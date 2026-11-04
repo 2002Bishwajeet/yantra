@@ -404,6 +404,7 @@ async fn a_machine_that_never_joined_is_sent_to_the_join_command_with_the_server
 }
 
 /// What Tailscale's check mode prints, with a link that must not reach a report.
+/// forum.tailscale.com/t/4539 and flaviocopes.com quote it (read 2026-11-04).
 const CHECK_MODE: &str = "# Tailscale SSH requires an additional check.\n\
                           # To authenticate, visit: https://login.tailscale.com/a/fixture";
 
@@ -484,6 +485,11 @@ async fn a_login_that_wants_a_browser_ends_fast_and_keeps_the_link_out() -> Resu
     assert!(
         !reachable.detail.contains("http"),
         "the link is dead once ssh stops: {}",
+        reachable.detail
+    );
+    assert!(
+        !reachable.detail.contains("login.tailscale.com"),
+        "{}",
         reachable.detail
     );
     assert_state(&checks, "sshd", State::Present);

@@ -6,6 +6,7 @@ import { useMachineReadiness } from '@/api/hooks'
 import { keys } from '@/api/keys'
 import { answer } from '@/test/daemon'
 import { renderInApp } from '@/test/inApp'
+import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 import { ReadinessCard } from './Readiness'
 import { useVerdict } from './useVerdict'
 
@@ -386,7 +387,7 @@ describe('the Readiness card', () => {
     const said = 'Tailscale SSH requires an additional check, which needs a browser sign-in that Yantra cannot finish, so ssh was stopped'
     await draw(report(checks(['reachable'], { reachable: said })))
     expect(card().getByRole('heading', { name: 'pi needs a browser sign-in' })).toBeTruthy()
-    expect(card().getByText(/Tailscale asks for a browser sign-in on each connection/)).toBeTruthy()
+    expect(card().getByText(/waits for a browser sign-in, and the appliance has no browser/)).toBeTruthy()
     expect(card().getByText(/from check to accept/)).toBeTruthy()
     expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
 
@@ -398,6 +399,33 @@ describe('the Readiness card', () => {
     fireEvent.click(press)
     expect(card().getAllByText(said).length).toBeGreaterThan(0)
     expect(card().getByText('tmux')).toBeTruthy()
+  })
+
+  /** Y-621: the two lines a daemon before v0.10.1 sends. The sign-in link is
+   *  dead once ssh ends, so it is nowhere on the page, open or closed. */
+  it('reads Tailscale’s real check text with the new cause, the join command and no link', async () => {
+    daemon()
+    await draw(report(checks(['reachable'], { reachable: CHECK_RULE })))
+    expect(card().getByRole('heading', { name: 'pi needs a browser sign-in' })).toBeTruthy()
+    expect(card().getByText('Tailscale SSH on pi waits for a browser sign-in, and the appliance has no browser.')).toBeTruthy()
+    expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+    expect(card().getByRole('button', { name: /^Check/ })).toBeTruthy()
+    fireEvent.click(card().getByRole('button', { name: /What ssh said/ }))
+    expect(card().getAllByText(/Tailscale SSH requires an additional check\./).length).toBeGreaterThan(0)
+    expect(document.body.textContent).not.toContain('login.tailscale.com')
+  })
+
+  /** Y-621: a changed key names the forget command and never the join command. */
+  it('names yantra forget-host-key for a changed host key, and keeps Check', async () => {
+    daemon()
+    await draw(report(checks(['reachable'], { reachable: CHANGED_KEY })))
+    expect(card().getByRole('heading', { name: 'pi’s host key changed' })).toBeTruthy()
+    expect(card().getByText(/pi answered with a different host key than the one the appliance recorded/)).toBeTruthy()
+    expect(card().getByText(/If you know why it changed/)).toBeTruthy()
+    expect(card().getByText('yantra forget-host-key pi')).toBeTruthy()
+    expect(card().getByRole('button', { name: /^Check/ })).toBeTruthy()
+    expect(card().queryByText(/curl -fsSL/)).toBeNull()
+    expect(card().queryByText(/REMOTE HOST IDENTIFICATION/)).toBeNull()
   })
 
   /** R-23 on the page: every failure has words of its own, and none shows

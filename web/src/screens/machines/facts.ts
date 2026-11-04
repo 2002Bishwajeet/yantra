@@ -74,7 +74,7 @@ export const checkNamed = (checks: Check[], name: string): Check | undefined =>
  *  only a machine that answered and then failed gets the error tone.
  *  `refused` and `unreachable` split the way the machine page does
  *  (`reachableFailure`, Y-402 review): a changed host key is not the join
- *  command's to fix, so only `refused` offers Copy join command. */
+ *  command's to fix, so `changed` offers no Copy join command. */
 export type CardVerdict =
   | { kind: 'asleep' }
   | { kind: 'expired' }
@@ -82,6 +82,7 @@ export type CardVerdict =
   | { kind: 'refused' }
   | { kind: 'unjoined' }
   | { kind: 'browser' }
+  | { kind: 'changed' }
   | { kind: 'unreachable' }
   | { kind: 'needs'; missing: number }
   | { kind: 'ready' }
@@ -116,6 +117,8 @@ export function cardChip(verdict: CardVerdict, seen: string | null): { state: Ma
       return { state: 'failed', word: 'not joined', error: true }
     case 'browser':
       return { state: 'failed', word: 'browser sign-in', error: true }
+    case 'changed':
+      return { state: 'failed', word: 'host key changed', error: true }
     case 'unreachable':
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'needs':

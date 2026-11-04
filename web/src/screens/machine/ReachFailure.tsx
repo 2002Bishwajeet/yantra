@@ -1,17 +1,17 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { joinFixes, reachWords, type AnswerFailure, type ReachableFailure } from '@/lib/checks'
+import { joinFixes, reachWords, withoutSignIn, type AnswerFailure, type ReachableFailure } from '@/lib/checks'
 import { joinCommand } from '@/lib/join'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { Text } from '@/m3/text/Text'
 
 /** The raw error, one press away from every surface that fails on it. Only
- *  ssh's own words are called ssh's (Y-585). */
+ *  ssh's own words are called ssh's (Y-585), and never a dead sign-in link (Y-621). */
 export function SshSaid(props: { detail: string; kind?: AnswerFailure; children?: ReactNode }) {
   return (
     <Disclosure summary={props.kind === 'listing' ? 'The full error' : 'What ssh said'}>
-      <div className="m3-mono m3-wrap">{props.detail}</div>
+      <div className="m3-mono m3-wrap">{withoutSignIn(props.detail)}</div>
       {props.children}
     </Disclosure>
   )
@@ -43,6 +43,9 @@ export function ReachFailure(props: {
         ) : null}
       </Text>
       {join && joinFixes(kind) ? <Copyable text={joinCommand(join)} what="the join command" /> : null}
+      {kind === 'changed' ? (
+        <Copyable text={`yantra forget-host-key ${name}`} what="the command that forgets the host key" />
+      ) : null}
       <SshSaid detail={detail}>{children}</SshSaid>
     </div>
   )

@@ -42,6 +42,7 @@ yantra history extract --decision session-state --out rows ~/.local/share/yantra
                                  # cut training rows from that folder, checked by gitleaks again
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
 yantra fix-terminfo <machine>    # teach a machine your terminal
+yantra forget-host-key <machine> # forget its recorded host key, once you know why it changed
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place
 yantra ssh-identity --machine <m> --user <u>  # one machine's Host block, logging in as <u>
 yantra join-script               # the script a new machine pipes into sh (GET /join)

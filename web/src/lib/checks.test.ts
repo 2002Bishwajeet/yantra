@@ -9,7 +9,9 @@ import {
   reachWords,
   sessionNeeds,
   tookOf,
+  withoutSignIn,
 } from './checks'
+import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 
 describe('the check name table', () => {
   it('names each of doctor’s twelve checks the way a person says it', () => {
@@ -87,8 +89,27 @@ describe('a failed reach', () => {
     expect(reachableFailure(`${BROWSER} · Permission denied`)).toBe('browser')
   })
 
+  /** Y-621: the two lines Tailscale really sends, and OpenSSH's changed key. */
+  it('reads the real refusal texts', () => {
+    expect(reachableFailure(CHECK_RULE)).toBe('browser')
+    expect(reachableFailure(CHANGED_KEY)).toBe('changed')
+    expect(reachableFailure('sshd refused this connection: Host key verification failed.')).toBe('changed')
+  })
+
+  it('puts the browser check before a changed key, and a changed key before the key', () => {
+    expect(reachableFailure(`${BROWSER} · Host key verification failed.`)).toBe('browser')
+    expect(reachableFailure(`${CHANGED_KEY} · Permission denied`)).toBe('changed')
+  })
+
+  it('drops the dead sign-in link and keeps the rest of what ssh said', () => {
+    const shown = withoutSignIn(CHECK_RULE)
+    expect(shown).not.toContain('login.tailscale.com')
+    expect(shown).toContain('Tailscale SSH requires an additional check.')
+    expect(withoutSignIn(CHANGED_KEY)).toBe(CHANGED_KEY)
+  })
+
   it('gives every failure a cause and a next step that name the machine, and no raw ssh', () => {
-    for (const kind of ['refused', 'unjoined', 'browser', 'unreachable'] as const) {
+    for (const kind of ['refused', 'unjoined', 'browser', 'changed', 'unreachable'] as const) {
       const { cause, next } = reachWords(kind, 'pi')
       expect(cause).toContain('pi')
       expect(next.length).toBeGreaterThan(0)
@@ -98,16 +119,28 @@ describe('a failed reach', () => {
 
   it('offers normal ssh or the tailnet rule for a browser check', () => {
     const { cause, next } = reachWords('browser', 'pi')
-    expect(cause).toBe('Yantra can’t reach pi because Tailscale asks for a browser sign-in on each connection.')
-    expect(next).toContain('join command')
-    expect(next).toContain('normal ssh')
-    expect(next).toContain('from check to accept')
+    expect(cause).toBe('Tailscale SSH on pi waits for a browser sign-in, and the appliance has no browser.')
+    expect(next).toBe(
+      'Run the join command on pi; it turns on normal ssh with the appliance’s key. Or change the tailnet’s SSH rule from check to accept.',
+    )
   })
 
-  it('keeps the join command away from the one failure it cannot fix', () => {
+  it('names the forget command for a changed key, and only once a person knows why', () => {
+    const { cause, next } = reachWords('changed', 'pi')
+    expect(cause).toBe(
+      'pi answered with a different host key than the one the appliance recorded. Turning Tailscale SSH off changes it, and so does a reinstall.',
+    )
+    expect(next).toBe(
+      'If you know why it changed, run yantra forget-host-key pi on the appliance, then Check again. If you do not, find out first.',
+    )
+    expect(reachWords('unreachable', 'pi').cause).not.toContain('host key')
+  })
+
+  it('keeps the join command away from the failures it cannot fix', () => {
     expect(joinFixes('refused')).toBe(true)
     expect(joinFixes('unjoined')).toBe(true)
     expect(joinFixes('browser')).toBe(true)
+    expect(joinFixes('changed')).toBe(false)
     expect(joinFixes('unreachable')).toBe(false)
     expect(joinFixes('listing')).toBe(false)
   })
@@ -122,6 +155,8 @@ describe('a failed sessions or status answer', () => {
     expect(answerFailure(ssh('yantra@pi: Permission denied (publickey).'))).toBe('refused')
     expect(answerFailure(ssh('the ssh config here names no account for pi'))).toBe('unjoined')
     expect(answerFailure(ssh('# Tailscale SSH requires an additional check.'))).toBe('browser')
+    expect(answerFailure(ssh(CHECK_RULE))).toBe('browser')
+    expect(answerFailure(ssh('Host key verification failed.'))).toBe('changed')
     expect(answerFailure(ssh('connect to host pi port 22: No route to host'))).toBe('unreachable')
   })
 

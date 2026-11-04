@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Check, MachineSessions } from '@/api'
 import { aMachine, aWorkspace } from '@/api/fixtures'
 import { verdictOf } from '@/screens/machine/verdict'
+import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 import { cardChip, cardVerdict, machineState, markOf, summary, tally, unclaimed, wordOf } from './facts'
 
 const check = (name: string, state: Check['state']): Check => ({
@@ -97,6 +98,15 @@ describe('the card verdict (D7 §3.3)', () => {
     const browser = [{ check: 'reachable', state: 'absent' as const, detail: 'Tailscale SSH requires an additional check' }]
     expect(cardVerdict(aMachine(), browser)).toEqual({ kind: 'browser' })
     expect(cardChip({ kind: 'browser' }, null)).toEqual({ state: 'failed', word: 'browser sign-in', error: true })
+    const real = [{ check: 'reachable', state: 'absent' as const, detail: CHECK_RULE }]
+    expect(cardVerdict(aMachine(), real)).toEqual({ kind: 'browser' })
+  })
+
+  /** Y-621: no Copy join command, because a changed key is not the join's to fix. */
+  it('is changed when the machine answers with a key the appliance did not record', () => {
+    const changed = [{ check: 'reachable', state: 'absent' as const, detail: CHANGED_KEY }]
+    expect(cardVerdict(aMachine(), changed)).toEqual({ kind: 'changed' })
+    expect(cardChip({ kind: 'changed' }, null)).toEqual({ state: 'failed', word: 'host key changed', error: true })
   })
 
   it('is unjoined when no ssh config block names the machine (Y-412)', () => {

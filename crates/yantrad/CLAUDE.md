@@ -335,12 +335,12 @@ directory to walk.
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
 `DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms`,
 `PATCH`/`DELETE /api/rooms/{room}`, `POST /api/rooms/{room}/resume`,
-`POST /api/rooms/{room}/messages`, `PUT /api/layout` and
+`POST /api/rooms/{room}/messages`, `PUT /api/layout`, `POST /api/join/forget-host-key` and
 `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
 `repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
-`room resume` (Y-534), `room post` (Y-536), `room new`, `room edit`, `room rm` (Y-550), `layout set` (Y-515) and
-`update` (Y-368). The daemon may do
+`room resume` (Y-534), `room post` (Y-536), `room new`, `room edit`, `room rm` (Y-550), `layout set` (Y-515),
+`forget-host-key` (Y-621) and `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
 
@@ -394,7 +394,11 @@ resolves**, and the owner ruled the page must say when it is not `user` — a ke
 owner's `Host *` above the new one, wins. The route adds a `joined` event that says the same, and
 spawns a readiness re-check that records only a refused reach. **One join at a time**:
 `Fleet::joins` is held around the key-making and the append, because two first fetches would
-both run `ssh-keygen` on one path. **`GET /join` sits beside
+both run `ssh-keygen` on one path. **`POST /api/join/forget-host-key` is `yantra forget-host-key`
+for the caller** (Y-621). It names the machine as `/api/join` does, so a machine forgets only its own
+line, and it answers `{machine, removed}`. `join.sh` calls it after `tailscale set --ssh=false`,
+because sshd's host key is not Tailscale SSH's. It holds `Fleet::joins` too, and it adds no field to
+`/api/join`'s body. **`GET /join` sits beside
 `/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
 `yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
 owner ruled that generation is Yantra's and happens on first use.
