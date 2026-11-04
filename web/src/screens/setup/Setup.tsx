@@ -279,7 +279,7 @@ export function Setup() {
   const now = useTick(true)
   const strangers = useId()
   const later = useId()
-  const { about, identity, machines, sweep, notifications, events, all, hub, guests, steps, later: optional, done, next, target } =
+  const { about, identity, machines, sweep, notifications, events, all, hub, guests, steps, later: optional, githubGrant, done, next, target } =
     useChecklist(now)
   const carried = useFab() !== null
   const presses = useRef(new Map<string, Presses>())
@@ -502,7 +502,7 @@ export function Setup() {
                 trailing={
                   optional.github.status === 'done' ? undefined : (
                     <Button render={<Link params={{ category: 'providers' }} to="/settings/$category" />} role="link" variant="tonal">
-                      Connect
+                      {githubGrant.kind === 'refused' ? 'Sign in again' : 'Connect'}
                     </Button>
                   )
                 }

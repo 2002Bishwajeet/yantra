@@ -88,12 +88,28 @@ describe('the step each read makes', () => {
   })
 
   it('says who GitHub is signed in as, and that a flow is waiting', () => {
-    expect(github(got(contract.github)).words).toContain('signed in as 2002Bishwajeet')
-    expect(github(got(contract.disconnected)).status).toBe('todo')
-    expect(github(got({ ...contract.disconnected, pending: true }))).toEqual({
+    const accepted = contract.githubReadiness
+    expect(github(got(contract.github), accepted).words).toContain('signed in as 2002Bishwajeet')
+    expect(github(got(contract.disconnected), accepted).status).toBe('todo')
+    expect(github(got({ ...contract.disconnected, pending: true }), accepted)).toEqual({
       status: 'progress',
       words: 'a sign-in is waiting at github.com',
     })
+  })
+
+  it('says a refused grant is due, and never says someone', () => {
+    const refused = github(got(contract.github), contract.githubRefused)
+    expect(refused).toEqual({ status: 'due', words: 'GitHub refused the grant · sign in again' })
+    for (const connection of [contract.github, { ...contract.github, login: null }]) {
+      for (const readiness of [contract.githubReadiness, contract.githubRefused, { looked: 'never' as const }]) {
+        expect(github(got(connection), readiness).words).not.toContain('someone')
+      }
+    }
+  })
+
+  it('counts a grant GitHub was not asked about as done', () => {
+    const unread = { ...contract.github, login: null }
+    expect(github(got(unread), { looked: 'never' })).toEqual({ status: 'done', words: 'signed in on the appliance' })
   })
 
   /** ADR-0021: a saved relay is the next start's, so the step reads what the

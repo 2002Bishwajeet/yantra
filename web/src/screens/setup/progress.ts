@@ -3,6 +3,7 @@ import type { Machine, Readiness } from '@/api'
 import {
   useAbout,
   useGithub,
+  useGithubReadiness,
   useMachines,
   useNotifications,
   useReadiness,
@@ -11,6 +12,7 @@ import {
 } from '@/api/hooks'
 import { fromReading } from '@/api/client'
 import { machineReadinessQuery } from '@/api/queries'
+import { grant } from '@/lib/github'
 import { runsSessions } from '@/lib/platform'
 import { isReady } from '@/lib/ready'
 import { at } from '@/lib/time'
@@ -66,6 +68,7 @@ export function useChecklist(now: number) {
   const about = useAbout()
   const identity = useSshIdentity()
   const connection = useGithub()
+  const githubReadiness = useGithubReadiness()
   const machines = useMachines()
   const listed = useWorkspaces()
   const sweep = useReadiness()
@@ -122,7 +125,7 @@ export function useChecklist(now: number) {
     hubNode ?? null,
     now,
   )
-  const later = { github: github(connection), push: push(about), key }
+  const later = { github: github(connection, githubReadiness), push: push(about), key }
   const done = Object.values(steps).filter((one) => one.status === 'done').length
   const target =
     guests.find((one) => one.line.kind === 'missing' && one.line.installable)?.machine.name ?? null
@@ -154,6 +157,7 @@ export function useChecklist(now: number) {
     guests,
     steps,
     later,
+    githubGrant: grant(connection.data, githubReadiness),
     done,
     readyCount,
     next,

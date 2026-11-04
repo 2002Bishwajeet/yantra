@@ -897,10 +897,10 @@ read the route yet. Y-314 wrote those types by hand nine rows later, and Y-322 w
 join them up. **Land a DTO and the type that checks it in one change**, which is why Y-307's
 `Transcript` arrived with its own entry rather than with a comment deferring one.
 
-**`/readiness/github` still holds `github: None`**, and that deferral has not expired: nothing in
-`web/src` reads that route, so there is no type for an entry to satisfy. **`/api/github`,
-`/api/repos` and the `Device` answer are in it since Y-342**, with their types appended at the end
-of `api.ts` in one block.
+**`/readiness/github` is in it since Y-623**, as `githubReadiness` (accepted) and `githubRefused`
+(a 401), both `Looked<Check>`. Settings and Setup read the route, so the entries have a type to
+satisfy. **`/api/github`, `/api/repos` and the `Device` answer are in it since Y-342**, with their
+types appended at the end of `api.ts` in one block.
 
 **`terminalSize` is the entry travelling the other way** — a shape the *browser* writes and the
 daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell

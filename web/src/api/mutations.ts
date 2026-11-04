@@ -3,6 +3,7 @@ import type {
   Change,
   Cloning,
   Create,
+  Connection,
   Device,
   Killed,
   Listing,
@@ -221,8 +222,12 @@ export function useInstall() {
  *  GitHub itself, so there is no poll write; `useGithub()` says when the
  *  grant is held. A 409 is a flow already waiting for its code. */
 export function useGithubLogin() {
+  const client = useQueryClient()
   return useMutation<Device, ApiError, void>({
     mutationFn: () => fetchJson<Device>('/api/github/login', { method: 'POST' }),
+    // Until the next poll, a grant held from before is not the new sign-in.
+    onSuccess: () =>
+      client.setQueryData<Connection>(keys.github(), (held) => (held ? { ...held, pending: true } : held)),
   })
 }
 

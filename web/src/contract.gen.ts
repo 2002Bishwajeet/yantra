@@ -16,6 +16,7 @@ import type {
   ChatNotAttached,
   ChatQuery,
   ChatQueue,
+  Check,
   Cloning,
   Commands,
   Connection,
@@ -451,6 +452,26 @@ export const github = {
   "pending": false,
   "scopes": []
 } satisfies Connection
+
+export const githubReadiness = {
+  "age_seconds": 0,
+  "data": {
+    "check": "github",
+    "detail": "GitHub accepts the grant, signed in as 2002Bishwajeet",
+    "state": "present"
+  },
+  "looked": "ok"
+} satisfies Looked<Check>
+
+export const githubRefused = {
+  "age_seconds": 0,
+  "data": {
+    "check": "github",
+    "detail": "GitHub refused the grant — it was revoked or replaced, so sign in again",
+    "state": "absent"
+  },
+  "looked": "ok"
+} satisfies Looked<Check>
 
 export const disconnected = {
   "avatar_url": null,

@@ -75,6 +75,7 @@ const fleet: Answers = {
   'GET /api/notifications': [200, contract.notifications],
   'GET /api/readiness': [200, contract.readiness],
   'GET /api/github': [200, contract.github],
+  'GET /api/readiness/github': [200, contract.githubReadiness],
   'GET /api/repos': [200, contract.repos],
   'POST /api/machines/cachyos-g14/dirs': (sent) => [200, listing(String(sent.path ?? HOME))],
   'POST /api/viewing': [204],

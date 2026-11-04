@@ -342,7 +342,10 @@ const routes = [
     'GET',
     /^\/api\/github$/,
     (s) => {
-      if (s.connection.pending && Date.now() >= s.grantAt) s.connection = SIGNED_IN
+      if (s.connection.pending && Date.now() >= s.grantAt) {
+        s.connection = SIGNED_IN
+        s.github = contract.githubReadiness
+      }
       return [200, s.connection]
     },
   ],
