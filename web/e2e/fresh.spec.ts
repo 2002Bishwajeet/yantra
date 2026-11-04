@@ -80,7 +80,7 @@ const SHELL: Record<string, Expect> = {
 const CHECKED: Rule = text('Nothing is running', 'Set up Yantra')
 const SETTINGS_NAV = Object.fromEntries(CATEGORIES.map(([id, label]) => [label, url(`/settings/${id}`)]))
 const MACHINE_PAGE: Record<string, Expect> = {
-  'Check again': text('Ready for sessions', 'Not checked yet'),
+  Check: text('Ready for sessions', 'Not checked yet'),
   'New session': url('/new'),
   Show: expanded,
 }
@@ -100,7 +100,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
   fleet: { Reorder: disabled, New: url('/new'), 'Sign in': url('/settings/providers') },
   machines: {
     Open: url('/m/yantra-box'),
-    'Check again': text('ready'),
+    Check: text('ready'),
     'Add a device': url('/machines/add'),
   },
   ...Object.fromEntries(MACHINES.map((name) => [`machine-${name}`, MACHINE_PAGE])),

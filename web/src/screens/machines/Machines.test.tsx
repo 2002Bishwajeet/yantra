@@ -96,7 +96,7 @@ describe('/machines on the busy fleet', () => {
     expect(alert.textContent).toContain('node biswas-iphone is on this tailnet but is not yours')
   })
 
-  it('asks the machine again when Check again is pressed, for a machine never checked', async () => {
+  it('asks the machine when Check is pressed, for a machine never checked', async () => {
     const state = scenario('busy')
     state.readiness!.data = (state.readiness!.data as { machine: string }[]).filter(
       (one) => one.machine !== 'pi-5',
@@ -104,8 +104,43 @@ describe('/machines on the busy fleet', () => {
     const asked = mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
     expect(card('pi-5').getByText('not checked')).toBeTruthy()
-    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check again' }))
+    // The chip carries the status, and the first ask is not "again".
+    expect(card('pi-5').queryByText('not asked yet')).toBeNull()
+    expect(card('pi-5').queryByRole('button', { name: 'Check again' })).toBeNull()
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi-5/readiness'))
+  })
+
+  it('shows the daemon’s words when Check is refused', async () => {
+    const state = scenario('refused')
+    state.readiness!.data = (state.readiness!.data as { machine: string }[]).filter(
+      (one) => one.machine !== 'pi-5',
+    )
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check' }))
+    const alert = await card('pi-5').findByRole('alert')
+    expect(alert.textContent).toContain('Check was refused')
+  })
+
+  /** Y-616: Worth a look may not claim a clean fleet when no machine answered. */
+  it('says no machine has answered yet, whatever the doctor reports say', async () => {
+    const state = scenario('busy')
+    state.sessions!.data = [{ machine: 'cachyos-g14', reached: 'no', error: 'timed out' }]
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(await screen.findByText('No machine has answered yet')).toBeTruthy()
+    expect(screen.queryByText('Nothing unaccounted for')).toBeNull()
+  })
+
+  it('says nothing is unaccounted for once a machine has answered, checked or not', async () => {
+    const state = scenario('busy')
+    state.sessions!.data = [{ machine: 'cachyos-g14', reached: 'yes', sessions: [] }]
+    state.readiness!.data = []
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(await screen.findByText('Nothing unaccounted for')).toBeTruthy()
+    expect(screen.queryByText('No machine has answered yet')).toBeNull()
   })
 
   /** Y-579: no workspace names the machine, and the daemon now keeps the
@@ -122,7 +157,7 @@ describe('/machines on the busy fleet', () => {
     await screen.findByText(/^looked /)
     expect(card('pi-5').getByText('not checked')).toBeTruthy()
 
-    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check again' }))
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check' }))
     await waitFor(() => expect(card('pi-5').queryByText('not checked')).toBeNull())
 
     const polls = () => asked.filter((one) => one === 'GET /api/readiness').length
