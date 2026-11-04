@@ -96,7 +96,7 @@ export function StepStart(props: { form: SessionForm; values: Values }) {
           <Option
             eyebrow="agent"
             icon={<Bot />}
-            note="Claude Code opens in the repository and asks for trust before it runs anything"
+            note="Claude Code starts in this folder. It asks you to trust the folder before it runs anything."
             onPress={() => form.setFieldValue('opens', 'claude')}
             pressed={values.opens === 'claude'}
             title="Claude"
@@ -104,10 +104,10 @@ export function StepStart(props: { form: SessionForm; values: Values }) {
           <Option
             eyebrow="command"
             icon={<Terminal />}
-            note="for example: just dev"
+            note="Runs one command in this folder, such as just dev."
             onPress={() => form.setFieldValue('opens', 'command')}
             pressed={values.opens === 'command'}
-            title="A command"
+            title="Your command"
           >
             <form.Field name="command">
               {(field) => (
@@ -124,10 +124,15 @@ export function StepStart(props: { form: SessionForm; values: Values }) {
         </div>
       </Card>
       <Card className="ns__card" surface="low">
-        <Eyebrow render={<h2 />}>What will happen</Eyebrow>
+        <Eyebrow render={<h2 />}>When you press Create and open</Eyebrow>
         <ol className="ns__happen">
-          {happenings(values, root).map((line) => (
-            <li key={line}>{line}</li>
+          {happenings(values, root).map(({ line, detail }) => (
+            <li key={line}>
+              {line}
+              {detail ? (
+                <Mono className="ns__detail">{detail}</Mono>
+              ) : null}
+            </li>
           ))}
         </ol>
       </Card>

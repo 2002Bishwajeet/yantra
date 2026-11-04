@@ -557,3 +557,9 @@ span.ns__crumb {
 [data-shell="phone"] .ns__hint {
   flex-basis: 100%;
 }
+
+.ns__detail {
+  display: block;
+  font-size: var(--md-sys-typescale-body-small-size, 0.75rem);
+  color: var(--md-sys-color-on-surface-variant);
+}

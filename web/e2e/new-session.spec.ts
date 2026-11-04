@@ -46,7 +46,7 @@ test.describe('the four steps', () => {
     await page.getByRole('button', { name: 'Use hetzner-1' }).click()
     await expect(page.getByRole('button', { name: 'Use hetzner-1' })).toHaveCount(0)
     await page.getByRole('button', { name: 'Continue' }).click()
-    await expect(page.getByText('open a tmux session on hetzner-1 in ~/Github/scratch', { exact: false })).toBeVisible()
+    await expect(page.getByText('It opens a session in ~/Github/scratch on hetzner-1', { exact: false })).toBeVisible()
   })
 
   test('passes axe on each step', async ({ page }) => {
@@ -256,7 +256,7 @@ test.describe('all four steps, to a workspace that is running', () => {
     await page.getByRole('button', { name: 'Continue' }).click()
 
     await expect(page.getByText('What opens in the session')).toBeVisible()
-    await expect(page.getByText('open a tmux session on cachyos-g14 in ~/Github/yantra', { exact: false })).toBeVisible()
+    await expect(page.getByText('It opens a session in ~/Github/yantra on cachyos-g14', { exact: false })).toBeVisible()
     await screenshot(page, 'new-session-start', 'busy', size, { overlay: size !== 'phone' })
     await page.getByRole('button', { name: 'Create and open' }).click()
 

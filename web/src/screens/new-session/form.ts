@@ -123,31 +123,29 @@ export function plan(values: Values): Plan | null {
   }
 }
 
-/** The "What will happen" list, derived from the choices (NewSessionStart). */
-export function happenings(values: Values, home: string | null): string[] {
+/** The list under "When you press Create and open", derived from the choices. */
+export function happenings(values: Values, home: string | null): { line: string; detail?: string }[] {
   const { source } = values
   const where = source ? tilde(source.path, home) : '…'
-  const out = [`write ~/.config/yantra/workspaces/${values.name}.toml`]
-  if (source?.kind === 'github' && source.here === 'no') {
-    out.push(`clone ${source.repo.full_name} into ${where} on ${values.machine}`)
-    out.push(`open a tmux session on ${values.machine} in ${where}`)
-  } else {
-    const state =
-      source?.kind === 'github'
-        ? source.here === 'yes'
-          ? ', which is already there'
-          : ', which will be tried then'
-        : source?.checked === 'unknown'
-          ? ', which will be tried then'
-          : ', which is already there'
-    out.push(`open a tmux session on ${values.machine} in ${where}${state}`)
-  }
-  out.push(
-    values.opens === 'command'
-      ? `run ${values.command.trim() || '…'} in it and attach this browser to the pane`
-      : 'start Claude in it and attach this browser to the pane',
-  )
-  return out
+  const { machine } = values
+  const clone = source?.kind === 'github' && source.here === 'no'
+  const unchecked = source?.kind === 'github' ? source.here === 'unknown' : source?.checked === 'unknown'
+  const second = clone
+    ? `It clones ${source.repo.full_name} into ${where} on ${machine}, then opens a session there.`
+    : `It opens a session in ${where} on ${machine}.${unchecked ? ' Yantra checks the folder then.' : ''}`
+  return [
+    {
+      line: `Yantra saves the workspace as ${values.name}.`,
+      detail: `~/.config/yantra/workspaces/${values.name}.toml`,
+    },
+    { line: second },
+    {
+      line:
+        values.opens === 'command'
+          ? `${values.command.trim() || '…'} runs there, and you see it in this window.`
+          : 'Claude starts there, and you see it in this window.',
+    },
+  ]
 }
 
 /** The line under step 2 that says why Continue is off, or what it will do. */
