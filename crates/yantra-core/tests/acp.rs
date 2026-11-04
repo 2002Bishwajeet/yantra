@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use common::{SshFixture, USER};
 use yantra_core::acp::{Agent, Harness};
-use yantra_core::chat::{Event, StopReason};
+use yantra_core::chat::{ContentDelta, Event, StopReason, StreamKind};
 use yantra_core::ssh::{Exec, Machine, Ssh};
 
 /// opencode's first start fetches its plugins.
@@ -163,23 +163,28 @@ async fn initialize_reload_and_cancel(fixture: &SshFixture) -> Result<()> {
 
     let turn = agent.prompt(&session, "Count slowly from 1 to 500, one number per line.");
     let cancel = async {
-        // The turn's first update says it has begun, so the cancel cannot
-        // arrive before it.
+        // Y-625: cancel mid-stream. A cancel before the stub's first number
+        // can reach an opencode defect (-32603) instead of its cancel path.
         tokio::time::timeout(PATIENCE, async {
             while let Some(update) = events.recv().await {
-                if update.event != Event::TurnStarted {
-                    return Ok(());
+                match update.event {
+                    Event::ContentDelta(ContentDelta {
+                        stream_kind: StreamKind::AssistantText,
+                        ..
+                    }) => return Ok(()),
+                    Event::TurnCompleted(_) => bail!("the turn ended before its first text"),
+                    _ => {}
                 }
             }
-            bail!("the events ended before the turn's first update")
+            bail!("the events ended before the turn's first text")
         })
         .await
-        .context("the turn's first update took too long")??;
+        .context("the turn's first text took too long")??;
         Ok::<_, anyhow::Error>(agent.cancel(&session)?)
     };
     let (stopped, cancelled) = tokio::join!(within("a cancelled prompt", turn), cancel);
-    cancelled?;
     let stopped = stopped?;
+    cancelled?;
     ensure!(
         stopped == StopReason::Cancelled,
         "the cancelled turn stopped as {stopped:?}"
