@@ -260,6 +260,16 @@ for (const destination of DESTINATIONS) {
       await screenshot(page, destination.id, 'fresh', size)
     })
 
+    if (destination.id === 'settings-agents' || destination.id === 'settings-providers') {
+      test('says no machine is checked, and draws no placeholder', async ({ page }) => {
+        await open(page, 'fresh', destination)
+        const main = page.locator('main')
+        await expect(main.getByText(/no machine is checked yet/i)).toBeVisible()
+        await expect(main.getByText(/of 0 machines/)).toHaveCount(0)
+        await expect(main.getByText('Another agent')).toHaveCount(0)
+      })
+    }
+
     test('answers every button', async ({ page, size, context }) => {
       test.setTimeout(240_000)
       await context.grantPermissions(['clipboard-read', 'clipboard-write'])

@@ -121,15 +121,6 @@ export function StepStart(props: { form: SessionForm; values: Values }) {
               )}
             </form.Field>
           </Option>
-          <Option
-            disabled
-            eyebrow="Another agent"
-            icon={<Bot />}
-            note="later. Only Claude is wired today."
-            onPress={() => form.setFieldValue('opens', 'later')}
-            pressed={values.opens === 'later'}
-            title="Another agent"
-          />
         </div>
       </Card>
       <Card className="ns__card" surface="low">

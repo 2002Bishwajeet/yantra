@@ -20,7 +20,7 @@ export type Values = {
   machine: string
   provider: Provider
   source: Source | null
-  opens: 'claude' | 'command' | 'later'
+  opens: 'claude' | 'command'
   command: string
 }
 
