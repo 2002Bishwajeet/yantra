@@ -31,6 +31,17 @@ test.describe('Add a device', () => {
 
   test('beat 2 names the key, and Show key opens the public half', async ({ page }) => {
     await scenario(page, 'adding')
+    // Not in the scenario: a key on file ticks the dashboard checklist and hides its Add a device link.
+    await page.route('**/api/ssh-identity', (route) =>
+      route.fulfill({
+        json: {
+          fingerprint: 'SHA256:<fingerprint>',
+          kind: 'ed25519',
+          path: '/home/<user>/.ssh/id_yantra',
+          public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra',
+        },
+      }),
+    )
     await page.goto(flow('new-box'))
     const joined = beat(page, 'Joined')
     await expect(joined.getByText(/The command adds this key: ed25519 · SHA256:/)).toBeVisible()
