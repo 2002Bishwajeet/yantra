@@ -299,6 +299,11 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
 - **It may use the real Mac.** `bishwajeets-macbook-pro` answers ssh as `biswa` over the tailnet
   (owner, 2026-11-04). A row that needs a check on a Mac runs it there. An ssh login cannot read
   the login keychain (I-44), so work that needs a GUI login session still parks.
+- **It walks the product before a release.** After a wave, and before any release, an agent opens the
+  live dashboard on the box in a real browser and walks New session, Start, a Chat turn, Commit,
+  Open PR and the machine cards on the real Mac and the real Linux laptop. Each finding becomes a
+  row, and a release waits for a clean walk. A row that touches a machine is done only when it works
+  there through the dashboard (owner, 2026-11-04, Y-637).
 - **Subagents follow the owner's model rule.** Opus plans, reviews and builds Rust; Sonnet builds
   web and docs, runs the gate, simplifies and ships. No subagent runs on Fable. Owner, 2026-10-05:
   use Opus only where it matters, and at high effort only to review and to plan transport work.
