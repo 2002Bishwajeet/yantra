@@ -166,9 +166,11 @@ mode `0755`, and keeps it after the run:
 
 Settings → About draws the step, a progress bar while the archive arrives, and on a failure the
 last 20 lines of `said`. `yantra update` prints the same to stderr. A run starts by clearing the
-directory. To read it by hand: `cat /run/yantra-update/status /run/yantra-update/said`. **The first
-update of a box installed before Y-612 shows no progress**: the unit runs the updater already on
-the box, and that one writes none.
+directory. A run of `install.sh` at a terminal removes `status` and `said` once it has installed
+the binaries, so a failure the unit left does not outlive that recovery. To read it by hand:
+`cat /run/yantra-update/status /run/yantra-update/said`. **The first update of a box installed
+before Y-612 shows no progress**: the unit runs the updater already on the box, and that one
+writes none.
 
 **What the restart ends.** Sessions on the machines keep running: their tmux servers belong to the
 login user there, not to `yantrad`. An open terminal in the dashboard loses its socket and

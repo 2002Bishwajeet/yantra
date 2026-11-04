@@ -471,6 +471,11 @@ for binary in yantrad yantra yantra-agent; do
     fi
     as_root mv -f "$BIN_DIR/$binary.new" "$BIN_DIR/$binary"
 done
+# Y-612: the unit keeps a failed run's status, so a recovery at a terminal
+# clears it, or About reports that failure beside the version installed here.
+if [ -z "$state" ] && [ -d /run/yantra-update ]; then
+    as_root rm -f /run/yantra-update/status /run/yantra-update/said
+fi
 
 as_root install -m 644 "$staged/yantrad.service" "$staged/yantra-agent.service" /etc/systemd/system/
 if [ "$updates" = yes ]; then

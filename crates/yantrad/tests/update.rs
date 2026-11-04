@@ -563,6 +563,23 @@ sys.exit("About never said the update failed; it saw " + json.dumps(steps))
             .is_some_and(|said| said.contains("does not match SHA256SUMS")),
         "{seen}\n{story}"
     );
+
+    // The unit keeps the failure, so a recovery at a terminal must clear it.
+    appliance.publish(NEW, NEW_MARK)?;
+    appliance.install("/fixture/install.sh", NEW)?;
+    let recovered = appliance.sh("for _ in $(seq 120); do \
+           curl -fsS http://127.0.0.1:7717/api/about && exit 0; sleep 0.25; \
+         done; exit 1")?;
+    let recovered: serde_json::Value = serde_json::from_str(&recovered)?;
+    assert!(
+        appliance.carries("/usr/local/bin/yantrad", NEW_MARK)?,
+        "the terminal run did not install v{NEW}"
+    );
+    assert_eq!(
+        recovered["update"],
+        serde_json::Value::Null,
+        "the failure outlived the recovery: {recovered}"
+    );
     Ok(())
 }
 
