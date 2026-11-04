@@ -139,7 +139,7 @@ function triagePrompt(exclude) {
 Rank the open rows in its §3 that an agent can finish alone today.
 
 Eligible: status ⬜ todo, every row in Depends is ✅ done or 🔵 review (a 🔵 review row has merged; only a release has not marked it), and an agent can prove the done condition on this Linux box with cargo, podman and Playwright.
-Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the owner, a phone, a Pi, audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, or an answer to an open question. A check on a Mac over ssh is eligible: `ssh biswa@bishwajeets-macbook-pro` reaches the real Mac.
+Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the owner, a phone, a Pi, audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, or an answer to an open question. A check on a Mac over ssh is eligible: \`ssh biswa@bishwajeets-macbook-pro\` reaches the real Mac.
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
 Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}.` : ''}
 
