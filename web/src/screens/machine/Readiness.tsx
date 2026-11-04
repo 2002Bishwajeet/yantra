@@ -299,7 +299,7 @@ export function ReadinessCard(props: {
                 : 'Install'}
           </Button>
         ) : null}
-        {verdict.kind === 'unasked' ? <Doctor machine={name} variant="tonal" /> : null}
+        {verdict.kind === 'unasked' ? <Doctor first machine={name} variant="tonal" /> : null}
         {verdict.kind === 'ready' || verdict.kind === 'manual' ? (
           <Button render={<Link to="/new" />} role="link" variant={verdict.kind === 'ready' ? 'filled' : 'tonal'}>
             New session
@@ -367,7 +367,7 @@ function Body(props: {
     case 'unasked':
       return (
         <Text render={<p />} className="readiness__said" scale="body-medium" tone="variant">
-          Yantra has not asked {name} what it has yet. Check again asks it now, one ssh round trip.
+          Check asks {name} what it has now, one ssh round trip.
         </Text>
       )
     case 'unread':

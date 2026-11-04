@@ -199,9 +199,11 @@ export function MachineCard(props: MachineCardProps) {
               />
             ))}
           </ul>
-          <Text className="machines__summary" scale="body-small" tone="variant">
-            {summary(counted)}
-          </Text>
+          {verdict.kind === 'unchecked' ? null : (
+            <Text className="machines__summary" scale="body-small" tone="variant">
+              {summary(counted)}
+            </Text>
+          )}
         </>
       )}
 
@@ -215,7 +217,7 @@ export function MachineCard(props: MachineCardProps) {
         </Button>
         {verdict.kind === 'needs' ? <Install machine={machine.name} /> : null}
         {verdict.kind === 'refused' || verdict.kind === 'unjoined' || verdict.kind === 'browser' ? <CopyJoin /> : null}
-        {verdict.kind === 'unchecked' ? <Doctor machine={machine.name} /> : null}
+        {verdict.kind === 'unchecked' ? <Doctor first machine={machine.name} /> : null}
       </div>
     </Card>
   )

@@ -345,11 +345,13 @@ describe('the Readiness card', () => {
     expect(card().queryByRole('button')).toBeNull()
   })
 
-  it('reads a machine nobody asked as Not checked yet, with Check again', async () => {
+  it('reads a machine nobody asked as Not checked yet, with Check', async () => {
     const asked = daemon()
     await draw({ looked: 'never' })
     expect(card().getByRole('heading', { name: 'Not checked yet' })).toBeTruthy()
-    fireEvent.click(card().getByRole('button', { name: 'Check again' }))
+    expect(card().queryByText(/has not asked/)).toBeNull()
+    expect(card().queryByRole('button', { name: 'Check again' })).toBeNull()
+    fireEvent.click(card().getByRole('button', { name: 'Check' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi/readiness'))
     expect(screen.queryByRole('alert')).toBeNull()
   })

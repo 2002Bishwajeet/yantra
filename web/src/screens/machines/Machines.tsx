@@ -189,7 +189,10 @@ export function Machines() {
       <ErrorBoundary eyebrow="Worth a look" title="The sessions could not be drawn">
         <Unclaimed
           held={held}
-          pending={sessions.looked === 'pending' || workspaces.looked === 'pending'}
+          pending={
+            sessions.looked === 'pending' || workspaces.looked === 'pending' || readiness.looked === 'pending'
+          }
+          checked={readiness.looked === 'ok' && runs.some((one) => checksOf(checks, one.name).length > 0)}
         />
       </ErrorBoundary>
     </Page>

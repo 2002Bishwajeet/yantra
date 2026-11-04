@@ -103,7 +103,7 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
     const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
     expect(await ready.findByRole('heading', { name: 'Not checked yet' })).toBeTruthy()
-    expect(ready.getByRole('button', { name: 'Check again' })).toBeTruthy()
+    expect(ready.getByRole('button', { name: 'Check' })).toBeTruthy()
     expect(screen.queryByText(/yantrad was not reached/)).toBeNull()
   })
 
