@@ -124,23 +124,23 @@ describe('/machines on the busy fleet', () => {
   })
 
   /** Y-616: Worth a look may not claim a clean fleet when no machine answered. */
-  it('says no machine is checked yet, until one has checks', async () => {
+  it('says no machine has answered yet, whatever the doctor reports say', async () => {
     const state = scenario('busy')
-    state.sessions!.data = []
-    state.readiness!.data = []
+    state.sessions!.data = [{ machine: 'cachyos-g14', reached: 'no', error: 'timed out' }]
     mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
-    expect(await screen.findByText('No machine is checked yet')).toBeTruthy()
+    expect(await screen.findByText('No machine has answered yet')).toBeTruthy()
     expect(screen.queryByText('Nothing unaccounted for')).toBeNull()
   })
 
-  it('says nothing is unaccounted for once a machine has checks', async () => {
+  it('says nothing is unaccounted for once a machine has answered, checked or not', async () => {
     const state = scenario('busy')
-    state.sessions!.data = []
+    state.sessions!.data = [{ machine: 'cachyos-g14', reached: 'yes', sessions: [] }]
+    state.readiness!.data = []
     mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
     expect(await screen.findByText('Nothing unaccounted for')).toBeTruthy()
-    expect(screen.queryByText('No machine is checked yet')).toBeNull()
+    expect(screen.queryByText('No machine has answered yet')).toBeNull()
   })
 
   /** Y-579: no workspace names the machine, and the daemon now keeps the

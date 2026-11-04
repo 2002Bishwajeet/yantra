@@ -192,7 +192,7 @@ export function Machines() {
           pending={
             sessions.looked === 'pending' || workspaces.looked === 'pending' || readiness.looked === 'pending'
           }
-          checked={readiness.looked === 'ok' && runs.some((one) => checksOf(checks, one.name).length > 0)}
+          answered={sessions.looked === 'ok' && sessions.data.some((one) => one.reached === 'yes')}
         />
       </ErrorBoundary>
     </Page>

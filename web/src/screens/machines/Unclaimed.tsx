@@ -17,8 +17,8 @@ import type { Held } from './facts'
  *  surface — a full tertiary card there was the loudest thing on the page
  *  for saying nothing is wrong. A tinted card is for the sessions worth a
  *  look, so it only appears once there are some. */
-export function Unclaimed(props: { held: Held[]; pending: boolean; checked: boolean }) {
-  const { held, pending, checked } = props
+export function Unclaimed(props: { held: Held[]; pending: boolean; answered: boolean }) {
+  const { held, pending, answered } = props
 
   if (pending) {
     return (
@@ -37,7 +37,7 @@ export function Unclaimed(props: { held: Held[]; pending: boolean; checked: bool
         <Eyebrow render={<h2 />} id="machines-unclaimed">
           Worth a look
         </Eyebrow>
-        {checked ? (
+        {answered ? (
           <>
             <State state="done">Nothing unaccounted for</State>
             <Text className="machines__said" scale="body-small" tone="variant">
@@ -46,9 +46,9 @@ export function Unclaimed(props: { held: Held[]; pending: boolean; checked: bool
           </>
         ) : (
           <>
-            <State state="unknown">No machine is checked yet</State>
+            <State state="unknown">No machine has answered yet</State>
             <Text className="machines__said" scale="body-small" tone="variant">
-              Check a machine to list the tmux sessions no workspace claims.
+              The daemon lists tmux sessions from the machines that answer.
             </Text>
           </>
         )}
