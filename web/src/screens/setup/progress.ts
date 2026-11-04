@@ -99,14 +99,21 @@ export function useChecklist(now: number) {
         .map((one) => one.machine.name)
     : []
   const readyCount = lines.filter((one) => one.line.kind === 'ready').length
+  const unchecked = lines.filter((one) => one.line.kind === 'unchecked')
 
   const steps = {
     tailnet: tailnet(about, location.protocol),
     machine: identity.error
       ? failed(identity.error)
-      : added(joined, identity.data === null ? reached : [], hub && reaches(hub) ? hub.machine.name : null),
+      : added(
+          joined,
+          identity.data === null ? reached : [],
+          hub && reaches(hub) ? hub.machine.name : null,
+          unchecked.filter((one) => !one.machine.hub).map((one) => one.machine.name),
+          guests.length,
+        ),
     ready: readied(lines.map((one) => ({ machine: one.machine.name, line: one.line }))),
-    first: firstSession(listed.looked === 'ok' ? listed.data.length : null, readyCount),
+    first: firstSession(listed.looked === 'ok' ? listed.data.length : null, readyCount, lines.length > 0 && unchecked.length === lines.length),
   }
   const key = keyExpiry(
     { data: machines.looked === 'ok' ? machines.data : undefined, error: fromReading(machines), isPending: machines.looked === 'pending' },

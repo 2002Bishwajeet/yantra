@@ -171,9 +171,3 @@
   max-width: none;
   padding-left: 58px;
 }
-
-.setup__bulk {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}

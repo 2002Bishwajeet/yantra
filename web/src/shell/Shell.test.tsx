@@ -281,8 +281,8 @@ describe('the FAB', () => {
       mount('tablet', '/', { overrides: { '/api/workspaces': empty, '/api/machines': unhubbed } })
       await waitFor(() => expect(named(fab())).toBe('Add a device'))
       expect(fab()!.getAttribute('href')).toBe('/machines/add')
-      const add = within(screen.getByRole('main')).getByRole('link', { name: 'Add a device' })
-      expect(add.dataset.variant).toBe('tonal')
+      // Y-615: the FAB is the one Add a device, so the page draws no copy.
+      expect(within(screen.getByRole('main')).queryByRole('link', { name: 'Add a device' })).toBeNull()
     })
 
     it('carries New session once a machine is ready and nothing else is left', async () => {

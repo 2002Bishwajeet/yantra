@@ -3,7 +3,7 @@ import type { Machine, Readiness } from '@/api'
 import { ApiError } from '@/api/errors'
 import * as contract from '@/contract.gen'
 import { joinCommand, joinUrl } from '@/lib/join'
-import { added, github, keyExpiry, line, machines, push, ready, tailnet } from './steps'
+import { added, firstSession, github, keyExpiry, line, machines, push, ready, tailnet } from './steps'
 
 const reading = { data: undefined, error: null, isPending: true }
 const got = <T,>(data: T) => ({ data, error: null, isPending: false })
@@ -44,6 +44,28 @@ describe('the step each read makes', () => {
     expect(none).toEqual({ status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' })
     expect(none.words).not.toMatch(/yantra|`/)
     expect(added(['pi-5', 'nas'])).toEqual({ status: 'done', words: 'pi-5, nas joined · more machines can be added later' })
+  })
+
+  /** Y-615: a guest not checked yet may have joined, so step 2 counts it and does not deny it. */
+  it('counts the machines on the tailnet that no check has read yet', () => {
+    expect(added([], [], null, ['pi-5', 'nas', 'mac'])).toEqual({
+      status: 'todo',
+      words: '3 machines on the tailnet, none checked yet · a check shows which joined',
+    })
+    expect(added([], [], null, ['pi-5', 'nas'], 3).words).toBe(
+      '1 of 3 machines checked, none joined yet · a check shows which joined',
+    )
+    expect(added([], [], null, ['pi-5']).words).toBe('1 machine on the tailnet, none checked yet · a check shows which joined')
+    expect(added(['pi-5'], [], null, ['nas']).status).toBe('done')
+    expect(added([], [], null, []).words).toBe('no machine has joined yet · Add a device shows the steps')
+  })
+
+  it('says no machine is checked ready when none is checked, and keeps the old words otherwise', () => {
+    expect(firstSession(null, 0, true).words).toBe('needs one ready machine · none is checked yet')
+    expect(firstSession(null, 0, false).words).toBe('needs one ready machine, you have none yet')
+    expect(firstSession(null, 0, false).words).not.toContain('none is checked')
+    expect(firstSession(null, 1, false).words).toBe('needs one ready machine, you have 1')
+    expect(firstSession(2, 0, true).status).toBe('done')
   })
 
   /** Y-582: the hub is the daemon's own node, so a fresh install has nothing to add. */

@@ -29,10 +29,16 @@ test.describe('the first run', () => {
   })
 
   /** D7 §3.1: one filled button, and before any join it is Add a device. On
-   *  the phone and the tablet the FAB carries it, so the step's copy is tonal. */
+   *  the phone and the tablet the FAB carries it, and the page draws no copy (Y-615). */
   test('fills only Add a device, which opens the guided flow', async ({ page, size }) => {
     await expect(page.locator('main [data-variant="filled"]')).toHaveCount(size === 'desktop' ? 1 : 0)
-    await expect(page.getByRole('main').getByRole('link', { name: 'Add a device' })).toHaveAttribute('href', '/machines/add')
+    const add = page.getByRole('main').getByRole('link', { name: 'Add a device' })
+    if (size === 'desktop') {
+      await expect(add).toHaveAttribute('href', '/machines/add')
+    } else {
+      await expect(add).toHaveCount(0)
+      await expect(page.getByRole('link', { name: 'Add a device, quick action' })).toHaveAttribute('href', '/machines/add')
+    }
   })
 
   /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */
@@ -95,7 +101,7 @@ test.describe('the first run', () => {
 })
 
 /** Y-582: a fresh install. The hub is the daemon's own node and is ready, so
- *  step 1 shows it with nothing to press, and step 2 lists only the other
+ *  step 1 shows it with nothing to press, and step 3 lists only the other
  *  machines. The key is not made yet, so `/` still draws the checklist. */
 test.describe('a fresh install with a ready hub', () => {
   test.beforeEach(async ({ page }) => {
@@ -113,8 +119,10 @@ test.describe('a fresh install with a ready hub', () => {
     await expect(page.getByText(/yantra-box is the hub and needs no adding · more machines can be added later/)).toBeVisible()
   })
 
-  test('lists only the other machines under step 2', async ({ page }) => {
+  test('lists only the other machines under step 3', async ({ page }) => {
     const others = page.getByRole('list', { name: 'Other machines' })
+    const step3 = page.locator('.setup__list > li', { hasText: 'Get it ready' })
+    await expect(step3.locator('xpath=following-sibling::li[1]').getByRole('list', { name: 'Other machines' })).toBeAttached()
     await expect(others.getByText('macbook', { exact: true })).toBeVisible()
     await expect(others.getByText('yantra-box', { exact: true })).toHaveCount(0)
     await expect(page.getByText('iphone', { exact: true })).toHaveCount(0)

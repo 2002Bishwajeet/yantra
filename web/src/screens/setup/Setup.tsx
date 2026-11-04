@@ -356,14 +356,17 @@ export function Setup() {
               step={steps.machine}
               title={TITLES.machine}
               trailing={
-                <Button
-                  icon={<Plus />}
-                  render={<Link to="/machines/add" />}
-                  role="link"
-                  variant={next === 'add' && !carried ? 'filled' : 'tonal'}
-                >
-                  Add a device
-                </Button>
+                // The FAB is the one Add a device while it carries the action.
+                carried && next === 'add' ? undefined : (
+                  <Button
+                    icon={<Plus />}
+                    render={<Link to="/machines/add" />}
+                    role="link"
+                    variant={next === 'add' ? 'filled' : 'tonal'}
+                  >
+                    Add a device
+                  </Button>
+                )
               }
             />
             <li className="setup__sub">
@@ -386,39 +389,6 @@ export function Setup() {
               )}
               {machines.looked === 'failed' ? (
                 <ErrorSurface.Inline error={fromReading(machines)!} title="Machines could not be read" />
-              ) : guests.length > 0 ? (
-                <>
-                  {unchecked || installable ? (
-                    <div className="setup__bulk">
-                      {unchecked ? (
-                        <Button onClick={() => press('check')} variant="tonal">
-                          Check all
-                        </Button>
-                      ) : null}
-                      {installable ? (
-                        <Button onClick={() => press('install')} variant="tonal">
-                          Install on all
-                        </Button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  <ul aria-label="Other machines" className="setup__lines">
-                  {guests.map((one) => (
-                    <MachineLine
-                      events={events}
-                      join={<Join about={about} url={join} what={`the join command for ${one.machine.name}`} />}
-                      key={one.machine.name}
-                      line={one.line}
-                      machine={one.machine}
-                      read={notifications.data !== undefined}
-                      register={register}
-                      running={running}
-                      report={one.report}
-                      target={next === 'install' && one.machine.name === target}
-                    />
-                  ))}
-                  </ul>
-                </>
               ) : null}
               {foreign.length > 0 ? (
                 <>
@@ -438,7 +408,47 @@ export function Setup() {
                 </>
               ) : null}
             </li>
-            <Item fallback="3" step={steps.ready} title={TITLES.ready} />
+            <Item
+              fallback="3"
+              step={steps.ready}
+              title={TITLES.ready}
+              trailing={
+                unchecked || installable ? (
+                  <>
+                    {unchecked ? (
+                      <Button onClick={() => press('check')} variant="tonal">
+                        Check all
+                      </Button>
+                    ) : null}
+                    {installable ? (
+                      <Button onClick={() => press('install')} variant="tonal">
+                        Install on all
+                      </Button>
+                    ) : null}
+                  </>
+                ) : undefined
+              }
+            />
+            {guests.length > 0 ? (
+              <li className="setup__sub">
+                <ul aria-label="Other machines" className="setup__lines">
+                  {guests.map((one) => (
+                    <MachineLine
+                      events={events}
+                      join={<Join about={about} url={join} what={`the join command for ${one.machine.name}`} />}
+                      key={one.machine.name}
+                      line={one.line}
+                      machine={one.machine}
+                      read={notifications.data !== undefined}
+                      register={register}
+                      running={running}
+                      report={one.report}
+                      target={next === 'install' && one.machine.name === target}
+                    />
+                  ))}
+                </ul>
+              </li>
+            ) : null}
             <Item
               fallback="4"
               step={steps.first}

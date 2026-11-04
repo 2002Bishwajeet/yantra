@@ -16,8 +16,7 @@ const DESTINATIONS = [
 const heading = (page: Parameters<typeof axe>[0], name: string) =>
   page.getByRole('heading', { level: 1, name }).first()
 
-// The shell's FAB. A page may keep a tonal copy of the same action, so a
-// query by name alone would find both.
+// The shell's FAB, found by class because the page's own links share its name.
 const fab = (page: Page) => page.locator('.shell__fab, .shell__rail-fab')
 
 /** D7 §4.1, S11 and S12 (Y-401): on the first run the checklist is `/`. */
@@ -28,7 +27,7 @@ test.describe('the FAB on the first run', () => {
     await expect(page.locator('h1', { hasText: 'Set up Yantra' }).first()).toBeAttached()
   })
 
-  test('carries Add a device on the phone and the tablet, and the step keeps a tonal copy', async ({
+  test('carries Add a device on the phone and the tablet, and the step draws no copy', async ({
     page,
     size,
   }) => {
@@ -38,7 +37,7 @@ test.describe('the FAB on the first run', () => {
       await expect(fab(page)).toHaveCount(0)
     } else {
       await expect(page.getByRole('link', { name: 'Add a device, quick action' })).toHaveAttribute('href', '/machines/add')
-      await expect(add).toHaveAttribute('data-variant', 'tonal')
+      await expect(add).toHaveCount(0)
     }
     // D7 §3.1: one filled action in the view, and it is the next thing.
     await expect(page.locator('main [data-variant="filled"]')).toHaveCount(size === 'desktop' ? 1 : 0)

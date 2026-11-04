@@ -12,6 +12,13 @@ import { Setup } from './Setup'
 /* The checklist on its own, so every line state is drawn and asserted — the
    ones the Dashboard only shows once a machine is online. */
 
+/* The FAB belongs to the shell; a test sets what it carries. */
+const fab = vi.hoisted(() => ({ carries: false }))
+vi.mock('@/shell/primary', async (original) => ({
+  ...(await original<typeof import('@/shell/primary')>()),
+  useFab: () => (fab.carries ? ({ kind: 'add-device' } as never) : null),
+}))
+
 const NOW = Date.parse('2026-09-06T12:00:00Z')
 const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
 
@@ -88,6 +95,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  fab.carries = false
   vi.useRealTimers()
   vi.unstubAllGlobals()
   cleanup()
@@ -157,6 +165,54 @@ describe('the steps', () => {
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([checks(tools)])] })
     expect(screen.getByText("not yet · cachyos-g14 reached without Yantra's key · run the join command on it once")).toBeTruthy()
     expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+    expect(filled()).toEqual(['Add a device'])
+  })
+
+  /** Y-615: a fresh install lists guests nobody has checked, so step 2 does not deny them. */
+  it('says how many machines wait for a check, and puts Check all on step 3', async () => {
+    await draw(base([up, upToo]))
+    expect(screen.getByText('not yet · 2 machines on the tailnet, none checked yet · a check shows which joined')).toBeTruthy()
+    expect(screen.getByText('not yet · needs one ready machine · none is checked yet')).toBeTruthy()
+    const row = (title: string) => screen.getByText(title).closest('.m3-list__row') as HTMLElement
+    expect(within(row('Get it ready')).getByRole('button', { name: 'Check all' })).toBeTruthy()
+    expect(within(row('Add a machine')).queryByRole('button', { name: 'Check all' })).toBeNull()
+    expect(document.querySelector('.setup__bulk')).toBeNull()
+  })
+
+  it('puts Install on all on step 3 once every machine is checked', async () => {
+    await draw({
+      ...base([up]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks({ ...tools, tmux: 'absent' })])],
+    })
+    const row = screen.getByText('Get it ready').closest('.m3-list__row') as HTMLElement
+    expect(within(row).getByRole('button', { name: 'Install on all' })).toBeTruthy()
+    expect(within(row).queryByRole('button', { name: 'Check all' })).toBeNull()
+  })
+
+  it('keeps Install on all beside Check all while one machine is unchecked', async () => {
+    await draw({
+      ...base([up, upToo]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks({ ...tools, tmux: 'absent' })])],
+    })
+    const row = screen.getByText('Get it ready').closest('.m3-list__row') as HTMLElement
+    expect(within(row).getByRole('button', { name: 'Check all' })).toBeTruthy()
+    expect(within(row).getByRole('button', { name: 'Install on all' })).toBeTruthy()
+    expect(screen.queryByText(/none is checked/)).toBeNull()
+  })
+
+  /** Y-615: the FAB is the one Add a device on a phone and a tablet. */
+  it('draws no Add a device in the page while the FAB carries it', async () => {
+    fab.carries = true
+    await draw(base())
+    expect(screen.queryByRole('link', { name: 'Add a device' })).toBeNull()
+    expect(filled()).toEqual([])
+  })
+
+  it('keeps one filled Add a device on a desktop, which has no FAB', async () => {
+    await draw(base())
+    expect(screen.getAllByRole('link', { name: 'Add a device' })).toHaveLength(1)
     expect(filled()).toEqual(['Add a device'])
   })
 
@@ -303,7 +359,7 @@ describe('the hub', () => {
     expect(filled()).toEqual(['New session'])
   })
 
-  it('lists only the other machines under step 2', async () => {
+  it('lists only the other machines under step 3, with the key and strangers under step 2', async () => {
     await draw({
       ...base([box, up]),
       ...keyed,
@@ -315,6 +371,10 @@ describe('the hub', () => {
     expect(hubList().queryByText('cachyos-g14')).toBeNull()
     expect(screen.getByText('done · cachyos-g14 joined · more machines can be added later')).toBeTruthy()
     expect(screen.getByText(/done · 2 of 2 machines ready/)).toBeTruthy()
+    const rows = [...document.querySelectorAll('.setup__list > li')]
+    const lines = screen.getByRole('list', { name: 'Other machines' })
+    const step = (title: string) => rows.findIndex((one) => one.textContent?.includes(title))
+    expect(rows.indexOf(lines.closest('.setup__sub')!)).toBe(step('Get it ready') + 1)
   })
 
   it('links a hub that is not ready to its machine page, and offers no Check or Install', async () => {
