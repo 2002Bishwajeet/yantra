@@ -512,7 +512,7 @@ describe('the machine lines', () => {
     const changed = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: CHANGED_KEY }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([changed as Readiness])] })
     expect(
-      screen.getByText('its host key changed · run yantra forget-host-key cachyos-g14 once you know why'),
+      screen.getByText('its host key changed · run sudo -u yantra -H yantra forget-host-key cachyos-g14 once you know why'),
     ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeNull()
   })

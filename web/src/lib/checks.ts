@@ -90,6 +90,10 @@ export const INSTALLABLE: readonly string[] = CHECK_IDS.filter((id) => fixOf(id,
  *  tell a reinstall from an attack, so `yantra forget-host-key` waits for one. */
 export type ReachableFailure = 'refused' | 'unjoined' | 'browser' | 'changed' | 'unreachable'
 
+/** The daemon's `known_hosts` belongs to the account yantrad runs as, so the
+ *  verb runs as that account, as docs/appliance.md runs the others. */
+export const forgetHostKey = (machine: string) => `sudo -u yantra -H yantra forget-host-key ${machine}`
+
 export function reachableFailure(detail: string): ReachableFailure {
   if (/names no account/i.test(detail)) return 'unjoined'
   if (/requires an additional check/i.test(detail)) return 'browser'
@@ -138,7 +142,7 @@ export function reachWords(kind: AnswerFailure, name: string): { cause: string; 
     case 'changed':
       return {
         cause: `${name} answered with a different host key than the one the appliance recorded. Turning Tailscale SSH off changes it, and so does a reinstall.`,
-        next: `If you know why it changed, run yantra forget-host-key ${name} on the appliance, then Check again. If you do not, find out first.`,
+        next: `If you know why it changed, run ${forgetHostKey(name)} on the appliance, then Check again. If you do not, find out first.`,
       }
     case 'unreachable':
       return {

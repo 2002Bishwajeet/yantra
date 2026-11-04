@@ -422,7 +422,7 @@ describe('the Readiness card', () => {
     expect(card().getByRole('heading', { name: 'pi’s host key changed' })).toBeTruthy()
     expect(card().getByText(/pi answered with a different host key than the one the appliance recorded/)).toBeTruthy()
     expect(card().getByText(/If you know why it changed/)).toBeTruthy()
-    expect(card().getByText('yantra forget-host-key pi')).toBeTruthy()
+    expect(card().getByText('sudo -u yantra -H yantra forget-host-key pi')).toBeTruthy()
     expect(card().getByRole('button', { name: /^Check/ })).toBeTruthy()
     expect(card().queryByText(/curl -fsSL/)).toBeNull()
     expect(card().queryByText(/REMOTE HOST IDENTIFICATION/)).toBeNull()

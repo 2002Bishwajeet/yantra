@@ -370,7 +370,7 @@ use_sshd_instead() {
     say "Tailscale SSH is off, and the appliance logs in with its key."
     # sshd answers with another host key, which yantrad would refuse as changed.
     if ! curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
-        say "yantrad kept Tailscale SSH's old host key, so its next check fails on a changed key. Run yantra forget-host-key $machine on the appliance."
+        say "yantrad kept Tailscale SSH's old host key, so its next check fails on a changed key. Run sudo -u yantra -H yantra forget-host-key $machine on the appliance."
     fi
     if browser_needed; then
         fail "the appliance still cannot log in. The dashboard's Check says why."

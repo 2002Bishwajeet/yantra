@@ -131,7 +131,7 @@ describe('a failed reach', () => {
       'pi answered with a different host key than the one the appliance recorded. Turning Tailscale SSH off changes it, and so does a reinstall.',
     )
     expect(next).toBe(
-      'If you know why it changed, run yantra forget-host-key pi on the appliance, then Check again. If you do not, find out first.',
+      'If you know why it changed, run sudo -u yantra -H yantra forget-host-key pi on the appliance, then Check again. If you do not, find out first.',
     )
     expect(reachWords('unreachable', 'pi').cause).not.toContain('host key')
   })

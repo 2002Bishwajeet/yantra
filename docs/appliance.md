@@ -444,11 +444,12 @@ that way: it holds the key to the whole fleet, and the sessions are not on that 
 sudo -u yantra -H yantra ssh-identity
 sudo -u yantra -H yantra ssh-identity --machine <m> --user <u>
 sudo -u yantra -H yantra join-script
+sudo -u yantra -H yantra forget-host-key <m>
 ```
 
 The first generates `~/.ssh/id_yantra` if that account has no key, adds a `Host` block binding it for
 every machine a workspace names, and prints the public key. The second writes one block, with its
-`User`. The third prints the join script. **`-H` matters**: without it `sudo` may leave `HOME` as
+`User`. The third prints the join script. The fourth removes the host key that account recorded for `<m>`, so the next check records the new one; the dashboard names it when a key changed ([Y-621](../tracker.md#3-task-board)). **`-H` matters**: without it `sudo` may leave `HOME` as
 yours and the verb prepares the wrong account's `~/.ssh`. Each is idempotent — an existing key is
 kept, because regenerating it orphans every `authorized_keys` entry it is in, and a machine the
 config already names is left exactly as it is. A block the first verb wrote has no `User`, so it

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { joinFixes, reachWords, withoutSignIn, type AnswerFailure, type ReachableFailure } from '@/lib/checks'
+import { forgetHostKey, joinFixes, reachWords, withoutSignIn, type AnswerFailure, type ReachableFailure } from '@/lib/checks'
 import { joinCommand } from '@/lib/join'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
@@ -44,7 +44,7 @@ export function ReachFailure(props: {
       </Text>
       {join && joinFixes(kind) ? <Copyable text={joinCommand(join)} what="the join command" /> : null}
       {kind === 'changed' ? (
-        <Copyable text={`yantra forget-host-key ${name}`} what="the command that forgets the host key" />
+        <Copyable text={forgetHostKey(name)} what="the command that forgets the host key" />
       ) : null}
       <SshSaid detail={detail}>{children}</SshSaid>
     </div>
