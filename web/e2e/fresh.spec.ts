@@ -225,15 +225,10 @@ async function walk(page: Page, size: Size, destination: Destination, name: Scen
   }
 }
 
-/** Text that is wider than its box, or a box that ends past the viewport. An element that cuts on
- *  purpose (`.m3-clip`) is excused only where its whole text is a title or an accessible name. */
+/** Text that is wider than its box, or a box that ends past the viewport. A title or an aria-label
+ *  excuses nothing: a phone has no hover, so the cut words stay unreadable. */
 function clipped(page: Page) {
   return page.evaluate(() => {
-    const excused = (el: Element) => {
-      const full = el.textContent?.trim() ?? ''
-      const named = el.closest('[title], [aria-label]')
-      return [named?.getAttribute('title'), named?.getAttribute('aria-label')].some((one) => one?.includes(full))
-    }
     const scrolls = (el: Element) => {
       for (let up: Element | null = el; up && up !== document.body; up = up.parentElement) {
         const overflow = getComputedStyle(up).overflowX
@@ -248,7 +243,7 @@ function clipped(page: Page) {
       if (!own || box.width <= 1 || getComputedStyle(el).visibility === 'hidden') continue
       const cut = el.scrollWidth > el.clientWidth + 1 && !/auto|scroll/.test(getComputedStyle(el).overflowX)
       const past = box.right > innerWidth + 1 && !scrolls(el)
-      if ((cut && !(el.matches('.m3-clip') && excused(el))) || past) {
+      if (cut || past) {
         out.push(`${cut ? 'cut' : 'past the edge'}: ${el.className} — ${el.textContent?.trim().slice(0, 60)}`)
       }
     }
