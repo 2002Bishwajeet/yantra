@@ -21,6 +21,7 @@ export type Scenario =
   | 'rooms'
   | 'composer'
   | 'longrepo'
+  | 'longtitle'
   | 'avatar'
   | 'avatarbroken'
 

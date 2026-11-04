@@ -10,7 +10,7 @@ import type { Size } from './sizes'
 export async function screenshot(
   page: Page,
   screen: string,
-  scenario: Scenario,
+  scenario: Scenario | `${Scenario}-${number}`,
   size: Size,
   options: { overlay?: boolean } = {},
 ) {

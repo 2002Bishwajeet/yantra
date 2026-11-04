@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
+import type { Size } from './lib/sizes'
 
 /* Y-347's screen, first pictured by Y-352. What the Fleet, TabletFleet and
    PhoneFleet boards say the page must carry, at all three sizes.
@@ -97,4 +98,99 @@ test.describe('the fleet when nothing answers', () => {
     await expect(title).toHaveText('Fleet')
     await expect(page.getByRole('alert')).toBeVisible()
   })
+})
+
+/* Y-581. A review or an issue is one row at every width: the GitHub rows fill the
+   card, a title keeps its words whole, and the actions stay inside the row. Each
+   width is owned by one project, as layout.spec.ts owns 768. */
+const WIDTHS: readonly { width: number; height: number; owner: Size }[] = [
+  { width: 390, height: 844, owner: 'phone' },
+  { width: 768, height: 1024, owner: 'tablet' },
+  { width: 1280, height: 900, owner: 'desktop' },
+  { width: 2000, height: 1000, owner: 'desktop' },
+]
+
+for (const { width, height, owner } of WIDTHS) {
+  test.describe(`the GitHub queue at ${width} px`, () => {
+    test.use({ viewport: { width, height } })
+
+    test.beforeEach(async ({ page, size }) => {
+      test.skip(size !== owner, `the ${owner} project owns ${width} px`)
+      await scenario(page, 'longtitle')
+      await page.goto('/fleet')
+      await expect(band(page, 'On GitHub').getByRole('heading', { name: 'Issues' })).toBeVisible({ timeout: 15_000 })
+      await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    })
+
+    test('fills the card, keeps whole words, and holds the actions inside the row', async ({ page }) => {
+      const found = await page.evaluate(() => {
+        const bad: string[] = []
+        const rows = Array.from(document.querySelectorAll<HTMLElement>('.github__item'))
+        const inner = (card: HTMLElement) => {
+          const style = getComputedStyle(card)
+          return card.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        }
+        // A line break between two letters or digits is a word split in the middle.
+        const split = (el: Element) => {
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+          for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+            const text = node.data
+            const range = document.createRange()
+            let top: number | null = null
+            let last = ''
+            for (let i = 0; i < text.length; i++) {
+              range.setStart(node, i)
+              range.setEnd(node, i + 1)
+              const rect = range.getClientRects()[0]
+              if (!rect || text[i] === ' ') continue
+              if (top !== null && Math.abs(rect.top - top) > 4 && /[A-Za-z0-9]/.test(last) && /[A-Za-z0-9]/.test(text[i]!))
+                return `${text.slice(Math.max(0, i - 6), i)}|${text.slice(i, i + 6)}`
+              top = rect.top
+              last = text[i]!
+            }
+          }
+          return null
+        }
+        for (const li of rows) {
+          const name = li.querySelector('.github__ref')!.textContent
+          const card = li.closest<HTMLElement>('.fleet__card')!
+          const row = li.getBoundingClientRect()
+          if (Math.abs(row.width - inner(card)) > 1) bad.push(`${name}: row ${row.width} is not the card's inner ${inner(card)}`)
+          const actions = li.querySelector('.github__actions')!.getBoundingClientRect()
+          const box = li.querySelector('.github__row')!.getBoundingClientRect()
+          if (actions.left < box.left - 1 || actions.right > box.right + 1 || actions.bottom > box.bottom + 1)
+            bad.push(`${name}: actions leave the row`)
+          for (const part of li.querySelectorAll('.github__ref, .github__title')) {
+            const at = split(part)
+            if (at) bad.push(`${name}: a word breaks at ${at}`)
+          }
+        }
+        return { bad, count: rows.length }
+      })
+      expect(found.count).toBe(13)
+      expect(found.bad).toEqual([])
+    })
+
+    test('looks the same', async ({ page, size }) => {
+      await screenshot(page, 'fleet', `longtitle-${width}`, size)
+    })
+  })
+}
+
+/* The phone's last row clears the FAB above the navigation bar. */
+test('the last card on the phone clears the floating action button', async ({ page, size }) => {
+  test.skip(size !== 'phone', 'the FAB floats over the page on the phone only')
+  await scenario(page, 'longtitle')
+  await page.goto('/fleet')
+  await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+  const fab = page.locator('.shell__fab')
+  await expect(fab).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await expect
+    .poll(() => page.evaluate(() => Math.ceil(window.scrollY + window.innerHeight) >= document.documentElement.scrollHeight - 1))
+    .toBe(true)
+  const last = (await page.locator('.fleet__card').last().boundingBox())!
+  const button = (await fab.boundingBox())!
+  expect(last.y + last.height).toBeLessThanOrEqual(button.y + 0.5)
 })
