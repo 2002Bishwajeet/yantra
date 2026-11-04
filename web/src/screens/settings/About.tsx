@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ExternalLink, FileKey, Scale } from 'lucide-react'
+import { ExternalLink, FileKey, Scale, Shield } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import type { Looked, Published } from '@/api'
 import { fromReading } from '@/api/client'
@@ -72,6 +72,17 @@ export function About() {
         ) : null}
         {facts ? <Update asked={asked} onAsked={setAsked} published={facts.published} running={facts.version} /> : null}
       </section>
+      <Group label="Who can open the dashboard">
+        <ListItem
+          headline="Only devices on your tailnet can open this dashboard. There is no separate login."
+          supporting={facts?.tailnet ? `Tailnet · ${facts.tailnet}` : undefined}
+          leading={
+            <Lead>
+              <Shield />
+            </Lead>
+          }
+        />
+      </Group>
       <Group label="Daemon">
         <ListItem
           headline={<Mono>/etc/yantra/daemon.env</Mono>}

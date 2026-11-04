@@ -5,7 +5,7 @@ import { Plus, Share2 } from 'lucide-react'
 import type { Machine } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
-import { useAbout, useMachines, useNotifications, useReadiness, useThisDevice } from '@/api/hooks'
+import { useAbout, useMachines, useNotifications, useReadiness, useSshIdentity, useThisDevice } from '@/api/hooks'
 import { keys } from '@/api/keys'
 import { useRecheckReadiness } from '@/api/mutations'
 import { machineReadinessQuery } from '@/api/queries'
@@ -20,11 +20,12 @@ import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Stepper, type StepItem, type StepState } from '@/m3/stepper/Stepper'
-import { Text } from '@/m3/text/Text'
+import { Mono, Text } from '@/m3/text/Text'
 import { useFormFactor } from '@/shell/formFactor'
 import { asEvents } from '@/shell/notifications'
 import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
+import { Sheet } from '@/screens/settings/Sheet'
 import { Join } from '@/screens/setup/Join'
 import { joined, LATE_MS, newDevice, newStranger, onTailnet, reachable, ready, installable, type Beat, type BeatState } from './beats'
 import { Track } from '@/m3/track/Track'
@@ -156,6 +157,56 @@ function useHere(platform: Platform, machine: string | undefined) {
   return new URL(router.buildLocation({ to: '/machines/add', search: { platform, machine } }).href, location.origin).href
 }
 
+/** Which key the join command places. `null` is a key not yet made, which is
+ *  a state of the line; a failed read is drawn inline and never thrown. */
+function JoinKey() {
+  const identity = useSshIdentity()
+  const [open, setOpen] = useState(false)
+  if (identity.error) {
+    return (
+      <ErrorSurface.Inline
+        error={asApiError(identity.error)}
+        reset={() => void identity.refetch()}
+        title="The appliance's key could not be read"
+      />
+    )
+  }
+  const key = identity.data
+  if (key === undefined) return null
+  if (key === null) return <Note>The appliance makes its key when the first machine joins.</Note>
+  return (
+    <>
+      <div className="add-device__key">
+        <Note>
+          The command adds this key: {key.kind} · {key.fingerprint}
+        </Note>
+        <Button onClick={() => setOpen(true)} variant="text">
+          Show key
+        </Button>
+      </div>
+      <details className="add-device__diagnostics">
+        <summary>Diagnostics</summary>
+        <Note>
+          The key is at <Mono>{key.path}</Mono> on the appliance.
+        </Note>
+      </details>
+      <Sheet
+        actions={
+          <Button onClick={() => setOpen(false)} variant="text">
+            Close
+          </Button>
+        }
+        description="The join command places this key for you. To place it by hand, add it to ~/.ssh/authorized_keys on the machine."
+        onOpenChange={setOpen}
+        open={open}
+        title="Public key"
+      >
+        <Copyable text={key.public_key} what="the public key" />
+      </Sheet>
+    </>
+  )
+}
+
 /** Beat 2's body: the command, and this page on the new device (walk-through
  *  §3.2), where it is one tap to copy. */
 function JoinHere(props: { platform: Session; name: string | undefined }) {
@@ -180,6 +231,7 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
             the appliance which account that is.
           </Note>
           <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
+          <JoinKey />
         </div>
       </div>
     )
@@ -197,6 +249,7 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
           the appliance which account that is.
         </Note>
         <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
+        <JoinKey />
         <Note>Or open this on {device}, where the command is one tap to copy:</Note>
         <Copyable text={here} what="this page's address" />
       </div>

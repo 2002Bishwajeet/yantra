@@ -115,3 +115,15 @@
 [data-shell="phone"] .add-device__pick .m3-segment:nth-of-type(n + 3) {
   border-top: 1px solid var(--md-sys-color-outline);
 }
+
+.add-device__key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.add-device__diagnostics summary {
+  cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+}
