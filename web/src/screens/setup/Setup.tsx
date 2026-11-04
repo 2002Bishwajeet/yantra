@@ -7,7 +7,7 @@ import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
 import { joinFixes, reachWords } from '@/lib/checks'
 import { joinUrl } from '@/lib/join'
-import { notYours } from '@/lib/platform'
+import { apart, notYours } from '@/lib/platform'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -108,13 +108,39 @@ function wordsOf(said: Line, name: string): string {
   }
 }
 
+/** Y-622: the hub is never added, so no word of its line sends the owner to the join command. */
+function hubWords(said: Line, name: string): string {
+  switch (said.kind) {
+    case 'refused':
+      return 'the key was refused · its machine page shows how'
+    case 'unjoined':
+      return 'no account named for it · its machine page shows how'
+    case 'browser':
+      return 'Tailscale asks for a browser sign-in · its machine page shows how'
+    default:
+      return wordsOf(said, name)
+  }
+}
+
 const bad = (said: Line): said is Extract<Line, { detail: string }> => 'detail' in said
 
 /** Y-582: the hub's line under step 1. It is never added, so it offers no
  *  Check or Install; one that is not ready links to its machine page. */
-function HubLine(props: { machine: Machine; line: Line }) {
+function HubLine(props: { machine: Machine; line: Line | null }) {
   const { machine, line: said } = props
   const beat = machine.heartbeat
+  if (!said)
+    return (
+      <li className="setup__line" data-kind="apart">
+        <span className="setup__machine">{machine.name}</span>
+        <Text className="setup__said" scale="body-small" tone="variant">
+          {apart(machine)}
+        </Text>
+        <Button render={<Link params={{ machine: machine.name }} to="/m/$machine" />} role="link" variant="text">
+          Open
+        </Button>
+      </li>
+    )
   return (
     <li className="setup__line" data-kind={said.kind}>
       <State size="small" state={mark[said.kind]}>
@@ -122,7 +148,7 @@ function HubLine(props: { machine: Machine; line: Line }) {
       </State>
       <div className="setup__said">
         <Text className={bad(said) ? 'setup__bad' : undefined} scale="body-small" tone={bad(said) ? undefined : 'variant'}>
-          {wordsOf(said, machine.name)}
+          {hubWords(said, machine.name)}
         </Text>
         {said.kind === 'unreachable' ? (
           <Text scale="body-small" tone="variant">
@@ -280,7 +306,7 @@ export function Setup() {
     )
 
   // Y-404: listed with the reason, never counted.
-  const foreign = all.filter((one) => one.ownership !== 'yours')
+  const foreign = all.filter((one) => one.ownership !== 'yours' && !one.hub)
   const join = joinUrl(location, about.data)
   const read = stamp([
     { name: 'machines', reading: machines },
