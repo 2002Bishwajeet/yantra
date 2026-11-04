@@ -22,12 +22,20 @@ describe('gitFailure', () => {
   })
 
   it.each<[string, GitFailureKind]>([
-    ['a turn or a revert is running in this thread; wait for it to end', 'draftRunning'],
+    ['a turn or a revert is running in this thread; wait for it to end', 'turnRunning'],
     ['the thread has nothing to commit', 'draftNothing'],
-    ['the Mac has no tmux server from a login session, so git', 'draftNoLogin'],
+    ['the Mac has no tmux server from a login session, so git', 'noLogin'],
     ['something else', 'other'],
   ])('a draft 409 saying "%s" is %s', (said, kind) => {
     expect(gitFailure('draft', refused(409, said)).kind).toBe(kind)
+  })
+
+  it.each<GitAction>(['draft', 'commit', 'push'])('a %s 409 saying a turn or a revert is running is turnRunning', (action) => {
+    expect(gitFailure(action, refused(409, 'a turn or a revert is running')).kind).toBe('turnRunning')
+  })
+
+  it.each<GitAction>(['draft', 'commit', 'push'])('a %s 409 saying the Mac has no tmux server is noLogin', (action) => {
+    expect(gitFailure(action, refused(409, 'the Mac has no tmux server from a login session')).kind).toBe('noLogin')
   })
 
   it.each<GitAction>(['draft', 'commit', 'push', 'pr'])('%s with 404 is no thread, and asking again cannot help', (action) => {
