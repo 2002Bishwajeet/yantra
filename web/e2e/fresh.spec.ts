@@ -110,7 +110,11 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     Cancel: url('/'),
     'Another name': { kind: 'value', value: 'Name' },
     ...Object.fromEntries(MACHINES.map((name) => [name, pressed])),
-    Continue: url('/new?step=2'),
+    // Y-627: the only ready machine is the hub, which gets no chip until an account on it joins,
+    // so nothing is preselected and Continue waits for a pick.
+    Continue: disabled,
+    'Copy the join command': text('Copied'),
+    Open: url('/m/yantra-box'),
   },
   settings: SETTINGS_NAV,
   'settings-general': SETTINGS_NAV,
@@ -144,6 +148,10 @@ async function open(page: Page, name: Scenario, destination: Destination) {
   await page.goto(destination.path)
   await expect(page.locator('h1, h2').filter({ hasText: destination.heading }).first()).toBeAttached()
   await expect(page.locator('[data-slot="reading"], [aria-busy="true"]')).toHaveCount(0)
+  // Y-627: the hub's join command arrives with /api/about, after the rest of the page.
+  if (destination.id === 'new' && name === 'fresh') {
+    await expect(page.getByRole('button', { name: 'Copy the join command' })).toBeVisible()
+  }
 }
 
 const PRESSABLE = (page: Page) => page.getByRole('button').or(page.getByRole('link'))
