@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { AgentRow, Attention, Check, Item, Machine, Readiness } from '@/api'
+import type { Attention, Check, Item, Machine, Readiness } from '@/api'
 import { aListed, aMachine, aWorkspace } from '@/api/fixtures'
 import { MachineCard } from '@/screens/machines/MachineCard'
 import { renderInApp } from '@/test/inApp'
