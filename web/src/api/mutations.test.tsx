@@ -104,7 +104,7 @@ describe('the workspace verbs', () => {
 })
 
 describe('the workspace file', () => {
-  it('creates with a POST and invalidates the list', async () => {
+  it('creates with a POST, keeps the 201 for the page, and invalidates the list', async () => {
     const asked = daemon(201, aWorkspace({ name: 'site' }))
     const { result } = renderHookQueried(() => ({
       create: useCreateWorkspace(),
@@ -127,6 +127,9 @@ describe('the workspace file', () => {
     expect(
       result.current.client.getQueryState(keys.workspaces())?.isInvalidated,
     ).toBe(true)
+    expect(result.current.client.getQueryData(keys.created('site'))).toEqual(
+      aWorkspace({ name: 'site' }),
+    )
   })
 
   /** No `?force=true` unless a surface means it: the daemon's refusal to strand
@@ -154,12 +157,14 @@ describe('the workspace file', () => {
     const { client } = result.current
     client.setQueryData(keys.status('site'), looked.ok({}))
     client.setQueryData(keys.spend('site'), {})
+    client.setQueryData(keys.created('site'), aWorkspace({ name: 'site' }))
     client.setQueryData(keys.status('other'), looked.ok({}))
 
     await act(() => result.current.remove.mutateAsync({ name: 'site' }))
 
     expect(client.getQueryState(keys.status('site'))).toBeUndefined()
     expect(client.getQueryState(keys.spend('site'))).toBeUndefined()
+    expect(client.getQueryState(keys.created('site'))).toBeUndefined()
     expect(client.getQueryState(keys.status('other'))).toBeDefined()
   })
 })

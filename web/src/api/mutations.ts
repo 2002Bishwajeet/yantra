@@ -37,14 +37,17 @@ const workspace = (name: string, tail = '') =>
  *
  *  Each `201`/`200` still carries the whole answer, and the surfaces draw
  *  that: the sweep is up to 30 s behind its own write, so a refetch alone can
- *  list what was just deleted (I-30). */
+ *  list what was just deleted (I-30). A create keeps its `201` under
+ *  `keys.created`, and the session page draws it until the sweep lists the name. */
 export function useCreateWorkspace() {
   const client = useQueryClient()
   return useMutation<Workspace, ApiError, Create>({
     mutationFn: (body) =>
       fetchJson<Workspace>('/api/workspaces', { method: 'POST', ...json(body) }),
-    onSuccess: () =>
-      client.invalidateQueries({ queryKey: keys.workspaces(), exact: true }),
+    onSuccess: (made) => {
+      client.setQueryData(keys.created(made.name), made)
+      return client.invalidateQueries({ queryKey: keys.workspaces(), exact: true })
+    },
   })
 }
 
