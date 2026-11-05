@@ -123,6 +123,7 @@ function missingTitle(check: Check, name: string): string {
   if (check.check === 'provider-auth') return 'gh is not signed in'
   if (check.check === 'login-session') return 'claude is not signed in'
   if (check.check === 'folder-access') return 'macOS blocks Desktop, Documents and Downloads'
+  if (check.check === 'hooks') return 'a hook cannot run'
   return `${nameOf(check.check)} is missing`
 }
 

@@ -13,7 +13,7 @@ const report = (checks: Check[]): Reading<Readiness> => ({ looked: 'ok', age_sec
 
 const all = (over: Record<string, Check['state']> = {}, detail: Record<string, string> = {}) =>
   report(
-    ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'heartbeat'].map(
+    ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'heartbeat'].map(
       (id) => check(id, over[id] ?? 'present', detail[id] ?? ''),
     ),
   )
@@ -212,6 +212,14 @@ describe('the machine page’s verdict', () => {
     const v = verdict(all({ 'folder-access': 'absent' }))
     expect(v.kind).toBe('manual')
     expect(titleOf(v, 'pi')).toBe('macOS blocks Desktop, Documents and Downloads')
+    expect(startable(v)).toBe(true)
+  })
+
+  /** Y-640: the agent starts, and only the hook fails, so it is a warning. */
+  it('lets a session start where a hook cannot run', () => {
+    const v = verdict(all({ hooks: 'absent' }))
+    expect(v.kind).toBe('manual')
+    expect(titleOf(v, 'mbp')).toBe('a hook cannot run')
     expect(startable(v)).toBe(true)
   })
 

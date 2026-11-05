@@ -332,7 +332,7 @@ export function ReadinessCard(props: {
   )
 }
 
-/** D7 §4.3: the twelve, folded to one line. The count is already under the title. */
+/** D7 §4.3: the thirteen, folded to one line. The count is already under the title. */
 function folded(checks: Check[]): string {
   const names = checks.map((one) => nameOf(one.check))
   return names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : names.join(', ')

@@ -242,12 +242,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_mac_with_a_server_running_sends_no_launchctl() {
-        for server in [Server::Running, Server::Empty] {
-            let mac = Mac::new(server, 3);
-            required(&mac, Os::MacOs).await.expect("a server runs");
-            assert!(!mac.asked_for("launchctl"));
-        }
+    async fn a_mac_with_a_session_held_sends_no_launchctl() {
+        let mac = Mac::new(Server::Running, 3);
+        required(&mac, Os::MacOs).await.expect("a server runs");
+        assert!(!mac.asked_for("launchctl"));
+    }
+
+    /// Y-640: an empty server gets the script, which may replace its older
+    /// job, and serves when the script cannot run while the server still
+    /// answers. `tmux.rs` tests the bootout that leaves none.
+    #[tokio::test]
+    async fn a_mac_with_an_empty_server_is_sent_the_script_and_starts() {
+        let mac = Mac::new(Server::Empty, 3);
+        required(&mac, Os::MacOs).await.expect("a server runs");
+        assert!(mac.asked_for("launchctl"));
     }
 
     #[tokio::test]

@@ -26,7 +26,7 @@ afterEach(() => {
   Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
 })
 
-const IDS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'heartbeat']
+const IDS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'heartbeat']
 
 const checks = (absent: string[] = [], detail: Record<string, string> = {}): Check[] =>
   IDS.map((id) => ({
@@ -135,8 +135,8 @@ describe('the Readiness card', () => {
   /** On a ready machine the microphone is all Install could do, so Install
    *  waits for the box; the optional microphone is not counted against it. */
   it.each([
-    ['ready', [] as string[], 'Ready for sessions', '11 of 11'],
-    ['manual', ['provider-auth'], 'gh is not signed in', '10 of 11'],
+    ['ready', [] as string[], 'Ready for sessions', '12 of 12'],
+    ['manual', ['provider-auth'], 'gh is not signed in', '11 of 12'],
   ])('enables Install on a %s machine only while Microphone is ticked', async (_, absent, title, count) => {
     daemon()
     await draw(report([...checks(absent), { check: 'mic', state: 'absent', detail: 'not installed' }]))
@@ -488,6 +488,19 @@ describe('the Readiness card', () => {
     await draw(report(checks(['folder-access'])), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'macOS blocks Desktop, Documents and Downloads' })).toBeTruthy()
     expect(card().getByText(/Allow full disk access for remote users\. Every ssh login to pi, agents included/)).toBeTruthy()
+    expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
+  })
+
+  /** Y-640: the detail names the command, and the session is still offered. */
+  it('names the command a hook cannot find, and still offers a session', async () => {
+    daemon()
+    const said = {
+      hooks: 'the agent’s PATH lacks `node` (SessionStart in claude-mem@thedotmack), so those hooks fail each time an agent starts',
+    }
+    await draw(report(checks(['hooks'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
+    expect(card().getByRole('heading', { name: 'a hook cannot run' })).toBeTruthy()
+    expect(card().getByText(/lacks `node` \(SessionStart in claude-mem@thedotmack\)/)).toBeTruthy()
+    expect(card().getByText(/put its directory on PATH in your login shell/)).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
 

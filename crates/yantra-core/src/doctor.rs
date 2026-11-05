@@ -14,8 +14,11 @@
 //! [D2 §3.1]: ../../../docs/design/02-setup.md
 //! [D2 §3.2]: ../../../docs/design/02-setup.md
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::time::Duration;
+
+use serde_json::Value;
 
 use tokio::time::Instant;
 
@@ -41,6 +44,7 @@ const PROVIDER_AUTH: &str = "provider-auth";
 const LOGIN_SESSION: &str = "login-session";
 const MIC: &str = "mic";
 const FOLDER_ACCESS: &str = "folder-access";
+const HOOKS: &str = "hooks";
 /// Public because the one caller that can answer this check finds it by name —
 /// see [`heartbeat`].
 pub const HEARTBEAT: &str = "heartbeat";
@@ -50,7 +54,7 @@ pub const GITHUB: &str = "github";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.
-const BEHIND_SSH: [&str; 9] = [
+const BEHIND_SSH: [&str; 10] = [
     TMUX,
     GIT,
     AGENT_CLI,
@@ -60,6 +64,7 @@ const BEHIND_SSH: [&str; 9] = [
     LOGIN_SESSION,
     MIC,
     FOLDER_ACCESS,
+    HOOKS,
 ];
 
 /// What every check behind ssh says when ssh itself did not answer. The reason
@@ -189,7 +194,7 @@ pub async fn fleet_with(extra: &[String], term: &str) -> Result<Vec<Report>, Err
 ///
 /// Never fails: a connection that cannot even be built is a report of unknowns
 /// with the reason in it, because a caller asking *what is wrong with this box*
-/// is answered better by twelve states than by one error.
+/// is answered better by thirteen states than by one error.
 pub async fn machine(name: &str, term: &str) -> Report {
     let ssh = ssh::machine_at(name)
         .ok_or_else(|| "no directory for ssh control sockets on this machine".to_owned())
@@ -276,6 +281,7 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         .await,
         timed_one(mic(exec)).await,
         timed_one(folder_access(exec)).await,
+        timed_one(hooks(exec, found_tmux.as_ref(), &os)).await,
         heartbeat(),
     ]
 }
@@ -777,6 +783,245 @@ fn folder_access_from(said: &str) -> Check {
     }
 }
 
+/// Splits what [`read_files`] printed. A file it could not read is empty.
+const HOOK_FILE: &str = "yantra-hook-file";
+
+/// Each of `files` (shell words) after a [`HOOK_FILE`] line, in one round trip.
+fn read_files(files: &str) -> String {
+    format!(
+        "for f in {files}; do printf '\\n%s\\n' {HOOK_FILE}; cat \"$f\" 2>/dev/null; done; exit 0"
+    )
+}
+
+/// The `count` files [`read_files`] printed, each as JSON, or `None` when the
+/// output is not that shape. An empty file is `Value::Null`; `Err` names the
+/// file that is not JSON, and never its contents (Q5).
+fn files_from(said: &str, names: &[&str]) -> Option<Result<Vec<Value>, String>> {
+    let mark = format!("\n{HOOK_FILE}\n");
+    let mut parts = said.split(&mark);
+    parts.next()?;
+    let files: Vec<&str> = parts.collect();
+    if files.len() != names.len() {
+        return None;
+    }
+    Some(
+        files
+            .iter()
+            .zip(names)
+            .map(|(text, name)| match text.trim() {
+                "" => Ok(Value::Null),
+                text => serde_json::from_str(text).map_err(|_| (*name).to_owned()),
+            })
+            .collect(),
+    )
+}
+
+/// Each program a hook needs on `PATH`, with the events and sources that run it.
+type Uses = BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)>;
+
+/// Words that are no program to find on `PATH`. A hook that starts with
+/// `command -v node &&` guards itself.
+const BUILTINS: [&str; 8] = [
+    "command", "exec", "export", "if", "test", "true", "exit", "cd",
+];
+
+/// The program a hook runs: `command` itself when it has `args`, else the shell
+/// line's first word after any `VAR=value`. A path or a word the shell would
+/// expand is not looked up on `PATH`, so it is `None`.
+fn program(hook: &Value) -> Option<&str> {
+    let command = hook.get("command")?.as_str()?.trim();
+    let name = if hook.get("args").is_some() {
+        command
+    } else {
+        command.split_whitespace().find(|word| {
+            !word.split_once('=').is_some_and(|(key, _)| {
+                !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+        })?
+    };
+    let plain = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c));
+    (plain && !BUILTINS.contains(&name)).then_some(name)
+}
+
+/// The command hooks in a `hooks` object, as settings.json and a plugin's
+/// hooks.json both hold it.
+fn hooks_in(hooks: Option<&Value>, source: &str, uses: &mut Uses) {
+    let Some(events) = hooks.and_then(Value::as_object) else {
+        return;
+    };
+    for (event, groups) in events {
+        let groups = groups.as_array().into_iter().flatten();
+        for hook in groups
+            .filter_map(|group| group.get("hooks")?.as_array())
+            .flatten()
+        {
+            if hook.get("type").and_then(Value::as_str) != Some("command") {
+                continue;
+            }
+            if let Some(name) = program(hook) {
+                let (events, sources) = uses.entry(name.to_owned()).or_default();
+                events.insert(event.clone());
+                sources.insert(source.to_owned());
+            }
+        }
+    }
+}
+
+/// The hooks the agent runs: settings.json's own, then each enabled plugin's.
+/// `Err` is the check to report.
+async fn hook_commands<E: Exec>(exec: &E) -> Result<Uses, Check> {
+    let could_not =
+        |err: &dyn std::fmt::Display| unknown(HOOKS, format!("could not be asked: {err}"));
+    let not_read = || unknown(HOOKS, "the probe answered nothing Yantra reads");
+    let not_json = |file: String| unknown(HOOKS, format!("{file} is not JSON Yantra can read"));
+
+    let names = [
+        "~/.claude/settings.json",
+        "~/.claude/plugins/installed_plugins.json",
+    ];
+    let words: Vec<String> = names
+        .iter()
+        .map(|name| name.replacen('~', "\"$HOME", 1) + "\"")
+        .collect();
+    let out = exec
+        .exec(&read_files(&words.join(" ")))
+        .await
+        .map_err(|err| could_not(&err))?;
+    let files = files_from(&String::from_utf8_lossy(&out.stdout), &names)
+        .ok_or_else(not_read)?
+        .map_err(not_json)?;
+    let (settings, installed) = (&files[0], &files[1]);
+
+    let mut uses = Uses::new();
+    hooks_in(settings.get("hooks"), "settings.json", &mut uses);
+
+    let plugins: Vec<(&str, String)> = settings
+        .get("enabledPlugins")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, on)| on.as_bool() == Some(true))
+        .filter_map(|(name, _)| {
+            let root = installed
+                .get("plugins")?
+                .get(name)?
+                .get(0)?
+                .get("installPath")?;
+            Some((
+                name.as_str(),
+                format!("{}/hooks/hooks.json", root.as_str()?),
+            ))
+        })
+        .collect();
+    if plugins.is_empty() {
+        return Ok(uses);
+    }
+
+    let paths: Vec<String> = plugins.iter().map(|(_, path)| sq(path)).collect();
+    let out = exec
+        .exec(&read_files(&paths.join(" ")))
+        .await
+        .map_err(|err| could_not(&err))?;
+    let names: Vec<&str> = plugins.iter().map(|(name, _)| *name).collect();
+    let files = files_from(&String::from_utf8_lossy(&out.stdout), &names)
+        .ok_or_else(not_read)?
+        .map_err(|plugin| not_json(format!("the hooks.json of {plugin}")))?;
+    for (file, plugin) in files.iter().zip(names) {
+        hooks_in(file.get("hooks"), plugin, &mut uses);
+    }
+    Ok(uses)
+}
+
+/// Precedes the names [`hooks`] could not find.
+const UNRESOLVED: &str = "yantra-unresolved";
+
+/// Y-640: a hook whose program the agent's `PATH` lacks fails each time the
+/// agent starts. That `PATH` is the tmux server's, so a running server is
+/// asked through `run-shell` (I-55). With none, Linux's next server inherits
+/// ssh's, and a Mac's is the LaunchAgent's, which cannot be asked yet.
+async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Error>) -> Check {
+    let could_not =
+        |err: &dyn std::fmt::Display| unknown(HOOKS, format!("could not be asked: {err}"));
+    let uses = match hook_commands(exec).await {
+        Ok(uses) => uses,
+        Err(check) => return check,
+    };
+    if uses.is_empty() {
+        return present(HOOKS, "no hook names a command");
+    }
+
+    let words: Vec<String> = uses.keys().map(|name| sq(name)).collect();
+    let probe = format!(
+        "echo {UNRESOLVED}; for n in {}; do command -v \"$n\" >/dev/null 2>&1 || echo \"$n\"; done",
+        words.join(" ")
+    );
+    let os = match os {
+        Ok(os) => *os,
+        Err(err) => return could_not(err),
+    };
+    let inside = match tmux {
+        Some(tmux) => match tmux.running(exec).await {
+            Ok(running) => running.then_some(tmux),
+            Err(err) => return could_not(&err),
+        },
+        None => None,
+    };
+    let command = match (inside, os) {
+        (Some(tmux), _) => tmux::run_shell(tmux.path(), &probe),
+        (None, Os::Other) => probe,
+        (None, Os::MacOs) => {
+            return unknown(
+                HOOKS,
+                "an agent on this Mac gets the PATH of the tmux server Yantra's LaunchAgent \
+                 starts, and it cannot be asked until that server runs",
+            );
+        }
+    };
+
+    let out = match exec.exec(&command).await {
+        Ok(out) if out.success() => out,
+        Ok(out) => return could_not(&String::from_utf8_lossy(&out.stderr).trim()),
+        Err(err) => return could_not(&err),
+    };
+    let said = String::from_utf8_lossy(&out.stdout);
+    let Some((_, after)) = said.split_once(&format!("{UNRESOLVED}\n")) else {
+        return unknown(HOOKS, "the probe answered nothing Yantra reads");
+    };
+    let missing: Vec<String> = after
+        .lines()
+        .filter_map(|line| uses.get_key_value(line.trim()))
+        .map(|(name, (events, sources))| {
+            let events: Vec<&str> = events.iter().map(String::as_str).collect();
+            let sources: Vec<&str> = sources.iter().map(String::as_str).collect();
+            format!(
+                "`{name}` ({} in {})",
+                events.join(", "),
+                sources.join(" and ")
+            )
+        })
+        .collect();
+    if missing.is_empty() {
+        let names: Vec<&str> = uses.keys().map(String::as_str).collect();
+        return present(
+            HOOKS,
+            format!(
+                "the agent's PATH has every command a hook names: {}",
+                names.join(", ")
+            ),
+        );
+    }
+    absent(
+        HOOKS,
+        format!(
+            "the agent's PATH lacks {}, so those hooks fail each time an agent starts",
+            missing.join("; ")
+        ),
+    )
+}
+
 /// **Unknown from every caller there is today**, and it is the architecture
 /// rather than an omission: the beats live in the running daemon's memory and
 /// nothing persists them (Y-044), while the CLI calls the library in-process and
@@ -1132,7 +1377,7 @@ mod tests {
     #[test]
     fn a_machine_that_cannot_be_asked_is_never_reported_as_missing_anything() {
         let checks = nothing_asked("ssh could not be set up here");
-        assert_eq!(checks.len(), 12);
+        assert_eq!(checks.len(), 13);
         assert!(
             checks.iter().all(|c| c.state == State::Unknown),
             "{checks:?}"
@@ -1430,6 +1675,327 @@ mod tests {
 
         let found = provider_auth(&mac, gh(), None, &Ok(Os::MacOs)).await;
         assert_eq!(found.state, State::Unknown, "{}", found.detail);
+    }
+
+    /// Y-640: a machine's Claude files, and the names its agent's PATH lacks.
+    struct Agent {
+        os: Os,
+        server: bool,
+        settings: &'static str,
+        installed: &'static str,
+        plugin_hooks: &'static str,
+        missing: &'static str,
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    /// claude-mem 15.9.0's hooks, cut to one of each form.
+    const CLAUDE_MEM: &str = r#"{"hooks": {
+        "Setup": [{"hooks": [{"type": "command", "command": "/bin/sh -c 'export PATH=x'"}]}],
+        "SessionStart": [{"matcher": "startup", "hooks": [
+            {"type": "command", "command": "claude-mem", "args": ["start"]},
+            {"type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/x.cjs"]}
+        ]}],
+        "Stop": [{"hooks": [{"type": "command", "command": "claude-mem", "args": ["summarize"]}]}]
+    }}"#;
+
+    const ENABLED: &str =
+        r#"{"enabledPlugins": {"claude-mem@thedotmack": true, "off@market": false}}"#;
+
+    const INSTALLED: &str = r#"{"version": 2, "plugins": {
+        "claude-mem@thedotmack": [{"installPath": "/Users/me/.claude/plugins/cache/claude-mem/15.9.0"}],
+        "off@market": [{"installPath": "/Users/me/.claude/plugins/cache/off/1.0.0"}]
+    }}"#;
+
+    impl Agent {
+        fn new(settings: &'static str, plugin_hooks: &'static str, missing: &'static str) -> Self {
+            Self {
+                os: Os::Other,
+                server: false,
+                settings,
+                installed: INSTALLED,
+                plugin_hooks,
+                missing,
+                asked: std::sync::Mutex::default(),
+            }
+        }
+
+        fn asked(&self, part: &str) -> Vec<String> {
+            let asked = self.asked.lock().expect("not poisoned");
+            asked.iter().filter(|c| c.contains(part)).cloned().collect()
+        }
+
+        async fn check(&self) -> Check {
+            let tmux = Tmux::resolve(self).await.expect("a tmux");
+            hooks(self, Some(&tmux), &Ok(self.os)).await
+        }
+    }
+
+    impl Exec for Agent {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            self.asked
+                .lock()
+                .expect("not poisoned")
+                .push(command.to_owned());
+            let file = |body: &str| format!("\n{HOOK_FILE}\n{body}");
+            let (status, stdout, stderr) = if command.contains("settings.json") {
+                (
+                    0,
+                    file(self.settings) + &file(self.installed),
+                    String::new(),
+                )
+            } else if command.contains("hooks/hooks.json") {
+                (0, file(self.plugin_hooks), String::new())
+            } else if command.contains(UNRESOLVED) {
+                (0, format!("{UNRESOLVED}\n{}", self.missing), String::new())
+            } else if command.contains("list-sessions") {
+                match self.server {
+                    true => (0, String::new(), String::new()),
+                    false => (
+                        1,
+                        String::new(),
+                        "no server running on /tmp/tmux-501/default\n".to_owned(),
+                    ),
+                }
+            } else if command.contains("command -v tmux") {
+                (0, "/opt/homebrew/bin/tmux\n".to_owned(), String::new())
+            } else {
+                (1, String::new(), String::new())
+            };
+            Ok(ssh::Output {
+                status,
+                stdout: stdout.into_bytes(),
+                stderr: stderr.into_bytes(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn no_hooks_is_present() {
+        for (settings, installed) in [("", ""), ("{}", INSTALLED), (ENABLED, "")] {
+            let mut agent = Agent::new(settings, CLAUDE_MEM, "");
+            agent.installed = installed;
+            let found = agent.check().await;
+            assert_eq!(found.state, State::Present, "{}", found.detail);
+            assert_eq!(found.detail, "no hook names a command");
+            assert!(agent.asked("hooks/hooks.json").is_empty());
+        }
+    }
+
+    /// Only the enabled plugin's hooks.json is read, and the exec form's
+    /// `command` is the program.
+    #[tokio::test]
+    async fn every_resolved_command_is_present_and_named() {
+        let agent = Agent::new(ENABLED, CLAUDE_MEM, "");
+        let found = agent.check().await;
+        assert_eq!(found.state, State::Present, "{}", found.detail);
+        assert!(
+            found.detail.ends_with(": claude-mem, node"),
+            "{}",
+            found.detail
+        );
+        let read = agent.asked("hooks/hooks.json");
+        assert_eq!(read.len(), 1, "{read:?}");
+        assert!(
+            read[0]
+                .contains("'/Users/me/.claude/plugins/cache/claude-mem/15.9.0/hooks/hooks.json'")
+        );
+        assert!(!read[0].contains("off/1.0.0"), "{read:?}");
+        let probe = &agent.asked(UNRESOLVED)[0];
+        assert!(probe.contains("'claude-mem' 'node'"), "{probe}");
+        assert!(
+            !probe.contains("/bin/sh"),
+            "a path is not looked up: {probe}"
+        );
+    }
+
+    /// The walk on bishwajeets-macbook-pro: the detail names each command,
+    /// its events and its plugin, and nothing else from the files.
+    #[tokio::test]
+    async fn a_missing_command_is_absent_with_its_event_and_plugin() {
+        let agent = Agent::new(ENABLED, CLAUDE_MEM, "node\nclaude-mem\n");
+        let found = agent.check().await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert!(
+            found
+                .detail
+                .contains("`claude-mem` (SessionStart, Stop in claude-mem@thedotmack)"),
+            "{}",
+            found.detail
+        );
+        assert!(
+            found
+                .detail
+                .contains("`node` (SessionStart in claude-mem@thedotmack)"),
+            "{}",
+            found.detail
+        );
+        assert!(found.detail.contains("PATH lacks"), "{}", found.detail);
+        for private in ["summarize", "CLAUDE_PLUGIN_ROOT", "/Users/me"] {
+            assert!(
+                !found.detail.contains(private),
+                "{private}: {}",
+                found.detail
+            );
+        }
+    }
+
+    /// A shell line's program is its first word after `VAR=value`; a builtin
+    /// that guards the line, a path and an expansion are not looked up.
+    #[test]
+    fn a_shell_lines_program_is_its_first_plain_word() {
+        let program_of = |command: &str| {
+            program(&serde_json::json!({"type": "command", "command": command})).map(str::to_owned)
+        };
+        assert_eq!(program_of("node x.js").as_deref(), Some("node"));
+        assert_eq!(program_of("FOO=1 BAR=x bun run y").as_deref(), Some("bun"));
+        assert_eq!(program_of("command -v node && node x || exit 0"), None);
+        assert_eq!(
+            program_of("bash \"${CLAUDE_PLUGIN_ROOT}/x.sh\"").as_deref(),
+            Some("bash")
+        );
+        assert_eq!(program_of("\"${CLAUDE_PLUGIN_ROOT}/x.sh\""), None);
+        assert_eq!(program_of("$HOME/bin/x"), None);
+        assert_eq!(program_of("/usr/bin/env node"), None);
+        assert_eq!(program_of("[ -f x ] && y"), None);
+        assert_eq!(program_of(""), None);
+        let exec = serde_json::json!({"command": "node", "args": ["a b"]});
+        assert_eq!(program(&exec), Some("node"));
+    }
+
+    /// settings.json's own hooks count, and a shell line's guard is skipped.
+    #[tokio::test]
+    async fn settings_hooks_are_read_too() {
+        let agent = Agent::new(
+            r#"{"hooks": {"PreToolUse": [{"hooks": [
+                {"type": "command", "command": "jq -r .tool"},
+                {"type": "command", "command": "command -v node && node x || exit 0"},
+                {"type": "prompt", "prompt": "is this safe?"}
+            ]}]}}"#,
+            "",
+            "jq\n",
+        );
+        let found = agent.check().await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert!(
+            found.detail.contains("`jq` (PreToolUse in settings.json)"),
+            "{}",
+            found.detail
+        );
+        assert!(!found.detail.contains("node"), "{}", found.detail);
+    }
+
+    /// R-23: a file that is not JSON was not read, so nothing is missing.
+    #[tokio::test]
+    async fn unparseable_json_is_unknown() {
+        let found = Agent::new("{not json", "", "").check().await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+        assert!(found.detail.contains("settings.json"), "{}", found.detail);
+        assert!(!found.detail.contains("not json"), "{}", found.detail);
+
+        let found = Agent::new(ENABLED, "{\"hooks\": [", "").check().await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+        assert!(
+            found.detail.contains("claude-mem@thedotmack"),
+            "{}",
+            found.detail
+        );
+
+        let found = hooks(
+            &Answers {
+                status: 0,
+                stdout: "/usr/bin/found\n",
+            },
+            None,
+            &Ok(Os::Other),
+        )
+        .await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+        let found = hooks(&Refuses, None, &Ok(Os::Other)).await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+    }
+
+    /// The agent's PATH is the tmux server's, so a running server answers.
+    #[tokio::test]
+    async fn a_running_server_is_asked_inside() {
+        for os in [Os::MacOs, Os::Other] {
+            let mut agent = Agent::new(ENABLED, CLAUDE_MEM, "node\n");
+            (agent.os, agent.server) = (os, true);
+            let found = agent.check().await;
+            assert_eq!(found.state, State::Absent, "{os:?}: {}", found.detail);
+            let probe = &agent.asked(UNRESOLVED)[0];
+            assert!(probe.contains("run-shell"), "{probe}");
+        }
+    }
+
+    /// Linux's next server inherits ssh's PATH, so ssh answers. A Mac's next
+    /// server is the LaunchAgent's, whose PATH ssh does not have.
+    #[tokio::test]
+    async fn with_no_server_linux_asks_over_ssh_and_a_mac_cannot_ask() {
+        let linux = Agent::new(ENABLED, CLAUDE_MEM, "");
+        assert_eq!(linux.check().await.state, State::Present);
+        assert!(!linux.asked(UNRESOLVED)[0].contains("run-shell"));
+
+        let mut mac = Agent::new(ENABLED, CLAUDE_MEM, "node\n");
+        mac.os = Os::MacOs;
+        let found = mac.check().await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+        assert!(found.detail.contains("LaunchAgent"), "{}", found.detail);
+        assert!(mac.asked(UNRESOLVED).is_empty());
+        assert!(mac.asked("launchctl").is_empty(), "doctor is a read");
+    }
+
+    /// The three probes under a real `sh`, with `$HOME` a scratch directory.
+    struct Local(std::path::PathBuf);
+
+    impl Exec for Local {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            let out = std::process::Command::new("sh")
+                .args(["-c", command])
+                .env("HOME", &self.0)
+                .output()
+                .expect("sh is on every machine this builds on");
+            Ok(ssh::Output {
+                status: out.status.code().unwrap_or(-1),
+                stdout: out.stdout,
+                stderr: out.stderr,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn the_probes_work_under_a_real_shell() {
+        let home = std::env::temp_dir().join(format!("yantra-hooks-{}", std::process::id()));
+        let plugin = home.join("plugin's dir");
+        std::fs::create_dir_all(home.join(".claude/plugins")).expect("a directory");
+        std::fs::create_dir_all(plugin.join("hooks")).expect("a directory");
+        std::fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"enabledPlugins": {"p@m": true},
+                "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "sh -c true"}]}]}}"#,
+        )
+        .expect("a file");
+        let installed = serde_json::json!({"plugins": {"p@m": [{"installPath": plugin}]}});
+        std::fs::write(
+            home.join(".claude/plugins/installed_plugins.json"),
+            installed.to_string(),
+        )
+        .expect("a file");
+        std::fs::write(
+            plugin.join("hooks/hooks.json"),
+            r#"{"hooks": {"SessionStart": [{"hooks": [
+                {"type": "command", "command": "yantra-no-such-program", "args": []}
+            ]}]}}"#,
+        )
+        .expect("a file");
+
+        let found = hooks(&Local(home.clone()), None, &Ok(Os::Other)).await;
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert_eq!(
+            found.detail,
+            "the agent's PATH lacks `yantra-no-such-program` (SessionStart in p@m), so those \
+             hooks fail each time an agent starts"
+        );
     }
 
     /// Linux keeps one question over ssh, and never asks tmux.
