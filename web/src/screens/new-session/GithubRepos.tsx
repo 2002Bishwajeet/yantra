@@ -4,8 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { Check, GitBranch, Search } from 'lucide-react'
 import type { Repo } from '@/api'
 import { asApiError } from '@/api/errors'
-import { useGithub, useRepos } from '@/api/hooks'
+import { useGithub, useGithubReadiness, useRepos } from '@/api/hooks'
 import { dirsQuery } from '@/api/queries'
+import { grant, REFUSED } from '@/lib/github'
 import { derive } from '@/lib/name'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -36,11 +37,12 @@ const notSignedIn = {
   describe: () => 'Nothing is signed in to Yantra, so no repository can be listed.',
 }
 
-function SignedIn(props: { login: string | null }) {
+function SignedIn(props: { login: string | null; asked: boolean }) {
   return (
     <p className="ns__signed">
       <Text scale="body-medium" tone="variant">
-        github.com · {props.login ?? 'signed in'} · signed in to Yantra · private repositories included
+        github.com · {props.login ?? 'signed in'} · signed in to Yantra ·{' '}
+        {props.asked ? 'private repositories included' : 'GitHub not asked yet'}
       </Text>
       <Link className="ns__link" params={{ category: 'providers' }} to="/settings/$category">
         Use another account
@@ -147,6 +149,7 @@ function Rows(props: { form: SessionForm; values: Values; repos: Repo[]; query: 
 export function GithubRepos(props: { form: SessionForm; values: Values }) {
   const { form, values } = props
   const github = useGithub()
+  const readiness = useGithubReadiness()
   const repos = useRepos()
   const [query, setQuery] = useState('')
   const deferred = useDeferredValue(query)
@@ -172,9 +175,33 @@ export function GithubRepos(props: { form: SessionForm; values: Values }) {
     )
   }
 
+  const held = grant(github.data, readiness)
+  if (held.kind === 'refused') {
+    return (
+      <ErrorSurface.Inline
+        action={
+          <Button
+            render={<Link params={{ category: 'providers' }} to="/settings/$category" />}
+            role="link"
+            variant="tonal"
+          >
+            Sign in again in Settings
+          </Button>
+        }
+        error={{
+          kind: 'refused',
+          said: readiness.looked === 'ok' ? readiness.data.detail : '',
+          retryable: false,
+          describe: () => `${REFUSED} — it was revoked or replaced, so no repository can be listed`,
+        }}
+        title={REFUSED}
+      />
+    )
+  }
+
   return (
     <div className="ns__github">
-      <SignedIn login={github.data?.login ?? null} />
+      <SignedIn asked={held.kind === 'accepted'} login={github.data?.login ?? null} />
       <TextField
         autoComplete="off"
         label="Search your repositories"

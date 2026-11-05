@@ -345,6 +345,32 @@ describe('the account button', () => {
     expect(image(button)).toBeNull()
   })
 
+  describe('when GitHub refuses the grant (Y-606)', () => {
+    const grantOf = (readiness: unknown) => ({
+      '/api/github': { body: contract.github },
+      '/api/readiness/github': { body: readiness },
+    })
+
+    it('names the refusal on the button and leads the menu to Providers', async () => {
+      mount('desktop', '/', { overrides: grantOf(contract.githubRefused) })
+      const button = await screen.findByRole('button', { name: /GitHub refused the grant/ })
+      fireEvent.click(button)
+      const item = await screen.findByRole('menuitem', { name: /GitHub refused the grant · sign in again/ })
+      expect(item.getAttribute('href')).toBe('/settings/providers')
+      expect(item.textContent).toContain('yantra github login')
+    })
+
+    it('draws neither the badge nor the item for a grant GitHub accepts', async () => {
+      const asked = mount('desktop', '/', { overrides: grantOf(contract.githubReadiness) })
+      const button = await account()
+      await waitFor(() => expect(asked).toContain('GET /api/readiness/github'))
+      expect(button.textContent).not.toMatch(/refused/)
+      fireEvent.click(button)
+      await screen.findByRole('menuitem', { name: 'Rooms' })
+      expect(screen.queryByRole('menuitem', { name: /refused/ })).toBeNull()
+    })
+  })
+
   it('goes back to the icon, in the same box, when the image does not load', async () => {
     mount('desktop', '/', { overrides: { '/api/github': { body: { ...contract.github, avatar_url: AVATAR } } } })
     const button = await account()

@@ -110,7 +110,7 @@ describe('Providers', () => {
 
     it('says GitHub refused it, offers Sign in again, and never says someone', async () => {
       mountSettings('desktop', '/settings/providers', refused)
-      expect(await screen.findByText('GitHub refused the grant')).toBeTruthy()
+      expect((await screen.findAllByText('GitHub refused the grant')).length).toBeGreaterThan(0)
       expect(screen.queryByRole('button', { name: 'Manage' })).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
       expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()

@@ -190,6 +190,41 @@ describe('step 2, where the code comes from', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
+  it('says GitHub refused the grant, and lists nothing, when the readiness is absent', async () => {
+    mountNew('desktop', '/new', { 'GET /api/readiness/github': [200, contract.githubRefused] })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    expect(await screen.findByText('GitHub refused the grant')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Sign in again in Settings' }).getAttribute('href')).toBe(
+      '/settings/providers',
+    )
+    expect(screen.queryByText(/private repositories included/)).toBeNull()
+    expect(screen.queryByRole('list', { name: 'Repositories' })).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  })
+
+  it('keeps the list, without the private claim, while GitHub has not been asked', async () => {
+    mountNew('desktop', '/new', {
+      'GET /api/readiness/github': [200, { looked: 'failed', age_seconds: 0, error: 'timeout' }],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    expect(await screen.findByRole('list', { name: 'Repositories' })).toBeTruthy()
+    expect(screen.getByText(/GitHub not asked yet/)).toBeTruthy()
+    expect(screen.queryByText(/private repositories included/)).toBeNull()
+  })
+
+  it('still says private repositories are included for an accepted grant', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    expect(await screen.findByText(/private repositories included/)).toBeTruthy()
+  })
+
   it('does not tell anyone to choose from a list that failed to load', async () => {
     mountNew('desktop', '/new', {
       'GET /api/repos': [200, { looked: 'failed', age_seconds: 0, error: 'rate limited' }],
