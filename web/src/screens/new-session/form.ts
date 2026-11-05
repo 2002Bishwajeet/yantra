@@ -1,4 +1,4 @@
-import type { Machine, Repo } from '@/api'
+import type { Machine, Readiness, Repo } from '@/api'
 import { USABLE_NAME } from '@/lib/name'
 import type { Step } from '@/router'
 
@@ -41,6 +41,15 @@ export const pickMachine = (given: string, machines: Machine[]): string =>
   machines.some((one) => one.name === given && one.ownership === 'yours' && one.online && !one.expired)
     ? given
     : ''
+
+/** The hub is the daemon's own host, and sessions run there only as an account
+ *  that joined. Same rule as Setup: online, and ssh got in (Y-627). */
+export const hubJoined = (machine: Machine, report: Readiness | null): boolean =>
+  machine.online && !!report?.checks.some((one) => one.check === 'reachable' && one.state === 'present')
+
+/** The machines a chip may be drawn for: a hub no account has joined is left out. */
+export const offered = (machines: Machine[], reports: (Readiness | null)[]): Machine[] =>
+  machines.filter((one, index) => !one.hub || hubJoined(one, reports[index] ?? null))
 
 /** Whether a step is complete enough to leave. */
 export function complete(step: Step, values: Values): boolean {

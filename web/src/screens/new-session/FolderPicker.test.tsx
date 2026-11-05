@@ -43,7 +43,7 @@ const mac = (path: string) => {
 const onMac: Answers = {
   'GET /api/machines': [
     200,
-    { ...contract.machines, data: contract.machines.data.map((one) => (one.name === 'cachyos-g14' ? { ...one, os: 'macOS' } : one)) },
+    { ...contract.machines, data: contract.machines.data.map((one) => (one.name === 'cachyos-g14' ? { ...one, os: 'macOS', hub: false } : { ...one, hub: false })) },
   ],
   'POST /api/machines/cachyos-g14/dirs': (sent) => [200, mac(String(sent.path ?? HOME))],
 }

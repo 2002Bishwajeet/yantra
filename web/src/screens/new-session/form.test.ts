@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { Machine, Repo } from '@/api'
+import type { Machine, Readiness, Repo } from '@/api'
 import {
   cloneInto,
   complete,
   happenings,
+  hubJoined,
   nameError,
+  offered,
   pickMachine,
   plan,
   reachable,
@@ -216,5 +218,37 @@ describe('the hint under the source step', () => {
     expect(sourceHint(local('no'), home)).toBe('Choose a folder that exists to continue.')
     expect(sourceHint(local('yes'), home)).toBeNull()
     expect(sourceHint(local('unknown'), home)).toBeNull()
+  })
+})
+
+describe('the hub in New session', () => {
+  const hub = aMachine({ name: 'yantra-box', hub: true })
+  const report = (detail: string, state: 'present' | 'absent'): Readiness => ({
+    machine: hub.name,
+    age_seconds: 0,
+    checks: [{ check: 'reachable', state, detail }],
+  })
+  const joined = report('', 'present')
+
+  it('has joined when it is online and ssh gets in', () => {
+    expect(hubJoined(hub, joined)).toBe(true)
+  })
+
+  it.each([
+    ['refused', report('Permission denied (publickey)', 'absent')],
+    ['unjoined', report('the ssh config here names no account for yantra-box', 'absent')],
+    ['no report', null],
+  ])('has not joined when %s', (_why, given) => {
+    expect(hubJoined(hub, given)).toBe(false)
+  })
+
+  it('has not joined when it is offline, whatever an old report says', () => {
+    expect(hubJoined({ ...hub, online: false }, joined)).toBe(false)
+  })
+
+  it('drops only a hub that has not joined', () => {
+    const other = aMachine({ name: 'cachyos-g14' })
+    expect(offered([hub, other], [null, null])).toEqual([other])
+    expect(offered([hub, other], [joined, null])).toEqual([hub, other])
   })
 })
