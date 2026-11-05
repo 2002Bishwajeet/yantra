@@ -456,7 +456,7 @@ describe('a Mac with no login tmux server (Y-631)', () => {
       {
         ...contract.machines,
         data: contract.machines.data.map((one) =>
-          one.name === MAC ? { ...one, online: true, os: 'macos' } : one,
+          one.name === MAC ? { ...one, online: true, os: 'macos', hub: false } : { ...one, hub: false },
         ),
       },
     ],
