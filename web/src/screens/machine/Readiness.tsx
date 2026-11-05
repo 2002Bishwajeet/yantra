@@ -18,7 +18,7 @@ import { Snackbar } from '@/m3/snackbar/Snackbar'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Doctor } from '@/screens/machines/Doctor'
-import { tally, wordOf } from '@/screens/machines/facts'
+import { counted, tally, wordOf } from '@/screens/machines/facts'
 import { joinUrl } from '@/lib/join'
 import { useTick } from '@/useTick'
 import { answer, LOST_MS, needsSudo, newestInstall } from './install'
@@ -167,7 +167,7 @@ export function ReadinessCard(props: {
   const installable = verdict.kind === 'missing' || verdict.kind === 'sudo' || (startable(verdict) && offerMic)
   // On a startable machine the microphone is all Install could do.
   const nothingAsked = startable(verdict) && !mic
-  const counted = tally(checks)
+  const tallied = tally(checks)
   const lost = running && watch !== null && now - watch.pressed > LOST_MS
   const already = install.error?.status === 409
   const refused = install.error && !already ? install.error : null
@@ -193,7 +193,7 @@ export function ReadinessCard(props: {
           </Text>
           {readiness.looked === 'ok' && checks.length > 0 && verdict.kind !== 'asleep' ? (
             <Mono className="readiness__count">
-              {counted.present} of {counted.total} · asked {readiness.age_seconds}s ago
+              {counted(tallied)} · asked {readiness.age_seconds}s ago
             </Mono>
           ) : null}
         </div>

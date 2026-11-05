@@ -187,6 +187,23 @@ describe('the machine page’s verdict', () => {
     expect(startable(v)).toBe(true)
   })
 
+  /** Y-641: `ready` means what setup's `isReady` means, on the chip too. */
+  it('says ready beside the optional fixes, and not while a session check is open', () => {
+    const optional = verdict(all({ 'provider-auth': 'absent', hooks: 'absent' }))
+    expect(optional).toMatchObject({ kind: 'manual', ready: true })
+    expect(chipOf(optional, null)).toEqual({ state: 'done', word: 'ready · 2 to fix', error: false })
+
+    const held = verdict(all({ 'login-session': 'absent', hooks: 'absent' }))
+    expect(held).toMatchObject({ kind: 'manual', ready: false })
+    expect(chipOf(held, null)).toEqual({ state: 'needs', word: '2 to fix', error: false })
+  })
+
+  it('does not say ready while a session check is unknown', () => {
+    const v = verdict(all({ 'login-session': 'unknown' }))
+    expect(v).toMatchObject({ kind: 'manual', ready: false })
+    expect(chipOf(v, null).word).toBe('1 to fix')
+  })
+
   /** Y-619: the account is signed in; the Mac has no login tmux server. */
   it('names the missing login tmux server, not a sign-out, for one check', () => {
     const v = verdict(all({ 'login-session': 'absent' }, { 'login-session': NO_SERVER }))
@@ -310,7 +327,7 @@ describe('noRows', () => {
   it('takes the listing at its word where the checks found tmux', () => {
     const listing = { title: 'No session is open here', words: 'tmux lists nothing on pi' }
     expect(noRows({ kind: 'ready' }, 'pi')).toEqual(listing)
-    expect(noRows({ kind: 'manual', absent: [check('provider-cli', 'absent')] }, 'pi')).toEqual(listing)
+    expect(noRows({ kind: 'manual', absent: [check('provider-cli', 'absent')], ready: true }, 'pi')).toEqual(listing)
     expect(noRows({ kind: 'missing', missing: ['git'], result: null, fresh: false }, 'pi')).toEqual(listing)
   })
 

@@ -45,7 +45,7 @@ import { asEvents } from '@/shell/notifications'
 import { phrase } from '@/shell/phrase'
 import { usePrefs } from '@/shell/prefs'
 import { useTick } from '@/useTick'
-import { unclaimed, unreachable, work, type WorkRow } from '@/work'
+import { unclaimed, unreachable, waiting, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
@@ -299,8 +299,7 @@ function Hero(props: {
   const { rows, attention, events, now, retry } = props
   // D7 §3.1: where the FAB carries New session, this copy is not also filled.
   const carried = useFab() !== null
-  const items = attention.looked === 'ok' ? attention.data.reviews.length + attention.data.issues.length : 0
-  const count = rows.length + items
+  const count = waiting(rows, attention.looked === 'ok' ? attention.data : null)
   const empty = count === 0 && attention.looked === 'ok'
   return (
     <Card aria-labelledby="dash-needs" className="dash__hero" surface="primary">

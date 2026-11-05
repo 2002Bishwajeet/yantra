@@ -20,14 +20,14 @@ test.describe('the machines on a busy fleet', () => {
     const good = card(page, 'cachyos-g14')
     // Every basic is present, so the chip reads the verdict (D7 §3.3).
     await expect(good.getByText('ready')).toBeVisible()
-    await expect(good.getByText('4 of 4 checks')).toBeVisible()
+    await expect(good.getByText('10 of 10')).toBeVisible()
     await expect(good.getByRole('button')).toHaveCount(0)
 
     const short = card(page, 'pi-5')
     // The check name table, never a raw id (D7 §3.5).
     await expect(short.getByText('claude', { exact: true })).toBeVisible()
     await expect(short.getByText('no `claude` on PATH there')).toBeVisible()
-    await expect(short.getByText('1 failing')).toBeVisible()
+    await expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeVisible()
     // `git` is not in pi-5's report at all, so it counts as missing too.
     await expect(short.getByText('2 missing')).toBeVisible()
     await expect(short.getByRole('button', { name: 'Install' })).toBeVisible()
@@ -36,7 +36,7 @@ test.describe('the machines on a busy fleet', () => {
     // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
     // Finding 128: the board dates the chip `7 Jul`, not `2026-07-07`.
     await expect(gone.getByText('asleep · 7 Jul', { exact: true })).toBeVisible()
-    await expect(gone.getByText('1 failing · 3 unknown')).toBeVisible()
+    await expect(gone.getByText('0 of 9 · 2 failing · 7 unknown')).toBeVisible()
     await expect(gone.getByRole('button')).toHaveCount(0)
   })
 
@@ -115,7 +115,7 @@ test.describe('the machines on a phone', () => {
     await page.goto('/machines')
     await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
     await expect(card(page, 'cachyos-g14').getByText('tmux')).toHaveCount(0)
-    await expect(card(page, 'cachyos-g14').getByText('4 of 4 checks')).toBeVisible()
+    await expect(card(page, 'cachyos-g14').getByText('10 of 10')).toBeVisible()
     await expect(card(page, 'nas').getByText('claude', { exact: true })).toBeVisible()
   })
 })

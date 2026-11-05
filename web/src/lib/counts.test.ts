@@ -1,0 +1,99 @@
+import { createElement } from 'react'
+import { describe, expect, it } from 'vitest'
+import type { AgentRow, Attention, Check, Item, Machine, Readiness } from '@/api'
+import { aListed, aMachine, aWorkspace } from '@/api/fixtures'
+import { MachineCard } from '@/screens/machines/MachineCard'
+import { renderInApp } from '@/test/inApp'
+import { chipOf, verdictOf } from '@/screens/machine/verdict'
+import { counted, tally } from '@/screens/machines/facts'
+import { line, machines as readied } from '@/screens/setup/steps'
+import { waiting, work } from '@/work'
+
+const BASICS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo']
+const OPTIONAL = ['provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'heartbeat']
+
+const report = (machine: string, absent: string[]): Readiness => ({
+  machine,
+  age_seconds: 0,
+  checks: [...BASICS, ...OPTIONAL].map(
+    (id): Check => ({ check: id, state: absent.includes(id) ? 'absent' : 'present', detail: '' }),
+  ),
+})
+
+const item = (number: number): Item => ({
+  repo: 'o/r',
+  number,
+  title: `item ${number}`,
+  url: `https://github.com/o/r/pull/${number}`,
+  updated_at: '2026-07-07T09:00:00Z',
+})
+
+/** One fleet, every count (Y-641): the walk found three screens printing three
+ *  numbers for it. */
+const mac = aMachine({ name: 'mac', os: 'macOS' })
+const laptop = aMachine({ name: 'laptop' })
+const box = aMachine({ name: 'box', online: false })
+const fleet: { machine: Machine; report: Readiness | null }[] = [
+  { machine: mac, report: report('mac', ['login-session', 'hooks', 'folder-access']) },
+  { machine: laptop, report: report('laptop', ['provider-auth']) },
+  { machine: box, report: null },
+]
+
+const chipFor = (machine: Machine, one: Readiness | null) =>
+  chipOf(
+    verdictOf({
+      name: machine.name,
+      machine,
+      readiness: one
+        ? { looked: 'ok', age_seconds: 0, data: one }
+        : { looked: 'ok', age_seconds: 0, data: { machine: machine.name, checks: [], age_seconds: 0 } },
+      events: [],
+      watch: null,
+    }),
+    null,
+  )
+
+describe('one fleet, every count', () => {
+  it('gives the card and the page one chip and one count for a machine', async () => {
+    for (const { machine, report: one } of fleet) {
+      if (!one) continue
+      const view = await renderInApp(
+        createElement(MachineCard, { machine, checks: one.checks, condensed: false, pending: false }),
+      )
+      const chip = chipFor(machine, one).word
+      const count = counted(tally(one.checks))
+      expect(view.getByText(chip)).toBeTruthy()
+      expect(view.getByText(new RegExp(`^${count}`))).toBeTruthy()
+      view.unmount()
+    }
+    expect(counted(tally(fleet[0]!.report!.checks))).toBe('9 of 12')
+    // A Mac whose login has no tmux server is not ready, and the chip says so.
+    expect(chipFor(mac, fleet[0]!.report).word).toBe('3 to fix')
+    expect(chipFor(laptop, fleet[1]!.report).word).toBe('ready · 1 to fix')
+    expect(chipFor(box, null).word).toBe('asleep')
+  })
+
+  it('counts a ready machine the same in setup and in the chips', () => {
+    const lines = fleet.map(({ machine, report: one }) => ({ machine: machine.name, line: line(machine, one, null) }))
+    const chips = fleet.filter(({ machine, report: one }) => chipFor(machine, one).word.startsWith('ready')).length
+    expect(chips).toBe(1)
+    expect(readied(lines).words).toContain(`${chips} of ${lines.length} machines ready`)
+  })
+
+  it('gives the dashboard and the bell one number', () => {
+    const workspace = aWorkspace({ name: 'trust' })
+    const agents: AgentRow[] = [
+      {
+        workspace,
+        status: { workspace: 'trust', machine: 'mac', reached: 'yes', status: { state: 'awaiting_trust' }, session: null },
+      },
+    ]
+    const rows = work([aListed(workspace)], { looked: 'ok', age_seconds: 0, data: agents })
+    const attention: Attention = { reviews: [item(1), item(2)], issues: [item(3)], notifications: 9 }
+    // The Hero draws the needs rows that are not machine rows; the bell passes every row.
+    const drawn = rows.filter((row) => row.band === 'needs' && row.kind !== 'machine')
+    expect(waiting(rows, attention)).toBe(4)
+    expect(waiting(drawn, attention)).toBe(waiting(rows, attention))
+    expect(waiting(rows, null)).toBe(1)
+  })
+})

@@ -4,6 +4,7 @@ import { asApiError } from '@/api/errors'
 import { INSTALLABLE, nameOf, reachableFailure, type ReachableFailure } from '@/lib/checks'
 import { grant, REFUSED } from '@/lib/github'
 import { blocking } from '@/lib/ready'
+import { tally } from '@/screens/machines/facts'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** Query's three states, as this screen reads them: nothing more of the
@@ -154,8 +155,7 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   if (reachable && reachable.state !== 'present') {
     return { kind: reachableFailure(reachable.detail), detail: reachable.detail }
   }
-  const present = report.checks.filter((one) => one.state === 'present').length
-  const total = report.checks.length
+  const { present, total } = tally(report.checks)
   const needs = blocking(report)
   if (needs.length === 0) return { kind: 'ready', present, total }
   const installable = needs.some((one) => INSTALLABLE.includes(one.check) && one.state === 'absent')

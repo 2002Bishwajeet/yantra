@@ -175,3 +175,11 @@ export function unreachable(reads: Reading<unknown>[]): string | null {
   if (failures.length === 0 || failures.length !== reads.length) return null
   return failures.every((one) => one === failures[0]) ? failures[0]! : null
 }
+
+/** What waits on the owner: the needs-band workspaces and the GitHub items.
+ *  The Hero and the bell both print this, so one fleet shows one number. A
+ *  machine row is the cause of its workspaces and is not counted. */
+export function waiting(rows: WorkRow[], attention: Attention | null): number {
+  const own = rows.filter((row) => row.band === 'needs' && row.kind !== 'machine').length
+  return own + (attention ? attention.reviews.length + attention.issues.length : 0)
+}

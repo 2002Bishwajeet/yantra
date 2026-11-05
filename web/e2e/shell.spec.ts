@@ -278,7 +278,7 @@ test.describe('the shell on busy', () => {
 
   test('opens notifications, and Mark all read empties Unread', async ({ page, size }) => {
     const bell = page.getByRole(size === 'phone' ? 'link' : 'button', { name: /^Notifications/ })
-    await expect(bell).toHaveAccessibleName(/unread/)
+    await expect(bell).toHaveAccessibleName(/waiting on you/)
     // WCAG 1.4.10: the tablet's sheet floats over the page rather than taking
     // 420 px out of it, so the page reflows for nobody when it opens.
     const before = (await page.getByRole('main').boundingBox())!
