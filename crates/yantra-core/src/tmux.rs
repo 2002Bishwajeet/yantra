@@ -331,6 +331,45 @@ impl Tmux {
         Ok(sessions)
     }
 
+    /// Whether a server answers. An empty `-D` server has no sessions and is
+    /// still one, so this is not `list` being empty.
+    pub async fn running<E: Exec>(&self, exec: &E) -> Result<bool, Error> {
+        let out = exec
+            .exec(&format!("{} list-sessions", sq(&self.path)))
+            .await?;
+        if out.success() {
+            return Ok(true);
+        }
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if no_server(&stderr) {
+            return Ok(false);
+        }
+        Err(Error::Command {
+            command: "list-sessions".to_owned(),
+            status: out.status,
+            stderr: stderr.trim().to_owned(),
+        })
+    }
+
+    /// A Mac's server in the login session: the one running, or one
+    /// [`LOGIN_SERVER`]'s LaunchAgent starts (ADR-0018's 2026-11-04 amendment).
+    /// `false` means no one is logged in at the screen.
+    pub async fn login_server<E: Exec>(&self, exec: &E) -> Result<bool, Error> {
+        if self.running(exec).await? {
+            return Ok(true);
+        }
+        let out = exec.exec(&login_server_command(&self.path)).await?;
+        match out.status {
+            0 => Ok(true),
+            NO_ONE_AT_THE_SCREEN => Ok(false),
+            status => Err(Error::Command {
+                command: "launchctl".to_owned(),
+                status,
+                stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+            }),
+        }
+    }
+
     /// The session's first pane, or `None` when there is no such session.
     ///
     /// This is only readable at all because `remain-on-exit` is set when the
@@ -574,6 +613,16 @@ fn parse_ids(name: &str, stdout: &[u8]) -> Result<Session, Error> {
     }
 }
 
+/// The shell function that loads the LaunchAgent. `join.sh` carries it too.
+pub(crate) const LOGIN_SERVER: &str = include_str!("login_server.sh");
+
+/// [`LOGIN_SERVER`]'s status when there is no `gui/<uid>` domain.
+const NO_ONE_AT_THE_SCREEN: i32 = 3;
+
+pub(crate) fn login_server_command(tmux: &str) -> String {
+    format!("{LOGIN_SERVER}\nlogin_server {}\n", sq(tmux))
+}
+
 /// POSIX single-quoting. Safe here because the exec payload runs the command
 /// under `/bin/sh` (ADR-0006), so the tcsh caveat in R7 does not apply.
 pub(crate) fn sq(s: &str) -> String {
@@ -590,7 +639,7 @@ pub(crate) fn sq(s: &str) -> String {
 /// own stderr — anything to be read back must be printed on stdout.
 ///
 /// With no server this fails with one of [`no_server`]'s spellings, which is the
-/// state [`crate::up::require_login_server`] refuses ahead of it on macOS.
+/// state [`crate::up::require_login_server`] ends, or refuses, ahead of it on macOS.
 ///
 /// [ADR-0018]: ../../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md
 pub(crate) fn run_shell(tmux: &str, command: &str) -> String {
@@ -634,7 +683,7 @@ mod signal_tests {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -723,10 +772,299 @@ mod tests {
         );
     }
 
+    const TMUX: &str = "/opt/homebrew/bin/tmux";
+
+    fn tmux() -> Tmux {
+        Tmux {
+            path: TMUX.to_owned(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_running_server_sends_no_launchctl() {
+        let mac = fake::Mac::new(fake::Server::Running, 0);
+        assert!(tmux().login_server(&mac).await.expect("answered"));
+        assert_eq!(mac.asked(), ["'/opt/homebrew/bin/tmux' list-sessions"]);
+    }
+
+    /// `tmux -D` keeps a server with no session, and `list-sessions` there
+    /// exits 0 and prints nothing. Measured on tmux 3.8.
+    #[tokio::test]
+    async fn an_empty_server_is_running() {
+        let mac = fake::Mac::new(fake::Server::Empty, 0);
+        assert!(tmux().running(&mac).await.expect("answered"));
+        assert!(tmux().login_server(&mac).await.expect("answered"));
+        assert!(!mac.asked_for("launchctl"));
+    }
+
+    #[tokio::test]
+    async fn no_server_sends_the_script_with_the_quoted_path() {
+        let mac = fake::Mac::new(fake::Server::None, 0);
+        assert!(!tmux().running(&mac).await.expect("answered"));
+        assert!(tmux().login_server(&mac).await.expect("answered"));
+        let asked = mac.asked();
+        assert_eq!(asked.last(), Some(&login_server_command(TMUX)));
+        assert!(
+            asked[asked.len() - 1].ends_with("\nlogin_server '/opt/homebrew/bin/tmux'\n"),
+            "{asked:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exit_3_is_no_one_at_the_screen() {
+        let mac = fake::Mac::new(fake::Server::None, 3);
+        assert!(!tmux().login_server(&mac).await.expect("answered"));
+    }
+
+    #[tokio::test]
+    async fn any_other_exit_is_a_launchctl_error_with_its_stderr() {
+        let mac = fake::Mac::new(fake::Server::None, 1);
+        let err = tmux().login_server(&mac).await.expect_err("refused");
+        let Error::Command {
+            command,
+            status,
+            stderr,
+        } = err
+        else {
+            panic!("{err:?}");
+        };
+        assert_eq!((command.as_str(), status), ("launchctl", 1));
+        assert_eq!(stderr, fake::SCRIPT_SAID);
+    }
+
+    /// I-41: a socket tmux may not open is not an absent server.
+    #[tokio::test]
+    async fn a_refused_socket_is_an_error_and_not_no_server() {
+        let mac = fake::Mac::new(fake::Server::Refused, 0);
+        assert!(matches!(
+            tmux().login_server(&mac).await,
+            Err(Error::Command { ref command, .. }) if command == "list-sessions"
+        ));
+        assert!(!mac.asked_for("launchctl"));
+    }
+
+    fn login_server_on(mac: &launchd::Mac) -> std::process::Output {
+        mac.run(&login_server_command(&mac.tmux()))
+    }
+
+    /// Join runs the script on a Mac whose Terminal already holds a server.
+    /// The job is installed anyway, and waits in its `ls` loop.
+    #[test]
+    fn a_running_server_still_gets_the_launch_agent() {
+        let mac = launchd::Mac::new("running", true, false, None);
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let plist = mac.plist().expect("the plist was written");
+        assert!(plist.contains("<key>KeepAlive</key><true/>"), "{plist}");
+        assert!(
+            plist.contains(&format!("<string>{}</string>", mac.tmux())),
+            "{plist}"
+        );
+        let log = mac.log();
+        assert!(log.contains("launchctl bootstrap gui/"), "{log}");
+        assert!(!log.contains("bootout"), "{log}");
+    }
+
+    /// The bootout of a loaded job ends the server it runs, and its sessions.
+    #[test]
+    fn an_older_job_holding_a_server_is_left_alone() {
+        let mac = launchd::Mac::new("older-held", true, true, Some("older"));
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert_eq!(mac.plist().as_deref(), Some("older"));
+        assert!(!mac.log().contains("bootout"), "{}", mac.log());
+    }
+
+    #[test]
+    fn an_older_job_with_no_server_is_replaced() {
+        let mac = launchd::Mac::new("older-idle", false, true, Some("older"));
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert!(mac.plist().expect("a plist").contains("KeepAlive"));
+        let log = mac.log();
+        let bootout = log.find("bootout").expect("the old job was booted out");
+        let bootstrap = log.find("bootstrap").expect("the new job was loaded");
+        assert!(bootout < bootstrap, "{log}");
+    }
+
     #[test]
     fn single_quoting_survives_quotes_and_newlines() {
         assert_eq!(sq("plain"), "'plain'");
         assert_eq!(sq("it's"), r"'it'\''s'");
         assert_eq!(sq("a\nb"), "'a\nb'");
+    }
+}
+
+/// A Mac answering by command, for the login-server branch of `tmux`, `up`
+/// and `clone`.
+#[cfg(test)]
+pub(crate) mod fake {
+    use crate::ssh::{self, Exec};
+    use std::sync::{Mutex, PoisonError};
+
+    pub(crate) const SCRIPT_SAID: &str = "the tmux server did not start";
+
+    #[derive(Clone, Copy)]
+    pub(crate) enum Server {
+        Running,
+        Empty,
+        None,
+        Refused,
+    }
+
+    pub(crate) struct Mac {
+        server: Server,
+        script: i32,
+        asked: Mutex<Vec<String>>,
+    }
+
+    impl Mac {
+        /// `script` is the status the login-server script exits with.
+        pub(crate) fn new(server: Server, script: i32) -> Self {
+            Self {
+                server,
+                script,
+                asked: Mutex::default(),
+            }
+        }
+
+        pub(crate) fn asked(&self) -> Vec<String> {
+            self.asked
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
+
+        pub(crate) fn asked_for(&self, part: &str) -> bool {
+            self.asked().iter().any(|command| command.contains(part))
+        }
+    }
+
+    impl Exec for Mac {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            self.asked
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(command.to_owned());
+            let (status, stdout, stderr) = if command.contains("\nlogin_server '") {
+                let said = if self.script == 0 { "" } else { SCRIPT_SAID };
+                (self.script, "", said)
+            } else if command.contains("list-sessions") {
+                match self.server {
+                    Server::Running => (0, "main: 1 windows\n", ""),
+                    Server::Empty => (0, "", ""),
+                    Server::None => (1, "", "no server running on /private/tmp/tmux-501/default"),
+                    Server::Refused => (
+                        1,
+                        "",
+                        "error connecting to /private/tmp/tmux-501/default (Permission denied)",
+                    ),
+                }
+            } else if command.contains("command -v tmux") {
+                (0, "/opt/homebrew/bin/tmux\n", "")
+            } else if command.contains("new-session") {
+                (0, "$1 @1 %1\n", "")
+            } else {
+                (0, "", "")
+            };
+            Ok(ssh::Output {
+                status,
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            })
+        }
+    }
+}
+
+/// A Mac's `launchctl` and `tmux` as shell scripts, so `login_server.sh` runs
+/// for real on the build host. State is three files in the directory.
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+pub(crate) mod launchd {
+    use std::path::{Path, PathBuf};
+
+    pub(crate) const PLIST: &str =
+        "Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux.plist";
+
+    pub(crate) struct Mac {
+        pub(crate) dir: PathBuf,
+    }
+
+    impl Mac {
+        /// `server`: a tmux server answers. `loaded`: the job is in the domain.
+        pub(crate) fn new(label: &str, server: bool, loaded: bool, plist: Option<&str>) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("yantra-launchd-{label}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("bin")).expect("a directory");
+            // kickstart starts the server only when the job is loaded.
+            write_tool(
+                &dir,
+                "launchctl",
+                r#"#!/bin/sh
+echo "launchctl $*" >>"$FAKE/log"
+case "$1" in
+print) case "$2" in */*/*) test -f "$FAKE/loaded" ;; *) exit 0 ;; esac ;;
+bootstrap) touch "$FAKE/loaded" ;;
+bootout) rm "$FAKE/loaded" "$FAKE/server" 2>/dev/null; exit 0 ;;
+kickstart) test -f "$FAKE/loaded" && touch "$FAKE/server" ;;
+esac
+"#,
+            );
+            write_tool(&dir, "tmux", "#!/bin/sh\ntest -f \"$FAKE/server\"\n");
+            if server {
+                std::fs::write(dir.join("server"), "").expect("a file");
+            }
+            if loaded {
+                std::fs::write(dir.join("loaded"), "").expect("a file");
+            }
+            if let Some(plist) = plist {
+                let path = dir.join(PLIST);
+                std::fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
+                std::fs::write(path, plist).expect("a file");
+            }
+            Self { dir }
+        }
+
+        pub(crate) fn tmux(&self) -> String {
+            self.dir.join("bin/tmux").display().to_string()
+        }
+
+        /// Runs `script` under `sh` with this Mac's tools and `$HOME`.
+        pub(crate) fn run(&self, script: &str) -> std::process::Output {
+            let path = format!(
+                "{}:{}",
+                self.dir.join("bin").display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            std::process::Command::new("sh")
+                .args(["-c", script])
+                .env("HOME", &self.dir)
+                .env("FAKE", &self.dir)
+                .env("PATH", path)
+                .output()
+                .expect("sh is on every machine this builds on")
+        }
+
+        pub(crate) fn log(&self) -> String {
+            std::fs::read_to_string(self.dir.join("log")).unwrap_or_default()
+        }
+
+        pub(crate) fn plist(&self) -> Option<String> {
+            std::fs::read_to_string(self.dir.join(PLIST)).ok()
+        }
+    }
+
+    impl Drop for Mac {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn write_tool(dir: &Path, name: &str, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("bin").join(name);
+        std::fs::write(&path, body).expect("a file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     }
 }

@@ -37,7 +37,7 @@ const checks = (absent: string[] = [], detail: Record<string, string> = {}): Che
 
 /** doctor.rs `no_login_server`, word for word. */
 const NO_SERVER =
-  'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal there: `tmux new-session -d`'
+  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
 
 const report = (list: Check[]): Looked<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks: list, age_seconds: 0 } })
 

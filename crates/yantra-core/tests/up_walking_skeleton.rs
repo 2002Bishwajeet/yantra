@@ -209,10 +209,11 @@ async fn a_repo_that_is_not_there_is_refused_before_a_session_exists() -> Result
 /// system, and no container is a Mac.
 ///
 /// What this proves is the mechanics — that a machine reported as macOS with no
-/// tmux server is refused, that one with a server is not, and that the refusal
-/// leaves nothing behind. **It proves nothing about launchd**: that a server
-/// started from a GUI login is what makes the agent able to read the keychain is
-/// only measurable on the Mac itself (`manual_macbook.rs`).
+/// tmux server and no `launchctl` (so no one at a login screen) is refused, that
+/// one with a server is not, and that the refusal leaves nothing behind. **It
+/// proves nothing about launchd**: that the LaunchAgent starts a server whose
+/// panes can read the keychain is only measurable on the Mac itself
+/// (`manual_macbook.rs`).
 #[tokio::test]
 async fn a_macos_machine_with_no_tmux_server_is_refused_rather_than_given_one() -> Result<()> {
     let Some(lab) = Lab::start("macos-precondition").await? else {
@@ -226,11 +227,11 @@ async fn a_macos_machine_with_no_tmux_server_is_refused_rather_than_given_one() 
 
     let err = up::open(&lab.ssh, &lab.tmux, &ws, None, Os::MacOs)
         .await
-        .expect_err("a Mac with no server must not be given one");
+        .expect_err("a Mac with no login session must not be given a server over ssh");
     assert!(matches!(err, up::Error::NoLoginServer { .. }), "{err:?}");
     assert!(
         err.to_string().contains("fixture"),
-        "the refusal names the machine a person has to go and start it on: {err}"
+        "the refusal names the machine a person has to go and log in at: {err}"
     );
     assert!(
         lab.tmux.list(&lab.ssh).await?.is_empty(),

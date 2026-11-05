@@ -484,9 +484,9 @@ login keychain (I-44). The rule the mappers apply is the one `from_create` and `
 wrote down. **`409`** is a refusal about state: the world already answers and a person changes that
 answer, which covers the trust dialog, an agent whose credential the gate did not find, a session
 opened as a shell, a workspace that runs something of its own, a `repo` the machine does not have,
-and — since Y-151 — a macOS machine with **no tmux server**, which
-[ADR-0018](../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md) §1 forbids Yantra
-to start there and a person fixes by starting one from their own login session. **`503`** is
+and — since Y-151 — a macOS machine with **no tmux server** that
+[ADR-0018](../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md) §1 lets Yantra
+start. Since Y-632 that means no one is logged in at its screen, and a person fixes it by logging in. **`503`** is
 nothing decided at all — ssh, tmux, terminfo, a status that could not be read, and a `resume` whose
 two sources disagree (R-23). **`500`** is left for what is genuinely this daemon's: no state
 directory, and a session id it could not generate. **Adding a variant to `up::Error`,

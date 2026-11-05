@@ -75,8 +75,9 @@ pub enum Error {
     TimedOut { minutes: u64 },
 
     #[error(
-        "the Mac has no tmux server from a login session, so git and claude there cannot read \
-         the login keychain (ADR-0018 §1). Start one there: `tmux new-session -d`"
+        "the Mac has no tmux server from a login session, because no one is logged in at its \
+         screen, so git and claude there cannot read the login keychain (ADR-0018 §1). Log in at \
+         that Mac, then try again"
     )]
     NoLoginServer,
 
@@ -649,12 +650,12 @@ async fn reach(name: &str) -> Result<(Workspace, Ssh), Failed> {
 
 /// The tmux server a Mac drafts and pushes in, or `None` elsewhere: over ssh
 /// a Mac cannot read the login keychain (I-44, ADR-0018 §5).
-async fn login_server(ssh: &Ssh) -> Result<Option<String>, Failed> {
-    if ssh::os(ssh).await.map_err(Error::Ssh)? != Os::MacOs {
+async fn login_server<E: Exec>(exec: &E) -> Result<Option<String>, Failed> {
+    if ssh::os(exec).await.map_err(Error::Ssh)? != Os::MacOs {
         return Ok(None);
     }
-    let tmux = Tmux::resolve(ssh).await?;
-    if tmux.list(ssh).await?.is_empty() {
+    let tmux = Tmux::resolve(exec).await?;
+    if !tmux.login_server(exec).await? {
         return Err(Error::NoLoginServer.into());
     }
     Ok(Some(tmux.path().to_owned()))
@@ -791,6 +792,55 @@ mod tests {
 
     fn issue() -> IssueRef {
         "o/r#42".parse().expect("an issue")
+    }
+
+    /// A Mac with no tmux server, whose login-server script exits `script`.
+    fn serverless_mac(script: i32) -> Machine {
+        Machine::answering(vec![
+            out(0, "Darwin\n", ""),
+            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(1, "", "no server running on /private/tmp/tmux-501/default"),
+            out(script, "", "launchctl said no"),
+        ])
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_no_server_drafts_in_the_one_the_launch_agent_starts() {
+        let mac = serverless_mac(0);
+        let tmux = login_server(&mac).await.expect("a server");
+        assert_eq!(tmux.as_deref(), Some("/opt/homebrew/bin/tmux"));
+        assert!(mac.asked()[3].ends_with("\nlogin_server '/opt/homebrew/bin/tmux'\n"));
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_no_one_at_the_screen_is_no_login_server() {
+        assert!(matches!(
+            login_server(&serverless_mac(3)).await,
+            Err(Failed::Commit(Error::NoLoginServer))
+        ));
+        assert!(matches!(
+            login_server(&serverless_mac(1)).await,
+            Err(Failed::Tmux(tmux::Error::Command { ref command, ref stderr, .. }))
+                if command == "launchctl" && stderr == "launchctl said no"
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_an_empty_server_sends_no_launchctl() {
+        let mac = Machine::answering(vec![
+            out(0, "Darwin\n", ""),
+            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "", ""),
+        ]);
+        assert!(login_server(&mac).await.expect("a server").is_some());
+        assert_eq!(mac.asked().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn linux_has_no_login_server() {
+        let linux = Machine::answering(vec![out(0, "Linux\n", "")]);
+        assert_eq!(login_server(&linux).await.expect("answered"), None);
+        assert_eq!(linux.asked().len(), 1);
     }
 
     /// What the machine's shell receives for `word` once `sq` quoted it.
