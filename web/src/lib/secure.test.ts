@@ -80,23 +80,42 @@ describe('toSecure', () => {
     expect(there.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/machines/pi?tab=talk#mic')
   })
 
-  it('takes the drafts and prefs along and leaves none behind', async () => {
+  it('takes the settings along and leaves them nowhere else', async () => {
     stub(served(ORIGIN), answers)
-    const draft = 'half a sentence, with a # and a % in it'
     const here = page(false, {
-      'yantra.chat.draft.t-1': draft,
       'yantra.prefs': '{"v":1,"theme":"dark"}',
+      'yantra.editor': 'zed',
+      'yantra.chat.interaction.t-1': 'plan',
       'someone.else': 'stays',
     })
     const result = await toSecure(here)
-    expect(result).toMatchObject({ kind: 'moved', carried: 2 })
+    expect(result).toMatchObject({ kind: 'moved', carried: 3 })
     expect([...here.held.keys()]).toEqual(['someone.else'])
 
     const there = landing(new URL(result.kind === 'moved' ? result.to : '').hash)
-    expect(arrive(there)).toEqual({ kind: 'arrived', kept: 2 })
-    expect(there.held.get('yantra.chat.draft.t-1')).toBe(draft)
+    expect(arrive(there)).toEqual({ kind: 'arrived', kept: 3 })
     expect(there.held.get('yantra.prefs')).toBe('{"v":1,"theme":"dark"}')
+    expect(there.held.get('yantra.editor')).toBe('zed')
+    expect(there.held.get('yantra.chat.interaction.t-1')).toBe('plan')
     expect(there.held.has('someone.else')).toBe(false)
+  })
+
+  it('puts no draft and no permission mode in the URL, and keeps them here', async () => {
+    stub(served(ORIGIN), answers)
+    const secret = 'the token is hunter2'
+    const here = page(false, {
+      'yantra.chat.draft.t-1': secret,
+      'yantra.chat.mode.t-1': 'bypassPermissions',
+      'yantra.editor': 'zed',
+    })
+    const result = await toSecure(here)
+    expect(result).toMatchObject({ kind: 'moved', carried: 1 })
+    const to = result.kind === 'moved' ? result.to : ''
+    expect(decodeURIComponent(to)).not.toContain('hunter2')
+    expect(decodeURIComponent(to)).not.toContain('bypassPermissions')
+    expect(here.held.get('yantra.chat.draft.t-1')).toBe(secret)
+    expect(here.held.get('yantra.chat.mode.t-1')).toBe('bypassPermissions')
+    expect(here.held.has('yantra.editor')).toBe(false)
   })
 
   it('stays when the daemon names no HTTPS origin', async () => {
@@ -148,16 +167,31 @@ describe('arrive', () => {
     expect(there.replaceState).not.toHaveBeenCalled()
   })
 
-  it('keeps what this origin already holds and writes only yantra keys', () => {
+  it('replaces what this origin holds with the carried setting, which is newer', () => {
     const there = landing(
-      carried({ hash: '', kept: { 'yantra.chat.draft.t-1': 'old', 'yantra.editor': 'zed', other: 'x' } }),
-      { 'yantra.chat.draft.t-1': 'typed here' },
+      carried({ hash: '', kept: { 'yantra.editor': 'zed', 'yantra.prefs': '{"v":1,"theme":"dark"}' } }),
+      { 'yantra.editor': 'cursor', 'yantra.prefs': '{"v":1,"theme":"light"}' },
+    )
+    expect(arrive(there)).toEqual({ kind: 'arrived', kept: 2 })
+    expect(there.held.get('yantra.editor')).toBe('zed')
+    expect(there.held.get('yantra.prefs')).toBe('{"v":1,"theme":"dark"}')
+    expect(there.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/machines/pi?tab=talk')
+  })
+
+  it('writes no key outside the carried settings, whatever a link holds', () => {
+    const there = landing(
+      carried({
+        hash: '',
+        kept: {
+          'yantra.chat.mode.t-1': 'bypassPermissions',
+          'yantra.chat.draft.t-1': 'planted',
+          'yantra.editor': 'zed',
+          other: 'x',
+        },
+      }),
     )
     expect(arrive(there)).toEqual({ kind: 'arrived', kept: 1 })
-    expect(there.held.get('yantra.chat.draft.t-1')).toBe('typed here')
-    expect(there.held.get('yantra.editor')).toBe('zed')
-    expect(there.held.has('other')).toBe(false)
-    expect(there.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/machines/pi?tab=talk')
+    expect([...there.held.keys()]).toEqual(['yantra.editor'])
   })
 
   it.each([

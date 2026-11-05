@@ -19,20 +19,20 @@ export type Page = {
   localStorage: Store
 }
 
-// Each origin has its own localStorage, so the move takes this page's keys
-// along in the fragment, which the browser never sends to the daemon.
+// Settings only: the browser keeps the moved-to URL in its history, so a draft
+// stays on :7717, and a link must not choose a permission mode.
 const CARRY = '#yantra-carry='
-const PREFIX = 'yantra.'
+const CARRIED = /^yantra\.(prefs|editor|chat\.interaction\..+)$/
 
 type Carry = { hash: string; kept: Record<string, string> }
 
-/** Every key this dashboard keeps: drafts, modes, prefs and the editor. */
+/** The settings this page can carry: prefs, the editor and plan mode. */
 function kept(storage: Store): Record<string, string> {
   const found: Record<string, string> = {}
   try {
     for (let at = 0; at < storage.length; at++) {
       const key = storage.key(at)
-      const value = key?.startsWith(PREFIX) ? storage.getItem(key) : null
+      const value = key && CARRIED.test(key) ? storage.getItem(key) : null
       if (key && value !== null) found[key] = value
     }
   } catch {
@@ -63,7 +63,8 @@ export async function toSecure(page: Page = window, timeoutMs = 3000): Promise<S
   const { pathname, search, hash } = page.location
   const carry: Carry = { hash, kept: kept(page.localStorage) }
   const to = `${https}${pathname}${search}${CARRY}${encodeURIComponent(JSON.stringify(carry))}`
-  // Moved, not copied: a later visit to :7717 must not bring back a draft sent since.
+  // Moved, not copied: :8443 takes every carried key, so a copy here would
+  // only come back over a newer setting on a later visit.
   try {
     for (const key of Object.keys(carry.kept)) page.localStorage.removeItem(key)
   } catch {
@@ -102,8 +103,8 @@ function parse(payload: string): Carry | null {
 }
 
 /** The other half of `toSecure`, run before the first render so every screen
- *  reads the carried keys. A key this origin already holds keeps its own value,
- *  so a link cannot overwrite what was typed here. */
+ *  reads the carried keys. A carried key replaces the one held here: the owner
+ *  comes from the page that set it last. */
 export function arrive(page: Landing = window): Arrived {
   const { pathname, search, hash } = page.location
   if (!hash.startsWith(CARRY)) return { kind: 'none' }
@@ -113,7 +114,7 @@ export function arrive(page: Landing = window): Arrived {
   let written = 0
   try {
     for (const [key, value] of Object.entries(carry.kept)) {
-      if (!key.startsWith(PREFIX) || page.localStorage.getItem(key) !== null) continue
+      if (!CARRIED.test(key)) continue
       page.localStorage.setItem(key, value)
       written++
     }
