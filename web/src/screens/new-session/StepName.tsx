@@ -1,20 +1,47 @@
 import { RefreshCw } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
+import type { Machine } from '@/api'
 import { fromReading } from '@/api/client'
 import { useMachines } from '@/api/hooks'
 import { keys } from '@/api/keys'
+import { LOGIN_SERVER_COMMAND, noLoginServer } from '@/lib/checks'
 import { Card } from '@/m3/card/Card'
 import { FilterChip } from '@/m3/chip/Chip'
+import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { Tile } from '@/m3/tile/Tile'
+import { useReports } from '@/screens/setup/progress'
 import { nameError, type Values } from './form'
 import { SuggestMachine } from './Suggestion'
 import type { SessionForm } from './useSessionForm'
 import { generateName } from './words'
+
+/** Unknown is not absent (R-23): a missing report, or a sweep that failed, warns of nothing. */
+function LoginServerWarning(props: { machines: Machine[]; chosen: string }) {
+  const { machines, chosen } = props
+  const reports = useReports(machines)
+  const report = reports[machines.findIndex((one) => one.name === chosen)]
+  const absent = report?.checks.some(
+    (one) =>
+      (one.check === 'login-session' || one.check === 'provider-auth') &&
+      one.state === 'absent' &&
+      noLoginServer(one.detail),
+  )
+  if (!absent) return null
+  return (
+    <div className="ns__fix" role="status">
+      <Text render={<p />} className="ns__note" scale="body-medium">
+        {chosen} has no tmux server from a login session, so a session cannot start there yet. In Terminal on{' '}
+        {chosen}, run:
+      </Text>
+      <Copyable text={LOGIN_SERVER_COMMAND} what="the Terminal command that starts a login tmux server" />
+    </div>
+  )
+}
 
 function Machines(props: { form: SessionForm; values: Values; preset: string }) {
   const { form, values, preset } = props
@@ -69,6 +96,7 @@ function Machines(props: { form: SessionForm; values: Values; preset: string }) 
         })}
       </div>
       <SuggestMachine form={form} machines={machines.data} preset={preset} values={values} />
+      <LoginServerWarning chosen={values.machine} machines={machines.data} />
     </>
   )
 }

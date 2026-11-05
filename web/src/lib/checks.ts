@@ -68,13 +68,16 @@ export const CHECK_IDS: readonly string[] = Object.keys(CHECKS)
 
 export const nameOf = (check: string): string => CHECKS[check]?.name ?? check
 
-/** doctor.rs `NO_LOGIN_SERVER`, which only `login-session` and `provider-auth`
- *  say: the account is signed in, and the Mac has no login tmux server (I-44). */
-export const noLoginServer = (detail: string) => /no tmux server from a login session is running/.test(detail)
+/** What a person types in Terminal on a Mac to start the login tmux server (I-44). */
+export const LOGIN_SERVER_COMMAND = 'tmux new-session -d'
+
+/** Every daemon sentence for this one refusal: doctor.rs `NO_LOGIN_SERVER` (said by
+ *  `login-session` and `provider-auth`), up.rs, clone.rs and commit.rs. */
+export const noLoginServer = (detail: string) => /no tmux server/.test(detail)
 
 /** A check with no detail gets the fix its id names. */
 export function fixOf(check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'>>, machine: string): Fix | null {
-  if (noLoginServer(check.detail ?? '')) return { by: 'command', command: 'tmux new-session -d', where: 'terminal' }
+  if (noLoginServer(check.detail ?? '')) return { by: 'command', command: LOGIN_SERVER_COMMAND, where: 'terminal' }
   return CHECKS[check.check]?.fix(machine) ?? null
 }
 
