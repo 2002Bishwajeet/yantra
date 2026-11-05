@@ -25,9 +25,8 @@ export type Values = {
   command: string
 }
 
-/** The boards' four labels. The first panel answers two of them, so leaving
- *  it ticks Name and Machine together and the walk lands on Source. */
-export const STEPS = ['Name', 'Machine', 'Source', 'Start'] as const
+/** One label per panel. */
+export const STEPS = ['Name', 'Source', 'Start'] as const
 
 export const nameError = (name: string): string | undefined =>
   name === ''

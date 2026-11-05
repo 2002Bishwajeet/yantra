@@ -187,9 +187,7 @@ export function NewSession() {
         </header>
       ) : null}
 
-      {/* Panel 1 answers labels 1 and 2, so step 2 is at label 3 and step 3
-          at label 4 (NewSession, NewSessionSource, NewSessionStart). */}
-      <Stepper className="ns__stepper" current={step === 1 ? 0 : step} steps={STEPS} />
+      <Stepper className="ns__stepper" current={step - 1} steps={STEPS} />
 
       {step === 1 ? <StepName form={form} preset={preset} values={values} /> : null}
       {step === 2 ? <StepSource form={form} values={values} /> : null}
