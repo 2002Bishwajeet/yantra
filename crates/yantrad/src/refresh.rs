@@ -133,8 +133,9 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     let github = model.clone();
     let checked = grant.clone();
     tokio::spawn(async move {
+        let mut last = None;
         loop {
-            look_at_github(&github, &checked).await;
+            look_at_github(&github, &checked, &Github::default(), &mut last).await;
             tick_or_change(&checked).await;
         }
     });
@@ -315,17 +316,44 @@ async fn look_at_attention<F: Forge>(model: &Model, forge: &F) {
 /// ask. Its own task because a local answer must not queue behind a
 /// `ConnectTimeout` per asleep machine. A grant from the environment learns
 /// its account here; one the daemon made already knows it.
-async fn look_at_github(model: &Model, grant: &Grant) {
+async fn look_at_github(model: &Model, grant: &Grant, github: &Github, last: &mut Option<Verdict>) {
     let asked = match grant.token().await {
         None => None,
-        Some(token) => Some(Github::default().account(&token).await),
+        Some(token) => Some(github.account(&token).await),
     };
     if let Some(Ok(account)) = &asked {
         grant.learned(account.clone()).await;
     }
+    let verdict = match &asked {
+        Some(Ok(account)) => Some(Verdict::Accepted(account.login.clone())),
+        Some(Err(github::Error::Refused)) => Some(Verdict::Refused),
+        _ => None,
+    };
+    if let Some(verdict) = verdict.filter(|verdict| last.as_ref() != Some(verdict)) {
+        match &verdict {
+            Verdict::Accepted(login) => {
+                tracing::info!("GitHub accepts the grant, signed in as {login}");
+            }
+            Verdict::Refused => {
+                let login = grant.read().await.login;
+                let login = login
+                    .as_deref()
+                    .unwrap_or("an account this daemon never learned");
+                tracing::warn!("GitHub refused the grant for {login}");
+            }
+        }
+        *last = Some(verdict);
+    }
     let asked = asked.map(|asked| asked.map(|account| account.login));
     let reading = Reading::new(doctor::github(asked.as_ref()));
     model.write().await.github = Some(Arc::new(reading));
+}
+
+/// GitHub's last answer about the grant. An unreachable GitHub is not one.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    Accepted(String),
+    Refused,
 }
 
 /// Every repository the grant can see, for New session to search **in the
@@ -372,6 +400,7 @@ mod tests {
     use super::*;
     use std::net::IpAddr;
     use yantra_core::attention::{self, Attention};
+    use yantra_core::github::Token;
     use yantra_core::inventory::Fake;
     use yantra_core::sessions::MachineSessions;
 
@@ -795,12 +824,81 @@ mod tests {
     /// No grant is *absent* on the check, earned without a network call.
     #[tokio::test]
     async fn the_grant_check_without_a_grant_is_absent_and_asks_nothing() {
+        let (capture, _logging) = logged();
         let model = Model::default();
-        look_at_github(&model, &Grant::default()).await;
+        let mut last = None;
+        look_at_github(&model, &Grant::default(), &Github::default(), &mut last).await;
 
         let reading = model.read().await.github.clone().expect("looked");
         assert_eq!(reading.value().state, doctor::State::Absent);
         assert!(reading.value().detail.contains("yantra github login"));
+        assert_eq!(last, None);
+        assert!(capture.0.lock().expect("the log").is_empty());
+    }
+
+    fn logged() -> (
+        crate::terminal::tests::Capture,
+        tracing::subscriber::DefaultGuard,
+    ) {
+        let capture = crate::terminal::tests::Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || writer.clone())
+            .finish();
+        (capture, tracing::subscriber::set_default(subscriber))
+    }
+
+    /// Y-648: the journal says when GitHub starts or stops accepting the
+    /// grant, once per change, with the login and never the token.
+    #[tokio::test]
+    async fn the_grant_look_logs_each_change_once_and_never_the_token() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let api = format!("http://{}", listener.local_addr().expect("its address"));
+        const ACCEPTED: &str = "200 OK\r\nContent-Length: 19\r\n\r\n{\"login\":\"octocat\"}";
+        const REFUSED: &str = "401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
+        let answers = [ACCEPTED, REFUSED, REFUSED, ACCEPTED];
+        let served = std::thread::spawn(move || {
+            for answer in answers {
+                let (mut stream, _) = listener.accept().expect("the look connects");
+                let mut request = Vec::new();
+                let mut byte = [0u8; 1];
+                while !request.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap_or(0) == 1 {
+                    request.push(byte[0]);
+                }
+                stream
+                    .write_all(format!("HTTP/1.1 {answer}").as_bytes())
+                    .expect("the fake answers");
+            }
+        });
+
+        let (capture, _logging) = logged();
+        let model = Model::default();
+        let grant = Grant::holding(Some(Token::new("ghp_secret-value".to_owned())));
+        let github = Github::at(&api, &api);
+        let mut last = None;
+        let mut lines = Vec::new();
+        for _ in 0..4 {
+            look_at_github(&model, &grant, &github, &mut last).await;
+            lines.push(
+                String::from_utf8_lossy(&capture.0.lock().expect("the log"))
+                    .lines()
+                    .count(),
+            );
+        }
+        served.join().expect("the fake served every look");
+
+        let log = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+        let accepted = "accepts the grant, signed in as octocat";
+        let refused = "refused the grant for octocat";
+        assert_eq!(lines, [1, 2, 2, 3], "{log}");
+        let first = log.find(accepted).expect(&log);
+        let gone = log.find(refused).expect(&log);
+        let back = log.rfind(accepted).expect(&log);
+        assert!(first < gone && gone < back, "{log}");
+        assert!(!log.contains("ghp_secret-value"), "{log}");
     }
 
     /// ADR-0027 §2: a GitHub that could not be asked is a failed reading,

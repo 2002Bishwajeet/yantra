@@ -113,6 +113,7 @@ asked. Two answers are *absent* and both are earned — no grant, and a grant Gi
 could not be reached says nothing about the grant. It has no `failed`: a look it could not take is
 already *unknown* inside the check. `doctor::github` is a pure mapper over `GET /user`'s answer, and
 `refresh.rs` is what asks — on the slow clock, since it spends the owner's quota like the inbox does.
+The look logs each change between accepted and refused, with the login and never the token (Y-648).
 
 **The grant itself is `GET /api/github`, and it never carries the token.** `connected`, the login,
 the profile image URL, the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
