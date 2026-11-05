@@ -4,9 +4,11 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useClone, useCreateWorkspace, useUp } from '@/api/mutations'
 import { probeQuery } from '@/api/queries'
 import { attachTerminal, terminalAddress } from '@/api/socket'
+import { LOGIN_SERVER_COMMAND, noLoginServer } from '@/lib/checks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
+import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
@@ -156,6 +158,14 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
                   reset={retry}
                   title={`${named[stage.id]} was refused`}
                 />
+              ) : null}
+              {stage.state === 'refused' && stage.error && noLoginServer(stage.error.said) ? (
+                <div className="ns__fix">
+                  <Text render={<p />} scale="body-medium" tone="variant">
+                    In Terminal on {plan.machine}, run this, then Try again.
+                  </Text>
+                  <Copyable text={LOGIN_SERVER_COMMAND} what="the Terminal command that starts a login tmux server" />
+                </div>
               ) : null}
             </li>
           ))}

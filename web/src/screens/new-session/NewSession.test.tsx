@@ -396,6 +396,106 @@ describe('step 4, starting', () => {
   })
 })
 
+/** Y-631: a Mac with no login tmux server refuses the session, and the screen
+ *  says why in full and offers the Terminal command. */
+describe('a Mac with no login tmux server (Y-631)', () => {
+  const UP_SAID =
+    '`cachyos-g14` runs macOS and has no tmux server, and Yantra will not start one there: panes in a server started over ssh cannot read the login keychain, so the agent would come up unauthenticated. Start one from a login session on that machine — in Terminal: `tmux new-session -d`'
+  const DOCTOR_SAID =
+    'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal there: `tmux new-session -d`'
+  const MAC = 'bishwajeets-macbook-pro'
+  const writeText = vi.fn<(text: string) => Promise<void>>()
+  const stubClipboard = (clipboard: unknown) =>
+    Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true })
+  afterEach(() => {
+    writeText.mockReset()
+    Reflect.deleteProperty(navigator, 'clipboard')
+  })
+
+  const refuse = (status = 409, said = UP_SAID) => ({
+    'POST /api/workspaces': (sent: Record<string, unknown>): [number, unknown] => [201, { ...sent, startup: null }],
+    'POST /api/workspaces/quiet-otter/up': [status, said] as [number, unknown],
+  })
+
+  it('shows the whole sentence, and a Copy button that copies the command', async () => {
+    writeText.mockResolvedValue()
+    stubClipboard({ writeText })
+    await toStepThree(refuse())
+    press('Create and open')
+
+    expect(await screen.findByText(UP_SAID)).toBeTruthy()
+    expect(screen.getByText(/In Terminal on cachyos-g14, run this, then Try again/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    press(/Copy the Terminal command/)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('tmux new-session -d'))
+    expect(await screen.findByRole('button', { name: /Copied the Terminal command/ })).toBeTruthy()
+  })
+
+  it('selects the command and says so when the clipboard refuses', async () => {
+    writeText.mockRejectedValue(new Error('denied'))
+    stubClipboard({ writeText })
+    await toStepThree(refuse())
+    press('Create and open')
+    await screen.findByText(UP_SAID)
+    press(/Copy the Terminal command/)
+    expect(await screen.findByText(/this page has no clipboard/)).toBeTruthy()
+  })
+
+  it('offers no command for a refusal that is not this one', async () => {
+    await toStepThree(refuse(409, 'workspace `quiet-otter` opens at `/x`, and `cachyos-g14` has no such directory'))
+    press('Create and open')
+    await screen.findByText(/has no such directory/)
+    expect(screen.queryByRole('button', { name: /Copy/ })).toBeNull()
+  })
+
+  const withMac = (checks: { check: string; state: string; detail: string }[] | 'failed'): Answers => ({
+    'GET /api/machines': [
+      200,
+      {
+        ...contract.machines,
+        data: contract.machines.data.map((one) =>
+          one.name === MAC ? { ...one, online: true, os: 'macos' } : one,
+        ),
+      },
+    ],
+    'GET /api/readiness': [
+      200,
+      checks === 'failed'
+        ? { looked: 'failed', age_seconds: 0, error: 'ssh: nothing' }
+        : { looked: 'ok', age_seconds: 0, data: [{ machine: MAC, age_seconds: 0, checks }] },
+    ],
+  })
+  const noServer = [
+    { check: 'login-session', state: 'absent', detail: DOCTOR_SAID },
+    { check: 'tmux', state: 'present', detail: '' },
+  ]
+
+  it('warns on the Machine step, with the command, when the chosen Mac has no login server', async () => {
+    mountNew('desktop', '/new', withMac(noServer))
+    await screen.findByRole('dialog', { name: 'New session' })
+    press(MAC)
+    expect(await screen.findByText(/has no tmux server from a login session, so a session cannot start there yet/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Copy the Terminal command/ })).toBeTruthy()
+  })
+
+  it('warns of nothing for a ready Linux machine', async () => {
+    mountNew('desktop', '/new', withMac(noServer))
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'cachyos-g14', pressed: true })).toBeTruthy())
+    expect(screen.queryByText(/cannot start there yet/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Copy/ })).toBeNull()
+  })
+
+  it('warns of nothing when the readiness sweep failed, because unknown is not absent', async () => {
+    mountNew('desktop', '/new', withMac('failed'))
+    await screen.findByRole('dialog', { name: 'New session' })
+    press(MAC)
+    await waitFor(() => expect(screen.getByRole('button', { name: MAC, pressed: true })).toBeTruthy())
+    expect(screen.queryByText(/cannot start there yet/)).toBeNull()
+  })
+})
+
 describe('the modal and the page', () => {
   it.each(['desktop', 'tablet'] as const)('draws a dialog named New session on a %s', async (size) => {
     mountNew(size, '/new')

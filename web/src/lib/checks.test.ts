@@ -4,6 +4,7 @@ import {
   CHECK_IDS,
   fixOf,
   joinFixes,
+  LOGIN_SERVER_COMMAND,
   noLoginServer,
   nameOf,
   reachableFailure,
@@ -82,9 +83,29 @@ describe('the check name table', () => {
     })
   })
 
-  it('knows doctor’s phrase for a missing login tmux server', () => {
-    expect(noLoginServer(NO_SERVER)).toBe(true)
+  /** Y-631: the four Rust sentences for this one refusal, word for word. */
+  it.each([
+    [
+      'up.rs',
+      '`mbp` runs macOS and has no tmux server, and Yantra will not start one there: panes in a server started over ssh cannot read the login keychain, so the agent would come up unauthenticated. Start one from a login session on that machine — in Terminal: `tmux new-session -d`',
+    ],
+    [
+      'clone.rs',
+      '`mbp` runs macOS and has no tmux server, and Yantra will not start one there (ADR-0018 §1). Start one from a login session on that machine: `tmux new-session -d`',
+    ],
+    [
+      'commit.rs',
+      'the Mac has no tmux server from a login session, so git and claude there cannot read the login keychain (ADR-0018 §1). Start one there: `tmux new-session -d`',
+    ],
+    ['doctor.rs', NO_SERVER],
+  ])('knows the %s sentence for a missing login tmux server', (_, said) => {
+    expect(noLoginServer(said)).toBe(true)
+    expect(said).toContain(LOGIN_SERVER_COMMAND)
+  })
+
+  it('does not take another refusal for a missing login tmux server', () => {
     expect(noLoginServer('claude finds no credential where the agent will run (method: none)')).toBe(false)
+    expect(noLoginServer('workspace `quiet-otter` already exists')).toBe(false)
   })
 
   /** Y-390 review: GitHub and `yantra-agent` are optional for a session. */

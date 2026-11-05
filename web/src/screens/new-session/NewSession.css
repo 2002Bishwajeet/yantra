@@ -18,6 +18,12 @@
   margin: 0;
 }
 
+.ns__fix {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .ns__recap {
   display: flex;
   flex-wrap: wrap;
