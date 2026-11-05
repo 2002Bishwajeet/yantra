@@ -16,10 +16,11 @@ import { Mono, Text } from '@/m3/text/Text'
 import { Ago } from '@/screens/fleet/age'
 import { isAge } from '@/screens/fleet/clock'
 import { answer, newestInstall, type Watch } from '@/screens/machine/install'
+import { chipOf, verdictOf } from '@/screens/machine/verdict'
 import { SshSaid } from '@/screens/machine/ReachFailure'
 import { asEvents } from '@/shell/notifications'
 import { Doctor } from './Doctor'
-import { CARD_CHECKS, cardChip, cardVerdict, checkNamed, markOf, summary, tally, wordOf } from './facts'
+import { CARD_CHECKS, checkNamed, markOf, summary, tally, wordOf } from './facts'
 
 /** `os` is a family rather than a distribution (api.ts), and the beat carries
  *  the architecture — so the line says what the daemon knows and no more. */
@@ -161,12 +162,17 @@ export function MachineCard(props: MachineCardProps) {
     const check = checkNamed(checks, name)
     return check ? [check] : []
   })
-  const counted = tally(four)
   const shown = condensed ? four.filter((one) => one.state !== 'present') : four
   // D3 §5.7's one clock, as the board prints it: `2h` under a day, `7 Jul` past one.
   const seen = machine.last_seen ? at(machine.last_seen) : null
-  const verdict = cardVerdict(machine, checks)
-  const chip = cardChip(verdict, seen?.text ?? null)
+  const verdict = verdictOf({
+    name: machine.name,
+    machine,
+    readiness: { looked: 'ok', age_seconds: 0, data: { machine: machine.name, checks, age_seconds: 0 } },
+    events: [],
+    watch: null,
+  })
+  const chip = chipOf(verdict, seen?.text ?? null)
 
   return (
     <Card aria-labelledby={`machine-${machine.name}`} className="machines__card">
@@ -199,9 +205,9 @@ export function MachineCard(props: MachineCardProps) {
               />
             ))}
           </ul>
-          {verdict.kind === 'unchecked' ? null : (
+          {verdict.kind === 'unasked' ? null : (
             <Text className="machines__summary" scale="body-small" tone="variant">
-              {summary(counted)}
+              {summary(tally(checks))}
             </Text>
           )}
         </>
@@ -215,9 +221,9 @@ export function MachineCard(props: MachineCardProps) {
         >
           Open
         </Button>
-        {verdict.kind === 'needs' ? <Install machine={machine.name} /> : null}
+        {verdict.kind === 'missing' || verdict.kind === 'sudo' ? <Install machine={machine.name} /> : null}
         {verdict.kind === 'refused' || verdict.kind === 'unjoined' || verdict.kind === 'browser' ? <CopyJoin /> : null}
-        {verdict.kind === 'unchecked' ? <Doctor first machine={machine.name} /> : null}
+        {verdict.kind === 'unasked' ? <Doctor first machine={machine.name} /> : null}
       </div>
     </Card>
   )

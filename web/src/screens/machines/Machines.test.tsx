@@ -39,14 +39,14 @@ describe('/machines on the busy fleet', () => {
       expect(good.getByText(check)).toBeTruthy()
     }
     expect(good.getAllByText('ok')).toHaveLength(4)
-    expect(good.getByText('4 of 4 checks')).toBeTruthy()
+    expect(good.getByText('10 of 10')).toBeTruthy()
     // Everything passes, so nothing asks the machine again.
     expect(good.queryByRole('button')).toBeNull()
 
     const short = card('pi-5')
     expect(short.getByText('missing')).toBeTruthy()
     expect(short.getByText('no `claude` on PATH there')).toBeTruthy()
-    expect(short.getByText('1 failing')).toBeTruthy()
+    expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeTruthy()
     // `git` is not in pi-5's report at all, so it counts as missing too (D7 §3.3).
     expect(short.getByText('2 missing')).toBeTruthy()
     expect(short.getByRole('button', { name: 'Install' })).toBeTruthy()
@@ -55,7 +55,7 @@ describe('/machines on the busy fleet', () => {
     // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
     expect(gone.getByText('asleep · 7 Jul')).toBeTruthy()
     expect(gone.getAllByText('unknown').length).toBeGreaterThan(0)
-    expect(gone.getByText('1 failing · 3 unknown')).toBeTruthy()
+    expect(gone.getByText('0 of 9 · 2 failing · 7 unknown')).toBeTruthy()
     // Asleep offers nothing to press: ssh cannot answer either way.
     expect(gone.queryAllByRole('button')).toHaveLength(0)
   })
@@ -216,7 +216,7 @@ describe('/machines on the phone', () => {
     mount('phone', '/machines')
     await screen.findByText(/^looked /)
     const good = card('cachyos-g14')
-    expect(good.getByText('4 of 4 checks')).toBeTruthy()
+    expect(good.getByText('10 of 10')).toBeTruthy()
     expect(good.queryByText('tmux')).toBeNull()
     expect(card('pi-5').getByText('claude')).toBeTruthy()
   })

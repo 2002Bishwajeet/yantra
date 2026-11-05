@@ -1,7 +1,7 @@
 import type { Check, CheckState, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
 import { answerFailure, INSTALLABLE, nameOf, noLoginServer, reachableFailure } from '@/lib/checks'
-import { missingBasics } from '@/lib/ready'
+import { blocking, isReady, missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
 
@@ -20,7 +20,7 @@ export type Verdict =
   | { kind: 'unreachable'; detail: string }
   | { kind: 'sudo'; missing: string[]; result: Event }
   | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean }
-  | { kind: 'manual'; absent: Check[] }
+  | { kind: 'manual'; absent: Check[]; ready: boolean }
   | { kind: 'ready' }
 
 const BASIC = new Set(INSTALLABLE)
@@ -79,7 +79,12 @@ export function verdictOf(input: {
 
   // ADR-0031 §9: the microphone is optional, so its absence never titles the card.
   const absent = checks.filter((one) => one.state === 'absent' && !BASIC.has(one.check) && one.check !== 'mic')
-  return absent.length > 0 ? { kind: 'manual', absent } : { kind: 'ready' }
+  // `ready` means `isReady` on every screen, so a session check that is
+  // absent or unknown holds it back, and an optional one (gh, hooks) does not.
+  const ready = isReady(readiness.data)
+  if (ready && absent.length === 0) return { kind: 'ready' }
+  const held = blocking(readiness.data).filter((one) => !absent.some((other) => other.check === one.check))
+  return { kind: 'manual', absent: [...absent, ...held], ready }
 }
 
 const NOT_REACHED: ReadonlySet<Verdict['kind']> = new Set([
@@ -190,7 +195,9 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
     case 'missing':
       return { state: 'needs', word: `${verdict.missing.length} missing`, error: false }
     case 'manual':
-      return { state: 'needs', word: `${verdict.absent.length} to fix`, error: false }
+      return verdict.ready
+        ? { state: 'done', word: `ready · ${verdict.absent.length} to fix`, error: false }
+        : { state: 'needs', word: `${verdict.absent.length} to fix`, error: false }
     case 'ready':
       return { state: 'done', word: 'ready', error: false }
     default:
