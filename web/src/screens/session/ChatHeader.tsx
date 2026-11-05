@@ -6,6 +6,7 @@
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { ChevronDown, Diff, RefreshCw } from 'lucide-react'
 import { useThreads } from '@/api/mutations'
@@ -34,12 +35,14 @@ export type ChatHeaderProps = {
   diffRef: RefObject<HTMLButtonElement | null>
   /** The polite note a comment added from the diff leaves. */
   added: boolean
+  /** The page's tab bar. Undefined draws the header in place; null draws nothing, for a tab that is not Chat. */
+  into?: HTMLElement | null
 }
 
 /** Y-633: the Chat tab's top line. The threads read on mount and on Refresh, and never poll:
  *  each read is an ssh to the machine and a call to GitHub (Y-489). */
 export function ChatHeader(props: ChatHeaderProps) {
-  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, added } = props
+  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, added, into } = props
   const active = thread ?? urlThread ?? null
   const threads = useThreads(workspace)
   const { mutate } = threads
@@ -59,13 +62,19 @@ export function ChatHeader(props: ChatHeaderProps) {
   const title = current ? branchTail(current.branch) : (active ?? 'New thread')
   const groupId = useId()
 
-  return (
+  if (into === null) return null
+
+  const header = (
     <header className="chat__header">
       <nav aria-label="Thread" className="chat__crumbs">
-        <Text className="chat__crumb" scale="label-large" tone="variant">
-          {workspace}
-        </Text>
-        <span aria-hidden="true">/</span>
+        {into === undefined ? (
+          <>
+            <Text className="chat__crumb" scale="label-large" tone="variant">
+              {workspace}
+            </Text>
+            <span aria-hidden="true">/</span>
+          </>
+        ) : null}
         <Menu>
           <MenuTrigger className="chat__title m3-interactive" aria-label={`Threads, ${title}`}>
             <Mono>{title}</Mono>
@@ -160,4 +169,5 @@ export function ChatHeader(props: ChatHeaderProps) {
       </span>
     </header>
   )
+  return into ? createPortal(header, into) : header
 }

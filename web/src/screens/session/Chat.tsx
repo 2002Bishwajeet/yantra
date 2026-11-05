@@ -241,6 +241,8 @@ export type ChatProps = {
   onThread: (thread: string) => void
   /** Y-489: the issue's first text, from the picker that opened this thread. */
   initialDraft?: string
+  /** Y-633: where the header draws, in the page's one bar. */
+  slot?: HTMLElement | null
 }
 
 /** The streaming chat (ADR-0026, Y-356, ADR-0033). The first turn picks the
@@ -248,7 +250,7 @@ export type ChatProps = {
  *  writes the tree the Terminal tab's agent is in. Every harness draws on the
  *  one timeline. */
 export function Chat(props: ChatProps) {
-  const { workspace, thread, onThread, initialDraft } = props
+  const { workspace, thread, onThread, initialDraft, slot } = props
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
   const [draft, setDraft, recallInto] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
@@ -496,6 +498,7 @@ export function Chat(props: ChatProps) {
         diff={{ open: showDiff, onToggle: toggleDiff, onRefresh: chat.requestDiff }}
         diffRef={diffButton}
         diffs={diffs}
+        into={slot}
         thread={timeline.thread}
         urlThread={thread}
         workspace={workspace.name}

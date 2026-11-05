@@ -41,7 +41,6 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 
@@ -50,7 +49,19 @@
   overflow-x: auto;
 }
 
+.session__chatbar {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.session__chatbar .chat__header {
+  flex: 1;
+  justify-content: flex-end;
+}
+
 .session__read {
+  margin-left: auto;
   font-size: var(--md-sys-typescale-body-small-size);
   line-height: var(--md-sys-typescale-body-small-line-height);
   color: var(--md-sys-color-on-surface-variant);

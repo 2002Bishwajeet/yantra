@@ -279,7 +279,7 @@ test.describe('the composer', () => {
       'The chat is not connected, so nothing can be sent.',
     )
     // Where a phone ends up scrolled depends on whether the thread list or the banner arrived first, so the capture is the top.
-    await expect(page.getByRole('link', { name: /^3a1b2c3d4e5f6a7b/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Threads, / })).toBeVisible()
     await page.evaluate(() => window.scrollTo(0, 0))
     await screenshot(page, 'composer-closed', 'busy', size, { overlay: size === 'phone' })
   })
@@ -462,7 +462,7 @@ test('an issue draft fills the card with no label over it', async ({ page, size 
   await expect(shell(page).locator('label')).toHaveCount(0)
   // The overlay capture races the history, the thread list and the scroll; wait for all three, then scroll to the end.
   await expect(page.getByText('Is the core crate green?')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Commit', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: /^Threads, / })).toBeVisible()
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
   await expect
     .poll(() => page.evaluate(() => Math.round(window.innerHeight + window.scrollY - document.documentElement.scrollHeight)))

@@ -237,12 +237,12 @@ test('the fleet keeps its stamp and its action in one row on a phone', async ({ 
   expect(Math.abs(a.y + a.height / 2 - (b.y + b.height / 2))).toBeLessThanOrEqual(2)
 })
 
-test('all four session tabs fit in 390 px with none clipped', async ({ page, size }) => {
+test('all three session tabs fit in 390 px with none clipped', async ({ page, size }) => {
   test.skip(size !== 'phone', 'the phone is the narrowest size')
   await scenario(page, 'busy')
   await page.goto('/w/landing')
   const nav = page.getByRole('navigation', { name: 'Views' })
-  await expect(nav.getByRole('link')).toHaveCount(4)
+  await expect(nav.getByRole('link')).toHaveCount(3)
   const edge = (await nav.boundingBox())!
   for (const link of await nav.getByRole('link').all()) {
     const box = (await link.boundingBox())!

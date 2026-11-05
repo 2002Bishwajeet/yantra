@@ -158,6 +158,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   const [chatFor, setChatFor] = useState(view === 'chat' ? name : null)
   if (view === 'chat' && chatFor !== name) setChatFor(name)
   const chatOpened = chatFor === name
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
   // A chat reads its thread only when its socket opens, so a thread picked from the list
   // remounts it. A thread the chat itself named is already attached and does not.
   const [named, setNamed] = useState(thread)
@@ -211,6 +212,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
             ))}
           </PillGroup>
         </nav>
+        {view === 'chat' ? <div className="session__chatbar" ref={setSlot} /> : null}
         {readAt ? (
           <Mono className="session__read">
             read{' '}
@@ -226,7 +228,14 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
         {chatOpened ? (
           <div className="session__chat" hidden={view !== 'chat'}>
-            <Chat initialDraft={draft ?? carried} key={`${name}:${epoch}`} onThread={chatNamed} thread={thread} workspace={workspace} />
+            <Chat
+              initialDraft={draft ?? carried}
+              key={`${name}:${epoch}`}
+              onThread={chatNamed}
+              slot={view === 'chat' ? slot : null}
+              thread={thread}
+              workspace={workspace}
+            />
           </div>
         ) : null}
         {view === 'terminal' ? (
