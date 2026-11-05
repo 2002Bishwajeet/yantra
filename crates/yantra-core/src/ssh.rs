@@ -183,7 +183,7 @@ impl Machine {
 
 /// One step of [`Machine::forget_host_key`], answering its stdout.
 async fn forget_step(program: &str, args: &[String]) -> Result<Vec<u8>, Error> {
-    let out = tokio::process::Command::new(program)
+    let out = tokio::process::Command::from(crate::scrubbed(program))
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -343,7 +343,7 @@ impl Ssh {
         self.machine.prepare_sockets()?;
         let log = LogFile::new(&self.machine.state_dir)?;
 
-        let mut ssh = tokio::process::Command::new(program);
+        let mut ssh = tokio::process::Command::from(crate::scrubbed(program));
         ssh.args(self.stdio_argv(command, log.path()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -408,7 +408,7 @@ impl Ssh {
         let log = LogFile::new(&m.state_dir)?;
         let nonce = nonce()?;
 
-        let mut cmd = tokio::process::Command::new(program);
+        let mut cmd = tokio::process::Command::from(crate::scrubbed(program));
         cmd.arg("-E").arg(log.path());
         cmd.args(m.connection_args());
         // Not ERROR: ssh prints a server's banner only from INFO up, and

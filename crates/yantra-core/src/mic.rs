@@ -186,7 +186,7 @@ pub fn record() -> Result<(Recorder, ChildStdout), Error> {
 }
 
 fn spawn(program: &str, args: &[&str]) -> Result<(Recorder, ChildStdout), Error> {
-    let mut child = tokio::process::Command::new(program)
+    let mut child = tokio::process::Command::from(crate::scrubbed(program))
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

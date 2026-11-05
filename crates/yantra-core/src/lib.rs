@@ -63,3 +63,15 @@ pub mod workspace;
 
 #[cfg(test)]
 mod shells;
+
+/// The daemon's own credentials, which every process it starts must not inherit (Y-647).
+pub const SECRETS: [&str; 3] = [github::TOKEN, notify::RELAY_TOKEN, notify::RELAY_URL];
+
+/// `Command::new` without [`SECRETS`]; every production spawn here starts from it.
+pub(crate) fn scrubbed(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    for name in SECRETS {
+        command.env_remove(name);
+    }
+    command
+}
