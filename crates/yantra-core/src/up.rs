@@ -249,7 +249,8 @@ mod tests {
     }
 
     /// Y-640: an empty server gets the script, which may replace its older
-    /// job, and serves even when the script cannot run.
+    /// job, and serves when the script cannot run while the server still
+    /// answers. `tmux.rs` tests the bootout that leaves none.
     #[tokio::test]
     async fn a_mac_with_an_empty_server_is_sent_the_script_and_starts() {
         let mac = Mac::new(Server::Empty, 3);

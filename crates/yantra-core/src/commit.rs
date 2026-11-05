@@ -836,7 +836,8 @@ mod tests {
         assert_eq!(mac.asked().len(), 3);
     }
 
-    /// Y-640: an empty server gets the script, and serves if it fails.
+    /// Y-640: an empty server gets the script, and serves if it fails while
+    /// it still answers. The script's bootout may have ended it.
     #[tokio::test]
     async fn a_mac_with_an_empty_server_is_sent_the_script() {
         let mac = Machine::answering(vec![
@@ -844,9 +845,19 @@ mod tests {
             out(0, "/opt/homebrew/bin/tmux\n", ""),
             out(0, "", ""),
             out(1, "", "launchctl said no"),
+            out(0, "", ""),
         ]);
         assert!(login_server(&mac).await.expect("a server").is_some());
         assert!(mac.asked()[3].ends_with("\nlogin_server '/opt/homebrew/bin/tmux'\n"));
+
+        let mac = Machine::answering(vec![
+            out(0, "Darwin\n", ""),
+            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "", ""),
+            out(1, "", "launchctl said no"),
+            out(1, "", "no server running on /private/tmp/tmux-501/default"),
+        ]);
+        assert!(login_server(&mac).await.is_err());
     }
 
     #[tokio::test]

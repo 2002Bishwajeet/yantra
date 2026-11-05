@@ -361,7 +361,8 @@ impl Tmux {
     /// `false` means no one is logged in at the screen.
     ///
     /// An empty server gets the script too, which replaces an older job and
-    /// its `PATH` (Y-640); if that fails, the empty server still serves.
+    /// its `PATH` (Y-640). If the script fails, the empty server serves only
+    /// while it still answers.
     pub async fn login_server<E: Exec>(&self, exec: &E) -> Result<bool, Error> {
         let answered = match self.sessions(exec).await? {
             Some(listed) if !listed.trim().is_empty() => return Ok(true),
@@ -369,9 +370,14 @@ impl Tmux {
             None => false,
         };
         let out = exec.exec(&login_server_command(&self.path)).await?;
+        if out.success() {
+            return Ok(true);
+        }
+        // The script's bootout ends the empty server before a failed bootstrap.
+        if answered && self.sessions(exec).await?.is_some() {
+            return Ok(true);
+        }
         match out.status {
-            0 => Ok(true),
-            _ if answered => Ok(true),
             NO_ONE_AT_THE_SCREEN => Ok(false),
             status => Err(Error::Command {
                 command: "launchctl".to_owned(),
@@ -823,7 +829,8 @@ mod tests {
     }
 
     /// Y-640: KeepAlive keeps an empty server up, so an older job is replaced
-    /// there or never. A failed replacement still leaves that server to use.
+    /// there or never. A failed script leaves that server to use while it
+    /// still answers.
     #[tokio::test]
     async fn an_empty_server_gets_the_script_and_still_serves_if_it_fails() {
         for script in [0, 1, 3] {
@@ -832,7 +839,10 @@ mod tests {
                 tmux().login_server(&mac).await.expect("answered"),
                 "{script}"
             );
-            assert_eq!(mac.asked().last(), Some(&login_server_command(TMUX)));
+            assert!(
+                mac.asked().contains(&login_server_command(TMUX)),
+                "{script}"
+            );
         }
     }
 
@@ -926,6 +936,29 @@ mod tests {
         let bootout = log.find("bootout").expect("the old job was booted out");
         let bootstrap = log.find("bootstrap").expect("the new job was loaded");
         assert!(bootout < bootstrap, "{log}");
+    }
+
+    /// The bootout that replaces an older job ends its empty server, so a
+    /// failed bootstrap leaves none, and `up` must not start one over ssh.
+    #[tokio::test]
+    async fn an_empty_server_booted_out_by_a_failed_replacement_is_no_server() {
+        let mac = launchd::Mac::new("older-empty-fails", true, true, Some("older"));
+        mac.fail_bootstrap();
+        let tmux = Tmux { path: mac.tmux() };
+        let err = tmux
+            .login_server(&mac)
+            .await
+            .expect_err("no server answers");
+        let Error::Command {
+            command, stderr, ..
+        } = err
+        else {
+            panic!("{err:?}");
+        };
+        assert_eq!(command, "launchctl");
+        assert!(stderr.contains("Bootstrap failed"), "{stderr}");
+        assert!(mac.log().contains("bootout"), "{}", mac.log());
+        assert!(!tmux.running(&mac).await.expect("answered"));
     }
 
     #[test]
@@ -1117,7 +1150,12 @@ pub(crate) mod launchd {
 echo "launchctl $*" >>"$FAKE/log"
 case "$1" in
 print) case "$2" in */*/*) test -f "$FAKE/loaded" ;; *) exit 0 ;; esac ;;
-bootstrap) touch "$FAKE/loaded" ;;
+bootstrap)
+    if test -f "$FAKE/bootstrap-fails"; then
+        echo "Bootstrap failed: 5: Input/output error" >&2
+        exit 5
+    fi
+    touch "$FAKE/loaded" ;;
 bootout) rm "$FAKE/loaded" "$FAKE/server" 2>/dev/null; exit 0 ;;
 kickstart) test -f "$FAKE/loaded" && touch "$FAKE/server" ;;
 esac
@@ -1126,7 +1164,8 @@ esac
             write_tool(
                 &dir,
                 "tmux",
-                "#!/bin/sh\ntest -f \"$FAKE/server\" && cat \"$FAKE/server\"\n",
+                "#!/bin/sh\ntest -f \"$FAKE/server\" && exec cat \"$FAKE/server\"\n\
+                 echo \"no server running on $FAKE/socket\" >&2\nexit 1\n",
             );
             // A login shell that fails, so the plist holds the fixed PATH.
             write_tool(&dir, "shell", "#!/bin/sh\nexit 1\n");
@@ -1142,6 +1181,10 @@ esac
                 std::fs::write(path, plist).expect("a file");
             }
             Self { dir }
+        }
+
+        pub(crate) fn fail_bootstrap(&self) {
+            std::fs::write(self.dir.join("bootstrap-fails"), "").expect("a file");
         }
 
         pub(crate) fn tmux(&self) -> String {
@@ -1188,6 +1231,17 @@ esac
                 .expect("a closed string")
                 .0
                 .to_owned()
+        }
+    }
+
+    impl crate::ssh::Exec for Mac {
+        async fn exec(&self, command: &str) -> Result<crate::ssh::Output, crate::ssh::Error> {
+            let out = self.run(command);
+            Ok(crate::ssh::Output {
+                status: out.status.code().unwrap_or(-1),
+                stdout: out.stdout,
+                stderr: out.stderr,
+            })
         }
     }
 
