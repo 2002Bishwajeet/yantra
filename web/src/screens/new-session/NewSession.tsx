@@ -4,7 +4,8 @@ import { useStore } from '@tanstack/react-form'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
 import { dirsQuery } from '@/api/queries'
-import { useGithub, useMachines, useRepos } from '@/api/hooks'
+import { useGithub, useGithubReadiness, useMachines, useRepos } from '@/api/hooks'
+import { grant } from '@/lib/github'
 import type { Step } from '@/router'
 import { Button } from '@/m3/button/Button'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
@@ -43,7 +44,9 @@ function SourceHint(props: { values: Values }) {
   const { root, home } = useCloneFolder(props.values.machine)
   const github = useGithub()
   const repos = useRepos()
-  const listed = !github.error && github.data?.connected === true && repos.looked === 'ok' && !home.error
+  const refused = grant(github.data, useGithubReadiness()).kind === 'refused'
+  const listed =
+    !github.error && github.data?.connected === true && !refused && repos.looked === 'ok' && !home.error
   const hint = sourceHint(props.values, root, listed)
   return (
     <Text className="ns__hint" id={HINT_ID} render={<p role="status" />} scale="body-medium" tone="variant">
