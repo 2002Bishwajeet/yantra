@@ -328,6 +328,11 @@ button, in the workspace header and above an unclaimed session's terminal.
   only in a secure context. A built page on plain HTTP reads `https` from
   `/api/about`, probes that origin's `/healthz`, and moves when it answers
   ([`lib/secure.ts`](src/lib/secure.ts), Y-652). Otherwise it stays, and the button is off and says why.
+- **The move takes this browser's `yantra.*` keys with it.** Each origin has its
+  own `localStorage`, so drafts, modes and prefs on `:7717` travel in the
+  fragment and leave `:7717`. A key that `:8443` already holds keeps its own
+  value. The page renders only after the move is decided, so no draft is
+  typed on `:7717` in the meantime.
 - **Each way a press ends is its own sentence**: a refused permission, no
   device, a track the browser took, a socket that never opened, and the
   daemon's text frame. The audio is never stored or logged here either (Q5).
