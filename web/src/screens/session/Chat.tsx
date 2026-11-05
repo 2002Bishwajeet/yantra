@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { Diff, ImagePlus, RefreshCw } from 'lucide-react'
+import { ImagePlus } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
@@ -42,7 +42,7 @@ import { appendToDraft } from './diff/comment'
 import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
 import { useEditors } from './diff/useEditors'
-import { GitActions } from './GitActions'
+import { ChatHeader } from './ChatHeader'
 import { HarnessPicker } from './HarnessPicker'
 import { keepInteraction, keepMode, recallInteraction, recallMode } from './mode'
 import { ModePicker } from './ModePicker'
@@ -241,6 +241,8 @@ export type ChatProps = {
   onThread: (thread: string) => void
   /** Y-489: the issue's first text, from the picker that opened this thread. */
   initialDraft?: string
+  /** Y-633: where the header draws, in the page's one bar. */
+  slot?: HTMLElement | null
 }
 
 /** The streaming chat (ADR-0026, Y-356, ADR-0033). The first turn picks the
@@ -248,7 +250,7 @@ export type ChatProps = {
  *  writes the tree the Terminal tab's agent is in. Every harness draws on the
  *  one timeline. */
 export function Chat(props: ChatProps) {
-  const { workspace, thread, onThread, initialDraft } = props
+  const { workspace, thread, onThread, initialDraft, slot } = props
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
   const [draft, setDraft, recallInto] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
@@ -302,6 +304,7 @@ export function Chat(props: ChatProps) {
   const dock = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
   const busy = timeline.turn !== 'idle'
+  const diffs = timeline.entries.filter((entry) => entry.kind === 'diff').length
   const enterSends = useEnterSends()
   const box = useRef<HTMLTextAreaElement>(null)
   const recalled = useRef<PromptHistoryPosition | null>(null)
@@ -489,31 +492,17 @@ export function Chat(props: ChatProps) {
 
   return (
     <div className="chat" data-branch={showDiff ? 'open' : undefined}>
-      <div className="chat__bar">
-        <Button
-          aria-pressed={showDiff}
-          icon={<Diff />}
-          onClick={toggleDiff}
-          ref={diffButton}
-          variant={showDiff ? 'tonal' : 'text'}
-        >
-          Diff
-        </Button>
-        <GitActions busy={busy} key={timeline.thread ?? ''} thread={timeline.thread} workspace={workspace.name} />
-        {showDiff ? (
-          <Button
-            aria-label="Refresh the diff"
-            icon={<RefreshCw />}
-            onClick={chat.requestDiff}
-            variant="text"
-          >
-            Refresh
-          </Button>
-        ) : null}
-        <span aria-live="polite" className="chat__added">
-          {added ? 'Comment added to your message.' : ''}
-        </span>
-      </div>
+      <ChatHeader
+        added={added}
+        busy={busy}
+        diff={{ open: showDiff, onToggle: toggleDiff, onRefresh: chat.requestDiff }}
+        diffRef={diffButton}
+        diffs={diffs}
+        into={slot}
+        thread={timeline.thread}
+        urlThread={thread}
+        workspace={workspace.name}
+      />
       {showDiff ? (
         <section aria-label="Branch diff" className="chat__branch">
           <DiffSheet

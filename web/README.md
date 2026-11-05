@@ -3,7 +3,7 @@
 Sixteen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every workspace and machine at `/fleet`, the machines compared at
 `/machines`, the guided Add a device at `/machines/add`, one machine at `/m/$machine`, one tmux session's terminal at
-`/m/$machine/s/$session`, one workspace's chat, terminal, transcript and spend
+`/m/$machine/s/$session`, one workspace's chat, terminal (with its transcript as History) and spend
 at `/w/$name`, its file at `/w/$name/repair`, the four-step create at `/new`,
 spend at `/usage`, the preferences at `/settings` and `/settings/$category`, and
 the phone's notifications at `/notifications`, and the rooms live agents share at
@@ -873,7 +873,7 @@ src/
                      verb (`verbs.ts`), and the Kill and Delete confirms
     machines/        `/machines` — a card per machine, its checks, and Doctor
     machine/         `/m/$machine`
-    session/         `/w/$name` — chat, terminal, transcript, spend
+    session/         `/w/$name` — chat, terminal (History), spend
     session-terminal/`/m/$machine/s/$session` — the same terminal on a session
                      no workspace claims (ADR-0022)
     repair/          `/w/$name/repair` — the file itself (ADR-0020)

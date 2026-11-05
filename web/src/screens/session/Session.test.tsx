@@ -1,5 +1,5 @@
 /**
- * `/w/{name}` before any socket is opened: which of the four views the URL
+ * `/w/{name}` before any socket is opened: which of the three views the URL
  * picks, and the three answers that are not a session at all — a name no
  * workspace carries, a file that will not load, and a list that could not be
  * read. Chat's own socket has its own suite (`Chat.test.tsx`).
@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { act, cleanup, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { keys } from '@/api/keys'
 import { renderInApp } from '@/test/inApp'
@@ -54,6 +54,7 @@ function daemon(list: unknown = looked(workspaces), agent: unknown = status) {
     vi.fn((path: string, init?: RequestInit) => {
       asked.push(`${init?.method ?? 'GET'} ${path.split('?')[0]}`)
       if (path.endsWith('/tokens')) return Promise.resolve(answer(200, contract.spend))
+      if (path.endsWith('/logs')) return Promise.resolve(answer(200, contract.logs))
       if (path.includes('/status')) return Promise.resolve(answer(200, agent))
       if (path.endsWith('/api/sessions')) return Promise.resolve(answer(200, sessions))
       if (path.endsWith('/api/workspaces')) return Promise.resolve(answer(200, list))
@@ -86,7 +87,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('one workspace, four views the URL carries', () => {
+describe('one workspace, three views the URL carries', () => {
   it('names the session once, with where it lives and the verbs that are live', async () => {
     daemon()
     await open('landing')
@@ -120,7 +121,7 @@ describe('one workspace, four views the URL carries', () => {
   /** Y-566: one Page width for every view, so the title and the tabs never move. */
   it('draws the wide page on every view', async () => {
     daemon()
-    for (const view of ['transcript', 'terminal'] as const) {
+    for (const view of ['terminal', 'spend'] as const) {
       const { unmount } = await open('landing', view)
       await screen.findByRole('button', { name: 'Stop' })
       expect(document.querySelector('.m3-page.session')?.getAttribute('data-width')).toBe('wide')
@@ -138,15 +139,15 @@ describe('one workspace, four views the URL carries', () => {
 
   /** D5 §3.2: a view is navigation, so each pill is a link the browser can
    *  copy and open in a tab. Chat is first (M14 board 13). */
-  it('draws the four views as links, chat first, with the open one marked', async () => {
+  it('draws the three views as links, chat first, with the open one marked', async () => {
     daemon()
     await open('landing')
 
     const views = await screen.findByRole('navigation', { name: 'Views' })
     const links = [...views.querySelectorAll('a')]
-    expect(links.map((one) => one.textContent)).toEqual(['Chat', 'Terminal', 'Transcript', 'Spend'])
+    expect(links.map((one) => one.textContent)).toEqual(['Chat', 'Terminal', 'Spend'])
     expect(links[0]?.getAttribute('href')).toBe('/w/landing?view=chat')
-    expect(links[3]?.getAttribute('aria-current')).toBe('page')
+    expect(links[2]?.getAttribute('aria-current')).toBe('page')
   })
 
   /** ADR-0019: spend is an ssh transcript read, so it is asked for once when
@@ -195,8 +196,8 @@ describe('one workspace, four views the URL carries', () => {
     await renderInApp(<Switch />, new QueryClient({ defaultOptions: { queries: { retry: false } } }))
 
     await waitFor(() => expect(sockets.map((one) => one.url).join()).toContain('/chat'))
-    act(() => control.show('transcript'))
-    await screen.findByRole('link', { name: 'Transcript', current: 'page' })
+    act(() => control.show('spend'))
+    await screen.findByRole('link', { name: 'Spend', current: 'page' })
     act(() => control.show('chat'))
 
     const chats = sockets.filter((one) => one.url.includes('/chat'))
@@ -291,6 +292,69 @@ describe('a workspace just created, before the sweep lists it', () => {
     await waitFor(() =>
       expect(document.querySelector('.session__meta')?.textContent).toContain('pi ·'),
     )
+  })
+})
+
+describe('the Chat tab with nothing in it', () => {
+  it('draws one empty state, and no thread list in the page body', async () => {
+    daemon()
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        static OPEN = 1
+        readyState = 0
+        onopen: (() => void) | null = null
+        constructor() {
+          queueMicrotask(() => {
+            this.readyState = 1
+            this.onopen?.()
+          })
+        }
+        send() {}
+        close() {}
+      },
+    )
+    await open('landing', 'chat')
+    await screen.findByRole('button', { name: 'Stop' })
+    expect(await screen.findAllByText('Nothing asked yet')).toHaveLength(1)
+    expect(screen.queryByText(/No threads yet/)).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Threads' })).toBeNull()
+    expect(document.querySelector('.threads')).toBeNull()
+  })
+})
+
+describe("the Terminal's History", () => {
+  const history = () => screen.findByRole('button', { name: 'Show History' })
+
+  it('reads the transcript when it opens, and not when the Terminal does', async () => {
+    const asked = daemon()
+    await open('landing', 'terminal')
+    const show = await history()
+    await new Promise((done) => setTimeout(done, 50))
+    expect(asked.filter((one) => one.endsWith('/logs'))).toEqual([])
+
+    fireEvent.click(show)
+    await screen.findByText(/the last .* records/)
+    expect(asked.filter((one) => one.endsWith('/logs'))).toEqual(['POST /api/workspaces/landing/logs'])
+  })
+
+  it('says what it holds, in one line, and has no link to its own view', async () => {
+    daemon()
+    await open('landing', 'terminal')
+    fireEvent.click(await history())
+    expect(
+      await screen.findByText(
+        'What the agent in this terminal said, read from its transcript on macbook. Chat turns are not here.',
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Take control' })).toBeNull()
+  })
+
+  it('is on the Terminal only', async () => {
+    daemon()
+    await open('landing', 'spend')
+    await screen.findByRole('link', { name: 'Spend', current: 'page' })
+    expect(screen.queryByRole('button', { name: 'Show History' })).toBeNull()
   })
 })
 

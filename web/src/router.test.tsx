@@ -155,6 +155,12 @@ describe('the search params', () => {
     await waitFor(() => expect(location.search).toBe(''))
   })
 
+  it('sends an old ?view=transcript link to the Terminal', async () => {
+    await open('/w/landing?view=transcript')
+    await h1('landing')
+    await waitFor(() => expect(location.search).toBe('?view=terminal'))
+  })
+
   it('keeps a step of one to four on /new and drops the rest', async () => {
     await open('/new?step=3')
     await screen.findByRole('dialog', { name: 'New session' })
