@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from 'react'
+import { type KeyboardEvent, useSyncExternalStore } from 'react'
 
 export const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
@@ -42,4 +42,19 @@ export function folderKeys(event: KeyboardEvent<HTMLElement>) {
         go(parent?.querySelector<HTMLElement>('[data-row]') ?? undefined)
       }
   }
+}
+
+const COARSE = '(pointer: coarse)'
+
+/** A touch screen has no Escape or `/` key, so the keyboard help is left out. */
+export function useTouch(): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      const query = matchMedia(COARSE)
+      query.addEventListener('change', notify)
+      return () => query.removeEventListener('change', notify)
+    },
+    () => matchMedia(COARSE).matches,
+    () => false,
+  )
 }

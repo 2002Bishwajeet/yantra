@@ -20,7 +20,6 @@ const names = (entries: Entry[]) => entries.map((e) => e.name)
 describe('arrange', () => {
   const all = [
     one('zeta'),
-    one('README.md', { kind: 'file' }),
     one('locked', { access: false }),
     one('alpha'),
     one('yantra', { repo: true, origin: 'git@github.com:a/yantra.git' }),
@@ -28,14 +27,13 @@ describe('arrange', () => {
     one('.config'),
   ]
 
-  it('puts repositories first, then folders, then files, then folders it cannot read', () => {
+  it('puts repositories first, then folders, then folders it cannot read', () => {
     expect(names(arrange(all, { hidden: true, filter: '' }))).toEqual([
       'landing',
       'yantra',
       '.config',
       'alpha',
       'zeta',
-      'README.md',
       'locked',
     ])
   })
@@ -47,7 +45,7 @@ describe('arrange', () => {
 
   it('keeps case-insensitive substring matches', () => {
     expect(names(arrange(all, { hidden: false, filter: 'AN' }))).toEqual(['landing', 'yantra'])
-    expect(names(arrange(all, { hidden: false, filter: '  ' }))).toHaveLength(6)
+    expect(names(arrange(all, { hidden: false, filter: '  ' }))).toHaveLength(5)
   })
 
   it('combines hidden with the filter', () => {

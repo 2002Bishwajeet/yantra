@@ -86,6 +86,7 @@ const fleet: Answers = {
 /** `<App/>` at `/new`, one width, over the contract fixtures with `answers`
  *  laid on top. Returns every request as `METHOD path`. */
 let width = 0
+let coarse = false
 const watchers = new Set<() => void>()
 
 /** Changes the width under a mounted form, as a phone does when it rotates. */
@@ -94,12 +95,19 @@ export function resize(size: FormFactor) {
   act(() => watchers.forEach((notify) => notify()))
 }
 
+/** Makes the next mount a touch screen: `(pointer: coarse)` answers true. */
+export function touchScreen() {
+  coarse = true
+}
+
 export function mountNew(size: FormFactor, path: string, answers: Answers = {}) {
   const asked: string[] = []
   width = WIDTH[size]
   vi.stubGlobal('scrollTo', () => {})
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
+    matches: query.includes('pointer: coarse')
+      ? coarse
+      : width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
     media: query,
     addEventListener: (_: string, notify: () => void) => watchers.add(notify),
     removeEventListener: (_: string, notify: () => void) => watchers.delete(notify),
@@ -127,6 +135,7 @@ export function mountNew(size: FormFactor, path: string, answers: Answers = {}) 
 }
 
 export function unmountNew() {
+  coarse = false
   vi.unstubAllGlobals()
   history.pushState(null, '', '/')
   localStorage.clear()

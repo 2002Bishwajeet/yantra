@@ -15,14 +15,14 @@ import { TextField } from '@/m3/text-field/TextField'
 import { usePrefs } from '@/shell/prefs'
 import { under, useNoAccess } from './dirs'
 import { FolderTree } from './FolderTree'
-import { slug, tilde, type Values } from './form'
-import { FOLDER_KEYS, folderKeys, typing } from './keys'
+import { expand, NO_HOME, slug, tilde, type Values } from './form'
+import { FOLDER_KEYS, folderKeys, typing, useTouch } from './keys'
 import { PathBar } from './PathBar'
 import { arrange, lastFolder, recentFolders } from './picker'
 import type { SessionForm } from './useSessionForm'
 
-function NewFolder(props: { machine: string; here: string; name: string; onMade: (path: string) => void }) {
-  const { machine, here, name, onMade } = props
+function NewFolder(props: { machine: string; here: string; home: string | null; name: string; onMade: (path: string) => void }) {
+  const { machine, here, home, name, onMade } = props
   const [folder, setFolder] = useState(name)
   const make = useMakeDir()
   const trimmed = folder.trim()
@@ -34,7 +34,7 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
         error={make.error ? make.error.said : undefined}
         label="New folder"
         onValueChange={setFolder}
-        supporting={`under ${here === '/' ? '/' : `${here}/`}`}
+        supporting={`under ${here === '/' ? '/' : `${tilde(here, home)}/`}`}
         value={folder}
       />
       <Button
@@ -59,6 +59,7 @@ function NewFolder(props: { machine: string; here: string; name: string; onMade:
 function nothing(listing: Listing, refused: string, filter: string, folder: string): string {
   if (!listing.access) return refused
   if (listing.entries.length === 0) return 'this folder is empty'
+  if (!listing.entries.some((entry) => entry.kind === 'dir')) return 'no folders here'
   if (filter.trim() !== '') return `nothing in ${folder} matches ${filter.trim()}`
   return 'nothing here but hidden entries'
 }
@@ -83,6 +84,9 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
   // Off by default: a home's dotfiles outnumber its projects (Y-414).
   const [hidden, setHidden] = useState(false)
   const list = useRef<HTMLUListElement>(null)
+  const moves = useRef(0)
+  const touch = useTouch()
+  const [unhomed, setUnhomed] = useState(false)
   const keys = useId()
   const home = useQuery({ ...dirsQuery(machine, null), enabled: true })
   // The old folder stays drawn while the next one loads, so a walk does not blank the list under the keyboard.
@@ -98,17 +102,16 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
     if (!values.named) form.setFieldValue('name', derive(path, origin))
   }
 
-  // The folder you are in is the choice, and `$HOME` is a fact that arrives
-  // with the first listing rather than one the page can write before it.
+  // Walking to a folder chooses it. The first listing (`$HOME`, or the last folder) is not a walk,
+  // so it chooses nothing; "Use <folder>" is how the start folder is picked.
   const chosen = values.source?.kind === 'local' ? values.source.path : null
   const arrived = useEffectEvent((path: string) => {
     if (chosen !== path) form.setFieldValue('source', { kind: 'local', path, origin: null, checked: 'yes' })
   })
   useEffect(() => {
-    if (here !== null) arrived(here)
+    if (here !== null && moves.current > 0) arrived(here)
   }, [here])
 
-  const moves = useRef(0)
   const refocus = useRef(false)
   const go = (path: string | null) => {
     moves.current += 1
@@ -159,8 +162,15 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
   }
 
   const source = values.source?.kind === 'local' ? values.source : null
-  const shown = listing.data ? arrange(listing.data.entries, { hidden, filter }) : []
-  const first = shown.find((entry) => entry.kind === 'dir' && entry.access)?.path
+  // A filter that starts with `/` or `~` is a path to go to, not a name to match.
+  const typed = /^[/~]/.test(filter.trim())
+  const shown = listing.data
+    ? arrange(
+        listing.data.entries.filter((entry) => entry.kind === 'dir'),
+        { hidden, filter: typed ? '' : filter },
+      )
+    : []
+  const first = shown.find((entry) => entry.access)?.path
   const tab = (path: string): 0 | -1 => (path === (active ?? first) ? 0 : -1)
   const recent = recentFolders(prefs, machine)
 
@@ -210,22 +220,31 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
 
       {gone ? (
         <Text render={<p role="status" />} className="ns__note" scale="body-medium" tone="variant">
-          {`${where} is gone; showing home`}
+          {`${tilde(where ?? '', root)} is gone; showing home`}
         </Text>
       ) : null}
 
       <TextField
         autoComplete="off"
-        label="Filter this folder"
+        error={unhomed ? NO_HOME : undefined}
+        label="Filter, or type a path"
         onKeyDown={(event) => {
-          if (event.key !== 'ArrowDown') return
-          event.preventDefault()
-          list.current?.querySelector<HTMLElement>('[data-row]')?.focus()
+          if (event.key === 'Enter' && typed) {
+            event.preventDefault()
+            const path = expand(filter.trim(), root)
+            if (path === null) setUnhomed(true)
+            else void visit(path)
+          } else if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            list.current?.querySelector<HTMLElement>('[data-row]')?.focus()
+          }
         }}
         onValueChange={(value) => {
           setFilter(value)
+          setUnhomed(false)
           setActive(null)
         }}
+        supporting={typed ? 'Enter goes to this path' : undefined}
         value={filter}
       />
 
@@ -243,11 +262,13 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
         />
       ) : (
         <>
-          <span className="m3-sr-only" id={keys}>
-            {FOLDER_KEYS}
-          </span>
+          {touch ? null : (
+            <span className="m3-sr-only" id={keys}>
+              {FOLDER_KEYS}
+            </span>
+          )}
           <ul
-            aria-describedby={keys}
+            aria-describedby={touch ? undefined : keys}
             aria-label="Folders"
             className="ns__list"
             onFocus={(event) => {
@@ -261,7 +282,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
             {shown.length === 0 ? (
               <li>
                 <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-                  {nothing(listing.data, refused, filter, tilde(here ?? '', root))}
+                  {nothing(listing.data, refused, typed ? '' : filter, tilde(here ?? '', root))}
                 </Text>
               </li>
             ) : null}
@@ -269,7 +290,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
             {listing.data.truncated ? (
               <li>
                 <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-                  {`${machine} sent the first ${listing.data.entries.length} entries and stopped. Choose Edit path, or press /, and type a path to reach the rest.`}
+                  {`${machine} sent the first ${listing.data.entries.length} entries and stopped. Choose Edit path${touch ? '' : ', or press /'}, and type a path to reach the rest.`}
                 </Text>
               </li>
             ) : null}
@@ -278,16 +299,24 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
       )}
 
       {here !== null ? (
-        <NewFolder
-          here={here}
-          key={here}
-          machine={machine}
-          name={values.name}
-          onMade={(path) => {
-            go(path)
-            choose(path, null, 'yes')
-          }}
-        />
+        <>
+          <div className="ns__clone">
+            <Button onClick={() => void visit(here)} type="button" variant="tonal">
+              {`Use ${tilde(here, root)}`}
+            </Button>
+          </div>
+          <NewFolder
+            here={here}
+            home={root}
+            key={here}
+            machine={machine}
+            name={values.name}
+            onMade={(path) => {
+              go(path)
+              choose(path, null, 'yes')
+            }}
+          />
+        </>
       ) : null}
 
       {source ? (
@@ -295,7 +324,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
           <Mono>{tilde(source.path, root)}</Mono>
           <Text scale="body-small" tone={source.checked === 'no' ? 'error' : 'variant'}>
             {source.checked === 'no'
-              ? `${machine} has no directory at ${source.path}. Make it there, or choose another.`
+              ? `${machine} has no directory at ${tilde(source.path, root)}. Make it there, or choose another.`
               : source.checked === 'unknown'
                 ? `${machine} could not be asked, so this path is unchecked. It will be tried when the workspace is opened.`
                 : source.origin

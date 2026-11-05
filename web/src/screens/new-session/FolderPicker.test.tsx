@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-libra
 import type { ByRoleMatcher, ByRoleOptions, Matcher } from '@testing-library/dom'
 import * as contract from '@/contract.gen'
 import { readPrefs, writePrefs } from '@/shell/prefs'
-import { type Answers, HOME, listing, mountNew, unmountNew } from './harness'
+import { type Answers, HOME, listing, mountNew, touchScreen, unmountNew } from './harness'
 
 afterEach(() => {
   cleanup()
@@ -226,7 +226,7 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
     await toLocal()
     press('Edit path')
     const field = screen.getByLabelText('Path') as HTMLInputElement
-    expect(field.value).toBe(HOME)
+    expect(field.value).toBe('~')
     fireEvent.change(field, { target: { value: `${DOCS}/GitHub` } })
     fireEvent.keyDown(field, { key: 'Enter' })
     expect(await folders.findByRole('button', { name: /^yantra/ })).toBeTruthy()
@@ -247,7 +247,7 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
     expect(await screen.findByLabelText('Path')).toBeTruthy()
     fireEvent.keyDown(screen.getByLabelText('Path'), { key: 'Escape' })
 
-    fireEvent.keyDown(screen.getByLabelText('Filter this folder'), { key: '/' })
+    fireEvent.keyDown(screen.getByLabelText('Filter, or type a path'), { key: '/' })
     expect(screen.queryByLabelText('Path')).toBeNull()
   })
 
@@ -257,14 +257,116 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
     const field = screen.getByLabelText('Path')
     fireEvent.change(field, { target: { value: 'Documents' } })
     fireEvent.keyDown(field, { key: 'Enter' })
-    expect(await screen.findByText(/A path starts with \//)).toBeTruthy()
+    expect(await screen.findByText(/A path starts with \/ or ~/)).toBeTruthy()
     fireEvent.change(field, { target: { value: '/' } })
-    expect(screen.queryByText(/A path starts with \//)).toBeNull()
+    expect(screen.queryByText(/A path starts with \/ or ~/)).toBeNull()
+  })
+
+  const probed = () => {
+    const paths: string[] = []
+    const probe: Answers = {
+      'POST /api/machines/cachyos-g14/probe': (sent) => {
+        paths.push(String(sent.path))
+        return [200, { machine: 'cachyos-g14', path: sent.path, exists: true, origin: null }]
+      },
+    }
+    return { paths, probe }
+  }
+  const chosen = () => document.querySelector('.ns__chosen')?.textContent ?? ''
+
+  it('walks to a path typed with ~ into the filter, and chooses it', async () => {
+    const { paths, probe } = probed()
+    await toLocal(probe)
+    const filter = screen.getByLabelText('Filter, or type a path')
+    fireEvent.change(filter, { target: { value: '~/Documents/GitHub' } })
+    expect(screen.getByText('Enter goes to this path')).toBeTruthy()
+    // A path is not a name to match: every row stays drawn.
+    expect(folders.getByRole('button', { name: /^Documents/ })).toBeTruthy()
+    fireEvent.keyDown(filter, { key: 'Enter' })
+    expect(await folders.findByRole('button', { name: /^yantra/ })).toBeTruthy()
+    expect(paths).toEqual([`${DOCS}/GitHub`])
+    expect(chosen()).toContain('~/Documents/GitHub')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
+  })
+
+  it('walks to a path typed with ~ into the path bar, and chooses it', async () => {
+    const { paths, probe } = probed()
+    await toLocal(probe)
+    press('Edit path')
+    const field = screen.getByLabelText('Path')
+    fireEvent.change(field, { target: { value: '~/Documents/GitHub' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(await folders.findByRole('button', { name: /^yantra/ })).toBeTruthy()
+    expect(paths).toEqual([`${DOCS}/GitHub`])
+    expect(chosen()).toContain('~/Documents/GitHub')
+  })
+
+  it('says so when ~ is typed before the machine has said where home is', async () => {
+    const { paths, probe } = probed()
+    mountNew('desktop', '/new', {
+      ...answers,
+      ...probe,
+      'POST /api/machines/cachyos-g14/dirs': (sent) => (sent.path === undefined ? [503, 'ssh: no route to host'] : dirs(sent)),
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    press(await screen.findByRole('button', { name: /Local directory/ }).then(() => /Local directory/))
+    const field = await screen.findByLabelText('Path')
+    fireEvent.change(field, { target: { value: '~/x' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(await screen.findByText(/has not said where home is yet/)).toBeTruthy()
+
+    const filter = screen.getByLabelText('Filter, or type a path')
+    fireEvent.change(filter, { target: { value: '~/x' } })
+    fireEvent.keyDown(filter, { key: 'Enter' })
+    expect(screen.getAllByText(/has not said where home is yet/)).toHaveLength(2)
+    fireEvent.change(filter, { target: { value: '~/xy' } })
+    expect(screen.getAllByText(/has not said where home is yet/)).toHaveLength(1)
+    expect(paths).toEqual([])
+  })
+
+  it('draws no file, and nothing is chosen before a walk', async () => {
+    await toLocal()
+    await folders.findByRole('button', { name: /^Documents/ })
+    expect(folders.queryByText('todo.txt')).toBeNull()
+    expect(chosen()).toBe('')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  })
+
+  it('keeps a local pick across Back, with no walk', async () => {
+    await toLocal()
+    fireEvent.click(await folders.findByRole('button', { name: /^Documents/ }))
+    await waitFor(() => expect(chosen()).toContain('~/Documents'))
+    press('Continue')
+    press(await screen.findByRole('button', { name: 'Back' }).then(() => 'Back'))
+    await screen.findByRole('list', { name: 'Folders' })
+    await waitFor(() => expect(chosen()).toContain('~/Documents'))
+  })
+
+  it('shows the keyboard help on a keyboard and hides it on a touch screen', async () => {
+    await toLocal()
+    press('Edit path')
+    expect(screen.getByText(/Escape goes back/)).toBeTruthy()
+    expect(screen.getByRole('list', { name: 'Folders' }).getAttribute('aria-describedby')).toBeTruthy()
+    cleanup()
+    unmountNew()
+
+    touchScreen()
+    await toLocal({
+      'POST /api/machines/cachyos-g14/dirs': (sent) => [200, { ...dirs(sent)[1] as object, truncated: true }],
+    })
+    expect(screen.getByRole('list', { name: 'Folders' }).hasAttribute('aria-describedby')).toBe(false)
+    expect(screen.queryByText(/Backspace goes up one folder/)).toBeNull()
+    expect(screen.getByText(/Choose Edit path, and type a path/)).toBeTruthy()
+    press('Edit path')
+    expect(screen.queryByText(/Escape goes back/)).toBeNull()
+    expect(screen.getByText(/starts with \/ or ~/)).toBeTruthy()
   })
 
   it('does not take Ctrl+L from a text field, an overlay, or a typed path', async () => {
     await toLocal()
-    fireEvent.keyDown(screen.getByLabelText('Filter this folder'), { key: 'l', ctrlKey: true })
+    fireEvent.keyDown(screen.getByLabelText('Filter, or type a path'), { key: 'l', ctrlKey: true })
     expect(screen.queryByLabelText('Path')).toBeNull()
 
     const palette = document.createElement('div')
@@ -407,7 +509,7 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
   it('filters the open folder as you type, says when nothing matches, and clears on a walk', async () => {
     await toLocal()
     await folders.findByRole('button', { name: /^Documents/ })
-    const filter = screen.getByLabelText('Filter this folder')
+    const filter = screen.getByLabelText('Filter, or type a path')
     fireEvent.change(filter, { target: { value: 'CONF' } })
     expect(folders.queryByRole('button', { name: /^Documents/ })).toBeNull()
     expect(folders.getByRole('button', { name: /^configs/ })).toBeTruthy()
@@ -418,7 +520,7 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
     fireEvent.change(filter, { target: { value: 'doc' } })
     fireEvent.click(folders.getByRole('button', { name: /^Documents/ }))
     await folders.findByRole('button', { name: /^GitHub/ })
-    expect((screen.getByLabelText('Filter this folder') as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText('Filter, or type a path') as HTMLInputElement).value).toBe('')
   })
 
   it('sorts repositories before plain folders, then by name', async () => {
@@ -480,8 +582,8 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
     await toLocal()
     fireEvent.click(await folders.findByRole('button', { name: /^Documents/ }))
     const github = await folders.findByRole('button', { name: /^GitHub/ })
-    fireEvent.change(screen.getByLabelText('Filter this folder'), { target: { value: 'git' } })
-    fireEvent.keyDown(screen.getByLabelText('Filter this folder'), { key: 'Backspace' })
+    fireEvent.change(screen.getByLabelText('Filter, or type a path'), { target: { value: 'git' } })
+    fireEvent.keyDown(screen.getByLabelText('Filter, or type a path'), { key: 'Backspace' })
     expect(crumbsNow().getByText('Documents').getAttribute('aria-current')).toBe('location')
 
     fireEvent.keyDown(github, { key: 'Backspace' })
@@ -492,7 +594,7 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
   it('moves from the filter to the first row on Down', async () => {
     await toLocal()
     await folders.findByRole('button', { name: /^Documents/ })
-    fireEvent.keyDown(screen.getByLabelText('Filter this folder'), { key: 'ArrowDown' })
+    fireEvent.keyDown(screen.getByLabelText('Filter, or type a path'), { key: 'ArrowDown' })
     expect(document.activeElement).toBe(folders.getAllByRole('button', { name: /^(?!Show folders)/ })[0])
   })
 
@@ -507,7 +609,7 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
   it('combines Show hidden with the filter', async () => {
     await toLocal()
     await folders.findByRole('button', { name: /^Documents/ })
-    fireEvent.change(screen.getByLabelText('Filter this folder'), { target: { value: 'conf' } })
+    fireEvent.change(screen.getByLabelText('Filter, or type a path'), { target: { value: 'conf' } })
     expect(folders.queryByText('.config')).toBeNull()
     press('Show hidden')
     expect(folders.getByRole('button', { name: /^\.config/ })).toBeTruthy()
@@ -526,7 +628,7 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
   it('falls back to home with a note when the last folder is gone', async () => {
     writePrefs({ general: { lastFolders: { 'cachyos-g14': '/home/biswa/old' } } })
     await toLocal()
-    expect(await screen.findByText('/home/biswa/old is gone; showing home')).toBeTruthy()
+    expect(await screen.findByText('~/old is gone; showing home')).toBeTruthy()
     expect(await folders.findByRole('button', { name: /^Documents/ })).toBeTruthy()
     expect(crumbsNow().getByText('~').getAttribute('aria-current')).toBe('location')
 

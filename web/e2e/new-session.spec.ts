@@ -1,4 +1,4 @@
-import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
+import { at, axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
 
 /** `/new` (Y-349): the four steps of NewSession, NewSessionSource,
@@ -117,11 +117,15 @@ test.describe('the four steps', () => {
     await page.getByRole('button', { name: /Local directory/ }).click()
 
     const folders = page.getByRole('list', { name: 'Folders' })
+    // Y-643: opening the step chooses nothing; a walk does.
+    await expect(folders.getByRole('button', { name: /^Github/ })).toBeVisible()
+    await expect(page.locator('.ns__chosen')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
     await folders.getByRole('button', { name: /^Github/ }).click()
     await expect(folders.getByText('git · 2002Bishwajeet/yantra')).toBeVisible()
-    // Y-414: a file and a closed folder are drawn and are not buttons.
-    await expect(folders.getByText('README.md')).toBeVisible()
-    await expect(folders.getByRole('button', { name: /^(README\.md|archive)/ })).toHaveCount(0)
+    // Y-414: a closed folder is drawn and is not a button. Y-643: a file is not drawn at all.
+    await expect(folders.getByText('README.md')).toHaveCount(0)
+    await expect(folders.getByRole('button', { name: /^archive/ })).toHaveCount(0)
     await expect(folders.getByText('.github')).toHaveCount(0)
     await screenshot(page, 'new-session-local', 'busy', size, { overlay: size !== 'phone' })
 
@@ -167,7 +171,7 @@ test.describe('the four steps', () => {
     await axe(page)
     await keyboardWalk(page, 12)
 
-    const filter = page.getByLabel('Filter this folder')
+    const filter = page.getByLabel('Filter, or type a path')
     await filter.fill('LAN')
     await expect(names).toHaveText(['landing'])
     await filter.fill('zzz')
@@ -214,6 +218,35 @@ test.describe('the four steps', () => {
     await expect(crumb).toHaveText('yantra')
     const recent = page.getByRole('region', { name: 'Recent on cachyos-g14' })
     await expect(recent.getByRole('button', { name: '~/Github/yantra' })).toBeVisible()
+  })
+
+  /** Y-643: `~` is understood, and nothing is chosen until the person walks. */
+  test('a path typed with ~ into the filter walks there and chooses it', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'one size is enough for the wire')
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: /Local directory/ }).click()
+
+    await expect(page.locator('.ns__chosen')).toHaveCount(0)
+    const filter = page.getByLabel('Filter, or type a path')
+    await filter.fill('~/Github/yantra')
+    await expect(page.getByText('Enter goes to this path')).toBeVisible()
+    await filter.press('Enter')
+    await expect(page.locator('.ns__chosen')).toContainText('~/Github/yantra')
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
+    await expect(page.getByText('README.md')).toHaveCount(0)
+  })
+
+  test('Use picks the folder the step opened at', async ({ page }) => {
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: /Local directory/ }).click()
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
+    await page.getByRole('button', { name: 'Use ~', exact: true }).click()
+    await expect(page.locator('.ns__chosen')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
 
   /** Y-484: kept in `yantra.prefs` general.cloneFolders, per machine. */
@@ -327,6 +360,37 @@ test.describe('a long repository name on a phone', () => {
     )
     await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
     await screenshot(page, 'new-session-source', 'longrepo', 'phone')
+    await axe(page)
+  })
+})
+
+test.describe('the local step on a phone (Y-643)', () => {
+  test.use(at('phone'))
+
+  test('scrolls a long folder inside a fixed height and hides the keyboard help', async ({ page }) => {
+    await scenario(page, 'busy')
+    await page.goto(PATH)
+    await expect(heading(page, 'New session')).toBeVisible()
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await page.getByRole('button', { name: /Local directory/ }).click()
+
+    const folders = page.getByRole('list', { name: 'Folders' })
+    await expect(folders).not.toHaveAttribute('aria-describedby')
+    await page.getByRole('button', { name: 'Edit path' }).click()
+    await expect(page.getByText(/Escape goes back/)).toHaveCount(0)
+    await page.getByLabel('Path').fill('/srv')
+    await page.getByLabel('Path').press('Enter')
+    await expect(folders.getByRole('button', { name: /^site-59/ })).toBeAttached()
+
+    const box = await folders.boundingBox()
+    const viewport = page.viewportSize()
+    expect(box?.height).toBeLessThanOrEqual((viewport?.height ?? 0) * 0.55 + 1)
+    const scroll = await folders.evaluate((list) => ({ inner: list.scrollHeight, outer: list.clientHeight }))
+    expect(scroll.inner).toBeGreaterThan(scroll.outer)
+    const height = await page.evaluate(() => document.documentElement.scrollHeight)
+    expect(height).toBeLessThan(5000)
     await axe(page)
   })
 })
