@@ -951,18 +951,33 @@ describe('images in the composer', () => {
 })
 
 describe('the git actions', () => {
-  const bar = () => within(document.querySelector('.chat__bar') as HTMLElement)
+  const header = () => within(document.querySelector('.chat__header') as HTMLElement)
+  const items = async () => {
+    fireEvent.click(header().getByRole('button', { name: 'Git actions' }))
+    return screen.findAllByRole('menuitem')
+  }
 
-  it('draws commit, push and open PR in the bar, off until the chat has a thread', async () => {
+  it('draws a quick action and a menu in the header, off until the chat has a thread', async () => {
     await open()
-    for (const name of ['Commit', 'Push', 'Open PR']) {
-      expect((bar().getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
-    }
+    expect((header().getByRole('button', { name: 'Commit' }) as HTMLButtonElement).disabled).toBe(true)
+    for (const item of await items()) expect(item.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
+
     say(started())
     await settled(() => expect(onThread).toHaveBeenCalled())
-    for (const name of ['Commit', 'Push', 'Open PR']) {
-      await settled(() => expect((bar().getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(false))
-    }
+    // The thread has no changed files yet, so the quick action has nothing to offer; the menu does.
+    await settled(() => expect(header().getByRole('button', { name: 'Up to date' })).toBeTruthy())
+    await settled(async () => {
+      for (const item of await items()) expect(item.getAttribute('aria-disabled')).toBeNull()
+    })
+  })
+
+  it('offers Commit as the quick action once a turn has changed files', async () => {
+    await open()
+    say(started())
+    say(chatCheckpoints[0])
+    await settled(() => expect((header().getByRole('button', { name: 'Commit' }) as HTMLButtonElement).disabled).toBe(false))
   })
 })
 

@@ -12,6 +12,7 @@ import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
+import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
@@ -24,7 +25,6 @@ import { KeyRow } from './Keys'
 import { NotFound } from './NotFound'
 import { Spend } from './Spend'
 import { Terminal } from './Terminal'
-import { ThreadList } from './ThreadList'
 import { Transcript } from './Transcript'
 import './Session.css'
 
@@ -35,11 +35,10 @@ const route = getRouteApi('/w/$name')
 const LABELS: Record<View, string> = {
   chat: 'Chat',
   terminal: 'Terminal',
-  transcript: 'Transcript',
   spend: 'Spend',
 }
 
-/** One workspace, four views the URL carries (D5 §3, board 13 puts Chat
+/** One workspace, three views the URL carries (D5 §3, board 13 puts Chat
  *  first). The list is read before any socket is opened: a round trip to the
  *  daemon is cheap and an attach is an ssh to a machine that may be asleep. */
 export function Session() {
@@ -224,9 +223,6 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
       </div>
       {/* Only the open tab is mounted, except the chat: mounting the terminal
           opens an ssh, and tmux redraws the pane for whoever attaches next (D5 §3.5). */}
-      <ErrorBoundary eyebrow="Session / Threads" layout="inline" resetKeys={[name]} title="The thread list broke">
-        <ThreadList key={name} name={name} thread={thread} view={view} />
-      </ErrorBoundary>
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
         {chatOpened ? (
           <div className="session__chat" hidden={view !== 'chat'}>
@@ -261,10 +257,15 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
                 {factor === 'phone' ? <KeyRow /> : null}
               </Terminal>
             )}
+            {/* Opening it is the request that reads the transcript, so the terminal alone spends one ssh. */}
+            <Disclosure action="Show" className="session__history" summary="History">
+              <Text render={<p />} scale="body-small" tone="variant">
+                What the agent in this terminal said, read from its transcript on {workspace.machine}. Chat turns are not
+                here.
+              </Text>
+              <Transcript now={now} onRead={transcript.read} said={transcript.said} state={state} workspace={workspace} />
+            </Disclosure>
           </div>
-        ) : null}
-        {view === 'transcript' ? (
-          <Transcript now={now} onRead={transcript.read} said={transcript.said} state={state} workspace={workspace} />
         ) : null}
         {view === 'spend' ? (
           <Spend asked={spend.asked} now={now} onAsk={() => void spend.ask(workspace)} workspace={workspace} />

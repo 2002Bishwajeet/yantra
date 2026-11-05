@@ -207,8 +207,8 @@ for (const [label, path, scrolls] of [
     const dock = page.locator('.composer-dock')
     await expect(dock).toBeVisible()
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
-    await expect(page.getByRole('heading', { name: 'Threads' })).toBeVisible()
-    // The thread list loads after the dock draws and must not leave the last block under it.
+    await expect(page.getByRole('navigation', { name: 'Thread' })).toBeVisible()
+    // The header loads after the dock draws and must not leave the last block under it.
     await expect
       .poll(async () => {
         // A thread opens at its top, so only the empty page is read as it opens; it carries itself to the end.

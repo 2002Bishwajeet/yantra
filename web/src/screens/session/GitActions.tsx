@@ -1,35 +1,55 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { GitCommitHorizontal, GitPullRequest, Upload } from 'lucide-react'
-import { useCommit, useDraftMessage, useOpenPr, usePush, useThreads } from '@/api/mutations'
+import { ChevronDown, GitCommitHorizontal, GitPullRequest, Upload } from 'lucide-react'
+import { useCommit, useDraftMessage, useOpenPr, usePush } from '@/api/mutations'
+import type { ThreadPr } from '@/api'
 import { Button } from '@/m3/button/Button'
-import { Dialog, DialogClose, DialogPopup, DialogTrigger } from '@/m3/dialog/Dialog'
+import { Dialog, DialogClose, DialogPopup } from '@/m3/dialog/Dialog'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
-import { gitFailure, whyOff, type GitFailure } from './git'
+import { IconButton } from '@/m3/icon-button/IconButton'
+import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
+import { gitFailure, type GitFailure } from './git'
+import { buildMenuItems, resolveQuickAction, type GitVerb } from './gitActions.logic'
 import './GitActions.css'
 
-type Pr = { number: number; url: string }
+type Pr = { number: number; url: string; state: 'open' | 'merged' }
 
 function Failure(props: { failure: GitFailure; retry: () => void }) {
   const { failure, retry } = props
   return <ErrorSurface.Inline className="git__fail" error={failure} reset={retry} title={failure.title} />
 }
 
-/** Commit, push and open a PR for the chat's thread (Y-493). Each verb is the
- *  daemon's own route; a person asks for each, and none runs by itself. */
-export function GitActions(props: { workspace: string; thread: string | null; busy: boolean }) {
-  const { workspace, thread, busy } = props
-  const why = whyOff(thread, busy)
+const ICON = { commit: <GitCommitHorizontal />, push: <Upload />, pr: <GitPullRequest /> }
+
+/** Commit, push and open a PR for the chat's thread (Y-493), as T3 Code lays them out: one quick
+ *  action for the next step, and a menu for all three. A person asks for each verb; none runs by itself.
+ *  The daemon sends no git status, so the next step comes from what this page saw (Y-633). */
+export function GitActions(props: {
+  workspace: string
+  thread: string | null
+  busy: boolean
+  /** Turn diffs in the timeline. A rise after this page's last commit means files changed. */
+  diffs: number
+  /** The thread's PR as the list read it. */
+  listed: ThreadPr | undefined
+  /** Read the thread list again, as a PR opened here changes it. */
+  refresh: () => void
+}) {
+  const { workspace, thread, busy, diffs, listed, refresh } = props
   const whyId = useId()
+  const menuWhyId = useId()
   const [note, setNote] = useState('')
 
-  const threads = useThreads(workspace)
-  const { mutate: listThreads } = threads
-  useEffect(() => {
-    if (thread !== null) listThreads()
-  }, [thread, listThreads])
   const [opened, setOpened] = useState<Pr | null>(null)
-  const listed = threads.data?.find((one) => one.id === thread)?.pr
-  const pr: Pr | null = opened ?? (listed && (listed.state === 'open' || listed.state === 'merged') ? listed : null)
+  const pr: Pr | null =
+    opened ?? (listed && (listed.state === 'open' || listed.state === 'merged') ? { ...listed, state: listed.state } : null)
+  const [committedAt, setCommittedAt] = useState(0)
+  const [committed, setCommitted] = useState(false)
+  const [pushed, setPushed] = useState(false)
+
+  const state = { thread: thread !== null, busy, changed: diffs > committedAt, committed, pushed, pr }
+  const quick = resolveQuickAction(state)
+  const items = buildMenuItems(state)
+  const off = items[0]!.reason
 
   const draft = useDraftMessage(workspace)
   const commit = useCommit(workspace)
@@ -39,6 +59,11 @@ export function GitActions(props: { workspace: string; thread: string | null; bu
   const [message, setMessage] = useState('')
   const box = useRef<HTMLTextAreaElement>(null)
   const boxId = useId()
+  const quickButton = useRef<HTMLButtonElement>(null)
+  const menuTrigger = useRef<HTMLButtonElement>(null)
+  // The dialog hands focus back to whatever opened it; the menu item it came from is gone by then.
+  const returnTo = useRef<HTMLElement | null>(null)
+  const afterMenu = useRef<GitVerb | null>(null)
 
   const ask = () => {
     if (thread !== null) draft.mutate(thread, { onSuccess: (got) => setMessage(got.message) })
@@ -65,6 +90,9 @@ export function GitActions(props: { workspace: string; thread: string | null; bu
       {
         onSuccess: (done) => {
           setDialog(false)
+          setCommittedAt(diffs)
+          setCommitted(true)
+          setPushed(false)
           setNote(`Committed: ${done.subject}`)
         },
       },
@@ -72,34 +100,44 @@ export function GitActions(props: { workspace: string; thread: string | null; bu
   }
   const pushIt = () => {
     if (thread === null) return
-    push.mutate(thread, { onSuccess: (done) => setNote(`Pushed ${done.remote}/${done.branch}`) })
+    push.mutate(thread, {
+      onSuccess: (done) => {
+        setCommitted(false)
+        setPushed(true)
+        setNote(`Pushed ${done.remote}/${done.branch}`)
+      },
+    })
   }
   const openIt = () => {
     if (thread === null) return
     openPr.mutate(thread, {
       onSuccess: (done) => {
-        setOpened({ number: done.number, url: done.url })
+        setOpened({ number: done.number, url: done.url, state: 'open' })
+        setPushed(false)
         setNote(`${done.created ? 'Opened' : 'Found'} PR #${done.number}`)
-        listThreads()
+        refresh()
       },
     })
   }
+  const run = (verb: GitVerb, from: HTMLElement | null) => {
+    returnTo.current = from
+    if (verb === 'commit') changeDialog(true)
+    else if (verb === 'push') pushIt()
+    else openIt()
+  }
 
-  const off = why !== null
-  const described = off ? whyId : undefined
   const draftFailure = draft.isError ? gitFailure('draft', draft.error) : null
   const commitFailure = commit.isError ? gitFailure('commit', commit.error) : null
+
+  // The quick action and the menu item run one verb, so they share its pending word.
+  const busyWord = (verb: GitVerb, label: string) =>
+    verb === 'push' && push.isPending ? 'Pushing…' : verb === 'pr' && openPr.isPending ? 'Opening…' : label
+  const verb = quick.kind === 'commit' || quick.kind === 'push' || quick.kind === 'pr' ? quick.kind : null
+  const pending = verb !== null && busyWord(verb, quick.label) !== quick.label
 
   return (
     <>
       <Dialog onOpenChange={changeDialog} open={dialog}>
-        <DialogTrigger
-          aria-describedby={described}
-          disabled={off}
-          render={<Button icon={<GitCommitHorizontal />} variant="text" />}
-        >
-          Commit
-        </DialogTrigger>
         <DialogPopup
           actions={
             <>
@@ -110,6 +148,7 @@ export function GitActions(props: { workspace: string; thread: string | null; bu
             </>
           }
           description="claude drafts a message from the changes on the machine. Edit it, or write your own."
+          finalFocus={returnTo}
           title="Commit this thread"
         >
           <div className="git__message">
@@ -140,37 +179,73 @@ export function GitActions(props: { workspace: string; thread: string | null; bu
           ) : null}
         </DialogPopup>
       </Dialog>
-      <Button
-        aria-describedby={described}
-        disabled={off || push.isPending}
-        icon={<Upload />}
-        onClick={pushIt}
-        variant="text"
-      >
-        {push.isPending ? 'Pushing…' : 'Push'}
-      </Button>
-      {pr ? (
-        <Button
-          icon={<GitPullRequest />}
-          render={<a href={pr.url} rel="noopener noreferrer" target="_blank" />}
-          variant="text"
+      <div className="git__split">
+        {quick.kind === 'open_pr_link' && pr ? (
+          <Button
+            icon={<GitPullRequest />}
+            render={<a href={pr.url} rel="noopener noreferrer" target="_blank" />}
+            variant="tonal"
+          >
+            {quick.label}
+          </Button>
+        ) : (
+          <Button
+            aria-describedby={quick.kind === 'hint' ? whyId : undefined}
+            disabled={quick.disabled || pending}
+            icon={verb ? ICON[verb] : undefined}
+            onClick={() => verb && run(verb, quickButton.current)}
+            ref={quickButton}
+            variant={quick.kind === 'hint' ? 'text' : 'tonal'}
+          >
+            {verb ? busyWord(verb, quick.label) : quick.label}
+          </Button>
+        )}
+        <Menu
+          onOpenChangeComplete={(open) => {
+            const verb = afterMenu.current
+            if (open || verb === null) return
+            afterMenu.current = null
+            run(verb, menuTrigger.current)
+          }}
         >
-          {`PR #${pr.number}`}
-        </Button>
-      ) : (
-        <Button
-          aria-describedby={described}
-          disabled={off || openPr.isPending}
-          icon={<GitPullRequest />}
-          onClick={openIt}
-          variant="text"
-        >
-          {openPr.isPending ? 'Opening…' : 'Open PR'}
-        </Button>
-      )}
-      {off ? (
+          <MenuTrigger render={<IconButton label="Git actions" ref={menuTrigger} />}>
+            <ChevronDown />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            {items.map((item) =>
+              item.kind === 'open_pr_link' && pr ? (
+                <MenuLinkItem
+                  icon={ICON.pr}
+                  key={item.id}
+                  render={<a href={pr.url} rel="noopener noreferrer" target="_blank" />}
+                >
+                  {item.label}
+                </MenuLinkItem>
+              ) : (
+                <MenuItem
+                  aria-describedby={item.disabled ? menuWhyId : undefined}
+                  disabled={item.disabled}
+                  icon={ICON[item.id]}
+                  key={item.id}
+                  onClick={() => {
+                    afterMenu.current = item.id
+                  }}
+                >
+                  {busyWord(item.id, item.label)}
+                </MenuItem>
+              ),
+            )}
+            {off ? (
+              <span className="m3-sr-only" id={menuWhyId}>
+                {off}
+              </span>
+            ) : null}
+          </MenuPopup>
+        </Menu>
+      </div>
+      {quick.hint ? (
         <span className="m3-sr-only" id={whyId}>
-          {why}
+          {quick.hint}
         </span>
       ) : null}
       <span aria-live="polite" className="chat__added">

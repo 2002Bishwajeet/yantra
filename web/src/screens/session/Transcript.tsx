@@ -17,7 +17,7 @@ export type TranscriptProps = {
 }
 
 /** What the agent in this workspace has been saying (D5 §4), read on request:
- *  mounting the tab is the request, `Refresh` re-reads, `Older` pages back. */
+ *  mounting it is the request, and the Terminal's History mounts it on first open, `Refresh` re-reads, `Older` pages back. */
 export function Transcript(props: TranscriptProps) {
   const { workspace, state, said, now, onRead } = props
 
@@ -59,15 +59,6 @@ export function Transcript(props: TranscriptProps) {
           ) : null}
         </Text>
         <div className="transcript__actions">
-          {/* D5 §4.6: on a narrow screen this is the only thing that reaches
-              the pane without going through the tab bar. */}
-          <Button
-            role="link"
-            render={<Link params={{ name: workspace.name }} replace search={{ view: 'terminal' }} to="/w/$name" />}
-            variant="text"
-          >
-            Take control
-          </Button>
           {said.said === 'held' && !said.moved ? (
             <Button
               disabled={said.paging || said.asked >= said.total}

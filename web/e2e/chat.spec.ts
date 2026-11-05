@@ -126,11 +126,15 @@ test.describe('the composer', () => {
     await expect(page.getByRole('heading', { level: 1, name: NAME }).first()).toBeVisible()
   })
 
-  test('rests as one line, and looks like the board', async ({ page, size }) => {
+  test('keeps one height for an empty field, focused or not, and looks like the board', async ({ page, size }) => {
     await expect(shell(page)).toHaveAttribute('data-empty', '')
-    const box = await composer(page).boundingBox()
-    expect(box?.height ?? 0).toBeLessThanOrEqual(32)
+    const before = (await composer(page).boundingBox())?.height ?? 0
+    expect(before).toBeGreaterThan(0)
     await screenshot(page, 'composer-resting', 'busy', size, { overlay: size === 'phone' })
+    await composer(page).focus()
+    await expect(composer(page)).toBeFocused()
+    await expect(shell(page)).toHaveAttribute('data-empty', '')
+    await expect.poll(async () => (await composer(page).boundingBox())?.height).toBe(before)
   })
 
   test('grows with a three-line draft and looks like the board', async ({ page, size }) => {
