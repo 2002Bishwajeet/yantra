@@ -219,7 +219,9 @@ nothing reads it back over the API. The daemon takes a new relay **at its next s
 It speaks **plain HTTP and always will**. TLS belongs to `tailscale serve`, which already holds and
 renews a certificate for the machine's `*.ts.net` name — `just https` puts the dashboard on
 `https://<machine>.<tailnet>.ts.net:8443/`, which is what a phone needs and what the PWA's secure
-context requires. One caveat, measured: a proxied write arrives from the *proxy's* address, so
+context requires. `GET /api/about` names that origin as `https`, and a dashboard opened on `:7717`
+moves there once the origin answers (Y-652). The daemon does not redirect: agents post heartbeats to
+`:7717`, and it cannot see whether `serve` runs. One caveat, measured: a proxied write arrives from the *proxy's* address, so
 ADR-0016's identity check sees the machine running the proxy rather than the caller. See its
 amendment and [`docs/development.md`](../../docs/development.md).
 

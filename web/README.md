@@ -324,8 +324,10 @@ button, in the workspace header and above an unclaimed session's terminal.
   still closes all of it, so the microphone is never open while the button is up.
 - **The frames are 16 kHz mono s16le, 640 bytes each.** `toPcm16` resamples from
   the device rate with a carry that spans blocks, and writes little-endian.
-- **On `:7717` the button is off and says why.** The browser offers a
-  microphone only in a secure context, which is the HTTPS address on `:8443`.
+- **On `:7717` the page moves to `:8443`.** The browser offers a microphone
+  only in a secure context. A built page on plain HTTP reads `https` from
+  `/api/about`, probes that origin's `/healthz`, and moves when it answers
+  ([`lib/secure.ts`](src/lib/secure.ts), Y-652). Otherwise it stays, and the button is off and says why.
 - **Each way a press ends is its own sentence**: a refused permission, no
   device, a track the browser took, a socket that never opened, and the
   daemon's text frame. The audio is never stored or logged here either (Q5).

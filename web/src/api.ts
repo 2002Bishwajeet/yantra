@@ -379,6 +379,9 @@ export type About = {
   // `listen_on`'s set exactly, as `host:port`.
   listening_on: string[]
   tailnet: string | null
+  // Y-652: `https://<node>:8443`, the `tailscale serve` origin where the mic
+  // works. Null when `tailnet` is. It does not prove serve runs.
+  https: string | null
   // Whether this process started with a relay. A relay saved since is the
   // next start's (ADR-0021). Never the URL or the token.
   relay: boolean

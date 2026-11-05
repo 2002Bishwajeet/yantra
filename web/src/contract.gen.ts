@@ -639,6 +639,7 @@ export const failed = {
 export const about = {
   "built": "2026-09-06",
   "channel": "stable",
+  "https": "https://<node>.<tailnet>.ts.net:8443",
   "listening_on": [
     "100.64.0.1:7717",
     "[fd7a:115c:a1e0::1]:7717"

@@ -104,7 +104,8 @@ account. The script says so first, because the dashboard cannot exist before the
    how that went. It asks nothing, and a failure here does not stop the install.
    [The ssh identity section](#the-appliances-ssh-identity) says more.
 10. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
-   `http://<tailnet address>:7717` if HTTPS is not on. If `qrencode` is installed, the URL also
+   `http://<tailnet address>:7717` if HTTPS is not on. A browser that opens `:7717` while HTTPS is
+   on moves to `:8443`, where the microphone works. If `qrencode` is installed, the URL also
    prints above that line as a QR code, so a phone can open it.
 
 **What a no does depends on the question.** A no to installing Tailscale or to logging in installs

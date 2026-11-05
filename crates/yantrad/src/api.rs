@@ -89,6 +89,7 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
             .map(ToString::to_string)
             .collect(),
         tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
+        https: https(&snapshot, &fleet.facts.listening_on),
         relay: fleet.facts.relay,
         published: Answer::of(snapshot.release.as_deref(), Published::of),
         channel,
@@ -98,12 +99,27 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
 
 /// The tailnet is `DNSName` past this node's own label.
 fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
+    let (_, tailnet) = this_node_name(snapshot, listening_on)?.split_once('.')?;
+    Some(tailnet.to_owned())
+}
+
+/// The port `tailscale serve` terminates TLS on; install.sh and `just https`
+/// set it up, and the daemon cannot see whether they did (Y-652).
+const HTTPS_PORT: u16 = 8443;
+
+/// Where the microphone works: a browser needs a secure context (ADR-0031 §4).
+fn https(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
+    let name = this_node_name(snapshot, listening_on)?;
+    Some(format!("https://{name}:{HTTPS_PORT}"))
+}
+
+/// This node's `DNSName` without the trailing dot.
+fn this_node_name<'a>(snapshot: &'a Snapshot, listening_on: &[SocketAddr]) -> Option<&'a str> {
     let machines = snapshot.machines.as_deref()?.value().as_ref().ok()?;
     let me = machines
         .iter()
         .find(|machine| is_this_node(machine, listening_on))?;
-    let (_, tailnet) = me.dns_name.trim_end_matches('.').split_once('.')?;
-    Some(tailnet.to_owned())
+    Some(me.dns_name.trim_end_matches('.'))
 }
 
 /// Which node is this one is answered by the addresses `listen_on` bound — the
@@ -625,6 +641,9 @@ pub(crate) struct About {
     /// `None` until the machines look has run, or when no node holds a bound
     /// address — never a guess.
     pub(crate) tailnet: Option<String>,
+    /// Y-652: the `tailscale serve` origin on this node, `None` when `tailnet`
+    /// is. It is not proof that serve runs, so the page probes it first.
+    pub(crate) https: Option<String>,
     /// Whether this process holds a relay. Never the URL or the token (§B4).
     pub(crate) relay: bool,
     /// The newest release GitHub publishes, read hourly (ADR-0027 §2).
@@ -893,6 +912,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     "[fd7a:115c:a1e0::1]:7717".to_owned(),
                 ],
                 tailnet: Some("<tailnet>.ts.net".to_owned()),
+                https: Some("https://<node>.<tailnet>.ts.net:8443".to_owned()),
                 relay: true,
                 published: Answer::Ok {
                     age_seconds: 1_234,
@@ -2374,10 +2394,15 @@ pub(crate) mod tests {
         assert!(body["uptime_seconds"].as_u64().is_some(), "{body}");
         assert_eq!(body["listening_on"], json!(["100.64.0.1:7717"]));
         assert_eq!(body["tailnet"], json!("example.ts.net"));
+        assert_eq!(
+            body["https"],
+            json!("https://cachyos-g14.example.ts.net:8443")
+        );
         assert_eq!(body["relay"], json!(true));
 
         let unlooked = get_json(holding(Snapshot::default()), "/about").await;
         assert_eq!(unlooked["tailnet"], Value::Null, "no look, no guess");
+        assert_eq!(unlooked["https"], Value::Null, "no look, no guess");
         assert_eq!(unlooked["published"], json!({"looked": "never"}));
         assert_eq!(unlooked["listening_on"], json!([]));
         assert_eq!(
@@ -2385,6 +2410,32 @@ pub(crate) mod tests {
             json!(false),
             "no relay at start is false, never absent"
         );
+    }
+
+    /// Y-652: a look that lists no node holding a bound address names no HTTPS
+    /// origin, because a browser sent to a guess lands on a dead page.
+    #[tokio::test]
+    async fn about_names_no_https_origin_when_no_node_holds_a_bound_address() {
+        let fleet = Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
+                ssh_dir: std::path::PathBuf::new(),
+                ssh_state: std::path::PathBuf::new(),
+                relay: false,
+                trigger: std::path::PathBuf::new(),
+                updater: std::path::PathBuf::new(),
+                progress: std::path::PathBuf::new(),
+            }),
+            ..looking_at_machines(vec![MachineInfo {
+                addresses: vec!["100.64.0.2".parse().expect("an address")],
+                ..machine("n-2", "pi", true)
+            }])
+        };
+
+        let body = get_json(fleet, "/about").await;
+        assert_eq!(body["tailnet"], Value::Null, "{body}");
+        assert_eq!(body["https"], Value::Null, "{body}");
     }
 
     /// ADR-0027 §2 on the wire: the published version is one of the three

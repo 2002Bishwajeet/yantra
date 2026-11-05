@@ -12,6 +12,8 @@ export type About = {
   uptime_seconds: number
   listening_on: string[]
   tailnet: string | null
+  // Y-652: the `tailscale serve` origin on :8443; null when `tailnet` is.
+  https: string | null
   // Y-388: whether this process started with a relay; never the URL or token.
   relay: boolean
   // Y-367: the newest published release (ADR-0027 §2).
