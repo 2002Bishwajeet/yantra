@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link, useLocation, useNavigate } from '@tanstack/react-router'
 import type { Workspace, WorkspaceStatus } from '@/api'
 import { useSessions, useSpend, useTranscript, useWorkspaces } from '@/api/hooks'
+import { keys } from '@/api/keys'
 import { MISSING, statusQuery } from '@/api/queries'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -61,6 +62,8 @@ export function Workspace(props: {
   const { name, view, thread, onThread } = props
   const client = useQueryClient()
   const listed = useWorkspaces()
+  // skipToken: never fetched, so a prefix invalidation leaves the 201 alone (Y-638).
+  const { data: made } = useQuery<Workspace>({ queryKey: keys.created(name), queryFn: skipToken })
 
   if (listed.looked === 'pending') {
     return (
@@ -100,7 +103,13 @@ export function Workspace(props: {
   }
 
   const entry = listed.data.find((one) => one.name === name)
-  if (!entry) return <NotFound name={name} />
+  if (!entry) {
+    return made ? (
+      <Loaded onThread={onThread ?? (() => {})} thread={thread} view={view} workspace={made} />
+    ) : (
+      <NotFound name={name} />
+    )
+  }
 
   if (entry.loaded === 'no') {
     return (

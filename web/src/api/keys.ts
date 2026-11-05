@@ -15,6 +15,8 @@ export const keys = {
       : (['workspaces', name, 'spend', since] as const),
   transcript: (name: string, window: Window) =>
     ['workspaces', name, 'transcript', window] as const,
+  /** The `201` of a create, drawn until the sweep lists the name. */
+  created: (name: string) => ['workspaces', name, 'created'] as const,
   repair: (name: string) => ['workspaces', name, 'repair'] as const,
   /** `null` is the workspace's repository, before a thread opens. */
   mentions: (name: string, thread: string | null, harness: string) =>

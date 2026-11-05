@@ -9,6 +9,7 @@ import { QueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { act, cleanup, screen, waitFor } from '@testing-library/react'
 import * as contract from '@/contract.gen'
+import { keys } from '@/api/keys'
 import { renderInApp } from '@/test/inApp'
 import { answer } from '@/test/daemon'
 import type { View } from '@/views'
@@ -260,6 +261,36 @@ describe('one workspace, four views the URL carries', () => {
 
     await waitFor(() => expect(sockets.some((one) => one.url.includes('thread=bbbbbbbb'))).toBe(true))
     expect(sockets.find((one) => one.url.includes('thread=aaaaaaaa'))?.closed).toBe(true)
+  })
+})
+
+/** Y-638: the sweep is up to 30 s behind the create, so the 201 draws the page. */
+describe('a workspace just created, before the sweep lists it', () => {
+  const made = { name: 'fresh', machine: 'macbook', repo: '/Users/biswa/Github/fresh', startup: null }
+  const seeded = () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    client.setQueryData(keys.created('fresh'), made)
+    return client
+  }
+
+  it('draws the session from the 201 and never says not found, even when the list polls again', async () => {
+    daemon()
+    const client = seeded()
+    await renderInApp(<Workspace name="fresh" view="spend" />, client)
+
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('fresh')
+    await act(() => client.invalidateQueries({ queryKey: keys.workspaces() }))
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('fresh')
+    expect(screen.queryByText(/No workspace is called/)).toBeNull()
+  })
+
+  it('prefers the listed entry once the sweep has it', async () => {
+    daemon(looked([...workspaces, { loaded: 'yes', ...made, machine: 'pi' }]))
+    await renderInApp(<Workspace name="fresh" view="spend" />, seeded())
+
+    await waitFor(() =>
+      expect(document.querySelector('.session__meta')?.textContent).toContain('pi ·'),
+    )
   })
 })
 
