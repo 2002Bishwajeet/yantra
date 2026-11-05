@@ -163,8 +163,8 @@ test.describe('the four steps', () => {
     await expect(crumb).toHaveText('~')
 
     await page.getByRole('button', { name: 'Edit path' }).click()
-    await page.getByLabel('Path').fill('/home/biswa/Github')
-    await page.getByLabel('Path').press('Enter')
+    await page.getByLabel('Path', { exact: true }).fill('/home/biswa/Github')
+    await page.getByLabel('Path', { exact: true }).press('Enter')
     await expect(crumb).toHaveText('Github')
     await expect(page.getByRole('button', { name: 'Edit path' })).toBeFocused()
     await expect(names).toHaveText(['landing', 'yantra', 'notes'])
@@ -380,8 +380,8 @@ test.describe('the local step on a phone (Y-643)', () => {
     await expect(folders).not.toHaveAttribute('aria-describedby')
     await page.getByRole('button', { name: 'Edit path' }).click()
     await expect(page.getByText(/Escape goes back/)).toHaveCount(0)
-    await page.getByLabel('Path').fill('/srv')
-    await page.getByLabel('Path').press('Enter')
+    await page.getByLabel('Path', { exact: true }).fill('/srv')
+    await page.getByLabel('Path', { exact: true }).press('Enter')
     await expect(folders.getByRole('button', { name: /^site-59/ })).toBeAttached()
 
     const box = await folders.boundingBox()
