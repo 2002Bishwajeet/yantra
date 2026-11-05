@@ -57,6 +57,24 @@ describe('the Dashboard on a busy fleet', () => {
     expect(hero.queryByText(/cargo-zig/)).toBeNull()
   })
 
+  it('moves the hero count when a band changes, while the row stays held', async () => {
+    const state = scenario('busy')
+    mount('desktop', '/', state)
+    await drawn()
+    expect(region('Needs you').getByText('6')).toBeTruthy()
+    // A new object, because the query cache shares structure with the old one.
+    const was = state.status.landing!.data as { status: object }
+    state.status.landing = {
+      looked: 'ok',
+      age_seconds: 0,
+      data: { ...was, status: { state: 'awaiting_trust' } },
+    } as never
+    // The next status poll reads the new band: the hero counts it at once and the row waits for Reorder.
+    await screen.findByRole('button', { name: /1 changed/ }, { timeout: 9000 })
+    expect(region('Needs you').getByText('7')).toBeTruthy()
+    expect(region('Needs you').queryByText('landing is waiting for trust')).toBeNull()
+  }, 15_000)
+
   /** Ledger row 142: the row wrote `ago` behind a helper that names the day
    *  past 24 h, so an old ask read `asked 30 Aug ago`. */
   it('drops `ago` from an ask that has become a date', async () => {
