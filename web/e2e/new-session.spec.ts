@@ -141,7 +141,7 @@ test.describe('the four steps', () => {
 
     await page.getByLabel('New folder').fill('landing-copy')
     await page.getByRole('button', { name: 'Make', exact: true }).click()
-    await expect(page.getByText('~/Github/landing-copy')).toBeVisible()
+    await expect(page.getByText('~/Github/landing-copy', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
 
