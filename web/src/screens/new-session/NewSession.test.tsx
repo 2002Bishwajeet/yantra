@@ -48,25 +48,48 @@ describe('step 1, the name and the machine', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
-  /** The boards name four steps and draw three panels: leaving the first
-   *  ticks Name and Machine together (NewSession, NewSessionSource). */
-  it('names the boards four steps, and ticks two of them at once', async () => {
+  it('names three steps, one per screen', async () => {
     mountNew('desktop', '/new')
     await screen.findByRole('dialog', { name: 'New session' })
     const steps = () => within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')
-    expect(steps().map((one) => one.textContent)).toEqual(['1Name', '2Machine', '3Source', '4Start'])
+    const states = () => steps().map((one) => one.getAttribute('data-state'))
+    expect(steps().map((one) => one.textContent)).toEqual(['1Name', '2Source', '3Start'])
     expect(steps()[0].getAttribute('aria-current')).toBe('step')
+    expect(states()).toEqual(['current', 'ahead', 'ahead'])
 
     type('Name', 'quiet-otter')
     press('cachyos-g14')
     press('Continue')
     await screen.findByText('On this machine')
-    expect(steps().map((one) => one.getAttribute('data-state'))).toEqual([
-      'done',
-      'done',
-      'current',
-      'ahead',
-    ])
+    expect(states()).toEqual(['done', 'current', 'ahead'])
+
+    press(/2002Bishwajeet\/yantra/)
+    press('Continue')
+    await screen.findByText('What opens in the session')
+    expect(states()).toEqual(['done', 'done', 'current'])
+  })
+
+  it('offers no chip for a node that runs no session, and ignores a preset naming one', async () => {
+    const nodes = [
+      aMachine({ name: 'an-iphone', os: 'iOS' }),
+      aMachine({ name: 'a-pixel', os: 'android' }),
+      aMachine({ name: 'a-desktop', os: 'windows' }),
+    ]
+    mountNew('desktop', '/new?machine=an-iphone', {
+      'GET /api/machines': [
+        200,
+        {
+          ...contract.machines,
+          data: [...contract.machines.data.map((one) => ({ ...one, hub: false })), ...nodes],
+        },
+      ],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    const chips = within(screen.getByRole('group', { name: 'Machine' }))
+    expect(chips.getByRole('button', { name: 'cachyos-g14' })).toBeTruthy()
+    for (const node of nodes) expect(chips.queryByRole('button', { name: new RegExp(node.name) })).toBeNull()
+    // The preset names a node that is not offered, so it selects nothing.
+    expect(chips.queryByRole('button', { pressed: true, name: /an-iphone/ })).toBeNull()
   })
 
   it('takes one machine, and never one that is not there', async () => {
@@ -494,7 +517,7 @@ describe('a Mac with no login tmux server (Y-631)', () => {
       {
         ...contract.machines,
         data: contract.machines.data.map((one) =>
-          one.name === MAC ? { ...one, online: true, os: 'macos', hub: false } : { ...one, hub: false },
+          one.name === MAC ? { ...one, online: true, os: 'macOS', hub: false } : { ...one, hub: false },
         ),
       },
     ],
