@@ -308,14 +308,23 @@ describe('step 2, the local browser', () => {
 describe('step 3, what opens in the session', () => {
   it('starts Claude unless a command is typed, and says what will happen', async () => {
     await toStepThree()
-    expect(screen.getByText(/^open a tmux session on cachyos-g14/)).toBeTruthy()
-    expect(screen.getByText(/start Claude in it/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'When you press Create and open' })).toBeTruthy()
+    expect(screen.getByText(/^It opens a session in/)).toBeTruthy()
+    expect(screen.getByText(/Claude starts there/)).toBeTruthy()
 
-    press(/A command/)
+    press(/Your command/)
     expect(screen.getByRole('button', { name: 'Create and open' })).toHaveProperty('disabled', true)
     type('Command', 'just dev')
-    await waitFor(() => expect(screen.getByText(/^run just dev in it/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/^just dev runs there/)).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Create and open' })).toHaveProperty('disabled', false)
+  })
+
+  it('heads the dialog with the machine and the folder as the list draws it', async () => {
+    await toStepThree()
+    const description = screen.getByRole('dialog').getAttribute('aria-describedby')
+    const text = document.getElementById(description ?? '')?.textContent ?? ''
+    expect(text).toBe('on cachyos-g14 · ~/Github/yantra')
+    expect(text).not.toContain('/home/biswa')
   })
 
   it('offers two options and no placeholder for another agent', async () => {
@@ -687,7 +696,7 @@ describe('the suggested machine (Y-517)', () => {
     await waitFor(() => expect(within(dialog).getByText('on pi')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Use pi' })).toBeNull()
     press('Continue')
-    expect(await screen.findByText('on pi · 2002Bishwajeet/yantra')).toBeTruthy()
+    expect(await screen.findByText('on pi · /srv/yantra')).toBeTruthy()
   })
   it.each([
     ['an unreachable machine', [placed('bishwajeets-macbook-pro', 80, 'the repo is there', '/srv/y'), placed('cachyos-g14', 45, 'it is idle')]],

@@ -1,7 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '@tanstack/react-form'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
+import { dirsQuery } from '@/api/queries'
 import { useGithub, useMachines, useRepos } from '@/api/hooks'
 import type { Step } from '@/router'
 import { Button } from '@/m3/button/Button'
@@ -15,7 +17,7 @@ import { useFormFactor } from '@/shell/formFactor'
 import { usePrefs } from '@/shell/prefs'
 import { readGeneral } from '@/screens/settings/general'
 import { useCloneFolder } from './clonePath'
-import { complete, pickMachine, plan, type Plan, reachable, sourceHint, STEPS, type Values } from './form'
+import { complete, pickMachine, plan, type Plan, reachable, sourceHint, STEPS, tilde, type Values } from './form'
 import { Starting } from './Starting'
 import { StepName } from './StepName'
 import { StepSource } from './StepSource'
@@ -97,8 +99,8 @@ export function NewSession() {
   const go = (to: Step) => void navigate({ to: '/new', search: { step: to } })
 
   const source = values.source
-  const sourceLabel =
-    source?.kind === 'github' ? source.repo.full_name : source ? source.path : null
+  const home = useQuery({ ...dirsQuery(values.machine, null), enabled: true })
+  const sourceLabel = source ? tilde(source.path, home.data?.path ?? null) : null
   const on = `on ${values.machine}${step === 3 && sourceLabel ? ` · ${sourceLabel}` : ''}`
 
   // The body is portalled into one host node that moves between the page and
