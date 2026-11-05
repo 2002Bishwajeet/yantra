@@ -12,26 +12,31 @@ login_server() {
     label=io.github.2002bishwajeet.yantra-tmux
     plist=$HOME/Library/LaunchAgents/$label.plist
     log=$HOME/Library/Logs/yantra-tmux.log
-    if ! [ -e "$plist" ]; then
-        mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" || return 1
-        # A second `tmux -D` on a held socket exits 1, which KeepAlive restarts
-        # every 10 s, so `ls` ends the job with 0 there. Measured on tmux 3.8.
-        cat >"$plist" <<PLIST || return 1
+    # The bootout below would end a running server's sessions.
+    "$tmux" ls >/dev/null 2>&1 && return 0
+    # kill-server ends `-D` with 0, so KeepAlive is unconditional. A second `-D`
+    # on a held socket exits 1, so the job waits out a server it did not start.
+    job=$(cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key><string>$label</string>
-    <key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string><string>"\$0" ls >/dev/null 2>/dev/null || exec "\$0" -D</string><string>$tmux</string></array>
+    <key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string><string>while "\$0" ls >/dev/null 2>/dev/null; do sleep 10; done; exec "\$0" -D</string><string>$tmux</string></array>
     <key>EnvironmentVariables</key><dict><key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
     <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+    <key>KeepAlive</key><true/>
     <key>StandardErrorPath</key><string>$log</string>
 </dict>
 </plist>
 PLIST
+)
+    # A plist an older Yantra wrote is replaced, and its job with it.
+    if [ "$(cat "$plist" 2>/dev/null)" != "$job" ]; then
+        mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" || return 1
+        printf '%s\n' "$job" >"$plist" || return 1
+        launchctl bootout "$domain/$label" 2>/dev/null
     fi
-    # `kill-server` also ends `-D` with 0, so the kickstart is what restarts it.
     launchctl print "$domain/$label" >/dev/null 2>&1 ||
         launchctl bootstrap "$domain" "$plist" || return 1
     launchctl kickstart "$domain/$label" || return 1
