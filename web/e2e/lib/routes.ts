@@ -38,6 +38,7 @@ export const ROUTES = [
   { id: 'add-device', path: '/machines/add', heading: 'Add a device', owner: 'Y-566', scenario: 'adding' },
   // The checklist draws in place of the dashboard until a first workspace exists.
   { id: 'setup', path: '/', heading: 'Set up Yantra', owner: 'Y-566', scenario: 'firstrun' },
+  { id: 'setup-route', path: '/setup', heading: 'Set up Yantra', owner: 'Y-645' },
 ] as const satisfies readonly Route[]
 
 export type RouteId = (typeof ROUTES)[number]['id']

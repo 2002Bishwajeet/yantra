@@ -29,6 +29,33 @@ test.describe('Add a device', () => {
     await screenshot(page, 'add-device', 'adding', size)
   })
 
+  for (const platform of ['linux', 'macos', 'mobile', 'windows']) {
+    test(`${platform} with a long machine name and a real key stays inside the phone`, async ({ page, size }) => {
+      test.skip(size !== 'phone', 'only a phone is narrower than a fingerprint')
+      await scenario(page, 'adding')
+      await page.route('**/api/ssh-identity', (route) =>
+        route.fulfill({
+          json: {
+            fingerprint: 'SHA256:aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abcdefg',
+            kind: 'ed25519',
+            path: '/home/a-long-account-name/.ssh/id_yantra_appliance_key',
+            public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra',
+          },
+        }),
+      )
+      await page.goto(`/machines/add?platform=${platform}&machine=${'a'.repeat(40)}`)
+      await expect(page.getByRole('heading', { level: 2, name: 'Joined' })).toBeVisible()
+      const wide = await page.evaluate(() => {
+        const root = document.documentElement
+        const stray = [...document.body.querySelectorAll('*')].filter(
+          (el) => el.getBoundingClientRect().right > root.clientWidth + 0.5 && getComputedStyle(el).position !== 'fixed',
+        )
+        return { overflow: root.scrollWidth - root.clientWidth, stray: stray.map((el) => el.className || el.tagName) }
+      })
+      expect(wide).toEqual({ overflow: 0, stray: [] })
+    })
+  }
+
   test('beat 2 names the key, and Show key opens the public half', async ({ page }) => {
     await scenario(page, 'adding')
     // Not in the scenario: a key on file ticks the dashboard checklist and hides its Add a device link.

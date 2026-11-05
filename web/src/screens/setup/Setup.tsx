@@ -8,7 +8,7 @@ import { useRecheckReadiness } from '@/api/mutations'
 import { forgetHostKey, joinFixes, reachWords } from '@/lib/checks'
 import { joinUrl } from '@/lib/join'
 import { apart, notYours } from '@/lib/platform'
-import { ago } from '@/lib/time'
+import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -91,7 +91,7 @@ const mark: Record<View, MarkState> = {
 function wordsOf(said: Line, name: string): string {
   switch (said.kind) {
     case 'asleep':
-      return `asleep${said.since ? ` · last seen ${said.since} ago` : ''}`
+      return `asleep${said.since ? ` · last seen ${seen(said.since)}` : ''}`
     case 'unchecked':
       return 'not checked yet · a check costs one ssh round trip'
     case 'unreachable':

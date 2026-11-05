@@ -233,6 +233,11 @@
   z-index: 5;
 }
 
+/* How far in from the right edge the extended FAB reaches; content that must stay readable reserves it. */
+:root {
+  --shell-fab-reach: 168px;
+}
+
 .shell__fab {
   position: fixed;
   right: calc(16px + env(safe-area-inset-right, 0px));

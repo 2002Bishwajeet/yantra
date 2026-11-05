@@ -412,8 +412,9 @@
   padding: 0 4px;
 }
 
+/* Finish setup sits above the hero, which can leave the headline in the FAB's band. */
 [data-shell="phone"] .dash__hero-words {
-  padding: 0;
+  padding: 0 var(--shell-fab-reach) 0 0;
 }
 
 [data-shell="phone"] .dash__hero .m3-row,
@@ -515,6 +516,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.dash__setup-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.dash__setup-link:hover {
+  text-decoration: underline;
 }
 
 .dash__setup-track {

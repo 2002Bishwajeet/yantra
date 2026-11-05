@@ -6,6 +6,7 @@ import { Row } from '@/m3/row/Row'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { SinceAgo } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
+import { openedByHand } from '@/work'
 import type { Held } from './facts'
 
 /** *Worth a look*: the tmux sessions the fleet does not account for. Attach
@@ -59,27 +60,29 @@ export function Unclaimed(props: { held: Held[]; pending: boolean }) {
                 >
                   Attach
                 </Button>
-                <KillSession
-                  machine={machine}
-                  row={
-                    <Row>
-                      <State state="unknown">unclaimed</State>
-                      <span className="machines__text">
-                        <span className="machines__name">{session.name}</span>
-                        <Mono className="machines__where">
-                          {machine} · {session.windows} window
-                          {session.windows === 1 ? '' : 's'}
-                        </Mono>
-                      </span>
-                    </Row>
-                  }
-                  session={session.name}
-                  trigger={
-                    <Button tone="error" variant="text">
-                      Kill
-                    </Button>
-                  }
-                />
+                {openedByHand(session.name) ? null : (
+                  <KillSession
+                    machine={machine}
+                    row={
+                      <Row>
+                        <State state="unknown">unclaimed</State>
+                        <span className="machines__text">
+                          <span className="machines__name">{session.name}</span>
+                          <Mono className="machines__where">
+                            {machine} · {session.windows} window
+                            {session.windows === 1 ? '' : 's'}
+                          </Mono>
+                        </span>
+                      </Row>
+                    }
+                    session={session.name}
+                    trigger={
+                      <Button tone="error" variant="text">
+                        Kill
+                      </Button>
+                    }
+                  />
+                )}
               </span>
             </Row>
           </li>

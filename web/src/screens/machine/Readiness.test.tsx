@@ -380,6 +380,12 @@ describe('the Readiness card', () => {
     }
   })
 
+  it('says a date as a date for a machine last seen long ago', async () => {
+    daemon()
+    await draw(report(checks(['tmux'])), [earlier], { machine: machine({ online: false }), lastSeen: '8 Oct' })
+    expect(card().getByText('Last seen on 8 Oct · Yantra asks again when it comes back.')).toBeTruthy()
+  })
+
   it('is asleep for a machine the tailnet says is off, and offers nothing to press', async () => {
     daemon()
     await draw(report(checks(['tmux'])), [earlier], { machine: machine({ online: false }), lastSeen: '3h' })

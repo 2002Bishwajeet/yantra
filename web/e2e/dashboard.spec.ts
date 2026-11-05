@@ -46,6 +46,23 @@ test.describe('the dashboard on a busy fleet', () => {
     await expect(worth.getByRole('button', { name: 'Adopt' })).toHaveCount(0)
   })
 
+  test('keeps the New session button off the "waiting on you" headline', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the FAB floats over the page only on a phone')
+    const fab = page.locator('.shell__fab')
+    const words = page.locator('.dash__hero-words')
+    await expect(fab).toBeVisible()
+    const apart = async () => {
+      const [a, b] = [await fab.boundingBox(), await words.boundingBox()]
+      expect(a && b).toBeTruthy()
+      const touching =
+        a!.x < b!.x + b!.width && b!.x < a!.x + a!.width && a!.y < b!.y + b!.height && b!.y < a!.y + a!.height
+      expect(touching).toBe(false)
+    }
+    await apart()
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await apart()
+  })
+
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {
     const h1 = page.locator('h1:visible')
     await expect(h1).toHaveCount(1)

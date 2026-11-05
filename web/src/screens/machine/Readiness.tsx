@@ -6,7 +6,7 @@ import { asApiError } from '@/api/errors'
 import { useAbout } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
 import { fixOf, nameOf, tookOf, withoutSignIn } from '@/lib/checks'
-import { ago } from '@/lib/time'
+import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -356,7 +356,7 @@ function Body(props: {
     case 'asleep':
       return (
         <Text render={<p />} className="readiness__said" scale="body-medium" tone="variant">
-          {lastSeen ? `Last seen ${lastSeen} ago · ` : ''}Yantra asks again when it comes back.
+          {lastSeen ? `Last seen ${seen(lastSeen)} · ` : ''}Yantra asks again when it comes back.
         </Text>
       )
     case 'expired':
