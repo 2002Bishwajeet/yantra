@@ -505,6 +505,7 @@ deleted everywhere else.
 | Y-654 | Answer approvals and questions at the composer | ⬜ todo | claude | — | **Owner, 2026-11-05:** a question from Claude shows as "asks to use a tool" with Accept and Decline only. Copy T3's `ComposerPendingApprovalActions.tsx`. **Done** when an approval and each option of a question are answered from the composer, and a test covers both. |
 | Y-655 | Start a thread by typing | ⬜ todo | claude | Y-649 | **Owner, 2026-11-05:** a new thread in a known workspace takes the four-step wizard. **Done** when typing a prompt in a workspace's chat starts a thread, and the wizard stays only for a new repository. |
 | Y-656 | v0.10.3 | 🟡 wip | owner, claude | — | **Owner, 2026-11-05:** ship the waves of 2026-11-05 and stop. **Done** when v0.10.3 is published, the box runs it, and the owner walks the chat screen and the [smoke pass](docs/plans/smoke-pass.md). |
+| Y-657 | Agent callers: tagged and scoped ([ADR-0040](docs/adr/0040-an-agent-caller-is-tagged-and-scoped.md)) | ⬜ todo | owner, claude | — | **Owner, 2026-11-05:** a chat agent on the appliance (Bilbo) delegates code work through Yantra without owner rights. On the appliance it connects over a local socket; elsewhere as a tagged node. **Done** when the owner accepts ADR-0040, an agent grant lets Bilbo start a task on one listed workspace, every other route answers 403, and the task ends in a pull request. Tackled later. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
