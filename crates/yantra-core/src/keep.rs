@@ -1028,7 +1028,8 @@ mod tests {
     #[test]
     fn output_over_the_cap_stops_the_agent_and_says_why() {
         let scratch = Scratch::new("cap");
-        let mut keeper = keep(&scratch.0, "exec yes", 100, 3600, 1);
+        // Bounded output: `yes` wrote gigabytes per tick and filled a tmpfs `/tmp`.
+        let mut keeper = keep(&scratch.0, "printf '%0200d' 0; exec sleep 60", 100, 3600, 1);
         assert_eq!(ended(&mut keeper).code(), Some(143), "SIGTERM");
         assert!(
             scratch
