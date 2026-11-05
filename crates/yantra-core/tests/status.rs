@@ -94,8 +94,12 @@ impl Lab {
             ),
             None => "[]".to_owned(),
         };
+        self.registry_says(&json).await
+    }
+
+    async fn registry_says(&self, json: &str) -> Result<()> {
         use base64::Engine as _;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&json);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(json);
         self.ssh
             .exec(&format!("printf %s '{b64}' | base64 -d > ~/.agents.json"))
             .await?;
@@ -230,6 +234,24 @@ async fn a_live_pane_backed_by_the_registry_is_running() -> Result<()> {
 
     assert_eq!(lab.verdict("statusrun").await?, Verdict::Running);
     lab.tmux.kill(&lab.ssh, "statusrun").await?;
+    Ok(())
+}
+
+/// Y-639: 2.1.318 lists a background agent with no `pid` ahead of the one in
+/// the pane, and that entry once emptied the whole registry.
+#[tokio::test]
+async fn a_background_agent_with_no_pid_leaves_the_pane_running() -> Result<()> {
+    let Some(lab) = Lab::start("status-bg").await? else {
+        return Ok(());
+    };
+    lab.registry_says(&format!(
+        r#"[{{"id":"b01412b5","cwd":"{REPO}","kind":"background","startedAt":1789245229327,"sessionId":"b01412b5-0000-4000-8000-000000000000","name":"a task","state":"blocked"}},{{"pid":4242,"cwd":"{REPO}","kind":"interactive","startedAt":1793677761631,"sessionId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"agent","status":"busy"}}]"#
+    ))
+    .await?;
+    lab.open("statusbg", "sleep 300").await?;
+
+    assert_eq!(lab.verdict("statusbg").await?, Verdict::Running);
+    lab.tmux.kill(&lab.ssh, "statusbg").await?;
     Ok(())
 }
 

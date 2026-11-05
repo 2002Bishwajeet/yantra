@@ -25,6 +25,12 @@ use crate::watch;
 /// tax on it. Q6 is why it is a constant: one owner, one fleet, nothing to tune.
 const EVERY: Duration = Duration::from_secs(30);
 
+/// How long a verb's wake waits before it looks again (Y-639). `up` and
+/// `resume` return before `claude` registers: a fresh one took about 0.85 s to
+/// appear on the laptop, and the Mac or a Pi is slower. The first look
+/// after the wake then reads the agent as unclear, and this look corrects it.
+const SETTLE: Duration = Duration::from_secs(5);
+
 /// The looks that leave the tailnet, and where the sentence above inverts: a
 /// GitHub poll warms nothing and is spent from the owner's own quota, which
 /// their `gh` and their `git push` draw on too. GitHub asks for this directly
@@ -97,11 +103,13 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
 
     let agents = model.clone();
     let remembered = fleet.events.clone();
+    let woken = fleet.look_at_agents.clone();
     tokio::spawn(async move {
         let mut notifier = Notifier::new(relay);
+        let mut settling = false;
         loop {
             look_at_agents(&agents, &mut notifier, &viewers, &remembered).await;
-            tokio::time::sleep(EVERY).await;
+            tick_or_verb(&woken, &mut settling).await;
         }
     });
 
@@ -180,6 +188,18 @@ async fn tick_or_change(grant: &Grant) {
     tokio::select! {
         () = tokio::time::sleep(ATTENTION) => {}
         () = grant.changed() => {}
+    }
+}
+
+/// A verb's wake costs two looks: one now, and one [`SETTLE`] later.
+async fn tick_or_verb(woken: &tokio::sync::Notify, settling: &mut bool) {
+    if std::mem::take(settling) {
+        tokio::time::sleep(SETTLE).await;
+        return;
+    }
+    tokio::select! {
+        () = tokio::time::sleep(EVERY) => {}
+        () = woken.notified() => *settling = true,
     }
 }
 
@@ -368,6 +388,58 @@ mod tests {
             key_expires: None,
             addresses: Vec::new(),
         }
+    }
+
+    /// Y-639: a verb wakes the agent sweep, even one that lands while a look is
+    /// running, and with no verb the sweep waits out `EVERY`.
+    #[tokio::test(start_paused = true)]
+    async fn a_verb_wakes_the_agent_sweep_before_every() {
+        let woken = tokio::sync::Notify::new();
+        let mut settling = false;
+        let start = tokio::time::Instant::now();
+        woken.notify_one();
+        tick_or_verb(&woken, &mut settling).await;
+        assert!(start.elapsed() < SETTLE);
+
+        tick_or_verb(&woken, &mut settling).await;
+        assert!(start.elapsed() >= SETTLE && start.elapsed() < EVERY);
+
+        tick_or_verb(&woken, &mut settling).await;
+        assert!(start.elapsed() >= SETTLE + EVERY);
+    }
+
+    /// Y-639: `up` returns before `claude` registers, so the look the verb
+    /// wakes finds no agent. The sweep looks again before `EVERY`, and the
+    /// agent reads as running then.
+    #[tokio::test(start_paused = true)]
+    async fn an_agent_that_registers_after_up_reads_as_running_before_every() {
+        let woken = Arc::new(tokio::sync::Notify::new());
+        let readings = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut registry = vec![true, false, false];
+        let (waking, seen) = (woken.clone(), readings.clone());
+        let sweep = tokio::spawn(async move {
+            let mut settling = false;
+            loop {
+                let registered = registry.pop().unwrap_or(true);
+                seen.lock()
+                    .expect("readings")
+                    .push((tokio::time::Instant::now(), registered));
+                tick_or_verb(&waking, &mut settling).await;
+            }
+        });
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let up = tokio::time::Instant::now();
+        woken.notify_one();
+        tokio::time::sleep(SETTLE + Duration::from_secs(1)).await;
+        sweep.abort();
+
+        let readings = readings.lock().expect("readings").clone();
+        let after: Vec<_> = readings.iter().filter(|(at, _)| *at >= up).collect();
+        assert_eq!(after.len(), 2, "{readings:?}");
+        assert!(!after[0].1, "the first look after up finds no agent");
+        assert!(after[1].1, "the second look finds it");
+        assert!(after[1].0 - up < EVERY);
     }
 
     /// I-47's lesson in the read model: a browser that arrives before the first

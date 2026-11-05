@@ -168,7 +168,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
     onThread(id)
   }
 
-  const { data: agent } = useQuery(statusQuery(name))
+  const { data: agent, isPending: unread } = useQuery(statusQuery(name))
   const status: WorkspaceStatus | null =
     agent === undefined || agent === MISSING || agent.looked !== 'ok' ? null : agent.data
   const state = status?.reached === 'yes' ? status.status : null
@@ -235,14 +235,23 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
                 is the session.
               </Text>
             ) : null}
-            <Terminal
-              height={factor === 'phone' ? '50vh' : '60vh'}
-              key={name}
-              label={`tmux ${name} on ${workspace.machine}`}
-              target={{ workspace: name, machine: workspace.machine }}
-            >
-              {factor === 'phone' ? <KeyRow /> : null}
-            </Terminal>
+            {/* Y-639: every Stop ends here, so it is a note and not a refused attach. */}
+            {state?.state === 'no_session' ? (
+              <Text render={<p />} className="session__banner" scale="body-medium">
+                {name} is stopped.{workspace.startup === null ? ' Resume starts claude again.' : ''}
+              </Text>
+            ) : unread ? (
+              <Skeleton shape="row" />
+            ) : (
+              <Terminal
+                height={factor === 'phone' ? '50vh' : '60vh'}
+                key={name}
+                label={`tmux ${name} on ${workspace.machine}`}
+                target={{ workspace: name, machine: workspace.machine }}
+              >
+                {factor === 'phone' ? <KeyRow /> : null}
+              </Terminal>
+            )}
           </div>
         ) : null}
         {view === 'transcript' ? (

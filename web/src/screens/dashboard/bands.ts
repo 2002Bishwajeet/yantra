@@ -56,7 +56,7 @@ const happened: Record<Event['kind'], { mark: MarkState; words: string }> = {
   no_agent: { mark: 'running', words: 'opened as a shell' },
   finished: { mark: 'done', words: 'finished' },
   stopped: { mark: 'idle', words: 'stopped' },
-  no_session: { mark: 'idle', words: 'no session' },
+  no_session: { mark: 'idle', words: 'stopped' },
   crashed: { mark: 'failed', words: 'crashed' },
   killed: { mark: 'failed', words: 'killed' },
   unclear: { mark: 'unknown', words: 'unclear' },
