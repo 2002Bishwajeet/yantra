@@ -334,15 +334,20 @@ impl Tmux {
     /// Whether a server answers. An empty `-D` server has no sessions and is
     /// still one, so this is not `list` being empty.
     pub async fn running<E: Exec>(&self, exec: &E) -> Result<bool, Error> {
+        Ok(self.sessions(exec).await?.is_some())
+    }
+
+    /// What `list-sessions` printed, or `None` when no server answers.
+    async fn sessions<E: Exec>(&self, exec: &E) -> Result<Option<String>, Error> {
         let out = exec
             .exec(&format!("{} list-sessions", sq(&self.path)))
             .await?;
         if out.success() {
-            return Ok(true);
+            return Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()));
         }
         let stderr = String::from_utf8_lossy(&out.stderr);
         if no_server(&stderr) {
-            return Ok(false);
+            return Ok(None);
         }
         Err(Error::Command {
             command: "list-sessions".to_owned(),
@@ -351,16 +356,22 @@ impl Tmux {
         })
     }
 
-    /// A Mac's server in the login session: the one running, or one
+    /// A Mac's server in the login session: one holding a session, or one
     /// [`LOGIN_SERVER`]'s LaunchAgent starts (ADR-0018's 2026-11-04 amendment).
     /// `false` means no one is logged in at the screen.
+    ///
+    /// An empty server gets the script too, which replaces an older job and
+    /// its `PATH` (Y-640); if that fails, the empty server still serves.
     pub async fn login_server<E: Exec>(&self, exec: &E) -> Result<bool, Error> {
-        if self.running(exec).await? {
-            return Ok(true);
-        }
+        let answered = match self.sessions(exec).await? {
+            Some(listed) if !listed.trim().is_empty() => return Ok(true),
+            Some(_) => true,
+            None => false,
+        };
         let out = exec.exec(&login_server_command(&self.path)).await?;
         match out.status {
             0 => Ok(true),
+            _ if answered => Ok(true),
             NO_ONE_AT_THE_SCREEN => Ok(false),
             status => Err(Error::Command {
                 command: "launchctl".to_owned(),
@@ -808,8 +819,21 @@ mod tests {
     async fn an_empty_server_is_running() {
         let mac = fake::Mac::new(fake::Server::Empty, 0);
         assert!(tmux().running(&mac).await.expect("answered"));
-        assert!(tmux().login_server(&mac).await.expect("answered"));
         assert!(!mac.asked_for("launchctl"));
+    }
+
+    /// Y-640: KeepAlive keeps an empty server up, so an older job is replaced
+    /// there or never. A failed replacement still leaves that server to use.
+    #[tokio::test]
+    async fn an_empty_server_gets_the_script_and_still_serves_if_it_fails() {
+        for script in [0, 1, 3] {
+            let mac = fake::Mac::new(fake::Server::Empty, script);
+            assert!(
+                tmux().login_server(&mac).await.expect("answered"),
+                "{script}"
+            );
+            assert_eq!(mac.asked().last(), Some(&login_server_command(TMUX)));
+        }
     }
 
     #[tokio::test]
@@ -882,12 +906,26 @@ mod tests {
 
     /// The bootout of a loaded job ends the server it runs, and its sessions.
     #[test]
-    fn an_older_job_holding_a_server_is_left_alone() {
+    fn an_older_job_holding_a_session_is_left_alone() {
         let mac = launchd::Mac::new("older-held", true, true, Some("older"));
+        std::fs::write(mac.dir.join("server"), "main: 1 windows\n").expect("a session");
         let out = login_server_on(&mac);
         assert_eq!(out.status.code(), Some(0), "{out:?}");
         assert_eq!(mac.plist().as_deref(), Some("older"));
         assert!(!mac.log().contains("bootout"), "{}", mac.log());
+    }
+
+    /// Y-640: an empty server loses nothing, and KeepAlive never lets it end.
+    #[test]
+    fn an_older_job_with_an_empty_server_is_replaced() {
+        let mac = launchd::Mac::new("older-empty", true, true, Some("older"));
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert!(mac.plist().expect("a plist").contains("KeepAlive"));
+        let log = mac.log();
+        let bootout = log.find("bootout").expect("the old job was booted out");
+        let bootstrap = log.find("bootstrap").expect("the new job was loaded");
+        assert!(bootout < bootstrap, "{log}");
     }
 
     #[test]
@@ -900,6 +938,65 @@ mod tests {
         let bootout = log.find("bootout").expect("the old job was booted out");
         let bootstrap = log.find("bootstrap").expect("the new job was loaded");
         assert!(bootout < bootstrap, "{log}");
+    }
+
+    /// The fixed directories, in the order the plist adds those it lacks.
+    fn fixed(home: &std::path::Path) -> String {
+        format!(
+            "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            home.display()
+        )
+    }
+
+    /// Y-640: nvm's node is on the login shell's PATH only. The shell prints
+    /// an escape code first, as iTerm's rc does.
+    #[test]
+    fn the_job_gets_the_login_shells_path_and_then_the_fixed_one() {
+        let mac = launchd::Mac::new("login-path", false, false, None);
+        mac.login_shell(
+            "#!/bin/sh\nprintf '\\033]1337;RemoteHost=me\\007'\n\
+             PATH=/fake/nvm/bin:/usr/bin:/bin; export PATH\neval \"$2\"\n",
+        );
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert_eq!(
+            mac.path(),
+            format!(
+                "/fake/nvm/bin:/usr/bin:/bin:{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:\
+                 /usr/sbin:/sbin",
+                mac.dir.display()
+            )
+        );
+    }
+
+    #[test]
+    fn a_login_shell_that_fails_or_prints_junk_gives_the_fixed_path() {
+        let mac = launchd::Mac::new("login-fails", false, false, None);
+        assert_eq!(login_server_on(&mac).status.code(), Some(0));
+        assert_eq!(mac.path(), fixed(&mac.dir));
+
+        for junk in [
+            "#!/bin/sh\necho 'zsh: no such option'\n",
+            "#!/bin/sh\necho yantra-login-path\necho 'not a path'\n",
+            "#!/bin/sh\necho yantra-login-path\necho '/a&b:/usr/bin'\n",
+        ] {
+            let mac = launchd::Mac::new("login-junk", false, false, None);
+            mac.login_shell(junk);
+            assert_eq!(login_server_on(&mac).status.code(), Some(0), "{junk}");
+            assert_eq!(mac.path(), fixed(&mac.dir), "{junk}");
+        }
+    }
+
+    /// An rc file that waits on a prompt must not hold the session's start.
+    #[test]
+    fn a_login_shell_that_hangs_is_cut_off() {
+        let mac = launchd::Mac::new("login-hangs", false, false, None);
+        mac.login_shell("#!/bin/sh\nexec sleep 60\n");
+        let started = std::time::Instant::now();
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
+        assert_eq!(mac.path(), fixed(&mac.dir));
     }
 
     #[test]
@@ -1026,7 +1123,13 @@ kickstart) test -f "$FAKE/loaded" && touch "$FAKE/server" ;;
 esac
 "#,
             );
-            write_tool(&dir, "tmux", "#!/bin/sh\ntest -f \"$FAKE/server\"\n");
+            write_tool(
+                &dir,
+                "tmux",
+                "#!/bin/sh\ntest -f \"$FAKE/server\" && cat \"$FAKE/server\"\n",
+            );
+            // A login shell that fails, so the plist holds the fixed PATH.
+            write_tool(&dir, "shell", "#!/bin/sh\nexit 1\n");
             if server {
                 std::fs::write(dir.join("server"), "").expect("a file");
             }
@@ -1045,6 +1148,11 @@ esac
             self.dir.join("bin/tmux").display().to_string()
         }
 
+        /// Replaces the account's login shell, which `$SHELL` names.
+        pub(crate) fn login_shell(&self, body: &str) {
+            write_tool(&self.dir, "shell", body);
+        }
+
         /// Runs `script` under `sh` with this Mac's tools and `$HOME`.
         pub(crate) fn run(&self, script: &str) -> std::process::Output {
             let path = format!(
@@ -1056,6 +1164,7 @@ esac
                 .args(["-c", script])
                 .env("HOME", &self.dir)
                 .env("FAKE", &self.dir)
+                .env("SHELL", self.dir.join("bin/shell"))
                 .env("PATH", path)
                 .output()
                 .expect("sh is on every machine this builds on")
@@ -1067,6 +1176,18 @@ esac
 
         pub(crate) fn plist(&self) -> Option<String> {
             std::fs::read_to_string(self.dir.join(PLIST)).ok()
+        }
+
+        /// The `PATH` the plist gives the job.
+        pub(crate) fn path(&self) -> String {
+            let plist = self.plist().expect("the plist was written");
+            let (_, rest) = plist
+                .split_once("<key>PATH</key><string>")
+                .expect("the plist sets PATH");
+            rest.split_once("</string>")
+                .expect("a closed string")
+                .0
+                .to_owned()
         }
     }
 

@@ -123,10 +123,10 @@ impl Drop for Lab {
     }
 }
 
-/// The twelve checks D2 §3.1 lists, in the order `doctor` reports them. Asserted
+/// The thirteen checks D2 §3.1 lists, in the order `doctor` reports them. Asserted
 /// on every path below, because the list *and its order* are the contract an
 /// installer and an agent read (D2.2).
-const EXPECTED: [&str; 12] = [
+const EXPECTED: [&str; 13] = [
     "reachable",
     "sshd",
     "tmux",
@@ -138,6 +138,7 @@ const EXPECTED: [&str; 12] = [
     "login-session",
     "mic",
     "folder-access",
+    "hooks",
     "heartbeat",
 ];
 
@@ -253,6 +254,8 @@ async fn a_bare_machine_tells_missing_apart_from_unaskable() -> Result<()> {
     assert_state(&checks, "heartbeat", State::Unknown);
     // Y-591: only macOS blocks folders over ssh.
     assert_state(&checks, "folder-access", State::Present);
+    // Y-640: no settings.json and no plugin, so no hook names a program.
+    assert_state(&checks, "hooks", State::Present);
     // ADR-0031 §9: optional, and the detail says so.
     assert_state(&checks, "mic", State::Absent);
     assert!(
@@ -265,6 +268,36 @@ async fn a_bare_machine_tells_missing_apart_from_unaskable() -> Result<()> {
         look(&checks, "terminfo").detail.contains(UNKNOWN_REMOTELY),
         "a downgrade has to name the terminal it lost"
     );
+    Ok(())
+}
+
+/// Y-640, against a real shell: a hook whose program is not on the `PATH` is
+/// named, and one whose program is there is not.
+#[tokio::test]
+async fn a_hook_whose_program_is_missing_is_named() -> Result<()> {
+    let Some(lab) = Lab::start("hooks")? else {
+        return Ok(());
+    };
+    let settings = r#"{"hooks": {"Stop": [{"hooks": [
+        {"type": "command", "command": "sh", "args": ["-c", "true"]},
+        {"type": "command", "command": "TERM=dumb yantra-no-such-program --flag"}
+    ]}]}}"#;
+    let out = lab
+        .ssh
+        .exec(&format!(
+            "mkdir -p ~/.claude && printf %s '{settings}' > ~/.claude/settings.json"
+        ))
+        .await?;
+    anyhow::ensure!(out.success(), "writing settings.json failed");
+
+    let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
+    assert_state(&checks, "hooks", State::Absent);
+    let detail = &look(&checks, "hooks").detail;
+    assert!(
+        detail.contains("`yantra-no-such-program` (Stop in settings.json)"),
+        "{detail}"
+    );
+    assert!(!detail.contains("`sh`"), "{detail}");
     Ok(())
 }
 

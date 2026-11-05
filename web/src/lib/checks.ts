@@ -56,6 +56,16 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
     fix: (machine) => ({ by: 'hand', words: fullDisk(machine) }),
     session: false,
   },
+  // Y-640: a warning, because the agent starts and only its hooks fail.
+  hooks: {
+    name: 'agent hooks',
+    fix: () => ({
+      by: 'hand',
+      words:
+        'Install the command where the agent finds it, or put its directory on PATH in your login shell. Yantra reads that PATH when it next starts tmux.',
+    }),
+    session: false,
+  },
   heartbeat: {
     name: 'heartbeat',
     fix: () => ({ by: 'hand', words: 'The join command offers yantra-agent, which sends it.' }),
@@ -63,7 +73,7 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
   },
 }
 
-/** `doctor`'s twelve ids, in its order. */
+/** `doctor`'s thirteen ids, in its order. */
 export const CHECK_IDS: readonly string[] = Object.keys(CHECKS)
 
 export const nameOf = (check: string): string => CHECKS[check]?.name ?? check

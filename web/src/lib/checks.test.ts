@@ -20,7 +20,7 @@ const NO_SERVER =
   'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
 
 describe('the check name table', () => {
-  it('names each of doctor’s twelve checks the way a person says it', () => {
+  it('names each of doctor’s thirteen checks the way a person says it', () => {
     expect(
       [
         'reachable',
@@ -34,6 +34,7 @@ describe('the check name table', () => {
         'login-session',
         'mic',
         'folder-access',
+        'hooks',
         'heartbeat',
       ].map(nameOf),
     ).toEqual([
@@ -48,6 +49,7 @@ describe('the check name table', () => {
       'claude signed in',
       'microphone',
       'folder access',
+      'agent hooks',
       'heartbeat',
     ])
   })
@@ -68,6 +70,12 @@ describe('the check name table', () => {
       words:
         'To allow it, open System Settings > General > Sharing > Remote Login, and turn on Allow full disk access for remote users. Every ssh login to mbp, agents included, then gets that access.',
     })
+    expect(fixOf({ check: 'hooks' }, 'mbp')).toEqual({
+      by: 'hand',
+      words:
+        'Install the command where the agent finds it, or put its directory on PATH in your login shell. Yantra reads that PATH when it next starts tmux.',
+    })
+    expect(sessionNeeds('hooks')).toBe(false)
   })
 
   /** Y-619: on a Mac with no login tmux server, both keychain checks are
@@ -110,7 +118,7 @@ describe('the check name table', () => {
 
   /** Y-390 review: GitHub and `yantra-agent` are optional for a session. */
   it('lists doctor’s ids in order, and says which of them a session needs', () => {
-    expect(CHECK_IDS).toHaveLength(12)
+    expect(CHECK_IDS).toHaveLength(13)
     expect(CHECK_IDS.filter(sessionNeeds)).toEqual(['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'])
     expect(sessionNeeds('docker')).toBe(false)
   })

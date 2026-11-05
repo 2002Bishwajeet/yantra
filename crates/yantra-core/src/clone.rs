@@ -241,10 +241,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_mac_with_an_empty_server_clones_without_launchctl() {
+    async fn a_mac_with_an_empty_server_clones() {
         let mac = Mac::new(Server::Empty, 3);
         cloned(&mac).await.expect("cloning");
-        assert!(!mac.asked_for("launchctl"));
+        assert!(mac.asked_for("new-session"));
     }
 
     #[tokio::test]

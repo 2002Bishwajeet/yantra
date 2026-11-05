@@ -16,8 +16,8 @@
 //! **Two of these need a person at that machine first**: Y-139's transcript
 //! measurement and Y-151's gate both want a tmux server started from a GUI
 //! login, and both refuse without one. Their own doc comments say why and what
-//! to run. Y-632's needs the owner logged in at the screen, and ends every tmux
-//! session there.
+//! to run. Y-632's and Y-640's need the owner logged in at the screen, and end
+//! every tmux session there.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -353,6 +353,91 @@ async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<
         "the LaunchAgent's server finds no credential (authMethod `{}`), so it is not in the \
          login session",
         auth.method
+    );
+    Ok(())
+}
+
+/// **Y-640's done condition**: after `up` starts a fresh server through the
+/// LaunchAgent, that server's `PATH` holds the login shell's node directory,
+/// `doctor` reports `hooks` present, and `node` and `claude-mem` resolve in it.
+/// Needs the owner logged in at the Mac's screen.
+///
+/// **It runs `tmux kill-server`, so every tmux session on that Mac ends.** It
+/// leaves the LaunchAgent loaded and its server running.
+#[tokio::test]
+#[ignore = "needs the real MacBook with the owner logged in at its screen, and kills its tmux server; set YANTRA_MAC=user@host"]
+async fn the_agents_hooks_find_their_commands_on_the_mac() -> anyhow::Result<()> {
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest.clone(),
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y640"),
+    })?;
+    anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
+    let tmux = Tmux::resolve(&ssh).await?;
+
+    let node = ssh
+        // The `echo` ends the line iTerm's escape codes are on.
+        .exec("\"$SHELL\" -lic 'echo; command -v node' </dev/null 2>/dev/null | tail -n 1")
+        .await?;
+    let node = String::from_utf8_lossy(&node.stdout).trim().to_owned();
+    let node_dir = node
+        .rsplit_once('/')
+        .map(|(dir, _)| dir.to_owned())
+        .filter(|dir| dir.starts_with('/'))
+        .ok_or_else(|| anyhow::anyhow!("the login shell finds no node: {node:?}"))?;
+
+    ssh.exec(&format!("'{}' kill-server", tmux.path())).await?;
+    anyhow::ensure!(
+        !tmux.running(&ssh).await?,
+        "the server outlived kill-server"
+    );
+
+    let _leaves = Leaves::session_only(&dest, tmux.path(), E2E);
+    let ws = workspace::Workspace {
+        name: E2E.to_owned(),
+        machine: dest.clone(),
+        repo: PathBuf::from("/tmp"),
+        startup: None,
+    };
+    up::open(&ssh, &tmux, &ws, None, Os::MacOs).await?;
+
+    let plist = ssh
+        .exec("cat \"$HOME/Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux.plist\"")
+        .await?;
+    let plist = String::from_utf8_lossy(&plist.stdout);
+    println!("{plist}");
+    anyhow::ensure!(
+        plist.contains(&format!("{node_dir}:")) || plist.contains(&format!("{node_dir}<")),
+        "the plist's PATH lacks the login shell's {node_dir}"
+    );
+
+    let checks = doctor::of(&ssh, "xterm-256color").await;
+    let hooks = checks
+        .iter()
+        .find(|check| check.check == "hooks")
+        .ok_or_else(|| anyhow::anyhow!("doctor reports no hooks check"))?;
+    println!("hooks: {:?}: {}", hooks.state, hooks.detail);
+    anyhow::ensure!(
+        hooks.state == doctor::State::Present,
+        "hooks is {:?}: {}",
+        hooks.state,
+        hooks.detail
+    );
+
+    let inside = ssh
+        .exec(&format!(
+            "'{}' run-shell 'command -v node && command -v claude-mem; exit 0'",
+            tmux.path()
+        ))
+        .await?;
+    let inside = String::from_utf8_lossy(&inside.stdout);
+    println!("inside the server: {inside}");
+    anyhow::ensure!(
+        inside.lines().filter(|line| line.starts_with('/')).count() == 2,
+        "the server's PATH lacks node or claude-mem: {inside}"
     );
     Ok(())
 }
