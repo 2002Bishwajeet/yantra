@@ -21,7 +21,6 @@ export function phrase(status: WorkspaceStatus | null): { mark: MarkState; words
     case 'finished':
       return { mark: 'done', words: 'finished', live: false }
     case 'stopped':
-      return { mark: 'idle', words: 'stopped', live: false }
     case 'no_session':
       return { mark: 'idle', words: 'stopped', live: false }
     case 'unclear':
