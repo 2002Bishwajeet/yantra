@@ -843,6 +843,50 @@ mod tests {
         assert!(!mac.asked_for("launchctl"));
     }
 
+    fn login_server_on(mac: &launchd::Mac) -> std::process::Output {
+        mac.run(&login_server_command(&mac.tmux()))
+    }
+
+    /// Join runs the script on a Mac whose Terminal already holds a server.
+    /// The job is installed anyway, and waits in its `ls` loop.
+    #[test]
+    fn a_running_server_still_gets_the_launch_agent() {
+        let mac = launchd::Mac::new("running", true, false, None);
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let plist = mac.plist().expect("the plist was written");
+        assert!(plist.contains("<key>KeepAlive</key><true/>"), "{plist}");
+        assert!(
+            plist.contains(&format!("<string>{}</string>", mac.tmux())),
+            "{plist}"
+        );
+        let log = mac.log();
+        assert!(log.contains("launchctl bootstrap gui/"), "{log}");
+        assert!(!log.contains("bootout"), "{log}");
+    }
+
+    /// The bootout of a loaded job ends the server it runs, and its sessions.
+    #[test]
+    fn an_older_job_holding_a_server_is_left_alone() {
+        let mac = launchd::Mac::new("older-held", true, true, Some("older"));
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert_eq!(mac.plist().as_deref(), Some("older"));
+        assert!(!mac.log().contains("bootout"), "{}", mac.log());
+    }
+
+    #[test]
+    fn an_older_job_with_no_server_is_replaced() {
+        let mac = launchd::Mac::new("older-idle", false, true, Some("older"));
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert!(mac.plist().expect("a plist").contains("KeepAlive"));
+        let log = mac.log();
+        let bootout = log.find("bootout").expect("the old job was booted out");
+        let bootstrap = log.find("bootstrap").expect("the new job was loaded");
+        assert!(bootout < bootstrap, "{log}");
+    }
+
     #[test]
     fn single_quoting_survives_quotes_and_newlines() {
         assert_eq!(sq("plain"), "'plain'");
@@ -929,5 +973,98 @@ pub(crate) mod fake {
                 stderr: stderr.as_bytes().to_vec(),
             })
         }
+    }
+}
+
+/// A Mac's `launchctl` and `tmux` as shell scripts, so `login_server.sh` runs
+/// for real on the build host. State is three files in the directory.
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+pub(crate) mod launchd {
+    use std::path::{Path, PathBuf};
+
+    pub(crate) const PLIST: &str =
+        "Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux.plist";
+
+    pub(crate) struct Mac {
+        pub(crate) dir: PathBuf,
+    }
+
+    impl Mac {
+        /// `server`: a tmux server answers. `loaded`: the job is in the domain.
+        pub(crate) fn new(label: &str, server: bool, loaded: bool, plist: Option<&str>) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("yantra-launchd-{label}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("bin")).expect("a directory");
+            // kickstart starts the server only when the job is loaded.
+            write_tool(
+                &dir,
+                "launchctl",
+                r#"#!/bin/sh
+echo "launchctl $*" >>"$FAKE/log"
+case "$1" in
+print) case "$2" in */*/*) test -f "$FAKE/loaded" ;; *) exit 0 ;; esac ;;
+bootstrap) touch "$FAKE/loaded" ;;
+bootout) rm "$FAKE/loaded" "$FAKE/server" 2>/dev/null; exit 0 ;;
+kickstart) test -f "$FAKE/loaded" && touch "$FAKE/server" ;;
+esac
+"#,
+            );
+            write_tool(&dir, "tmux", "#!/bin/sh\ntest -f \"$FAKE/server\"\n");
+            if server {
+                std::fs::write(dir.join("server"), "").expect("a file");
+            }
+            if loaded {
+                std::fs::write(dir.join("loaded"), "").expect("a file");
+            }
+            if let Some(plist) = plist {
+                let path = dir.join(PLIST);
+                std::fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
+                std::fs::write(path, plist).expect("a file");
+            }
+            Self { dir }
+        }
+
+        pub(crate) fn tmux(&self) -> String {
+            self.dir.join("bin/tmux").display().to_string()
+        }
+
+        /// Runs `script` under `sh` with this Mac's tools and `$HOME`.
+        pub(crate) fn run(&self, script: &str) -> std::process::Output {
+            let path = format!(
+                "{}:{}",
+                self.dir.join("bin").display(),
+                std::env::var("PATH").unwrap_or_default()
+            );
+            std::process::Command::new("sh")
+                .args(["-c", script])
+                .env("HOME", &self.dir)
+                .env("FAKE", &self.dir)
+                .env("PATH", path)
+                .output()
+                .expect("sh is on every machine this builds on")
+        }
+
+        pub(crate) fn log(&self) -> String {
+            std::fs::read_to_string(self.dir.join("log")).unwrap_or_default()
+        }
+
+        pub(crate) fn plist(&self) -> Option<String> {
+            std::fs::read_to_string(self.dir.join(PLIST)).ok()
+        }
+    }
+
+    impl Drop for Mac {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn write_tool(dir: &Path, name: &str, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("bin").join(name);
+        std::fs::write(&path, body).expect("a file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     }
 }

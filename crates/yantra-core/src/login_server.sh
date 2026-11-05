@@ -12,8 +12,6 @@ login_server() {
     label=io.github.2002bishwajeet.yantra-tmux
     plist=$HOME/Library/LaunchAgents/$label.plist
     log=$HOME/Library/Logs/yantra-tmux.log
-    # The bootout below would end a running server's sessions.
-    "$tmux" ls >/dev/null 2>&1 && return 0
     # kill-server ends `-D` with 0, so KeepAlive is unconditional. A second `-D`
     # on a held socket exits 1, so the job waits out a server it did not start.
     job=$(cat <<PLIST
@@ -31,11 +29,15 @@ login_server() {
 </plist>
 PLIST
 )
-    # A plist an older Yantra wrote is replaced, and its job with it.
+    # A plist an older Yantra wrote is replaced, and its job with it. The
+    # bootout ends the server that job runs, so it waits until no server answers.
     if [ "$(cat "$plist" 2>/dev/null)" != "$job" ]; then
+        if launchctl print "$domain/$label" >/dev/null 2>&1; then
+            "$tmux" ls >/dev/null 2>&1 && return 0
+            launchctl bootout "$domain/$label" 2>/dev/null
+        fi
         mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" || return 1
         printf '%s\n' "$job" >"$plist" || return 1
-        launchctl bootout "$domain/$label" 2>/dev/null
     fi
     launchctl print "$domain/$label" >/dev/null 2>&1 ||
         launchctl bootstrap "$domain" "$plist" || return 1

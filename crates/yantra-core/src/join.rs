@@ -80,6 +80,45 @@ mod tests {
         assert!(script.contains("login_server \"$tmux\""));
     }
 
+    /// `join.sh`'s `say` and `mac_tmux`, with the login-server function, run on
+    /// a fake Mac. The output is what the person reads.
+    fn mac_tmux_on(mac: &crate::tmux::launchd::Mac) -> String {
+        let start = SCRIPT.find("mac_tmux() {").expect("join.sh has mac_tmux");
+        let end = start + SCRIPT[start..].find("\n}\n").expect("mac_tmux ends") + 3;
+        let say = SCRIPT
+            .lines()
+            .find(|line| line.starts_with("say() {"))
+            .expect("join.sh has say");
+        let out = mac.run(&format!(
+            "{say}\n{}\n{}\nmac_tmux\n",
+            crate::tmux::LOGIN_SERVER,
+            &SCRIPT[start..end]
+        ));
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// A Mac whose Terminal already runs tmux still gets the LaunchAgent, and
+    /// join does not claim the running server is the job's.
+    #[test]
+    fn join_installs_the_launch_agent_beside_a_running_server() {
+        let mac = crate::tmux::launchd::Mac::new("join-running", true, false, None);
+        let said = mac_tmux_on(&mac);
+        let plist = mac.plist().expect("join wrote the plist");
+        assert!(plist.contains("<key>KeepAlive</key><true/>"), "{plist}");
+        assert!(said.contains("was already running"), "{said}");
+        assert!(!said.contains("runs in your login session"), "{said}");
+        assert!(said.contains(crate::tmux::launchd::PLIST), "{said}");
+    }
+
+    #[test]
+    fn join_with_no_server_says_the_login_session_runs_tmux() {
+        let mac = crate::tmux::launchd::Mac::new("join-none", false, false, None);
+        let said = mac_tmux_on(&mac);
+        assert!(mac.plist().is_some());
+        assert!(said.contains("tmux runs in your login session"), "{said}");
+    }
+
     /// `sh -n` parses without running, so a syntax error fails here rather
     /// than on the machine someone is trying to join.
     #[test]
