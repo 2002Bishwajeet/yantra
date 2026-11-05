@@ -219,7 +219,10 @@ refusal to start — it is every deployment but the appliance, and it is the one
 run. The token is never a workspace field, never written to disk, never logged and never served,
 which is ADR-0013 §4's rule for `YANTRA_DAEMON` applied to the first byte that leaves the tailnet.
 The startup line saying which of the two it got is there because a unit's environment is not the
-shell's, and a headless box has only the journal to say so.
+shell's, and a headless box has only the journal to say so. **No process the daemon starts receives
+`YANTRA_GITHUB_TOKEN`, `YANTRA_NTFY_TOKEN` or `YANTRA_NTFY_URL`** (Y-647): every spawn removes
+`yantra_core::SECRETS`, and [`tests/secrets.rs`](tests/secrets.rs) reads a real child's environment
+to prove it.
 
 **The relay is settable now, and the read above is unchanged** —
 [ADR-0021](../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md), Y-199. `/settings`

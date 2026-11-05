@@ -190,7 +190,7 @@ impl Gitleaks {
     // `--config` outranks both GITLEAKS_CONFIG variables in every 8.x release;
     // GITLEAKS_CONFIG_TOML is read only from 8.25.0.
     fn command(&self) -> Command {
-        let mut command = Command::new(&self.program);
+        let mut command = crate::scrubbed(&self.program);
         command
             .args([
                 "stdin",
@@ -250,7 +250,7 @@ impl Scan for Gitleaks {
     }
 
     fn rules(&self) -> Result<String, ScanError> {
-        let out = Command::new(&self.program)
+        let out = crate::scrubbed(&self.program)
             .arg("version")
             .stdin(Stdio::null())
             .output()

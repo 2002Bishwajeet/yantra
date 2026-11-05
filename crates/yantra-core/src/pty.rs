@@ -167,6 +167,9 @@ fn spawned(ssh: &Ssh, remote: &str, term: &str, size: Size) -> Result<Terminal, 
     // its own `PATH` rather than the caller's (Y-127).
     command.env("PATH", std::env::var("PATH").unwrap_or_default());
     command.env("TERM", term);
+    for name in crate::SECRETS {
+        command.env_remove(name);
+    }
 
     let child = pair
         .slave

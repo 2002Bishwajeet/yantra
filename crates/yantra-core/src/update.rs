@@ -165,7 +165,7 @@ pub async fn apply() -> Result<(), Error> {
             updater: PathBuf::from(UPDATER),
         });
     }
-    let out = tokio::process::Command::new("systemctl")
+    let out = tokio::process::Command::from(crate::scrubbed("systemctl"))
         .args(["start", "--no-ask-password", UNIT])
         .stdin(Stdio::null())
         .output()

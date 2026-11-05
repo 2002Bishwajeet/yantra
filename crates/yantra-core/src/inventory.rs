@@ -203,7 +203,7 @@ impl Inventory for Tailscale {
     }
 
     async fn whois(&self, address: IpAddr) -> Result<Option<Caller>, Error> {
-        let out = tokio::process::Command::new("tailscale")
+        let out = tokio::process::Command::from(crate::scrubbed("tailscale"))
             .args(["whois", "--json", &address.to_string()])
             .stdin(Stdio::null())
             .output()
@@ -230,7 +230,7 @@ impl Inventory for Tailscale {
 
 impl Tailscale {
     async fn status(&self) -> Result<Vec<u8>, Error> {
-        let out = tokio::process::Command::new("tailscale")
+        let out = tokio::process::Command::from(crate::scrubbed("tailscale"))
             .args(["status", "--json"])
             .stdin(Stdio::null())
             .output()
