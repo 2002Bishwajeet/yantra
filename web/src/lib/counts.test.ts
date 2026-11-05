@@ -1,4 +1,5 @@
 import { createElement } from 'react'
+import { renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { AgentRow, Attention, Check, Item, Machine, Readiness } from '@/api'
 import { aListed, aMachine, aWorkspace } from '@/api/fixtures'
@@ -8,6 +9,7 @@ import { chipOf, verdictOf } from '@/screens/machine/verdict'
 import { counted, tally } from '@/screens/machines/facts'
 import { line, machines as readied } from '@/screens/setup/steps'
 import { waiting, work } from '@/work'
+import { useHeldBands } from '@/screens/fleet/held'
 
 const BASICS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo']
 const OPTIONAL = ['provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'heartbeat']
@@ -80,20 +82,24 @@ describe('one fleet, every count', () => {
     expect(readied(lines).words).toContain(`${chips} of ${lines.length} machines ready`)
   })
 
-  it('gives the dashboard and the bell one number', () => {
+  it('counts the hero over the live bands while the rows stay held', () => {
     const workspace = aWorkspace({ name: 'trust' })
-    const agents: AgentRow[] = [
-      {
-        workspace,
-        status: { workspace: 'trust', machine: 'mac', reached: 'yes', status: { state: 'awaiting_trust' }, session: null },
-      },
-    ]
-    const rows = work([aListed(workspace)], { looked: 'ok', age_seconds: 0, data: agents })
-    const attention: Attention = { reviews: [item(1), item(2)], issues: [item(3)], notifications: 9 }
-    // The Hero draws the needs rows that are not machine rows; the bell passes every row.
-    const drawn = rows.filter((row) => row.band === 'needs' && row.kind !== 'machine')
-    expect(waiting(rows, attention)).toBe(4)
-    expect(waiting(drawn, attention)).toBe(waiting(rows, attention))
-    expect(waiting(rows, null)).toBe(1)
+    const running = work([aListed(workspace)], {
+      looked: 'ok',
+      age_seconds: 0,
+      data: [{ workspace, status: { workspace: 'trust', machine: 'mac', reached: 'yes', status: { state: 'running' }, session: null } }],
+    })
+    const trusting = work([aListed(workspace)], {
+      looked: 'ok',
+      age_seconds: 0,
+      data: [{ workspace, status: { workspace: 'trust', machine: 'mac', reached: 'yes', status: { state: 'awaiting_trust' }, session: null } }],
+    })
+    const attention: Attention = { reviews: [item(1)], issues: [item(3)], notifications: 9 }
+    const view = renderHook((rows) => useHeldBands(rows), { initialProps: running })
+    view.rerender(trusting)
+    // The held row keeps its old band until Reorder; the count does not wait for it.
+    expect(view.result.current.placed[0]!.band).toBe('running')
+    expect(waiting(view.result.current.placed, attention)).toBe(2)
+    expect(waiting(trusting, attention)).toBe(3)
   })
 })

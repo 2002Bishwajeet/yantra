@@ -7,7 +7,7 @@ export function Bell(props: Omit<IconButtonProps, 'label' | 'badge' | 'children'
   const { badge } = useEntries()
   return (
     <IconButton
-      badge={badge > 0 ? <Badge count={badge} label={`${badge} waiting on you`} /> : undefined}
+      badge={badge > 0 ? <Badge count={badge} label={`${badge} unread`} /> : undefined}
       label="Notifications"
       variant="tonal"
       {...props}
