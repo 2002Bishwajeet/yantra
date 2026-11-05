@@ -3,6 +3,7 @@ import type { Machine, Readiness, Repo } from '@/api'
 import {
   cloneInto,
   complete,
+  expand,
   happenings,
   hubJoined,
   nameError,
@@ -164,6 +165,21 @@ describe('paths', () => {
     expect(tilde('/home/biswa', '/home/biswa')).toBe('~')
     expect(tilde('/srv/x', '/home/biswa')).toBe('/srv/x')
     expect(tilde('/srv/x', null)).toBe('/srv/x')
+  })
+
+  it('draws a path with ~ when home carries a trailing slash', () => {
+    expect(tilde('/Users/biswa/Github/x', '/Users/biswa/')).toBe('~/Github/x')
+    expect(tilde('/Users/biswa', '/Users/biswa/')).toBe('~')
+  })
+
+  it('expands ~ and ~/x under home, and leaves other paths alone', () => {
+    expect(expand('~', '/home/biswa')).toBe('/home/biswa')
+    expect(expand('~/Github/yantra', '/home/biswa')).toBe('/home/biswa/Github/yantra')
+    expect(expand('~/x', '/home/biswa/')).toBe('/home/biswa/x')
+    expect(expand('/srv/x', '/home/biswa')).toBe('/srv/x')
+    expect(expand('~other/x', '/home/biswa')).toBe('~other/x')
+    expect(expand('~/x', null)).toBeNull()
+    expect(expand('/srv/x', null)).toBe('/srv/x')
   })
 
   it('reads an origin as owner/name, however it was written', () => {

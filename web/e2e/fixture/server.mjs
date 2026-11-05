@@ -232,6 +232,8 @@ function entriesOf(state, path) {
   const made = (state.made?.[path] ?? []).map((name) => dir(path, name, null))
   if (path === '/') return [dir(path, 'home', null), dir(path, 'srv', null), dir(path, 'root', null, 'dir', false)]
   if (path === '/home') return [dir(path, 'biswa', null)]
+  // Long enough that the picker has to scroll inside its own box (Y-643).
+  if (path === '/srv') return Array.from({ length: 60 }, (_, i) => dir(path, `site-${String(i).padStart(2, '0')}`, null))
   if (path === HOME) return [dir(path, 'Github', null), dir(path, 'notes', null), ...made]
   if (path === `${HOME}/Github`) {
     return [

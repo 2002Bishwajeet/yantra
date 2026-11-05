@@ -1,5 +1,6 @@
 import type { Machine, Readiness, Repo } from '@/api'
 import { USABLE_NAME } from '@/lib/name'
+import { trimSlash } from '@/lib/path'
 import type { Step } from '@/router'
 
 /** D4 §5's three answers: only a proven absence blocks. */
@@ -89,8 +90,18 @@ export const cloneInto = (folder: string, repo: Repo): string => `${folder}/${re
 /** `/home/you/Github/x` drawn as `~/Github/x`, as the boards write paths. */
 export function tilde(path: string, home: string | null): string {
   if (home === null) return path
-  if (path === home) return '~'
-  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path
+  const base = trimSlash(home)
+  if (path === base) return '~'
+  return path.startsWith(`${base}/`) ? `~${path.slice(base.length)}` : path
+}
+
+export const NO_HOME = 'This machine has not said where home is yet. Type the full path.'
+
+/** What `tilde` draws, read back: `~` and `~/x` become paths under `home`. `null` when `~` needs a home not yet known. */
+export function expand(path: string, home: string | null): string | null {
+  if (path !== '~' && !path.startsWith('~/')) return path
+  if (home === null) return null
+  return `${trimSlash(home).replace(/\/$/, '')}${path.slice(1)}`
 }
 
 /** `origin` as the boards write it: `owner/name`, without host or `.git`. */

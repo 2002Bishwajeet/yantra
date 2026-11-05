@@ -4,10 +4,9 @@ import { type Prefs, readPrefs, writePrefs } from '@/shell/prefs'
 
 const RECENT_MAX = 5
 
-// Folders you can enter come first, repositories before plain folders; files
-// and folders the account cannot read sit below them.
-const rank = (entry: Entry): number =>
-  !entry.access ? 3 : entry.kind === 'file' ? 2 : entry.repo ? 0 : 1
+// Folders you can enter come first, repositories before plain folders; folders
+// the account cannot read sit below them.
+const rank = (entry: Entry): number => (!entry.access ? 2 : entry.repo ? 0 : 1)
 
 /** The entries the picker draws: dotfiles only when `hidden`, names that
  *  contain `filter` in any letter case, and the git-first order the daemon

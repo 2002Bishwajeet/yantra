@@ -240,22 +240,60 @@ describe('step 2, the local browser', () => {
     await waitFor(() => expect(folders.queryByText('.config')).toBeNull())
   })
 
-  it('draws files and closed folders, marked, and neither is a choice', async () => {
+  it('draws closed folders, marked, and no files', async () => {
     const { folders, sent } = await toLocal()
-    const file = await folders.findByText('todo.txt')
-    const closed = folders.getByText('private')
-    expect(folders.getByText('file')).toBeTruthy()
+    const closed = await folders.findByText('private')
+    expect(folders.queryByText('todo.txt')).toBeNull()
     expect(folders.getByText('no access')).toBeTruthy()
-    expect(file.closest('button')).toBeNull()
     expect(closed.closest('button')).toBeNull()
-    expect(folders.queryByRole('button', { name: /^(todo\.txt|private)/ })).toBeNull()
+    expect(folders.queryByRole('button', { name: /^private/ })).toBeNull()
 
     const before = sent.length
-    fireEvent.click(file)
     fireEvent.click(closed)
-    // Nothing was asked and nothing was chosen: the folder is still $HOME.
+    // Nothing was asked and nothing was chosen.
     expect(sent).toHaveLength(before)
-    expect(screen.getAllByText('~').length).toBeGreaterThan(0)
+    expect(document.querySelector('.ns__chosen')).toBeNull()
+  })
+
+  it('says "no folders here" when a folder holds files and no folders', async () => {
+    const only = { ...listing(`${HOME}/Github`), entries: [{ path: `${HOME}/Github/README.md`, name: 'README.md', kind: 'file', access: true, repo: false, origin: null }] }
+    const { folders } = await toLocal({
+      'POST /api/machines/cachyos-g14/dirs': (body) => [200, body.path === `${HOME}/Github` ? only : listing(String(body.path ?? HOME))],
+    })
+    fireEvent.click(await folders.findByRole('button', { name: /^Github/ }))
+    expect(await folders.findByText('no folders here')).toBeTruthy()
+    expect(folders.queryByText('README.md')).toBeNull()
+  })
+
+  it('chooses nothing until the person walks or presses Use', async () => {
+    const { folders } = await toLocal()
+    await folders.findByRole('button', { name: /^Github/ })
+    expect(document.querySelector('.ns__chosen')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use ~' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false))
+    expect(document.querySelector('.ns__chosen')?.textContent).toContain('~')
+  })
+
+  it('chooses a folder by walking into it', async () => {
+    const { folders } = await toLocal()
+    fireEvent.click(await folders.findByRole('button', { name: /^Github/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false))
+    expect(document.querySelector('.ns__chosen')?.textContent).toContain('~/Github')
+  })
+
+  it('writes the missing line and the new-folder hint with ~', async () => {
+    const { folders } = await toLocal({
+      'POST /api/machines/cachyos-g14/probe': [200, { machine: 'cachyos-g14', path: `${HOME}/Github/nope`, exists: false, origin: null }],
+    })
+    await folders.findByRole('button', { name: /^Github/ })
+    expect(screen.getByText('under ~/')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit path' }))
+    const field = screen.getByLabelText('Path')
+    fireEvent.change(field, { target: { value: '~/Github/nope' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(await screen.findByText(/has no directory at ~\/Github\/nope\./)).toBeTruthy()
   })
 
   it('walks above $HOME to / and into another folder there', async () => {

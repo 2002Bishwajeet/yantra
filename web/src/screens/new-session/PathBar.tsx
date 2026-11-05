@@ -2,7 +2,8 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { Button } from '@/m3/button/Button'
 import { TextField } from '@/m3/text-field/TextField'
 import { crumbs } from './dirs'
-import { typing } from './keys'
+import { expand, NO_HOME, tilde } from './form'
+import { typing, useTouch } from './keys'
 
 /** The crumbs from `/` to the folder you are in. Given `onEdit`, `/` or
  *  Ctrl+L, and the Edit button, swap them for a field that holds the path:
@@ -19,15 +20,17 @@ export function PathBar(props: {
   const failed = props.failed ?? false
   const [text, setText] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [bad, setBad] = useState(false)
+  const [bad, setBad] = useState<'path' | 'home' | null>(null)
+  const touch = useTouch()
   // Set only when the user leaves an edit, so a field that closes for another reason keeps focus where it is.
   const leaving = useRef(false)
   const field = useRef<HTMLDivElement>(null)
   const bar = useRef<HTMLDivElement>(null)
   const was = useRef(false)
   const editing = text !== null || failed
+  const hereText = here === null ? '' : tilde(here, home)
 
-  const open = useEffectEvent(() => setText((held) => held ?? here ?? ''))
+  const open = useEffectEvent(() => setText((held) => held ?? hereText))
   useEffect(() => {
     if (!onEdit) return
     const listen = (event: KeyboardEvent) => {
@@ -55,12 +58,17 @@ export function PathBar(props: {
   const submit = async () => {
     const path = (text ?? '').trim()
     if (!onEdit) return
-    if (!path.startsWith('/')) {
-      setBad(true)
+    if (!path.startsWith('/') && path !== '~' && !path.startsWith('~/')) {
+      setBad('path')
+      return
+    }
+    const full = expand(path, home)
+    if (full === null) {
+      setBad('home')
       return
     }
     setBusy(true)
-    await onEdit(path)
+    await onEdit(full)
     setBusy(false)
     leaving.current = true
     setText(null)
@@ -72,7 +80,13 @@ export function PathBar(props: {
         <TextField
           autoComplete="off"
           disabled={busy}
-          error={bad ? 'A path starts with /, like /home/you/project' : undefined}
+          error={
+            bad === 'path'
+              ? 'A path starts with / or ~, like ~/project'
+              : bad === 'home'
+                ? NO_HOME
+                : undefined
+          }
           label="Path"
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
@@ -86,10 +100,14 @@ export function PathBar(props: {
             }
           }}
           onValueChange={(value) => {
-            setBad(false)
+            setBad(null)
             setText(value)
           }}
-          supporting={busy ? 'checking…' : 'absolute, on this machine; checked before anything is written. Escape goes back'}
+          supporting={
+            busy
+              ? 'checking…'
+              : `starts with / or ~, on this machine; checked before anything is written.${touch ? '' : ' Escape goes back'}`
+          }
           value={text ?? ''}
         />
       </div>
@@ -124,7 +142,7 @@ export function PathBar(props: {
         </ol>
       </nav>
       {onEdit ? (
-        <Button data-edit="" onClick={() => setText(here ?? '')} type="button" variant="text">
+        <Button data-edit="" onClick={() => setText(hereText)} type="button" variant="text">
           Edit path
         </Button>
       ) : null}
