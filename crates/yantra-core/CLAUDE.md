@@ -61,7 +61,7 @@ bind where:
 
 **Every script sent to a machine must parse under bash 3.2 and dash, alone and inside `c=$(…)`.**
 macOS's bash 3.2 ends a `$(…)` at an unpaired `)`, so a case pattern opens with `(` (Y-634).
-`shells.rs` checks every script in one container (Y-635). A new script must reach its `Recorder` or its builder list. A script behind a branch also goes in `REACHED`, so the test fails when no pass takes that branch.
+`shells.rs` checks every script in one container (Y-635), and with the Mac's own `/bin/bash`, `/bin/sh` and `/bin/dash` on CI's macos runner (Y-661). A new script must reach its `Recorder` or its builder list. A script behind a branch also goes in `REACHED`, so the test fails when no pass takes that branch.
 
 ## What `yantra-agent` may call
 
@@ -144,7 +144,9 @@ generates a keypair per run, passes `-F /dev/null`, and tears down in `Drop`.
 - **A skipped test must be able to fail.** `YANTRA_REQUIRE_PODMAN=1` turns "podman is missing" from
   a skip into an error, and `just test-ci` sets it (I-32).
 - `#[ignore]` is for tests needing the tailnet or the MacBook — `just test-mac <machine>`. Ignored,
-  never silently skipped.
+  never silently skipped. `tests/macos.rs` is ignored too, and CI's `macos` job runs it with
+  `just test-macos` on a GitHub runner that sshes to itself (Y-661). It kills the tmux server, so
+  it never targets the owner's Mac.
 - **Produce the state, do not describe it.** A test that hand-builds a dead pane cannot see I-47;
   one that really runs `kill -9` can.
 - `portable-pty` is a **dependency**, reached by `pty.rs` alone. Y-128 measured `just appliance-size`
