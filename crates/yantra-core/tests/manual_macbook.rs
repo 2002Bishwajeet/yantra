@@ -737,6 +737,117 @@ fn fresh_session_id() -> anyhow::Result<String> {
     ))
 }
 
+/// **Y-661**: a Chat turn on the real Mac, as `yantrad` runs one — the real
+/// `claude` in a keeper, read and written through it. Y-634 broke every one
+/// for 29 days while each suite stayed green.
+///
+/// It skips when the tmux server's panes find no credential (I-44): start the
+/// server at the Mac's screen, or let `up` start it through the LaunchAgent.
+#[tokio::test]
+#[ignore = "needs the real MacBook with claude signed in; set YANTRA_MAC=user@host"]
+async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
+    use yantra_core::chat::{Event, Interaction, PermissionMode, StreamKind, TurnState};
+    use yantra_core::claude::{self, Turn};
+    use yantra_core::keep::{self, File, Keeper, Limits, Started};
+    use yantra_core::thread;
+
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest.clone(),
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y661"),
+    })?;
+    anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
+    let tmux = Tmux::resolve(&ssh).await?;
+    let claude = Claude::resolve(&ssh).await?;
+    let auth = claude.auth(&ssh, &tmux, Os::MacOs).await?;
+    if !auth.logged_in {
+        println!(
+            "SKIPPED: the tmux server on {dest} finds no claude credential (authMethod `{}`). \
+             A server started over ssh cannot read the login keychain (I-44).",
+            auth.method
+        );
+        return Ok(());
+    }
+
+    let repo = "/private/tmp/yantra-y661";
+    let made = ssh
+        .exec(&format!(
+            "rm -rf {repo} && mkdir -p {repo} && cd {repo} && git init -q && echo one > README \
+             && git add README && git -c user.name=t -c user.email=t@example.com commit -qm one"
+        ))
+        .await?;
+    anyhow::ensure!(made.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let ws = workspace::Workspace {
+        name: "y661".to_owned(),
+        machine: dest.clone(),
+        repo: PathBuf::from(repo),
+        startup: None,
+    };
+    let place = thread::open(&ssh, &ws).await?;
+    let keeper = Keeper::of(&place).ok_or_else(|| anyhow::anyhow!("a chat place has a keeper"))?;
+    let agent = claude::command(
+        &place.worktree,
+        None,
+        PermissionMode::Supervised,
+        Interaction::Build,
+        None,
+    );
+    let run = keep::run_id()?;
+    let Started::Running { pane } =
+        keep::start(&ssh, &tmux, &keeper, &agent, &run, Limits::default()).await?
+    else {
+        anyhow::bail!("the thread's keeper was already running");
+    };
+    let reader = keep::follow(ssh.clone(), tmux.clone(), keeper.clone(), pane, 0);
+    let writer = keep::feed(ssh.clone(), tmux.clone(), keeper.clone(), &run, 0);
+    let (err_ssh, err_keeper) = (ssh.clone(), keeper.clone());
+    let said: claude::Said = Box::pin(async move {
+        let err = keep::read(&err_ssh, &err_keeper, File::Err, None)
+            .await
+            .unwrap_or_default();
+        String::from_utf8_lossy(&err).into_owned()
+    });
+    let (_turn, mut events) = Turn::kept(
+        reader,
+        writer,
+        thread::name(&place),
+        &run,
+        "Reply with just the word pong.",
+        said,
+    );
+
+    let mut text = String::new();
+    let done = tokio::time::timeout(Duration::from_secs(180), async {
+        while let Some(next) = events.recv().await {
+            match next.event {
+                Event::ContentDelta(delta) if delta.stream_kind == StreamKind::AssistantText => {
+                    text.push_str(&delta.delta);
+                }
+                Event::TurnCompleted(done) => return Some(done),
+                _ => {}
+            }
+        }
+        None
+    })
+    .await;
+    keep::kill(&ssh, &tmux, &keeper).await?;
+    let _ = thread::remove(&ssh, &place).await;
+    let done = done?.ok_or_else(|| anyhow::anyhow!("the events ended before turn.completed"))?;
+    println!("{done:?}: {text}");
+    anyhow::ensure!(
+        done.state == TurnState::Completed,
+        "the turn ended {done:?}"
+    );
+    anyhow::ensure!(
+        text.to_lowercase().contains("pong"),
+        "the turn said {text:?}"
+    );
+    Ok(())
+}
+
 /// What the test would otherwise leave on someone's laptop. `Drop` because a
 /// failed assertion is exactly when a leaked session is hardest to notice.
 struct Leaves {
