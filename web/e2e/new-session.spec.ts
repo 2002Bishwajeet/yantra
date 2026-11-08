@@ -1,5 +1,6 @@
 import { at, axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
+import { scrollHeight } from './lib/scroller'
 
 /** `/new` (Y-349): the four steps of NewSession, NewSessionSource,
  *  NewSessionLocal, NewSessionStart and NewSessionCloning. The fixture's
@@ -387,7 +388,7 @@ test.describe('the local step on a phone (Y-643)', () => {
     expect(box?.height).toBeLessThanOrEqual((viewport?.height ?? 0) * 0.55 + 1)
     const scroll = await folders.evaluate((list) => ({ inner: list.scrollHeight, outer: list.clientHeight }))
     expect(scroll.inner).toBeGreaterThan(scroll.outer)
-    const height = await page.evaluate(() => document.documentElement.scrollHeight)
+    const height = await scrollHeight(page)
     expect(height).toBeLessThan(5000)
     await axe(page)
   })

@@ -1,4 +1,5 @@
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
+import { scrollTo } from './lib/scroller'
 
 /** `/rooms` and `/rooms/$room` (Y-536) on the `rooms` scenario: `design-review`
  *  is live and `release` is paused at 20/20. The `phone` project is the done
@@ -121,7 +122,7 @@ test.describe('rooms', () => {
     const form = page.locator('.composer-dock')
     await expect(form).toHaveCSS('position', 'sticky')
     for (const to of [0, 'end'] as const) {
-      await page.evaluate((y) => window.scrollTo(0, y === 'end' ? document.body.scrollHeight : y), to)
+      await scrollTo(page, to)
       await expect(form).toBeInViewport({ ratio: 1 })
       const box = (await form.boundingBox())!
       expect(Math.round(box.y + box.height)).toBeGreaterThanOrEqual(420 - 1)
