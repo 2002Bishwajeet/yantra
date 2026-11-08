@@ -76,7 +76,7 @@ function RouteAction() {
 function Main({ down }: { down: ReactNode }) {
   return (
     // Focusable, not tabbable: where focus lands when a focused FAB goes away.
-    <main className="shell__main" tabIndex={-1}>
+    <main className="shell__main" data-scroll-restoration-id="main" tabIndex={-1}>
       <ErrorBoundary layout="page" {...useResetOnRouteChange()}>
         {down ?? (
           <>

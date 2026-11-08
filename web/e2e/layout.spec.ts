@@ -1,5 +1,6 @@
 import { axe, expect, scenario, test } from './lib/test'
 import { ROUTES, type Route } from './lib/routes'
+import { scrollTo } from './lib/scroller'
 
 /** Y-566: every route draws its body in one `Page` under one `PageHeader`, so
  *  the title and the first card share a left edge, the width stops at the
@@ -212,7 +213,7 @@ for (const [label, path, scrolls] of [
     await expect
       .poll(async () => {
         // A thread opens at its top, so only the empty page is read as it opens; it carries itself to the end.
-        if (scrolls) await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+        if (scrolls) await scrollTo(page, 'end')
         return dock.evaluate((el) => {
           const scrim = parseFloat(getComputedStyle(el, '::before').height)
           // The text, not its box: the intro and a turn can run past the block that holds them.
