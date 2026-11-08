@@ -57,6 +57,14 @@ test-ci *args:
 test-mac machine:
     YANTRA_MAC={{machine}} cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture
 
+# CI's macos job (Y-661): every remote script under the Mac's own bash 3.2, sh
+# and dash, and tests/macos.rs over ssh to `machine`, in one run so a failure
+# in one still runs the other. tests/macos.rs kills the machine's tmux server,
+# so `machine` is a disposable Mac, never the owner's.
+test-macos machine:
+    YANTRA_MAC_RUNNER={{machine}} cargo nextest run -p yantra-core --lib --test macos --run-ignored all \
+      -E 'test(/^shells::/) | binary(macos)' --test-threads 1 --no-capture --no-fail-fast
+
 build:
     cargo build --workspace
 
