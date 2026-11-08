@@ -117,20 +117,24 @@ pub async fn list<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Place>
         .collect())
 }
 
-/// Opens a thread as [`open`] does and keeps the issue under its branch. A
-/// thread whose issue could not be kept is removed, so none is left unnamed.
+/// Opens a thread as [`open`] does and keeps the issue and its title under its
+/// branch. A thread whose issue could not be kept is removed, so none is left
+/// unnamed.
 pub async fn open_for_issue<E: Exec>(
     exec: &E,
     workspace: &Workspace,
     issue: &IssueRef,
+    issue_title: &str,
 ) -> Result<Place, Error> {
     let place = open(exec, workspace).await?;
+    let repo = sq(&place.repo);
     let kept = exec
         .exec(&format!(
-            "git -C {} config {} {}",
-            sq(&place.repo),
+            "git -C {repo} config {} {} && git -C {repo} config {} {}",
             key(&place, "yantraIssue"),
-            sq(&issue.to_string())
+            sq(&issue.to_string()),
+            key(&place, "yantraTitle"),
+            sq(&title(&format!("#{} {issue_title}", issue.number)))
         ))
         .await;
     let failed = match kept {
@@ -145,10 +149,47 @@ pub async fn open_for_issue<E: Exec>(
     Err(failed)
 }
 
+/// A thread's title: the first non-empty line of `prompt`, its whitespace
+/// collapsed, cut at 60 characters.
+pub fn title(prompt: &str) -> String {
+    let line = prompt
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    match line.char_indices().nth(60) {
+        Some((cut, _)) => format!("{}…", line[..cut].trim_end()),
+        None => line,
+    }
+}
+
+/// Keeps the thread's title under its branch.
+pub async fn remember_title<E: Exec>(exec: &E, place: &Place, title: &str) -> Result<(), Error> {
+    let out = exec
+        .exec(&format!(
+            "git -C {} config {} {}",
+            sq(&place.repo),
+            key(place, "yantraTitle"),
+            sq(title)
+        ))
+        .await?;
+    if out.success() {
+        Ok(())
+    } else {
+        Err(Error::Worktree {
+            stderr: said(&out.stderr),
+        })
+    }
+}
+
 /// A thread with what git keeps about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Listed {
     pub place: Place,
+    /// What [`remember_title`] or [`open_for_issue`] kept.
+    pub title: Option<String>,
+    /// The repository branch the thread left: the repo's `HEAD` branch.
+    pub from: Option<String>,
     /// `owner/repo#n`, as [`open_for_issue`] kept it.
     pub issue: Option<String>,
     /// The remote's URL and the branch on it, from `branch.<b>.remote` and
@@ -156,19 +197,20 @@ pub struct Listed {
     pub upstream: Option<(String, String)>,
 }
 
-/// [`list`], and each thread's issue and upstream. One more round trip, and
-/// none when the workspace has no thread.
+/// [`list`], and each thread's title, issue and upstream. One more round trip,
+/// and none when the workspace has no thread.
 pub async fn listed<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Listed>, Error> {
     let places = list(exec, workspace).await?;
     let Some(first) = places.first() else {
         return Ok(Vec::new());
     };
+    let repo = sq(&first.repo);
     let out = exec
         .exec(&format!(
-            "git -C {} config -z --get-regexp {}",
-            sq(&first.repo),
+            "printf '%s\\n' \"$(git -C {repo} symbolic-ref --short -q HEAD)\"\n\
+             git -C {repo} config -z --get-regexp {}",
             sq(&format!(
-                "^branch\\.yantra/chat/{}/.*\\.(yantraissue|remote|merge)$|^remote\\..*\\.url$",
+                "^branch\\.yantra/chat/{}/.*\\.(yantratitle|yantraissue|remote|merge)$|^remote\\..*\\.url$",
                 workspace.name
             ))
         ))
@@ -179,10 +221,21 @@ pub async fn listed<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<List
             stderr: said(&out.stderr),
         });
     }
-    let config = Config::parse(&out.stdout);
+    let split = out
+        .stdout
+        .iter()
+        .position(|&byte| byte == b'\n')
+        .map_or(0, |newline| newline + 1);
+    let from = String::from_utf8_lossy(&out.stdout[..split])
+        .trim()
+        .to_owned();
+    let from = Some(from).filter(|from| !from.is_empty());
+    let config = Config::parse(&out.stdout[split..]);
     Ok(places
         .into_iter()
         .map(|place| Listed {
+            title: config.get(&place.branch, "yantratitle").map(str::to_owned),
+            from: from.clone(),
             issue: config.get(&place.branch, "yantraissue").map(str::to_owned),
             upstream: config.upstream(&place.branch),
             place,
@@ -248,6 +301,9 @@ pub struct Thread {
     pub branch: String,
     pub worktree: String,
     pub issue: Option<String>,
+    pub title: Option<String>,
+    /// The repository branch the thread left.
+    pub from: Option<String>,
     pub pr: Pr,
 }
 
@@ -320,6 +376,8 @@ pub async fn threads(name: &str, github: Option<(&Github, &Token)>) -> Result<Ve
             branch: found.place.branch,
             worktree: found.place.worktree,
             issue: found.issue,
+            title: found.title,
+            from: found.from,
             pr,
         });
     }
@@ -416,7 +474,7 @@ pub async fn start(
     let workspace = workspace::load(name)?;
     let read = github.issue(token, issue).await?;
     let ssh = reach(&workspace)?;
-    let place = open_for_issue(&ssh, &workspace, issue).await?;
+    let place = open_for_issue(&ssh, &workspace, issue, &read.title).await?;
     Ok(Opened {
         thread: self::name(&place).to_owned(),
         branch: place.branch,
@@ -1102,14 +1160,15 @@ mod tests {
             out(0, format!("{REPO}\n{WORKTREE}\n0123abcd\n").as_bytes(), ""),
             out(0, b"", ""),
         ]);
-        let place = open_for_issue(&machine, &workspace("web"), &issue())
+        let place = open_for_issue(&machine, &workspace("web"), &issue(), "Fix it")
             .await
             .expect("opened");
         assert_eq!(
             machine.asked()[1],
             format!(
-                "git -C '{REPO}' config 'branch.{}.yantraIssue' 'o/r#7'",
-                place.branch
+                "git -C '{REPO}' config 'branch.{b}.yantraIssue' 'o/r#7' \
+                 && git -C '{REPO}' config 'branch.{b}.yantraTitle' '#7 Fix it'",
+                b = place.branch
             )
         );
         assert_eq!(machine.asked().len(), 2);
@@ -1122,7 +1181,7 @@ mod tests {
             out(255, b"", "error: could not lock config file\n"),
             out(0, b"", ""),
         ]);
-        let failed = open_for_issue(&machine, &workspace("web"), &issue()).await;
+        let failed = open_for_issue(&machine, &workspace("web"), &issue(), "Fix it").await;
         assert!(
             matches!(&failed, Err(Error::Worktree { stderr }) if stderr == "error: could not lock config file"),
             "{failed:?}"
@@ -1133,7 +1192,8 @@ mod tests {
         assert!(asked[2].contains("branch -D"), "{}", asked[2]);
     }
 
-    const CONFIG: &[u8] = b"branch.yantra/chat/a/11111111.yantraissue\no/r#7\0\
+    const CONFIG: &[u8] = b"main\nbranch.yantra/chat/a/11111111.yantratitle\nFix the login\0\
+        branch.yantra/chat/a/11111111.yantraissue\no/r#7\0\
         branch.yantra/chat/a/11111111.remote\norigin\0\
         branch.yantra/chat/a/11111111.merge\nrefs/heads/fix-7\0\
         branch.yantra/chat/a/55555555.remote\nmy.fork\0\
@@ -1151,14 +1211,18 @@ mod tests {
         assert_eq!(
             machine.asked()[2],
             format!(
-                "git -C '{REPO}' config -z --get-regexp \
-                 '^branch\\.yantra/chat/a/.*\\.(yantraissue|remote|merge)$|^remote\\..*\\.url$'"
+                "printf '%s\\n' \"$(git -C '{REPO}' symbolic-ref --short -q HEAD)\"\n\
+                 git -C '{REPO}' config -z --get-regexp \
+                 '^branch\\.yantra/chat/a/.*\\.(yantratitle|yantraissue|remote|merge)$|^remote\\..*\\.url$'"
             )
         );
         let read: Vec<_> = found
             .iter()
             .map(|listed| (listed.issue.as_deref(), listed.upstream.clone()))
             .collect();
+        assert_eq!(found[0].title.as_deref(), Some("Fix the login"));
+        assert_eq!(found[1].title, None);
+        assert!(found.iter().all(|l| l.from.as_deref() == Some("main")));
         assert_eq!(
             read,
             [
@@ -1178,13 +1242,13 @@ mod tests {
         let none = Machine::answering(vec![
             out(0, PORCELAIN, ""),
             out(0, b"aaaa\nbbbb\n", ""),
-            out(1, b"", ""),
+            out(1, b"\n", ""),
         ]);
         let found = listed(&none, &workspace("a")).await.expect("listed");
         assert!(
             found
                 .iter()
-                .all(|l| l.issue.is_none() && l.upstream.is_none())
+                .all(|l| l.issue.is_none() && l.upstream.is_none() && l.from.is_none())
         );
 
         let empty = Machine::answering(vec![out(0, PORCELAIN, "")]);
@@ -1199,6 +1263,37 @@ mod tests {
         assert!(matches!(
             listed(&broken, &workspace("a")).await,
             Err(Error::Worktree { stderr }) if stderr == "error: invalid config file"
+        ));
+    }
+
+    #[test]
+    fn a_title_is_the_first_line_cut_and_trimmed() {
+        assert_eq!(title("\n\n  Fix   the\tlogin  \nmore"), "Fix the login");
+        assert_eq!(title(""), "");
+        let long = format!("{} tail", "ab ".repeat(30));
+        let cut = title(&long);
+        assert!(cut.ends_with('…') && cut.chars().count() <= 61, "{cut}");
+        assert_eq!(title(&"é".repeat(61)), format!("{}…", "é".repeat(60)));
+        assert_eq!(title(&"é".repeat(60)), "é".repeat(60));
+    }
+
+    #[tokio::test]
+    async fn a_title_is_kept_under_the_branch_and_a_failed_write_is_an_error() {
+        let machine = Machine::answering(vec![out(0, b"", "")]);
+        remember_title(&machine, &place(), "Fix it")
+            .await
+            .expect("kept");
+        assert_eq!(
+            machine.asked()[0],
+            format!(
+                "git -C '{REPO}' config 'branch.{}.yantraTitle' 'Fix it'",
+                place().branch
+            )
+        );
+        let failed = Machine::answering(vec![out(255, b"", "error: could not lock config file\n")]);
+        assert!(matches!(
+            remember_title(&failed, &place(), "Fix it").await,
+            Err(Error::Worktree { .. })
         ));
     }
 

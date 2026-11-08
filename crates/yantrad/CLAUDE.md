@@ -340,6 +340,7 @@ directory to walk.
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new,mentions,commands}`,
 `POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr}`, `POST /api/relay`,
+`GET /api/workspaces/{name}/threads` (Y-649: each held thread's `{id, state, since}`, read from memory, no ssh),
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
 `DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms`,
 `PATCH`/`DELETE /api/rooms/{room}`, `POST /api/rooms/{room}/resume`,

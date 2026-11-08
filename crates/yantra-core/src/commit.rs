@@ -1291,6 +1291,8 @@ mod tests {
     fn listed(issue: Option<&str>, remote: Option<&str>) -> thread::Listed {
         thread::Listed {
             place: place(),
+            title: None,
+            from: None,
             issue: issue.map(str::to_owned),
             upstream: remote.map(|url| (url.to_owned(), UPSTREAM.to_owned())),
         }

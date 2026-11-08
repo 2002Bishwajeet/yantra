@@ -281,7 +281,7 @@ async fn a_thread_from_an_issue_lists_its_issue_and_its_upstream() -> Result<()>
     };
     let issue: github::IssueRef = "o/r#7".parse()?;
 
-    let from_issue = thread::open_for_issue(&ssh, &workspace, &issue).await?;
+    let from_issue = thread::open_for_issue(&ssh, &workspace, &issue, "Fix it").await?;
     let plain = thread::open(&ssh, &workspace).await?;
     let issue_of = |listed: &[thread::Listed], place: &thread::Place| {
         listed
