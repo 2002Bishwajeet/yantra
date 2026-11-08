@@ -150,7 +150,7 @@ export function Machines() {
         <ErrorBoundary eyebrow="Devices" title="The devices could not be drawn">
           <Card aria-labelledby="machines-devices">
             <Eyebrow id="machines-devices" render={<h2 />}>
-              Devices that open the dashboard
+              Devices that open the dashbord
             </Eyebrow>
             <List>
               {devices.map((device) => (
