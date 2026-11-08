@@ -1,7 +1,7 @@
 # ADR-0041 — A Claude keeper holds the thread, not the turn
 
 - **Date:** 2026-11-08
-- **Status:** Proposed ([Y-657](../../tracker.md)). The owner accepts or changes it.
+- **Status:** Accepted 2026-11-08 by the owner ([Y-657](../../tracker.md)). [Y-658](../../tracker.md) builds it.
 - **Evidence:** T3 Code at commit `67eebaca` (2026-11-05), read at `~/Github/t3code-ref`:
   `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`,
   `apps/server/src/orchestration-v2/ProviderSessionManager.ts`, and the fixtures under
