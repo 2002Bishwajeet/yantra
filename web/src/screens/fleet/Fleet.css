@@ -84,9 +84,11 @@
   text-decoration: none;
 }
 
-a.fleet__name:hover,
-a.fleet__machine:hover {
-  text-decoration: underline;
+@media (hover: hover) and (pointer: fine) {
+  a.fleet__name:hover,
+  a.fleet__machine:hover {
+    text-decoration: underline;
+  }
 }
 
 .fleet__age {

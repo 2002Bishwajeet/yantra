@@ -10,6 +10,40 @@
    faces. This file adds the page under them and nothing else. */
 @import "./m3/tokens.css";
 
+/* Y-671, note 25 F2: touch basics. Unlayered element rules, so a class that
+   sets its own value (Talk, BottomSheet, Copyable) still wins. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a,
+button,
+summary,
+label,
+input,
+select,
+textarea,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="switch"],
+[role="option"] {
+  touch-action: manipulation;
+}
+
+button,
+summary,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="switch"],
+[role="option"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 body {
   background: var(--md-sys-color-surface);
   color: var(--md-sys-color-on-surface);
