@@ -429,22 +429,22 @@ test.describe('the phone shell is an app frame', () => {
   const main = (page: Page) => page.locator('.shell__main')
   const frame = (page: Page) =>
     page.evaluate(() => ({
-      barTop: document.querySelector('header.m3-top-app-bar')!.getBoundingClientRect().top,
-      navBottom: document.querySelector('nav.m3-navigation-bar')!.getBoundingClientRect().bottom,
+      barTop: document.querySelector('header')!.getBoundingClientRect().top,
+      navBottom: document.querySelector('nav.m3-navigation-bar')?.getBoundingClientRect().bottom ?? window.innerHeight,
       innerHeight: window.innerHeight,
       scrollY: window.scrollY,
       docOverflow: document.documentElement.scrollHeight - window.innerHeight,
     }))
 
-  async function holdsWhileMainScrolls(page: Page, path: string) {
+  async function holdsWhileMainScrolls(page: Page, path: string, by = 300) {
     await page.goto(path)
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
     const tall = await main(page).evaluate((el) => el.scrollHeight - el.clientHeight)
-    expect(tall).toBeGreaterThan(600)
+    expect(tall).toBeGreaterThan(by)
 
     const before = await frame(page)
-    await main(page).evaluate((el) => el.scrollTo(0, 600))
-    await expect.poll(() => main(page).evaluate((el) => el.scrollTop)).toBe(600)
+    await main(page).evaluate((el, y) => el.scrollTo(0, y), by)
+    await expect.poll(() => main(page).evaluate((el) => el.scrollTop)).toBe(by)
     const after = await frame(page)
 
     expect(after.barTop).toBe(0)
@@ -459,7 +459,7 @@ test.describe('the phone shell is an app frame', () => {
   })
 
   test('keeps the back bar at the top of a pushed route', async ({ page }) => {
-    await holdsWhileMainScrolls(page, '/fleet')
+    await holdsWhileMainScrolls(page, '/notifications', 60)
     await expect(page.getByRole('button', { name: 'Back' })).toBeInViewport()
   })
 
@@ -492,4 +492,14 @@ test.describe('the phone shell is an app frame', () => {
     await expect(page).toHaveURL(/\/$/)
     await expect.poll(() => main(page).evaluate((el) => el.scrollTop)).toBe(500)
   })
+})
+
+test('the tablet and desktop shells still scroll the document', async ({ page, size }) => {
+  test.skip(size === 'phone', 'the phone shell is the app frame')
+  await scenario(page, 'busy')
+  await page.goto('/')
+  await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+  const style = await page.locator('.shell__main').evaluate((el) => getComputedStyle(el).overflowY)
+  expect(style).toBe('visible')
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-shell]')!).overflow)).toBe('visible')
 })
