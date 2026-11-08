@@ -113,6 +113,8 @@ Its shape is below. Y-447 owns the final text and shellchecks it.
 - **The agent never sees a tty.** All three of its streams are redirected, so I-22 is kept for the
   same reason as in ADR-0026 decision 6.
 
+> **2026-11-08, [Y-657](../../tracker.md):** [ADR-0041](0041-a-claude-keeper-holds-the-thread.md) amends this decision. A Claude keeper now holds the thread's process across turns, as an ACP keeper does, because background work that a turn starts died with the turn.
+
 ### 4. The journals: where, and what
 
 Each thread has one directory on the machine, `~/.yantra/keep/<workspace>/<thread id>/`, mode
@@ -134,6 +136,8 @@ only connects `tail -f in` to the agent's stdin.
 
 **A new Claude turn empties the directory first**, apart from `images/`. So the journals always
 hold one Claude turn, or one ACP keeper's life.
+
+> **2026-11-08, [Y-657](../../tracker.md):** [ADR-0041](0041-a-claude-keeper-holds-the-thread.md) amends this decision. A new Claude turn no longer empties the directory: the journals hold the keeper's life, as they do for ACP.
 
 ### 5. Two limits, in the keeper
 
@@ -238,6 +242,8 @@ hold one Claude turn, or one ACP keeper's life.
   (decision 9).
 - **The journal directory stays until the next turn empties it, or until `thread::remove` deletes
   it** together with the worktree. The last turn therefore replays in full, tool cards included.
+
+> **2026-11-08, [Y-657](../../tracker.md):** [ADR-0041](0041-a-claude-keeper-holds-the-thread.md) amends this decision. A Claude agent no longer exits at its turn's end. The keeper ends when the thread is idle and no background work runs.
 
 ### 13. What the daemon persists
 
