@@ -8,8 +8,7 @@
 //! `manual_macbook.rs`. The `macos` job in `ci.yml` sets the machine up:
 //!
 //! ```text
-//! YANTRA_MAC_RUNNER=<ssh destination> \
-//!   cargo nextest run -p yantra-core --test macos --run-ignored only --test-threads 1
+//! just test-macos <ssh destination>
 //! ```
 
 #![cfg(target_os = "macos")]
