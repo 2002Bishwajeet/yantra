@@ -1,7 +1,7 @@
 # ADR-0043 — Dictation runs a local speech model on the box, and yantrad feeds it hotwords
 
 - **Date:** 2026-11-08
-- **Status:** Proposed. The owner has not accepted it. It answers [Y-651](../../tracker.md).
+- **Status:** Accepted 2026-11-08 by the owner ([Y-651](../../tracker.md)), with three answers: the service is Rust, there is no text pass, and there is no streaming. [Y-682](../../tracker.md) builds it.
 - **Evidence:** [R26](../research/26-local-speech-to-text.md), 2026-11-08. The measurements in it
   were made for this ADR.
 - **Extends** [ADR-0031](0031-the-microphone-reaches-a-machine-as-a-virtual-source.md) §4 (the audio
@@ -43,11 +43,11 @@ service is one process, `yantra-stt`, under systemd. It loads the model once, li
 address only, and answers `POST /transcribe` with raw 16 kHz mono s16le PCM and an optional hotword
 list. It returns `{"text": "..."}`. It keeps nothing.
 
-sherpa-onnx ships no HTTP server that takes hotwords per request (R26 §3). So the first version is
-about 60 lines of Python over the sherpa-onnx wheel. This is a second runtime **outside** the
-daemon, the CLI and the agent, which is where CLAUDE.md §B1 allows it: yantrad treats the service as
-`tmux` is treated, as a program behind an interface. Rewriting it as a Rust binary over sherpa-onnx's
-C API is a later row, not a precondition. See *Open questions*.
+sherpa-onnx ships no HTTP server that takes hotwords per request (R26 §3). So `yantra-stt` is a
+small Rust binary over sherpa-onnx's C API, through its Rust bindings. The owner chose Rust on
+2026-11-08, so Yantra keeps one runtime outside the browser (CLAUDE.md §B1). yantrad treats the
+service as `tmux` is treated, as a program behind an interface. The first build row confirms that
+the bindings take a per-request hotword list. If they do not, that row stops and says so.
 
 ### 3. It runs on `yantra-box`, and the laptop is the fallback
 
@@ -101,8 +101,7 @@ What this does **not** do, and the build must not promise:
 - A hotword that holds symbols makes things worse. `--no-fail-fast` was written correctly once and
   then sprayed *--no-* into three other sentences. So the list holds `nextest` and not
   `--no-fail-fast`, and dashes, slashes and dots are not hotwords.
-- Spoken *dash dash* and *slash* stay words. A later row may add a text pass for them. This ADR
-  does not decide one.
+- Spoken *dash dash* and *slash* stay words. The owner decided on 2026-11-08: no text pass now.
 
 ### 6. When the box is off
 
@@ -132,10 +131,8 @@ new WebSocket with a text-frame protocol, so `contract.gen.ts` does not change.
 - The model weights are CC-BY-4.0. The About screen must name NVIDIA.
 - The speed on the box is an estimate until the first row measures it.
 
-## Open questions
+## Answers from the owner, 2026-11-08
 
-- **Python wrapper or Rust binary for `yantra-stt`?** This ADR picks Python as the smallest thing
-  that runs. The owner may prefer Rust now, because of CLAUDE.md §B1.
-- **Is a text pass for *dash dash* and *slash* wanted?** It is a separate row if so.
-- **Does the owner want streaming partial text?** Offline decode on release is simpler. Moonshine
-  streaming-medium (245 M, 6.65 %) is the candidate if so, but R26 found no hotword support for it.
+- **Rust, not Python,** for `yantra-stt`.
+- **No text pass** for *dash dash*, *slash* and *dot*.
+- **No streaming.** The service decodes when the button is released.
