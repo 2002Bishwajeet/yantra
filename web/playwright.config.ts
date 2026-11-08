@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test'
+import { defineConfig, devices } from '@playwright/test'
 import { at, FIXTURE_PORT, WEB_PORT } from './e2e/lib/sizes'
 
 /* Every screen at three sizes against the fixture daemon (ADR-0024 §6).
@@ -31,7 +31,7 @@ export default defineConfig({
   snapshotPathTemplate: '{testDir}/__screenshots__/{arg}{ext}',
 
   expect: {
-    // The fixture is one Node process for every worker on three projects, and
+    // The fixture is one Node process for every worker on four projects, and
     // a read behind six of them takes longer than the 5 s default.
     timeout: 10_000,
     toHaveScreenshot: {
@@ -55,6 +55,8 @@ export default defineConfig({
 
   projects: [
     { name: 'phone', use: at('phone') },
+    // Y-660: the owner's phone is an iPhone, and Chromium at 390 px passed screens Safari broke.
+    { name: 'phone-webkit', use: { ...devices['iPhone 15'], ...at('phone'), browserName: 'webkit' }, metadata: { size: 'phone' } },
     { name: 'tablet', use: at('tablet'), expect: { toHaveScreenshot: { maxDiffPixels: 160 } } },
     { name: 'desktop', use: at('desktop'), expect: { toHaveScreenshot: { maxDiffPixels: 160 } } },
   ],

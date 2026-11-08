@@ -59,3 +59,4 @@ blob-report/
 .playwright/
 web/design/dist/
 
+.walk/

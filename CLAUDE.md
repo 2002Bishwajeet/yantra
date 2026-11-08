@@ -286,6 +286,10 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   A merged row goes to 🔵 review, because a row does not close in its own PR; the next release PR
   marks it ✅ done.
 - **It closes the issues its rows name.** An open GitHub issue gets a row first (§B0); the row names it as `#NNN`, and the PR body says `Closes #NNN`. Owner, 2026-10-20.
+- **It walks a visible row on the real product.** A row whose diff changes `web/src/` or a machine
+  path runs the branch's `yantrad` against the real fleet, and the PR carries WebKit and Chromium
+  screenshots. A machine row also passes `just test-mac` on the real Mac.
+  [`walk.sh`](.claude/workflows/walk.sh) holds the paths, and its guard refuses the merge without them (Y-660).
 - **It picks by priority.** Until the owner calls Yantra a daily driver, a row that closes the daily-driver gap goes first and feature milestones wait (owner, 2026-11-05). 1: closes or unblocks an open milestone. 2: a defect or a red suite.
   3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
 - **It runs up to three rows at once.** Rows that edit the same file do not run at the same time.
