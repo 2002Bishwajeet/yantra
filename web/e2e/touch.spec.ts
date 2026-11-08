@@ -13,7 +13,8 @@ test('the base touch rules hold on a touch screen', async ({ page, size }) => {
     const s = getComputedStyle(el) as CSSStyleDeclaration & { textSizeAdjust?: string }
     return s.textSizeAdjust ?? s.getPropertyValue('-webkit-text-size-adjust')
   })
-  expect(adjust).toBe('100%')
+  // Linux WebKit has no text-size-adjust (an iOS property) and reports ''.
+  if (adjust !== '') expect(adjust).toBe('100%')
 
   await expect(page.locator('a').first()).toHaveCSS('touch-action', 'manipulation')
   const button = page.getByRole('button', { name: /Show/ })
