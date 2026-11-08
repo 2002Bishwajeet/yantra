@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import type { Workspace } from '@/api'
 import type { Harness, ThreadEvent } from '@/api/thread'
-import { IMAGE_LIMIT, PAUSES } from '@/api/chat'
+import { IMAGE_LIMIT } from '@/api/chat'
 import {
   chatAttached,
   chatBranchDiff,
@@ -72,16 +72,6 @@ async function open(thread?: string) {
   await settled(() => expect(server.asked).toHaveLength(1))
   // The empty line appears once the socket is open.
   await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
-}
-
-/** Two reopens 10 ms apart for this test, so a socket gives up at once. */
-function quickReopens() {
-  const pauses = PAUSES as number[]
-  const kept = [...pauses]
-  pauses.splice(0, pauses.length, 10, 10)
-  onTestFinished(() => {
-    pauses.splice(0, pauses.length, ...kept)
-  })
 }
 
 function type(text: string) {
@@ -531,24 +521,20 @@ describe('the chat', () => {
     await settled(() => expect(screen.getAllByText('Running the tests.')).toHaveLength(1))
   })
 
-  it('draws a closed socket, and Try again reopens it on the same thread', async () => {
-    quickReopens()
+  it('draws no error while the daemon is away, and goes on when it answers', async () => {
     await open()
     say(started())
     await settled(() => expect(onThread).toHaveBeenCalled())
     server.keepHangingUp()
     server.hangUp()
-    const alert = await settled(() => screen.getByRole('alert'))
-    expect(alert.textContent).toContain('The chat socket closed and did not reopen')
-    expect(alert.textContent).toContain('A running turn continues on the machine')
-    expect(server.asked).toHaveLength(3)
-    expect(screen.getByLabelText<HTMLInputElement>('Message Claude in yantra-web').disabled).toBe(true)
+    await settled(() => expect(server.asked).toHaveLength(3))
+    expect(screen.queryByRole('alert')).toBeNull()
 
     server.takeConnections()
-    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
     await settled(() => expect(server.asked).toHaveLength(4))
     expect(server.asked[3]).toBe('/api/workspaces/yantra-web/chat?thread=1a2b3c4d')
-    await settled(() => expect(screen.queryByRole('alert')).toBeNull())
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('draws a refused socket, with nothing to retry', async () => {
@@ -664,15 +650,6 @@ describe('checkpoints', () => {
 
     say({ threadId: '1a2b3c4d', type: 'turn.completed', payload: { state: 'completed', stopReason: 'end_turn' } })
     await settled(() => expect(revert).toHaveProperty('disabled', false))
-  })
-
-  it('holds the revert when the socket closed', async () => {
-    quickReopens()
-    const card = await aTurnChanged()
-    server.keepHangingUp()
-    server.hangUp()
-    await settled(() => screen.getByRole('alert'))
-    expect(within(card).getByRole('button', { name: 'Revert to before this turn' })).toHaveProperty('disabled', true)
   })
 
   it('holds the revert while the socket reopens', async () => {

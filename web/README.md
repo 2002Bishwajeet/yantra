@@ -363,10 +363,16 @@ Settings → General. Ten things about the code:
   text comes back to an empty field.
 - **Every failure is a `ChatError` of its own kind**: refused, unreachable,
   not logged in, unknown thread, busy, bad frame, checkpoint, turn failed and
-  closed.
+  diff.
   Not logged in shows the command to run on the machine and a Retry that
-  reopens the socket. Only unreachable and closed offer Try again, and a socket is never reopened behind the person's
-  back, because the daemon cancels a turn whose socket closed.
+  reopens the socket. Only unreachable offers Try again.
+- **A dropped socket is reopened for as long as the page is visible** (Y-668).
+  The pauses are 1, 2, 4 and 8 seconds, and 8 seconds from then on. A hidden page
+  schedules no reopen; showing it, or the `online` event, reopens at once. An open
+  socket sends `{"type":"ping"}` every 20 seconds, and any frame within 5 seconds
+  counts as the answer. A silent socket is dropped and reopened after the last
+  cursor, because a phone's OS can kill a socket with no close event. A turn
+  outlives its socket (ADR-0035), so no count of failures ends the chat.
 - **`@` and `$` open a menu in the Chat composer** (Y-562). `@` lists the
   thread's files and `$` the harness's skills, from one `POST …/mentions`
   (`useMentions`). It asks once when a trigger opens and keeps the answer for

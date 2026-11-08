@@ -84,6 +84,7 @@ use axum::response::Response;
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OnceCell, broadcast, mpsc, oneshot};
+use tokio::time::MissedTickBehavior;
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
     ContentDelta, Decision, Event, Interaction, PermissionMode, RequestOption, Scope, StopReason,
@@ -102,6 +103,7 @@ use yantra_core::thread::{self, Place};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::{self, Workspace};
 
+use crate::terminal::{MISSES, PING_EVERY};
 use crate::write::{Authoriser, Refused, allowed, chain};
 
 /// How many transcript records an attach replays.
@@ -271,6 +273,15 @@ enum Frame {
     },
     /// Asks for the thread's whole-branch diff.
     Diff,
+    /// A browser cannot send a protocol ping, so it sends this and waits for a [`Pong`].
+    Ping,
+}
+
+/// The answer to [`Frame::Ping`]. It proves the socket is alive, nothing more.
+#[derive(Debug, Serialize)]
+struct Pong {
+    #[serde(rename = "type")]
+    tag: &'static str,
 }
 
 /// The one frame the daemon sends that is not a [`ThreadEvent`].
@@ -1648,12 +1659,15 @@ async fn flush<P: Peer>(sub: &mut Option<Sub>, peer: &mut P) -> bool {
 enum Heard {
     Text(String),
     Binary(Bytes),
+    /// The answer to a protocol ping.
+    Pong,
 }
 
 /// The browser's end of the socket. `None` is a socket that closed or failed.
 trait Peer {
     async fn hear(&mut self) -> Option<Heard>;
     async fn say_text(&mut self, text: String) -> bool;
+    async fn ping(&mut self) -> bool;
 
     async fn say<T: Serialize + Sync>(&mut self, frame: &T) -> bool {
         match serde_json::to_string(frame) {
@@ -1669,6 +1683,7 @@ impl Peer for WebSocket {
             match self.recv().await? {
                 Ok(Message::Text(text)) => return Some(Heard::Text(text.to_string())),
                 Ok(Message::Binary(bytes)) => return Some(Heard::Binary(bytes)),
+                Ok(Message::Pong(_)) => return Some(Heard::Pong),
                 Ok(Message::Close(_)) | Err(_) => return None,
                 // A ping is still axum's to answer.
                 Ok(_) => {}
@@ -1678,6 +1693,10 @@ impl Peer for WebSocket {
 
     async fn say_text(&mut self, text: String) -> bool {
         self.send(Message::Text(text.into())).await.is_ok()
+    }
+
+    async fn ping(&mut self) -> bool {
+        self.send(Message::Ping(Bytes::new())).await.is_ok()
     }
 }
 
@@ -1734,6 +1753,11 @@ async fn converse<M: Machine, P: Peer>(
     let (diffs, mut diffed) = mpsc::unbounded_channel::<String>();
     // The thread's next keeper, such as one a queued turn or a room starts.
     let mut waiter = None;
+    // Two missed pings end the socket, as terminal.rs bridge() does; the turn
+    // goes on in its keeper. A phone that slept leaves a socket nobody closes.
+    let mut unanswered = 0u8;
+    let mut pings = tokio::time::interval(PING_EVERY);
+    pings.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         if waiter.is_none()
             && let Some(here) = &here
@@ -1743,6 +1767,10 @@ async fn converse<M: Machine, P: Peer>(
         let open = tokio::select! {
             heard = peer.hear() => match heard {
                 None => false,
+                Some(Heard::Pong) => {
+                    unanswered = 0;
+                    true
+                }
                 Some(Heard::Binary(bytes)) => {
                     let reply = land(&machine, name, here.as_ref(), &mut early, &mut images, &bytes).await;
                     peer.say(&reply).await
@@ -1752,6 +1780,15 @@ async fn converse<M: Machine, P: Peer>(
                 }
             },
             Some(text) = diffed.recv() => peer.say_text(text).await,
+            _ = pings.tick() => {
+                if unanswered >= MISSES {
+                    tracing::info!("chat {name}: the socket answered no ping");
+                    false
+                } else {
+                    unanswered += 1;
+                    peer.ping().await
+                }
+            }
             followed = next_keeper(&mut waiter) => {
                 waiter = None;
                 match followed {
@@ -1934,6 +1971,7 @@ async fn heard_frame<M: Machine, P: Peer>(
                 true
             }
         },
+        Ok(Frame::Ping) => peer.say(&Pong { tag: "pong" }).await,
         Err(error) => {
             let said =
                 format!("a frame is a turn, an answer, a cancel, a revert or a diff: {error}");
@@ -3936,7 +3974,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 frame(Frame::Cancel),
                 frame(Frame::Revert { turn: 0 }),
                 frame(Frame::Diff),
+                frame(Frame::Ping),
             ]),
+        ),
+        (
+            "chatPong",
+            "ChatPong",
+            serde_json::to_value(Pong { tag: "pong" }).expect("a pong serialises"),
         ),
         (
             "chatQuery",
@@ -3957,6 +4001,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::watch;
@@ -4618,6 +4663,9 @@ mod tests {
         from: mpsc::UnboundedReceiver<Heard>,
         to: mpsc::UnboundedSender<String>,
         held: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+        pings: Arc<AtomicUsize>,
+        /// Answers each ping; a tab that slept has none.
+        pong: Option<mpsc::WeakUnboundedSender<Heard>>,
     }
 
     impl Peer for Browser {
@@ -4631,6 +4679,14 @@ mod tests {
                 let _ = released.await;
             }
             self.to.send(text).is_ok()
+        }
+
+        async fn ping(&mut self) -> bool {
+            self.pings.fetch_add(1, Ordering::SeqCst);
+            if let Some(back) = self.pong.as_ref().and_then(|back| back.upgrade()) {
+                let _ = back.send(Heard::Pong);
+            }
+            true
         }
     }
 
@@ -4699,14 +4755,35 @@ mod tests {
         after: Option<&str>,
         held: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
     ) -> (Tab, tokio::task::JoinHandle<()>) {
+        let (tab, served, _) = connect_pinged(script, thread, after, held, true);
+        (tab, served)
+    }
+
+    fn connect_pinged(
+        script: Arc<Script>,
+        thread: Option<&str>,
+        after: Option<&str>,
+        held: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+        answering: bool,
+    ) -> (Tab, tokio::task::JoinHandle<()>, Arc<AtomicUsize>) {
         let (send, from) = mpsc::unbounded_channel();
+        let pong = answering.then(|| send.downgrade());
+        let pings = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&pings);
         let (to, heard) = mpsc::unbounded_channel();
         let query = ChatQuery {
             thread: thread.map(str::to_owned),
             after: after.map(str::to_owned),
         };
         let served = tokio::spawn(async move {
-            converse(script, "web", query, &mut Browser { from, to, held }).await;
+            let mut browser = Browser {
+                from,
+                to,
+                held,
+                pings: counted,
+                pong,
+            };
+            converse(script, "web", query, &mut browser).await;
         });
         (
             Tab {
@@ -4714,6 +4791,7 @@ mod tests {
                 heard,
             },
             served,
+            pings,
         )
     }
 
@@ -5334,6 +5412,36 @@ mod tests {
             )
             .await;
         assert_eq!(agent.heard().await["method"], "session/new");
+    }
+
+    #[tokio::test]
+    async fn a_ping_frame_gets_a_pong_and_no_error() {
+        let (mut tab, _served) = connect(Arc::new(Script::default()), None);
+        assert_eq!(
+            tab.next_after(json!({"type": "ping"})).await,
+            json!({"type": "pong"})
+        );
+        assert!(tab.quiet().await);
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_answers_no_ping_is_closed_after_the_misses() {
+        let (_tab, served, pings) =
+            connect_pinged(Arc::new(Script::default()), None, None, None, false);
+        tokio::time::timeout(PING_EVERY * (u32::from(MISSES) + 6), served)
+            .await
+            .expect("the socket closes")
+            .expect("the task ends cleanly");
+        assert_eq!(pings.load(Ordering::SeqCst), usize::from(MISSES));
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_answers_pings_stays_open() {
+        let (_tab, served, pings) =
+            connect_pinged(Arc::new(Script::default()), None, None, None, true);
+        tokio::time::sleep(PING_EVERY * (u32::from(MISSES) + 4)).await;
+        assert!(!served.is_finished());
+        assert!(pings.load(Ordering::SeqCst) > usize::from(MISSES));
     }
 
     #[tokio::test(start_paused = true)]
@@ -7687,6 +7795,8 @@ mod tests {
             from,
             to,
             held: None,
+            pings: Arc::default(),
+            pong: None,
         };
         (browser, heard)
     }

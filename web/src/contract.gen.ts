@@ -14,6 +14,7 @@ import type {
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatPong,
   ChatQuery,
   ChatQueue,
   Check,
@@ -1218,8 +1219,15 @@ export const chatFrames = [
   },
   {
     "type": "diff"
+  },
+  {
+    "type": "ping"
   }
 ] satisfies ChatFrame[]
+
+export const chatPong = {
+  "type": "pong"
+} satisfies ChatPong
 
 export const chatQuery = {
   "after": "Y0123456789abcdef:812:0",
