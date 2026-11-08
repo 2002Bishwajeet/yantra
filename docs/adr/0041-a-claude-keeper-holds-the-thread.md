@@ -55,14 +55,29 @@ the thread is idle and no background work runs.**
 3. **A wake turn is a turn.** A turn that Claude starts with no user message gets the next turn
    number, a checkpoint and a diff, as any other turn does. When no socket is attached, `yantrad`
    sends one ntfy notification in the Y-451 phase for a finished turn.
-4. **The keeper ends** after 30 minutes with no turn and no background work, or after 4 hours with
-   background work and no turn. A cancel ends the turn and leaves background work running. *Stop
-   background work* is a separate action, and the thread's removal ends everything.
-5. **A change that needs a new process waits.** A new model, a new permission mode that the process
-   cannot take, or an `--add-dir` is refused while background work runs, with T3's words. With no
-   background work, `yantrad` closes stdin and starts a new keeper, which resumes the session.
-6. **The journals hold the keeper's life**, as they do for ACP. A new turn no longer empties the
-   directory. The 64 MiB cap of decision 5 replaces the keeper between turns, as it does for ACP.
+4. **The keeper ends** after 30 minutes with no turn and no background work. Background work pins
+   it open, and **every event from Claude restarts the pin**, as T3's does
+   (`ProviderSessionManager.ts:1203`). So a long build loop that keeps working is never cut off.
+   The keeper ends when background work has been silent for 4 hours. The thread's removal ends
+   everything.
+5. **Changes go to the live process.** A new model or permission mode is a `set_model` or
+   `set_permission_mode` control request on stdin, as T3's `setModel` and `setPermissionMode` are.
+   A change that only a new process can take, such as an `--add-dir`, waits while background work
+   runs, with T3's words. With no background work, `yantrad` closes stdin and starts a new keeper,
+   which resumes the stored session (decision 8).
+6. **Stop is per task and per thread.** A cancel ends the current turn and leaves background work
+   running. Each task in the *Waiting* list has its own Stop, which sends `stop_task`. *Stop all*
+   stops every task and then closes the keeper.
+7. **One root turn at a time.** A wake turn and a queued prompt never run together. When a wake
+   turn starts first, the queued prompt waits for its `result`. When a prompt is already queued,
+   Claude folds the wake into that turn, and `yantrad` draws one turn with both.
+8. **The thread stores its session id.** The keeper reads Claude's `session_id` from the `init`
+   line and `thread::remember` keeps it in the repository's git config, as it does for ACP. A new
+   keeper resumes that id, never the newest transcript file, so another `claude` run in the
+   worktree cannot change which conversation resumes.
+9. **The journals hold the keeper's life**, as they do for ACP. A new turn no longer empties the
+   directory. When `out` passes half its cap, the keeper is replaced between turns, as for ACP. A
+   keeper with background work is never replaced: it waits until the work ends.
 
 ## Consequences
 
@@ -71,7 +86,8 @@ the thread is idle and no background work runs.**
 - A thread holds one `claude` process on its machine for up to 30 minutes after its last turn, or
   4 hours with background work. A machine with many threads pays that memory.
 - **To measure before the build:** that `claude -p --input-format stream-json` keeps background
-  tasks alive after a `result` and starts a wake turn. T3's fixtures show it through the SDK. A
+  tasks alive after a `result`, starts a wake turn, and answers `set_model`, `set_permission_mode`
+  and `stop_task` on stdin. T3's fixtures show it through the SDK. A
   fixture test against the real binary in the podman machine is the proof (§B3).
 - `chat.rs` loses the Claude path that ends a keeper at each turn, and Claude and ACP keepers share
   one life cycle.
