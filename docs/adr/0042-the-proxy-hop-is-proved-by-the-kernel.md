@@ -1,15 +1,15 @@
 # ADR-0042 — The proxy hop is proved by the kernel, not by the address
 
 - **Date:** 2026-11-08
-- **Status:** Proposed 2026-11-08 ([Y-665](../../tracker.md), issue #654). The owner accepts or
-  changes it.
-- **Evidence:** research note 24, `docs/research/24-decision-and-practice-audit.md` (open in PR #647), which
+- **Status:** Accepted 2026-11-08 by the owner ([Y-665](../../tracker.md), issue #654).
+  [Y-680](../../tracker.md) builds it.
+- **Evidence:** research note 24, `docs/research/24-decision-and-practice-audit.md` , which
   found the hole. The measurements below were made on 2026-11-08 on `cachyos-g14` and read on
   `yantra-box`, both on Tailscale 1.104.4.
 - **Amends:** [ADR-0017](0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)
   decisions 1 and 2, and its consequence *"this machine becomes trusted for writes"*.
-  [ADR-0029](0029-a-machine-joins-itself.md) decision 3, for a join on the hub. Each gets a dated
-  note when the owner accepts this ADR.
+  [ADR-0029](0029-a-machine-joins-itself.md) decision 3, for a join on the hub. Each carries a dated
+  note.
 - **Unchanged:** [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)'s
   predicate (`whois`, live, same user, no tags, failure closed), and ADR-0017 decisions 3 to 5.
 - **Comes before:** ADR-0040, *An agent caller is tagged and scoped* (Proposed, open in PR #643).

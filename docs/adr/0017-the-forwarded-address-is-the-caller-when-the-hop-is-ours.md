@@ -103,6 +103,8 @@ peer stands as it does on 7717 today.
 an untrusted peer with a forwarded header ignores it, a malformed header refuses, and an address that
 resolves to nothing refuses as it already did.
 
+> **2026-11-08, [Y-665](../../tracker.md):** [ADR-0042](0042-the-proxy-hop-is-proved-by-the-kernel.md) amends decisions 1 and 2 and the consequence that this machine is trusted for writes. Since agent sessions run on the hub under their own account, a local process is no longer the owner, so the kernel, not the address, proves the `tailscale serve` hop.
+
 ## Consequences
 
 **The direct path is untouched, which is the test that this is a widening and not a rewrite.** A
