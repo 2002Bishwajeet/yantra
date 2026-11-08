@@ -316,6 +316,8 @@ export function getRouter(history: RouterHistory, client: QueryClient) {
     defaultErrorComponent: RouteError,
     defaultNotFoundComponent: Nowhere,
     scrollRestoration: true,
+    // The phone scrolls `main` and not the window (Y-670).
+    scrollToTopSelectors: ['.shell__main'],
   })
 }
 

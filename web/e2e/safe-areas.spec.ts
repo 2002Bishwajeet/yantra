@@ -1,5 +1,6 @@
 import { expect, scenario, test } from './lib/test'
 import { route } from './lib/routes'
+import { scrollTo } from './lib/scroller'
 
 /** Y-573 (#510). Chromium cannot emulate insets, so the tests set `--m3-safe-top`
  *  on <html> by hand and prove the arithmetic the stylesheets do with it. */
@@ -57,8 +58,8 @@ for (const scheme of ['light', 'dark'] as const) {
       const pad = document.createElement('div')
       pad.style.height = '4000px'
       document.querySelector('.shell__main')?.append(pad)
-      window.scrollTo(0, 1500)
     })
+    await scrollTo(page, 1500)
     expect((await strip()).top).toBe('0px')
   })
 }

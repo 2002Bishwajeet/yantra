@@ -1,6 +1,7 @@
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
 import type { Page } from '@playwright/test'
+import { endGap, scrollTo } from './lib/scroller'
 
 /** The chat flows the unit tests cannot reach (Y-484): they need a real
  *  mounted Session, a second tab, or a reload. The fixture's chat socket acts
@@ -324,7 +325,7 @@ test.describe('the composer', () => {
     )
     // Where a phone ends up scrolled depends on whether the thread list or the banner arrived first, so the capture is the top.
     await expect(page.getByRole('button', { name: /^Threads, / })).toBeVisible()
-    await page.evaluate(() => window.scrollTo(0, 0))
+    await scrollTo(page, 0)
     await screenshot(page, 'composer-closed', 'busy', size, { overlay: size === 'phone' })
   })
 
@@ -403,7 +404,7 @@ test.describe('the composer', () => {
 
   test('rides at the foot of the screen while the page scrolls', async ({ page }) => {
     await page.setViewportSize({ width: page.viewportSize()!.width, height: 520 })
-    await page.evaluate(() => window.scrollTo(0, 0))
+    await scrollTo(page, 0)
     const dock = page.locator('.composer-dock')
     await expect(dock).toBeInViewport({ ratio: 1 })
     const viewport = page.viewportSize()!.height
@@ -412,7 +413,7 @@ test.describe('the composer', () => {
       return Math.round(box.y + box.height)
     }
     expect(await at()).toBeGreaterThanOrEqual(viewport - 1)
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    await scrollTo(page, 'end')
     expect(await at()).toBeGreaterThanOrEqual(viewport - 1)
     await expect(dock).toBeInViewport({ ratio: 1 })
   })
@@ -507,10 +508,8 @@ test('an issue draft fills the card with no label over it', async ({ page, size 
   // The overlay capture races the history, the thread list and the scroll; wait for all three, then scroll to the end.
   await expect(page.getByText('Is the core crate green?')).toBeVisible()
   await expect(page.getByRole('button', { name: /^Threads, / })).toBeVisible()
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-  await expect
-    .poll(() => page.evaluate(() => Math.round(window.innerHeight + window.scrollY - document.documentElement.scrollHeight)))
-    .toBe(0)
+  await scrollTo(page, 'end')
+  await expect.poll(() => endGap(page)).toBe(0)
   await screenshot(page, 'composer-issue-draft', 'busy', size, { overlay: size === 'phone' })
 })
 
