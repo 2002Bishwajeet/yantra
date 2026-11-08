@@ -463,7 +463,7 @@ test.describe('the phone shell is an app frame', () => {
     await expect(page.getByRole('button', { name: 'Back' })).toBeInViewport()
   })
 
-  test('hands the scroll to main and stops the rubber band', async ({ page }) => {
+  test('hands the scroll to main and stops the rubber band', async ({ page, browserName }) => {
     await page.goto('/')
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorY)).toBe('none')
@@ -472,6 +472,8 @@ test.describe('the phone shell is an app frame', () => {
       return { overflowY: css.overflowY, overscroll: css.overscrollBehaviorY }
     })
     expect(style).toEqual({ overflowY: 'auto', overscroll: 'contain' })
+    // Y-660: Playwright has no wheel in mobile WebKit, so WebKit proves the styles and Chromium proves the scroll.
+    if (browserName === 'webkit') return
 
     const box = (await main(page).boundingBox())!
     await page.mouse.move(box.x + box.width / 2, box.y + 200)
