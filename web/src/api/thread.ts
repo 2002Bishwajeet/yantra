@@ -154,6 +154,11 @@ export type ChatFrame =
   | { type: 'revert'; turn: number }
   /** Asks for the thread's whole-branch diff; answered while a turn runs. */
   | { type: 'diff' }
+  /** A browser cannot send a protocol ping, so it sends this; the daemon answers `pong`. */
+  | { type: 'ping' }
+
+/** The answer to `ping`. It proves the socket is alive and is no event. */
+export type ChatPong = { type: 'pong' }
 
 /** The one daemon frame that is not an event. `notLoggedIn` names the
  *  command to run on the machine, because the login stays there (ADR-0033 §6). */

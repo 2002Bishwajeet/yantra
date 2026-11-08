@@ -80,6 +80,50 @@ test.describe('the chat, across views, tabs and reloads', () => {
     await expect(page.getByText('Reverted')).toBeVisible()
   })
 
+  test('a 60 s outage mid-turn reconnects after the last cursor and the turn finishes (Y-668)', async ({ page }) => {
+    test.setTimeout(150_000)
+    await turn(page)
+    const reopened = new Promise<string>((resolve) => {
+      page.on('websocket', (socket) => {
+        if (socket.url().includes('after=')) socket.on('framereceived', () => resolve(socket.url()))
+      })
+    })
+    await page.request.post('/api/fixture/chat-outage', { data: { ms: 60_000 } })
+
+    // The old client gave up after about 15 s; the chat must still show no error at 20 s.
+    await page.waitForTimeout(20_000)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
+    await expect(asking(page)).toBeVisible()
+
+    expect(decodeURIComponent(await reopened)).toMatch(/after=F\d+:0:0/)
+    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+
+  test('a page shown again opens a fresh socket at once (Y-668)', async ({ page }) => {
+    await turn(page)
+    const opened: string[] = []
+    page.on('websocket', (socket) => opened.push(socket.url()))
+    const visibility = (state: 'hidden' | 'visible') =>
+      page.evaluate((one) => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => one })
+        document.dispatchEvent(new Event('visibilitychange'))
+      }, state)
+    await visibility('hidden')
+    await page.request.post('/api/fixture/chat-outage', { data: { ms: 1 } })
+    // A hidden page schedules no reopen, whatever its backoff would have been.
+    await page.waitForTimeout(3_000)
+    expect(opened).toEqual([])
+
+    await visibility('visible')
+    await expect.poll(() => opened.length, { timeout: 2_000 }).toBe(1)
+    expect(decodeURIComponent(opened[0]!)).toMatch(/after=F\d+:0:0/)
+    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
+  })
+
   test('Full access draws no permission card', async ({ page }) => {
     await fullAccess(page)
     await send(page)

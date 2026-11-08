@@ -6,6 +6,7 @@ import {
   type ChatFailure,
   type ChatFrame,
   type ChatNotAttached,
+  type ChatPong,
   type Decision,
   type Harness,
   type Interaction,
@@ -33,8 +34,6 @@ export type ChatErrorKind =
   | 'diff'
   // The agent's turn ended failed: ssh refused, the harness not found.
   | 'turnFailed'
-  // The socket closed after it opened, and every reopen failed.
-  | 'closed'
 
 const sentences: Record<ChatErrorKind, string> = {
   refused: "The daemon refused the chat. This browser may not be on a node this tailnet's owner holds.",
@@ -46,7 +45,6 @@ const sentences: Record<ChatErrorKind, string> = {
   checkpoint: "git on the workspace's machine could not keep or restore this chat's files.",
   diff: "git on the workspace's machine could not diff this chat's branch.",
   turnFailed: 'The agent could not finish the turn.',
-  closed: 'The chat socket closed and did not reopen. A running turn continues on the machine. Try again to see it.',
 }
 
 /** Whose login is missing, where, and what to run there. */
@@ -59,8 +57,8 @@ export class ChatError extends Error {
   readonly said: string
   /** Set on `notLoggedIn` only. */
   readonly login?: Login
-  /** A machine that did not answer, and a socket that closed, may answer the
-   *  next time. The other kinds would say the same thing again. */
+  /** A machine that did not answer may answer the next time. The other kinds
+   *  would say the same thing again. */
   readonly retryable: boolean
   private readonly sentence?: string
 
@@ -71,7 +69,7 @@ export class ChatError extends Error {
     this.said = said
     // `notLoggedIn` is not: it fails again until a person logs in, so the
     // chat offers its own Retry beside the command.
-    this.retryable = kind === 'unreachable' || kind === 'closed'
+    this.retryable = kind === 'unreachable'
     this.sentence = sentence
     this.login = login
   }
@@ -137,9 +135,17 @@ export function chatAddress(workspace: string, thread?: string, after?: string):
 }
 
 /** How long apart a socket that dropped is reopened, one pause per attempt:
- *  the daemon's own reader backs off the same way. A message refills it, so
- *  the budget is per outage. Exported so the tests assert this list. */
-export const PAUSES: readonly number[] = [1_000, 2_000, 4_000, 8_000, 8_000]
+ *  the daemon's own reader backs off the same way. The last pause repeats for
+ *  as long as the page is visible, because a phone asleep for a minute is not
+ *  a chat that ended. A message restarts the list. Exported so the tests
+ *  assert it. */
+export const PAUSES: readonly number[] = [1_000, 2_000, 4_000, 8_000]
+
+/** How often an open, visible socket sends a ping. */
+export const PING_EVERY = 20_000
+
+/** How long a ping waits for any frame before the socket counts as dead. */
+export const PONG_WITHIN = 5_000
 
 export type ChatSocket = {
   /** `false` when the socket is not open, so nothing was sent. */
@@ -208,7 +214,15 @@ function queueOf(said: object): ChatQueue | null {
 /** A daemon frame, or `null` for one this dashboard cannot read. */
 export function frameOf(
   text: string,
-): ThreadEvent | ChatFailure | ChatAttached | ChatNotAttached | ChatBranchDiff | ChatQueue | null {
+):
+  | ThreadEvent
+  | ChatFailure
+  | ChatAttached
+  | ChatNotAttached
+  | ChatBranchDiff
+  | ChatQueue
+  | ChatPong
+  | null {
   let said: unknown
   try {
     said = JSON.parse(text)
@@ -216,6 +230,7 @@ export function frameOf(
     return null
   }
   if (typeof said !== 'object' || said === null || !('type' in said)) return null
+  if (said.type === 'pong') return { type: 'pong' }
   if (said.type === 'attached') {
     return 'path' in said && typeof said.path === 'string' && said.path !== '' ? (said as ChatAttached) : null
   }
@@ -242,7 +257,10 @@ export function frameOf(
  *  with the last cursor drawn, and the daemon sends only what followed it.
  *  `address` builds each URL from that cursor. `onRestart` says the daemon
  *  could not continue from it and replays the thread from the start, so the
- *  caller draws it again. `closed` is reported once every reopen failed. */
+ *  caller draws it again. A socket that drops is reopened for as long as the
+ *  page is visible; a hidden page waits until it is shown, and a socket that
+ *  stops answering pings is dropped and reopened (a phone's OS can kill one
+ *  without a close event). */
 export function openChat(
   address: (after?: string) => string,
   {
@@ -272,6 +290,10 @@ export function openChat(
   let finished = false
   let wasOpen = false
   let waiting: ReturnType<typeof setTimeout> | undefined
+  // A reopen that is scheduled and has not run.
+  let reopening = false
+  let heartbeat: ReturnType<typeof setInterval> | undefined
+  let deadline: ReturnType<typeof setTimeout> | undefined
   let attempts = 0
   // The last cursor drawn, and the one the open socket was opened after.
   let cursor: string | undefined
@@ -300,7 +322,84 @@ export function openChat(
     return true
   }
 
-  const open = () => {
+  const stopWatching = () => {
+    clearInterval(heartbeat)
+    clearTimeout(deadline)
+  }
+
+  const detach = (old: WebSocket) => {
+    old.onopen = old.onmessage = old.onclose = old.onerror = null
+  }
+
+  const visible = () => document.visibilityState !== 'hidden'
+
+  // A hidden page schedules nothing: the phone may be asleep, and `wake` reopens.
+  const reopenLater = () => {
+    onDropped?.()
+    if (!visible()) return
+    const pause = pauses[Math.min(attempts, pauses.length - 1)] ?? PAUSES[PAUSES.length - 1]!
+    attempts += 1
+    reopening = true
+    waiting = setTimeout(open, pause)
+  }
+
+  // No frame came back: a dead link may never fire `onclose`, so this does not wait for it.
+  const dead = () => {
+    stopWatching()
+    if (!socket || finished) return
+    const old = socket
+    detach(old)
+    old.close()
+    abandon()
+    onDropped?.()
+    // The link was silent, not refused: the first try is at once.
+    if (visible()) open()
+  }
+
+  const probe = () => {
+    if (socket?.readyState !== WebSocket.OPEN || !visible()) return
+    clearTimeout(deadline)
+    deadline = setTimeout(dead, PONG_WITHIN)
+    send({ type: 'ping' })
+  }
+
+  // The page came back or the network did: a reopen waiting out its pause is
+  // not needed, and an open socket may be one the OS killed.
+  const wake = () => {
+    if (finished || !visible()) return
+    clearTimeout(waiting)
+    reopening = false
+    attempts = 0
+    if (socket?.readyState === WebSocket.OPEN) {
+      probe()
+      return
+    }
+    // A second wake must not replace a socket that is still connecting.
+    if (socket?.readyState === WebSocket.CONNECTING) return
+    open()
+  }
+
+  const onVisibility = () => {
+    if (visible()) wake()
+    else if (reopening) {
+      clearTimeout(waiting)
+      reopening = false
+    }
+  }
+  const onPageShow = (event: PageTransitionEvent) => {
+    if (event.persisted) wake()
+  }
+  document.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('online', wake)
+  window.addEventListener('pageshow', onPageShow)
+
+  function open() {
+    reopening = false
+    if (socket) {
+      detach(socket)
+      socket.close()
+    }
+    stopWatching()
     let live: WebSocket
     asked = wasOpen ? cursor : undefined
     const redraws = drawn
@@ -316,9 +415,12 @@ export function openChat(
     live.onerror = () => {}
     live.onopen = () => {
       wasOpen = true
+      heartbeat = setInterval(probe, PING_EVERY)
       onOpen?.()
     }
     live.onmessage = (message: MessageEvent<unknown>) => {
+      // Any frame proves the socket is alive.
+      clearTimeout(deadline)
       const frame = typeof message.data === 'string' ? frameOf(message.data) : null
       if (frame === null) {
         onError(
@@ -333,6 +435,7 @@ export function openChat(
       // An error frame is no sign the daemon can answer, so it does not refill
       // the reopen budget.
       if (frame.type !== 'error') attempts = 0
+      if (frame.type === 'pong') return
       if (frame.type === 'attached' || frame.type === 'notAttached') {
         const waiting = pending.shift()
         if (!waiting) {
@@ -382,6 +485,7 @@ export function openChat(
       }
     }
     live.onclose = (closed: CloseEvent) => {
+      stopWatching()
       abandon()
       if (finished) return
       if (!wasOpen) {
@@ -395,15 +499,7 @@ export function openChat(
         finished = true
         return
       }
-      const pause = pauses[attempts]
-      if (pause === undefined) {
-        finished = true
-        onError(new ChatError('closed', ''))
-        return
-      }
-      attempts += 1
-      onDropped?.()
-      waiting = setTimeout(open, pause)
+      reopenLater()
     }
   }
 
@@ -442,6 +538,10 @@ export function openChat(
       abandon()
       finished = true
       clearTimeout(waiting)
+      stopWatching()
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('online', wake)
+      window.removeEventListener('pageshow', onPageShow)
       socket?.close()
     },
   }

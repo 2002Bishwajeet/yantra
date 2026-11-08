@@ -758,8 +758,9 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 
 The rules from before the keeper still hold:
 
-- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`
-  and `diff`; the daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
+- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`,
+  `diff` and `ping`; the daemon answers a `ping` with `{"type":"pong"}`, sends protocol pings itself and
+  ends a chat socket after two misses (Y-668). The daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
   `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn`, `checkpoint` and `diff`. `notLoggedIn`
   adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
   `chatQuery`.

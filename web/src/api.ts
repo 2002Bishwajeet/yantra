@@ -647,6 +647,7 @@ export type {
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatPong,
   ChatQuery,
   ChatQueue,
   SlashCommand,
