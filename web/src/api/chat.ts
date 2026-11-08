@@ -374,6 +374,8 @@ export function openChat(
       probe()
       return
     }
+    // A second wake must not replace a socket that is still connecting.
+    if (socket?.readyState === WebSocket.CONNECTING) return
     open()
   }
 
@@ -393,7 +395,10 @@ export function openChat(
 
   function open() {
     reopening = false
-    if (socket) detach(socket)
+    if (socket) {
+      detach(socket)
+      socket.close()
+    }
     stopWatching()
     let live: WebSocket
     asked = wasOpen ? cursor : undefined

@@ -145,6 +145,23 @@ describe('the chat socket after a drop', () => {
     expect(FakeSocket.all).toHaveLength(before + 1)
   })
 
+  it('opens one socket when online and visibilitychange fire back to back after a drop', () => {
+    const { first } = connect()
+    first.drop()
+    window.dispatchEvent(new Event('online'))
+    show('visible')
+    expect(FakeSocket.all).toHaveLength(2)
+    expect(FakeSocket.all[1]!.readyState).toBe(0)
+  })
+
+  it('closes the socket it replaces', () => {
+    const { first } = connect()
+    show('hidden')
+    show('visible')
+    vi.advanceTimersByTime(PONG_WITHIN)
+    expect(first.readyState).toBe(3)
+  })
+
   it('pings an open socket when the page is shown again', () => {
     const { first } = connect()
     show('hidden')
