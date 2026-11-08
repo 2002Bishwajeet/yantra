@@ -51,7 +51,7 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
         <h2 className="m3-error__title">{title}</h2>
         <p className="m3-error__sentence">{error.describe()}</p>
         {error.said ? (
-          <Mono className="m3-error__said" clip={layout === 'inline'}>
+          <Mono className="m3-error__said m3-wrap">
             {error.said}
           </Mono>
         ) : null}

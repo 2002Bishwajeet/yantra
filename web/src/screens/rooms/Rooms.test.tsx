@@ -47,14 +47,17 @@ const design: RoomSummary = {
   members: 2,
   messages: 1,
   last_at: NOW - 60,
+  workspace: 'web',
+  brief: null,
+  base: null,
 }
 const review: RoomSummary = { ...design, name: 'review', spent: 20, paused: true, messages: 2 }
 
 const reviewRoom: RoomData = {
   ...review,
   log: [
-    { seq: 19, at: NOW - 120, from: 'alpha · chat A1', text: 'The API is ready.', budget: 19 },
-    { seq: 20, at: NOW - 60, from: 'beta', text: '<b>bold?</b>\nline two', budget: 20 },
+    { seq: 19, kind: 'text', at: NOW - 120, from: 'alpha · chat A1', text: 'The API is ready.', budget: 19 },
+    { seq: 20, kind: 'text', at: NOW - 60, from: 'beta', text: '<b>bold?</b>\nline two', budget: 20 },
   ],
 }
 
@@ -120,7 +123,7 @@ describe('the rooms list', () => {
     daemon({ 'GET /api/rooms': { status: 200, body: [] } })
     open('/rooms')
     expect(await screen.findByText('No rooms')).toBeTruthy()
-    expect(screen.getByText(/a restart clears them/)).toBeTruthy()
+    expect(screen.getByText(/A room an agent made ends on a restart/)).toBeTruthy()
     expect(screen.queryByRole('link')).toBeNull()
   })
 
@@ -158,7 +161,7 @@ describe('one room', () => {
     open('/rooms/gone')
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByText('No room is called gone')).toBeTruthy()
-    expect(alert.textContent).toContain('a restart clears them')
+    expect(alert.textContent).toContain('a restart ended it')
     expect(within(alert).getByRole('link', { name: 'All rooms' }).getAttribute('href')).toBe('/rooms')
   })
 
@@ -201,7 +204,7 @@ describe('one room', () => {
       ...reviewRoom,
       paused: false,
       spent: 0,
-      log: [...reviewRoom.log, { seq: 21, at: NOW, from: 'owner on pixel', text: 'Go ahead.', budget: 0 }],
+      log: [...reviewRoom.log, { seq: 21, kind: 'text', at: NOW, from: 'owner on pixel', text: 'Go ahead.', budget: 0 }],
     }
     const calls = daemon({
       'GET /api/rooms/review': () => ({ status: 200, body: posted ? after : reviewRoom }),

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link, useLocation, useNavigate } from '@tanstack/react-router'
 import type { Workspace, WorkspaceStatus } from '@/api'
 import { useSessions, useSpend, useTranscript, useWorkspaces } from '@/api/hooks'
+import { keys } from '@/api/keys'
 import { MISSING, statusQuery } from '@/api/queries'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -11,6 +12,7 @@ import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
+import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
@@ -23,7 +25,6 @@ import { KeyRow } from './Keys'
 import { NotFound } from './NotFound'
 import { Spend } from './Spend'
 import { Terminal } from './Terminal'
-import { ThreadList } from './ThreadList'
 import { Transcript } from './Transcript'
 import './Session.css'
 
@@ -34,11 +35,10 @@ const route = getRouteApi('/w/$name')
 const LABELS: Record<View, string> = {
   chat: 'Chat',
   terminal: 'Terminal',
-  transcript: 'Transcript',
   spend: 'Spend',
 }
 
-/** One workspace, four views the URL carries (D5 §3, board 13 puts Chat
+/** One workspace, three views the URL carries (D5 §3, board 13 puts Chat
  *  first). The list is read before any socket is opened: a round trip to the
  *  daemon is cheap and an attach is an ssh to a machine that may be asleep. */
 export function Session() {
@@ -61,6 +61,8 @@ export function Workspace(props: {
   const { name, view, thread, onThread } = props
   const client = useQueryClient()
   const listed = useWorkspaces()
+  // skipToken: never fetched, so a prefix invalidation leaves the 201 alone (Y-638).
+  const { data: made } = useQuery<Workspace>({ queryKey: keys.created(name), queryFn: skipToken })
 
   if (listed.looked === 'pending') {
     return (
@@ -100,7 +102,13 @@ export function Workspace(props: {
   }
 
   const entry = listed.data.find((one) => one.name === name)
-  if (!entry) return <NotFound name={name} />
+  if (!entry) {
+    return made ? (
+      <Loaded onThread={onThread ?? (() => {})} thread={thread} view={view} workspace={made} />
+    ) : (
+      <NotFound name={name} />
+    )
+  }
 
   if (entry.loaded === 'no') {
     return (
@@ -150,6 +158,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   const [chatFor, setChatFor] = useState(view === 'chat' ? name : null)
   if (view === 'chat' && chatFor !== name) setChatFor(name)
   const chatOpened = chatFor === name
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
   // A chat reads its thread only when its socket opens, so a thread picked from the list
   // remounts it. A thread the chat itself named is already attached and does not.
   const [named, setNamed] = useState(thread)
@@ -168,7 +177,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
     onThread(id)
   }
 
-  const { data: agent } = useQuery(statusQuery(name))
+  const { data: agent, isPending: unread } = useQuery(statusQuery(name))
   const status: WorkspaceStatus | null =
     agent === undefined || agent === MISSING || agent.looked !== 'ok' ? null : agent.data
   const state = status?.reached === 'yes' ? status.status : null
@@ -203,6 +212,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
             ))}
           </PillGroup>
         </nav>
+        {view === 'chat' ? <div className="session__chatbar" ref={setSlot} /> : null}
         {readAt ? (
           <Mono className="session__read">
             read{' '}
@@ -215,13 +225,17 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
       </div>
       {/* Only the open tab is mounted, except the chat: mounting the terminal
           opens an ssh, and tmux redraws the pane for whoever attaches next (D5 §3.5). */}
-      <ErrorBoundary eyebrow="Session / Threads" layout="inline" resetKeys={[name]} title="The thread list broke">
-        <ThreadList key={name} name={name} thread={thread} view={view} />
-      </ErrorBoundary>
       <ErrorBoundary eyebrow={`Session / ${LABELS[view]}`} layout="inline" resetKeys={[name, view]} title="This view broke">
         {chatOpened ? (
           <div className="session__chat" hidden={view !== 'chat'}>
-            <Chat initialDraft={draft ?? carried} key={`${name}:${epoch}`} onThread={chatNamed} thread={thread} workspace={workspace} />
+            <Chat
+              initialDraft={draft ?? carried}
+              key={`${name}:${epoch}`}
+              onThread={chatNamed}
+              slot={view === 'chat' ? slot : null}
+              thread={thread}
+              workspace={workspace}
+            />
           </div>
         ) : null}
         {view === 'terminal' ? (
@@ -235,18 +249,32 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
                 is the session.
               </Text>
             ) : null}
-            <Terminal
-              height={factor === 'phone' ? '50vh' : '60vh'}
-              key={name}
-              label={`tmux ${name} on ${workspace.machine}`}
-              target={{ workspace: name, machine: workspace.machine }}
-            >
-              {factor === 'phone' ? <KeyRow /> : null}
-            </Terminal>
+            {/* Y-639: every Stop ends here, so it is a note and not a refused attach. */}
+            {state?.state === 'no_session' ? (
+              <Text render={<p />} className="session__banner" scale="body-medium">
+                {name} is stopped.{workspace.startup === null ? ' Resume starts claude again.' : ''}
+              </Text>
+            ) : unread ? (
+              <Skeleton shape="row" />
+            ) : (
+              <Terminal
+                height={factor === 'phone' ? '50vh' : '60vh'}
+                key={name}
+                label={`tmux ${name} on ${workspace.machine}`}
+                target={{ workspace: name, machine: workspace.machine }}
+              >
+                {factor === 'phone' ? <KeyRow /> : null}
+              </Terminal>
+            )}
+            {/* Opening it is the request that reads the transcript, so the terminal alone spends one ssh. */}
+            <Disclosure action="Show" className="session__history" summary="History">
+              <Text render={<p />} scale="body-small" tone="variant">
+                What the agent in this terminal said, read from its transcript on {workspace.machine}. Chat turns are not
+                here.
+              </Text>
+              <Transcript now={now} onRead={transcript.read} said={transcript.said} state={state} workspace={workspace} />
+            </Disclosure>
           </div>
-        ) : null}
-        {view === 'transcript' ? (
-          <Transcript now={now} onRead={transcript.read} said={transcript.said} state={state} workspace={workspace} />
         ) : null}
         {view === 'spend' ? (
           <Spend asked={spend.asked} now={now} onAsk={() => void spend.ask(workspace)} workspace={workspace} />

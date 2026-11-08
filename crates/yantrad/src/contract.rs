@@ -63,9 +63,12 @@ import type {
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatPong,
   ChatQuery,
   ChatQueue,
+  Check,
   Cloning,
+  Commands,
   Connection,
   Device,
   Event,
@@ -76,6 +79,7 @@ import type {
   Looked,
   Machine,
   MachineSessions,
+  Mentions,
   Opened,
   Placement,
   Readiness,
@@ -83,6 +87,7 @@ import type {
   Resumed,
   Room,
   RoomPosted,
+  RoomRemoved,
   RoomSummary,
   Spend,
   SshIdentity,
@@ -97,6 +102,7 @@ import type {
   ThreadPrOpened,
   ThreadPushed,
   Transcript,
+  UpdateProgress,
   Workspace,
   WorkspaceStatus,
 } from './api'
@@ -163,6 +169,16 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
         ),
         ("repos", "Looked<Repo[]>", read(&fleet, "/repos").await),
         ("github", "Connection", read(&fleet, "/github").await),
+        (
+            "githubReadiness",
+            "Looked<Check>",
+            read(&fleet, "/readiness/github").await,
+        ),
+        (
+            "githubRefused",
+            "Looked<Check>",
+            read(&refused(), "/readiness/github").await,
+        ),
         (
             "disconnected",
             "Connection",
@@ -321,9 +337,9 @@ async fn fleet() -> Fleet {
             .map(|report| (report.machine.clone(), Arc::new(Reading::new(report))))
             .collect(),
         attention: Some(Arc::new(Reading::new(Ok(attention())))),
-        // `/readiness/github` has no entry below: the type it would satisfy is
-        // the card's, and the dashboard is parked (Y-174).
-        github: None,
+        github: Some(Arc::new(Reading::new(doctor::github(Some(&Ok(
+            "2002Bishwajeet".into(),
+        )))))),
         // `/about` is built by hand in `api::answers` for its build date, and
         // its `published` fact is spelled there.
         release: None,
@@ -347,8 +363,28 @@ async fn fleet() -> Fleet {
             },
         ])))),
     });
+    // Y-582: bound to n-1's address, so n-1 is the hub.
+    let fleet = Fleet {
+        facts: Arc::new(crate::heartbeat::Facts {
+            started: std::time::Instant::now(),
+            listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
+            ssh_dir: PathBuf::new(),
+            ssh_state: PathBuf::new(),
+            relay: false,
+            trigger: PathBuf::new(),
+            updater: PathBuf::new(),
+            progress: PathBuf::new(),
+        }),
+        ..fleet
+    };
     // A grant whose login the sweep has learned; the token is in no answer.
-    fleet.github.learned("2002Bishwajeet".into()).await;
+    fleet
+        .github
+        .learned(yantra_core::github::Account {
+            login: "2002Bishwajeet".into(),
+            avatar_url: Some("https://avatars.githubusercontent.com/u/1?v=4".into()),
+        })
+        .await;
 
     let mut beats = fleet.beats.write().await;
     beats.insert("n-1".to_owned(), Reading::new(beat(Power::Ac)));
@@ -483,6 +519,15 @@ fn broken() -> Fleet {
     })
 }
 
+fn refused() -> Fleet {
+    holding(Snapshot {
+        github: Some(Arc::new(Reading::new(doctor::github(Some(&Err(
+            yantra_core::github::Error::Refused,
+        )))))),
+        ..Snapshot::default()
+    })
+}
+
 fn holding(snapshot: Snapshot) -> Fleet {
     Fleet {
         model: Arc::new(tokio::sync::RwLock::new(snapshot)),
@@ -518,7 +563,7 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
 /// A file the listing refused. It is in the fixture rather than only in a
 /// hand-written stub for this file's own reason: a state nothing generated is a
 /// state nothing checks, and `loaded: "no"` is the entry `web/` must narrow on.
-/// Three checks rather than the twelve `doctor` runs: what a page has to render
+/// Three checks rather than the thirteen `doctor` runs: what a page has to render
 /// is one of three states beside a name and a sentence, and the tenth of those
 /// tells it nothing the third did not.
 fn swept(machine: &str) -> doctor::Report {
@@ -529,11 +574,13 @@ fn swept(machine: &str) -> doctor::Report {
                 check: "reachable",
                 state: doctor::State::Present,
                 detail: "a command ran there and reported its own status".into(),
+                took_ms: Some(120),
             },
             doctor::Check {
                 check: "provider-auth",
                 state: doctor::State::Absent,
                 detail: "`gh` is installed there and no account is logged in".into(),
+                took_ms: None,
             },
             // The daemon fills this one in from the beats it holds, so the
             // fixture's value is the substitution's rather than the library's.
@@ -541,6 +588,7 @@ fn swept(machine: &str) -> doctor::Report {
                 check: doctor::HEARTBEAT,
                 state: doctor::State::Unknown,
                 detail: "only the running daemon holds the beats".into(),
+                took_ms: None,
             },
         ],
     }

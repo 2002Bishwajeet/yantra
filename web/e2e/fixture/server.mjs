@@ -64,6 +64,9 @@ const CLONE_PROGRESS = [
 
 const scenarios = new URL('./scenarios/', import.meta.url)
 
+// Y-583: no avatar by default, so no baseline fetches from the network.
+const SIGNED_IN = { ...contract.github, avatar_url: null }
+
 /** The raw fixtures, which is also what the `contract` scenario serves. */
 function defaults() {
   return {
@@ -81,7 +84,7 @@ function defaults() {
     here: { machine: null },
     // Y-350: what /api/github holds, and the daemon's key. `null` is a key
     // `yantra ssh-identity` has not made, a 404.
-    connection: contract.github,
+    connection: SIGNED_IN,
     sshIdentity: contract.sshIdentity,
     // Y-536: the rooms yantrad holds in memory, by name. The `rooms` scenario fills it.
     rooms: {},
@@ -229,6 +232,8 @@ function entriesOf(state, path) {
   const made = (state.made?.[path] ?? []).map((name) => dir(path, name, null))
   if (path === '/') return [dir(path, 'home', null), dir(path, 'srv', null), dir(path, 'root', null, 'dir', false)]
   if (path === '/home') return [dir(path, 'biswa', null)]
+  // Long enough that the picker has to scroll inside its own box (Y-643).
+  if (path === '/srv') return Array.from({ length: 60 }, (_, i) => dir(path, `site-${String(i).padStart(2, '0')}`, null))
   if (path === HOME) return [dir(path, 'Github', null), dir(path, 'notes', null), ...made]
   if (path === `${HOME}/Github`) {
     return [
@@ -339,7 +344,10 @@ const routes = [
     'GET',
     /^\/api\/github$/,
     (s) => {
-      if (s.connection.pending && Date.now() >= s.grantAt) s.connection = contract.github
+      if (s.connection.pending && Date.now() >= s.grantAt) {
+        s.connection = SIGNED_IN
+        s.github = contract.githubReadiness
+      }
       return [200, s.connection]
     },
   ],
@@ -376,6 +384,10 @@ const routes = [
     /^\/api\/machines\/([^/]+)\/readiness$/,
     (s, [machine], _, request) => {
       if (s.readiness.looked !== 'ok') return [200, s.readiness]
+      // #514, before Y-579: a re-check of a machine no workspace names was refused.
+      if (request.method === 'POST' && s.defects?.includes('recheck-needs-workspace')) {
+        return [404, `no workspace names a machine called \`${machine}\``]
+      }
       // A machine no workspace names answers a re-check (write.rs `recheck`
       // takes any name), and `asked` is what it answers. The daemon keeps it,
       // so the GETs that follow serve it too.
@@ -491,17 +503,40 @@ const routes = [
   ],
   ['POST', /^\/api\/workspaces\/([^/]+)\/tokens$/, () => [200, contract.spend]],
   ['POST', /^\/api\/workspaces\/([^/]+)\/logs$/, () => [200, contract.logs]],
-  // Y-489: Y-488's two thread routes. The second thread carries THREAD and a worktree, so editor links resolve (Y-491).
+  // Y-489: Y-488's two thread routes. The first thread is the chat's: THREAD, with a worktree so editor links resolve (Y-491).
+  // Its PR is none until the `pr` route opens one (Y-493); the second thread keeps its open PR.
   [
     'POST',
     /^\/api\/workspaces\/([^/]+)\/threads$/,
     (s, [name]) =>
       findWorkspace(s, name)
         ? [200, contract.threads.map((one, at) =>
-            at === 1 ? { ...one, id: THREAD, worktree: `/home/biswa/.yantra/worktrees/chat/${name}/${THREAD}` } : one,
+            at === 0
+              ? { ...one, id: THREAD, worktree: `/home/biswa/.yantra/worktrees/chat/${name}/${THREAD}`, pr: s.opened?.[name] ?? one.pr }
+              : one,
           )]
         : [404, notFound(name)],
   ],
+  // Y-493: Y-492's and Y-449's git routes. The scenario `gitfails` refuses each as the daemon does.
+  ...[
+    ['message', [200, contract.threadMessage], [502, 'claude exited with status 1: could not reach the model']],
+    ['commit', [200, contract.threadCommitted], [409, 'Author identity unknown: set user.name and user.email on the machine']],
+    ['push', [200, contract.threadPushed], [409, '! [rejected] yantra/492 -> yantra/492 (non-fast-forward)']],
+    ['pr', [200, contract.threadPrOpened], [409, 'the branch is not pushed to its upstream']],
+  ].map(([verb, good, refused]) => [
+    'POST',
+    new RegExp(`^/api/workspaces/([^/]+)/threads/([^/]+)/${verb}$`),
+    (s, [name], sent) => {
+      if (!findWorkspace(s, name)) return [404, notFound(name)]
+      if (s.gitFails) return refused
+      if (verb === 'commit' && String(sent.message ?? '').trim() === '') return [400, 'the commit message is empty']
+      if (verb === 'pr') {
+        const { number, url } = contract.threadPrOpened
+        ;(s.opened ??= {})[name] = { state: 'open', number, url }
+      }
+      return good
+    },
+  ]),
   [
     'POST',
     /^\/api\/workspaces\/([^/]+)\/threads\/new$/,
@@ -631,6 +666,17 @@ const routes = [
         })
       }
       return [200, { machine, ...reply }]
+    },
+  ],
+  // Y-668: the daemon goes away for `ms` (60 s by default). Open chat sockets die with no close
+  // frame and a new upgrade is refused, as a phone that slept finds them.
+  [
+    'POST',
+    /^\/api\/fixture\/chat-outage$/,
+    (state, _, sent) => {
+      state.outageUntil = Date.now() + (sent.ms ?? 60_000)
+      for (const one of state.chatSockets ?? []) one.terminate()
+      return [204]
     },
   ],
   ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],
@@ -846,7 +892,12 @@ const HISTORY = [
   ['assistant_text', 'Yes. `cargo test -p yantra-core` passed, **326** tests in all.'],
 ]
 
-function converse(state, request, socket, head, name, thread) {
+function converse(state, request, socket, head, name, thread, after) {
+  if (state.outageUntil > Date.now()) {
+    // Y-668: a daemon that is away, as a phone that slept finds it.
+    socket.destroy()
+    return
+  }
   if (state.refuse) {
     socket.end(
       `HTTP/1.1 ${state.refuse.status} Refused\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n${state.refuse.text}`,
@@ -895,30 +946,48 @@ function converse(state, request, socket, head, name, thread) {
       ws.close()
       return
     }
-    if (thread) {
-      say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness: 'claude' } })
-      HISTORY.forEach(([kind, text], at) => say(delta(kind, text, `history:${at}`)))
-    }
     // chat.rs's `Running`: one set per thread, shared by every socket of the scenario.
     const running = (state.running ??= new Set())
+    // Y-668: the turn is the keeper's, not the socket's (ADR-0035), so it outlives this socket.
+    // `log` is the running turn's events with their cursors, which `?after=` continues from.
+    const keeper = (state.keeper ??= { held: null, sent: 0, log: [], seq: 0 })
+    const open = (state.chatSockets ??= new Set())
+    open.add(ws)
+    ws.on('close', () => open.delete(ws))
+    if (thread) {
+      const started = { threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness: 'claude' } }
+      const at = after ? keeper.log.findIndex((one) => one.cursor === after) : -1
+      if (at >= 0) {
+        say({ ...started, cursor: after })
+        keeper.log.slice(at + 1).forEach(say)
+      } else {
+        say(started)
+        HISTORY.forEach(([kind, text], index) => say(delta(kind, text, `history:${index}`)))
+        if (keeper.held) keeper.log.forEach(say)
+      }
+    }
     const elsewhere = 'another tab is running a turn or a revert in this thread; wait for it to end'
     let known = thread
-    let waiting = null
-    let sent = 0
     let images = 0
+    const emit = (one) => {
+      const cursor = `F${keeper.seq++}:0:0`
+      const framed = { ...one, cursor }
+      keeper.log.push(framed)
+      say(framed)
+    }
     // chat.rs sends a completed turn's checkpoint diff right after `turn.completed`.
     const play = (events) =>
       events.forEach((one) => {
-        say(one)
+        emit(one)
         if (one.type === 'turn.completed' && one.payload.state === 'completed') {
-          say({ ...contract.chatCheckpoints[0], payload: { ...contract.chatCheckpoints[0].payload, turn: sent } })
+          say({ ...contract.chatCheckpoints[0], payload: { ...contract.chatCheckpoints[0].payload, turn: keeper.sent } })
         }
       })
     const release = () => {
-      if (waiting) running.delete(THREAD)
-      waiting = null
+      if (keeper.held) running.delete(THREAD)
+      keeper.held = null
+      keeper.log = []
     }
-    ws.on('close', release)
     ws.on('message', (data, binary) => {
       // An image (Y-424): yantrad's reply, under the name its counter gives.
       if (binary) {
@@ -929,8 +998,10 @@ function converse(state, request, socket, head, name, thread) {
       try {
         frame = binary ? null : JSON.parse(data.toString())
       } catch {}
-      if (frame?.type === 'turn' && typeof frame.text === 'string') {
-        if (waiting) return fail('busy', 'a turn is running; stop it or wait for it to end')
+      if (frame?.type === 'ping') {
+        say({ type: 'pong' })
+      } else if (frame?.type === 'turn' && typeof frame.text === 'string') {
+        if (keeper.held) return fail('busy', 'a turn is running; stop it or wait for it to end')
         if (running.has(THREAD)) return fail('busy', elsewhere)
         if (!known) {
           const harness = frame.harness ?? 'claude'
@@ -945,8 +1016,9 @@ function converse(state, request, socket, head, name, thread) {
           known = THREAD
           say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness } })
         }
-        sent += 1
-        say(delta('user_text', frame.text, `user:${sent}`))
+        keeper.sent += 1
+        keeper.log = []
+        emit(delta('user_text', frame.text, `user:${keeper.sent}`))
         if (frame.mode === 'full-access') {
           // chat.rs `full_access_mode_answers_every_request_without_a_card`: no card, and the turn ends at once.
           play(stream.filter((one) => one.type !== 'request.opened'))
@@ -954,14 +1026,14 @@ function converse(state, request, socket, head, name, thread) {
         }
         running.add(THREAD)
         play(stream.slice(0, asked))
-        waiting = stream.slice(asked)
-      } else if (frame?.type === 'answer' && waiting) {
-        const [resolved, ...rest] = waiting
-        say({ ...resolved, payload: { ...resolved.payload, decision: frame.decision } })
+        keeper.held = stream.slice(asked)
+      } else if (frame?.type === 'answer' && keeper.held) {
+        const [resolved, ...rest] = keeper.held
+        emit({ ...resolved, payload: { ...resolved.payload, decision: frame.decision } })
         play(rest)
         release()
       } else if (frame?.type === 'cancel') {
-        if (!waiting) return
+        if (!keeper.held) return
         say({ threadId: THREAD, type: 'request.resolved', payload: { requestId: 'r1', requestType: 'exec_command_approval', decision: 'cancel' } })
         say({ threadId: THREAD, type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } })
         release()
@@ -992,7 +1064,15 @@ server.on('upgrade', (request, socket, head) => {
   const step = url.pathname.match(/^\/api\/machines\/([^/]+)\/install\/(\d+)\/terminal$/)
   const chat = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/chat$/)
   if (chat) {
-    converse(state, request, socket, head, decodeURIComponent(chat[1]), url.searchParams.get('thread'))
+    converse(
+      state,
+      request,
+      socket,
+      head,
+      decodeURIComponent(chat[1]),
+      url.searchParams.get('thread'),
+      url.searchParams.get('after'),
+    )
     return
   }
   if (step) {

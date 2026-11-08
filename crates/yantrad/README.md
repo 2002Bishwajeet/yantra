@@ -38,6 +38,8 @@ API the CLI cannot reach.
 | `POST /api/placement` | `yantra why --repo` / `--path`. Both call `placement::ask`; the CLI has no `folders` override, so it finds each clone folder on the machine (Y-517) |
 | `POST /api/workspaces/{name}/resume` | `yantra resume` |
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
+| `POST /api/workspaces/{name}/mentions` | **None**: a terminal cannot mean it. The Chat composer's `@` files and `$` skills, for `{harness, thread?}` (Y-562, a `POST` for ADR-0019's reason) |
+| `POST /api/workspaces/{name}/commands` | **None**: a terminal cannot mean it. Claude's slash commands for the Chat composer's `/`, for `{harness, thread?}`; an ACP harness gets `[]`, since its list comes on the chat socket (Y-563, a `POST` for ADR-0019's reason) |
 | `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019) |
 | `POST /api/workspaces/{name}/threads/new` | `yantra chat new --issue` |
 | `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |
@@ -47,11 +49,12 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/tokens` | `yantra tokens`; an optional `{"since": <RFC 3339>}` body is the dashboard's window and has no CLI flag (Y-354) |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
-| `GET /api/about` | `yantra about` (the build; uptime, addresses, tailnet and whether a relay is held are the daemon's), and `yantra update --check` for `published` — the newest release, read hourly (Y-367) |
+| `GET /api/about` | `yantra about` (the build; uptime, addresses, tailnet and whether a relay is held are the daemon's), and `yantra update --check` for `published` — the newest release, read hourly (Y-367) — and `update`, how far `yantra-update.service` has got, read from `/run/yantra-update` (Y-612) |
 | `GET /api/ssh-identity` | `yantra ssh-identity` (the read half — a GET makes no key) |
 | `GET /api/here` | no verb, because a terminal already runs on the machine it would name; names the tailnet machine the request came from, found by the caller's node id from `whois` and not by address (I-5, I-52); authorised like every route, and 503 when the last tailnet look is missing or failed |
 | `GET /join` | `yantra join-script` (outside `/api`; makes the key on first use) |
 | `POST /api/join` | `yantra ssh-identity --machine <m> --user <u>`, with the machine taken from the caller |
+| `POST /api/join/forget-host-key` | `yantra forget-host-key <machine>`, with the machine taken from the caller |
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |
@@ -59,7 +62,11 @@ API the CLI cannot reach.
 | `POST /api/mcp` | `yantra mcp`'s `room_send` and `room_read`, which forward here. MCP over HTTP for agents in a room: a Chat turn reaches it through `--mcp-config`, and a message wakes an idle Claude thread (ADR-0038, Y-534). `GET` is `405` |
 | `POST /api/rooms/{room}/resume` | `yantra room resume` (204; a room this daemon does not hold is `404`) |
 | `POST /api/rooms/{room}/messages` | `yantra room post` (`{seq, delivered}`; the owner writes into a room, labelled `owner on <machine>`, and its count goes to 0; `404` for a room it does not hold, `400` for an empty text or one over 16 KiB; Y-536) |
-| `GET /api/rooms`, `GET /api/rooms/{room}` | **None**: the dashboard's Rooms screens read them (Y-536). The rooms with their budget, pause and members, and one room's messages. Memory, owner-only |
+| `GET /api/rooms`, `GET /api/rooms/{room}` | `yantra room ls` and `yantra room show`, and the dashboard's Rooms screens (Y-536, Y-550). The rooms with their budget, pause and members, and one room's messages. Memory, owner-only |
+| `POST /api/rooms` | `yantra room new` (201 with the summary; writes the room's definition, ADR-0039, Y-550) |
+| `PATCH /api/rooms/{room}` | `yantra room edit` (`{brief}`, where `null` clears it; an undefined room is `404`) |
+| `DELETE /api/rooms/{room}` | `yantra room rm` (`{"removed": bool}`, as the workspace delete answers) |
+| `GET /api/layout`, `PUT /api/layout` | `yantra layout show` and `yantra layout set` (the dashboard layout in `~/.config/yantra/dashboard.json`; a `PUT` at a stale `rev` is `409` with the current layout, ADR-0036, Y-515). The `GET` is not gated |
 | `GET /api/workspaces/{name}/chat` | **None yet for a turn**, which breaks the rule above: an open gap, not a decision. `yantra chat new` and `chat ls` open and list threads (Y-488). A WebSocket for the dashboard's Chat tab; each turn runs the thread's harness in its own worktree: `claude -p`, or an ACP agent (ADR-0026, ADR-0033, Y-356, Y-434). A keeper on the machine holds the turn, so it outlives the socket and the daemon (ADR-0035, Y-447) |
 | `POST /api/update` | `yantra update` (202 with no body; the daemon creates the trigger `yantra-update.path` watches, and a box with no updater is `409`, ADR-0027 §3) |
 | `GET /api/machines/{machine}/mic` | — (a WebSocket that carries push-to-talk audio into `pw-cat`, ADR-0031 §5) |
@@ -111,7 +118,9 @@ an address no peer holds is refused with `403`.
 long ago it arrived, and a machine nothing has ever been heard from carries **`null`** rather than a
 row of zeros — the two send a person to different places. The daemon names no display state: it
 serves the age and Tailscale's `online`, and the dashboard turns those into ADR-0013 §7's four. The
-beat is the one thing on this route that `yantra ls machines` cannot yet show.
+beat is the one thing on this route that `yantra ls machines` cannot yet show. Each machine also
+carries `hub`: `true` for the node that holds an address the daemon is bound to, which is the
+appliance itself (Y-582).
 
 ```json
 {"name": "cachyos-g14", "online": true, …,
@@ -125,7 +134,8 @@ sweep asks the machines a workspace names and each online Linux or macOS machine
 tailnet. The daemon keeps
 the latest check of each machine in memory, with its own `age_seconds`, so a later sweep that skips
 the machine or fails does not lose it. A machine no check has reached is a `404` here even though
-`yantra doctor <machine>` would go and ask it.
+`yantra doctor <machine>` would go and ask it. Each check that ran a step carries `took_ms`,
+and a check with no step leaves the key out.
 
 **`heartbeat` is the one check these routes answer and the terminal cannot.** The library reports it
 *unknown* from every caller it has, because the beats are in this process and nothing persists them;
@@ -142,8 +152,8 @@ the relay in `/etc/yantra/daemon.env`
 acts on, and the two must not read alike.
 
 `POST /api/github/login` starts that device flow and answers the code to type at github.com; the
-daemon polls, and `GET /api/github` says when the grant is live — `connected`, the login, the scopes
-and whether a sign-in is pending, never the token. `DELETE /api/github` removes it. `GET /api/repos`
+daemon polls, and `GET /api/github` says when the grant is live — `connected`, the login, the profile
+image URL, the scopes and whether a sign-in is pending, never the token. `DELETE /api/github` removes it. `GET /api/repos`
 is every repository the grant can see, swept every five minutes and filtered in the browser.
 
 **It is polled every five minutes rather than every thirty seconds**, which is the one read that

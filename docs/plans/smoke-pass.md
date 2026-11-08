@@ -1,10 +1,10 @@
 # The smoke pass
 
-Four releases shipped while the 61-box pass ([v0.8.0-qa-pass.md](v0.8.0-qa-pass.md), 60 boxes) went unwalked. A pass that long does not get walked at each release. The owner confirmed on 2026-10-19 (Y-482) that a 15-check smoke pass is the release gate.
+Four releases shipped while the 61-box pass ([v0.8.0-qa-pass.md](v0.8.0-qa-pass.md), 60 boxes) went unwalked. A pass that long does not get walked at each release. The owner confirmed on 2026-10-19 (Y-482) that a 17-check smoke pass is the release gate.
 
 ## The rule
 
-Each release walks these 15 checks on the installed release before its row closes. A release is each "Cut vX" or "vX.Y.Z" row. A failed check becomes a row in `tracker.md`. The owner walks the pass, and it takes about 15 minutes.
+Each release walks these 17 checks on the installed release before its row closes. A release is each "Cut vX" or "vX.Y.Z" row. A failed check becomes a row in `tracker.md`. The owner walks the pass, and it takes about 15 minutes.
 
 ## The checks
 
@@ -27,6 +27,8 @@ Each check is something a container cannot prove. The Twin test column names the
 | 13 | Speak into the mic in the dashboard. | The words reach the session. | `crates/yantrad/tests/mic.rs`, `the_dashboards_writer_carries_a_tone_into_yantra_mic_and_ends_when_closed` |
 | 14 | Open Setup on a real machine. | Every check reads true to the machine. | `crates/yantra-core/tests/doctor.rs`, `a_machine_with_everything_reports_present_except_the_beat` |
 | 15 | Open Settings → About. | The version equals the tag and the facts are right. | `web/e2e/settings.spec.ts`, `asks for an update after saying what the restart ends` |
+| 16 | After a fresh install, walk every screen and press every button. | Each screen draws, each button visibly answers, and no text is cut. | `web/e2e/fresh.spec.ts`, `answers every button` |
+| 17 | After a fresh install, open the dashboard on a real iPhone in Safari. | The safe areas hold, no text is clipped and every button visibly answers. | `web/e2e/safe-areas.spec.ts` and `web/e2e/fresh.spec.ts`, `cuts no text on a phone` |
 
 Some twins cover only part of a check. For example, no test draws a permission card or presses Stop in the browser. Swap any check or twin that the owner finds wrong.
 

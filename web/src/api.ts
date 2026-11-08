@@ -1,6 +1,8 @@
 // Unions rather than optional properties: a `sessions?: Session[]` compiles
 // and lets an unreachable machine render as "0 sessions".
 
+import type { SlashCommand } from './api/thread'
+
 export type Looked<T> =
   | { looked: 'ok'; age_seconds: number; data: T }
   | { looked: 'failed'; age_seconds: number; error: string }
@@ -52,6 +54,8 @@ export type Machine = {
   // Y-404: only `yours` counts or runs a session. `shared` is another Tailscale
   // account's node; `tagged` is the tailnet's, and wins over a matching owner.
   ownership: 'yours' | 'shared' | 'tagged'
+  // Y-582: the node yantrad runs on, named by the daemon from its bound address.
+  hub: boolean
 }
 
 // ADR-0013 §2: two variants, so unknown power cannot be spelled. A string and
@@ -204,6 +208,8 @@ export type Check = {
   state: CheckState
   // What was found, or why nothing could be. Carries no credential.
   detail: string
+  // Absent where no step ran, which zero would misreport (R-23).
+  took_ms?: number
 }
 
 /** `age_seconds` is this report's own: the daemon keeps a machine's last check,
@@ -375,7 +381,19 @@ export type About = {
   relay: boolean
   // Y-367: the newest release, read hourly. `failed` is never *current*.
   published: Looked<Published>
+  // Y-612: how far `yantra-update.service` has got. Null when nothing runs
+  // and the last run did not fail.
+  update: UpdateProgress | null
 }
+
+/** Y-612: what the update unit wrote to `/run/yantra-update`. `total` is null
+ *  when the release host sent no length. `said` is the unit's last stderr. */
+export type UpdateProgress =
+  | { step: 'resolving' }
+  | { step: 'downloading'; version: string; received: number; total: number | null }
+  | { step: 'verifying' }
+  | { step: 'installing' }
+  | { step: 'failed'; said: string }
 
 /** ADR-0027 §2: the published version, and whether it is newer than this
  *  build. The daemon decides `newer`, so the page and the CLI agree. */
@@ -502,6 +520,27 @@ export type ThreadOpened = {
   draft: string
 }
 
+/** `POST /api/workspaces/{name}/mentions` with `{ harness, thread? }` (Y-562):
+ *  what the composer offers after `@` and `$`. `files` is cut at 5000. */
+export type Mentions = {
+  files: string[]
+  truncated: boolean
+  skills: MentionSkill[]
+}
+
+export type MentionSkill = {
+  name: string
+  description: string
+  scope: 'user' | 'project'
+  /** What the composer inserts: `$<name>`. */
+  mention: string
+}
+
+/** `POST /api/workspaces/{name}/commands` with `{ harness, thread? }` (Y-563):
+ *  Claude's slash commands, for the composer's `/` menu. An ACP harness is
+ *  answered with none, because its list comes on the chat socket. */
+export type Commands = { commands: SlashCommand[] }
+
 /** `POST /api/workspaces/{name}/threads/{thread}/message`: the commit message
  *  `claude -p` wrote on the machine (Y-492). */
 export type ThreadMessage = {
@@ -535,8 +574,9 @@ export type ThreadPrOpened = {
 // edits above it is trivial.
 
 /** `GET /api/github` — what the daemon holds, read from memory (ADR-0023 §3).
- *  Never the token: `login` is the one thing about the account that is
- *  shown, and it is `null` until the grant's first `GET /user` has answered.
+ *  Never the token: `login` and `avatar_url` are what is shown of the
+ *  account, and both are `null` until the grant's first `GET /user` has
+ *  answered.
  *  `scopes` is empty for a grant read from the environment. `pending` is a
  *  device flow waiting for its code to be typed at github.com.
  *
@@ -548,6 +588,8 @@ export type ThreadPrOpened = {
 export type Connection = {
   connected: boolean
   login: string | null
+  /** GitHub's public profile image URL; `null` draws the icon. */
+  avatar_url: string | null
   scopes: string[]
   pending: boolean
   client_id: string | null
@@ -605,8 +647,10 @@ export type {
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatPong,
   ChatQuery,
   ChatQueue,
+  SlashCommand,
   ThreadEvent,
 } from './api/thread'
 
@@ -632,8 +676,9 @@ export type Placement = { ranked: Placed[]; rejected: Unplaced[] }
  *  this browser remembers per machine, and it wins over the one the daemon finds. */
 export type PlacementAsk = { repo?: string; path?: string; folders?: Record<string, string> }
 
-// Y-536: rooms (ADR-0038). They live in yantrad's memory, so a restart
-// empties the list and turns a room's page into a 404.
+// Y-536: rooms (ADR-0038). Their messages live in yantrad's memory. A room
+// with a workspace has a definition on disk, so a restart keeps it with one
+// system message (ADR-0039, Y-550); a room an agent made is lost.
 
 /** `GET /api/rooms`. `spent` counts agent messages since the owner last
  *  acted; at `budget` the room pauses. `last_at` is Unix seconds. */
@@ -645,14 +690,30 @@ export type RoomSummary = {
   members: number
   messages: number
   last_at: number | null
+  /** The home workspace; `null` for a room an agent made. */
+  workspace: string | null
+  brief: string | null
+  /** `null` is the workspace's current branch. */
+  base: string | null
 }
 
 /** `from` is the label the daemon wrote from identity: a machine, a machine
  *  and a Chat thread, or `owner on <machine>`. `text` is untrusted. */
-export type RoomMessage = { seq: number; at: number; from: string; text: string; budget: number }
+export type RoomMessage = {
+  seq: number
+  /** `system` is yantrad's own note, such as the one a restart leaves. */
+  kind: 'text' | 'system'
+  at: number
+  from: string
+  text: string
+  budget: number
+}
 
 /** `GET /api/rooms/{room}`: the summary and the messages the room keeps. */
 export type Room = RoomSummary & { log: RoomMessage[] }
 
 /** `POST /api/rooms/{room}/messages` with `{ text }`. */
 export type RoomPosted = { seq: number; delivered: number }
+
+/** `DELETE /api/rooms/{room}`. `false` is a room already gone. */
+export type RoomRemoved = { removed: boolean }

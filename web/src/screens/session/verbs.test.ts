@@ -50,7 +50,16 @@ describe('the verbs a session offers', () => {
       stop: false,
       resume: false,
     })
-    expect(verbs(landing, reached({ state: 'no_session' }))).toEqual({ stop: false, resume: false })
+  })
+
+  /** Y-639: every Stop ends in `no_session`, and the daemon's resume opens a
+   *  missing session, so Resume acts on it as it does on `stopped`. */
+  it('offers Resume on a session that is gone, unless the workspace runs its own command', () => {
+    expect(verbs(landing, reached({ state: 'no_session' }))).toEqual({ stop: false, resume: true })
+    expect(verbs({ ...landing, startup: 'npm run dev' }, reached({ state: 'no_session' }))).toEqual({
+      stop: false,
+      resume: false,
+    })
   })
 })
 

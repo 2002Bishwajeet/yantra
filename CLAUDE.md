@@ -286,16 +286,24 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   A merged row goes to 🔵 review, because a row does not close in its own PR; the next release PR
   marks it ✅ done.
 - **It closes the issues its rows name.** An open GitHub issue gets a row first (§B0); the row names it as `#NNN`, and the PR body says `Closes #NNN`. Owner, 2026-10-20.
-- **It picks by priority.** 1: closes or unblocks an open milestone. 2: a defect or a red suite.
+- **It picks by priority.** Until the owner calls Yantra a daily driver, a row that closes the daily-driver gap goes first and feature milestones wait (owner, 2026-11-05). 1: closes or unblocks an open milestone. 2: a defect or a red suite.
   3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
 - **It runs up to three rows at once.** Rows that edit the same file do not run at the same time.
   The local gate tests only what a row changed, and so does CI: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607). Shipping waits for every check that runs.
   Verification and shipping run one row at a time, because podman runs out of memory and rebases
   must see each other's merges.
-- **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a real
-  Mac, a Pi, audio hardware, Figma or Claude Design, a release cut, a new or amended ADR, a changed
+- **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a Pi,
+  audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, a changed
   invariant, or an answer to an open question. A parked row keeps its branch and appears in the
   report. A later run skips it until its reason no longer holds, then continues from that branch.
+- **It may use the real Mac.** `bishwajeets-macbook-pro` answers ssh as `biswa` over the tailnet
+  (owner, 2026-11-04). A row that needs a check on a Mac runs it there. An ssh login cannot read
+  the login keychain (I-44), so work that needs a GUI login session still parks.
+- **It walks the product before a release.** After a wave, and before any release, an agent opens the
+  live dashboard on the box in a real browser and walks New session, Start, a Chat turn, Commit,
+  Open PR and the machine cards on the real Mac and the real Linux laptop. Each finding becomes a
+  row, and a release waits for a clean walk. A row that touches a machine is done only when it works
+  there through the dashboard (owner, 2026-11-04, Y-637).
 - **Subagents follow the owner's model rule.** Opus plans, reviews and builds Rust; Sonnet builds
   web and docs, runs the gate, simplifies and ships. No subagent runs on Fable. Owner, 2026-10-05:
   use Opus only where it matters, and at high effort only to review and to plan transport work.

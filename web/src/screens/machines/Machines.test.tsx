@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { mount, scenario, unmount } from '@/screens/fleet/harness'
+import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 
 // The route is lazy, so the first mount pays for its chunk; warming it here
 // keeps that cost out of the first test's own timeout.
@@ -38,14 +39,14 @@ describe('/machines on the busy fleet', () => {
       expect(good.getByText(check)).toBeTruthy()
     }
     expect(good.getAllByText('ok')).toHaveLength(4)
-    expect(good.getByText('4 of 4 checks')).toBeTruthy()
+    expect(good.getByText('10 of 10')).toBeTruthy()
     // Everything passes, so nothing asks the machine again.
     expect(good.queryByRole('button')).toBeNull()
 
     const short = card('pi-5')
     expect(short.getByText('missing')).toBeTruthy()
     expect(short.getByText('no `claude` on PATH there')).toBeTruthy()
-    expect(short.getByText('1 failing')).toBeTruthy()
+    expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeTruthy()
     // `git` is not in pi-5's report at all, so it counts as missing too (D7 §3.3).
     expect(short.getByText('2 missing')).toBeTruthy()
     expect(short.getByRole('button', { name: 'Install' })).toBeTruthy()
@@ -54,7 +55,7 @@ describe('/machines on the busy fleet', () => {
     // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
     expect(gone.getByText('asleep · 7 Jul')).toBeTruthy()
     expect(gone.getAllByText('unknown').length).toBeGreaterThan(0)
-    expect(gone.getByText('1 failing · 3 unknown')).toBeTruthy()
+    expect(gone.getByText('0 of 9 · 2 failing · 7 unknown')).toBeTruthy()
     // Asleep offers nothing to press: ssh cannot answer either way.
     expect(gone.queryAllByRole('button')).toHaveLength(0)
   })
@@ -96,7 +97,7 @@ describe('/machines on the busy fleet', () => {
     expect(alert.textContent).toContain('node biswas-iphone is on this tailnet but is not yours')
   })
 
-  it('asks the machine again when Check again is pressed, for a machine never checked', async () => {
+  it('asks the machine when Check is pressed, for a machine never checked', async () => {
     const state = scenario('busy')
     state.readiness!.data = (state.readiness!.data as { machine: string }[]).filter(
       (one) => one.machine !== 'pi-5',
@@ -104,8 +105,43 @@ describe('/machines on the busy fleet', () => {
     const asked = mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
     expect(card('pi-5').getByText('not checked')).toBeTruthy()
-    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check again' }))
+    // The chip carries the status, and the first ask is not "again".
+    expect(card('pi-5').queryByText('not asked yet')).toBeNull()
+    expect(card('pi-5').queryByRole('button', { name: 'Check again' })).toBeNull()
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi-5/readiness'))
+  })
+
+  it('shows the daemon’s words when Check is refused', async () => {
+    const state = scenario('refused')
+    state.readiness!.data = (state.readiness!.data as { machine: string }[]).filter(
+      (one) => one.machine !== 'pi-5',
+    )
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check' }))
+    const alert = await card('pi-5').findByRole('alert')
+    expect(alert.textContent).toContain('Check was refused')
+  })
+
+  /** Y-616: Worth a look may not claim a clean fleet when no machine answered. */
+  it('says no machine has answered yet, whatever the doctor reports say', async () => {
+    const state = scenario('busy')
+    state.sessions!.data = [{ machine: 'cachyos-g14', reached: 'no', error: 'timed out' }]
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(await screen.findByText('No machine has answered yet')).toBeTruthy()
+    expect(screen.queryByText('Nothing unaccounted for')).toBeNull()
+  })
+
+  it('says nothing is unaccounted for once a machine has answered, checked or not', async () => {
+    const state = scenario('busy')
+    state.sessions!.data = [{ machine: 'cachyos-g14', reached: 'yes', sessions: [] }]
+    state.readiness!.data = []
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(await screen.findByText('Nothing unaccounted for')).toBeTruthy()
+    expect(screen.queryByText('No machine has answered yet')).toBeNull()
   })
 
   /** Y-579: no workspace names the machine, and the daemon now keeps the
@@ -122,7 +158,7 @@ describe('/machines on the busy fleet', () => {
     await screen.findByText(/^looked /)
     expect(card('pi-5').getByText('not checked')).toBeTruthy()
 
-    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check again' }))
+    fireEvent.click(card('pi-5').getByRole('button', { name: 'Check' }))
     await waitFor(() => expect(card('pi-5').queryByText('not checked')).toBeNull())
 
     const polls = () => asked.filter((one) => one === 'GET /api/readiness').length
@@ -180,7 +216,7 @@ describe('/machines on the phone', () => {
     mount('phone', '/machines')
     await screen.findByText(/^looked /)
     const good = card('cachyos-g14')
-    expect(good.getByText('4 of 4 checks')).toBeTruthy()
+    expect(good.getByText('10 of 10')).toBeTruthy()
     expect(good.queryByText('tmux')).toBeNull()
     expect(card('pi-5').getByText('claude')).toBeTruthy()
   })
@@ -264,10 +300,61 @@ describe('/machines with devices that open the dashboard', () => {
 })
 
 describe('/machines when ssh fails for a reason the join command cannot fix', () => {
+  /** Y-585: the card says why in plain words, offers the join command, and
+   *  keeps ssh's own words behind a press. */
+  it('reads a browser check as Copy join command, with the raw text closed', async () => {
+    const state = scenario('busy')
+    const said = 'Tailscale SSH requires an additional check, which needs a browser sign-in'
+    const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
+    const one = data.find((report) => report.machine === 'cachyos-g14')!
+    one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: said } : check))
+    mount('desktop', '/machines', state)
+    const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
+    expect(await box.findByText('browser sign-in')).toBeTruthy()
+    expect(box.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
+    expect(box.getByText(/waits for a browser sign-in, and the appliance has no browser/)).toBeTruthy()
+    expect(box.queryByText(said)).toBeNull()
+    fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
+    expect(box.getByText(said)).toBeTruthy()
+  })
+
+  /** Y-621: the two lines a daemon before v0.10.1 sends. The sign-in link is
+   *  dead once ssh ends, so it is nowhere on the page, open or closed. */
+  it('reads Tailscale’s real check text with the new cause and no link', async () => {
+    const state = scenario('busy')
+    const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
+    const one = data.find((report) => report.machine === 'cachyos-g14')!
+    one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: CHECK_RULE } : check))
+    mount('desktop', '/machines', state)
+    const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
+    expect(await box.findByText('browser sign-in')).toBeTruthy()
+    expect(box.getByText('Tailscale SSH on cachyos-g14 waits for a browser sign-in, and the appliance has no browser.')).toBeTruthy()
+    expect(box.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
+    fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
+    expect(box.getByText(/Tailscale SSH requires an additional check\./)).toBeTruthy()
+    expect(document.body.textContent).not.toContain('login.tailscale.com')
+  })
+
+  /** Y-621: only a person can tell a reinstall from an attack, so a changed key
+   *  offers no join command, and the machine page names the forget command. */
+  it('reads a changed host key on its own chip, with no join command', async () => {
+    const state = scenario('busy')
+    const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
+    const one = data.find((report) => report.machine === 'cachyos-g14')!
+    one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: CHANGED_KEY } : check))
+    mount('desktop', '/machines', state)
+    const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
+    expect(await box.findByText('host key changed')).toBeTruthy()
+    expect(box.getByText(/cachyos-g14 answered with a different host key than the one the appliance recorded/)).toBeTruthy()
+    expect(box.queryByRole('button', { name: 'Copy join command' })).toBeNull()
+    fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
+    expect(box.getByText(/REMOTE HOST IDENTIFICATION HAS CHANGED/)).toBeTruthy()
+  })
+
   /** A changed host key reads as `unreachable`, never `refused` — the join
    *  command places a key and cannot fix that (`reachableFailure`, Y-402
    *  review). Only a refused key offers Copy join command. */
-  it('reads ssh failing on a neutral-tone chip, and offers nothing to press', async () => {
+  it('reads ssh failing on a neutral-tone chip, and offers only the raw text', async () => {
     const state = scenario('busy')
     const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
     const cachy = data.find((one) => one.machine === 'cachyos-g14')!
@@ -280,7 +367,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
     const failing = card('cachyos-g14')
     expect(failing.getByText('ssh failing')).toBeTruthy()
     expect(failing.queryByRole('button', { name: 'Copy join command' })).toBeNull()
-    expect(failing.queryAllByRole('button')).toHaveLength(0)
+    expect(failing.getAllByRole('button').map((one) => one.textContent)).toEqual(['Show'])
   })
 })
 
@@ -295,6 +382,52 @@ describe('/machines when no machine can run a session', () => {
     expect(screen.getByText('No machine can run a session yet')).toBeTruthy()
     // The title row keeps its own Add a device too, so there are two.
     expect(screen.getAllByRole('link', { name: 'Add a device' }).length).toBeGreaterThan(0)
+  })
+})
+
+/** Y-582: the hub is the node yantrad runs on. It is drawn first, in its own
+ *  section, and never in the grid. The busy fleet's hub is cachyos-g14. */
+describe('/machines with a hub', () => {
+  type Row = Record<string, unknown>
+  it('draws the hub first and apart, with the note that its agents share it', async () => {
+    mount('desktop', '/machines')
+    await screen.findByText(/^looked /)
+    const hub = screen.getByRole('region', { name: 'Hub' })
+    expect(within(hub).getByRole('region', { name: 'cachyos-g14' })).toBeTruthy()
+    expect(within(hub).getByText('Agents on the hub share its CPU and memory with yantrad.')).toBeTruthy()
+    const grid = document.querySelector('.machines__grid')!
+    expect(within(grid as HTMLElement).queryByRole('region', { name: 'cachyos-g14' })).toBeNull()
+    expect(within(grid as HTMLElement).getByRole('region', { name: 'pi-5' })).toBeTruthy()
+    expect(hub.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getAllByRole('link', { name: 'Open' })).toHaveLength(6)
+  })
+
+  it('draws the page as before when no node is the hub', async () => {
+    const state = scenario('busy')
+    state.machines!.data = (state.machines!.data as Row[]).map((one) => ({ ...one, hub: false }))
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(screen.queryByRole('region', { name: 'Hub' })).toBeNull()
+    const grid = document.querySelector('.machines__grid') as HTMLElement
+    expect(within(grid).getByRole('region', { name: 'cachyos-g14' })).toBeTruthy()
+  })
+
+  it('offers Add a device under a hub that is the only machine', async () => {
+    const state = scenario('busy')
+    state.machines!.data = (state.machines!.data as Row[]).filter((one) => one.hub === true)
+    mount('desktop', '/machines', state)
+    await screen.findByText(/^looked /)
+    expect(within(screen.getByRole('region', { name: 'Hub' })).getByRole('region', { name: 'cachyos-g14' })).toBeTruthy()
+    expect(screen.getByText('No other machine yet')).toBeTruthy()
+    expect(screen.queryByText('No machine can run a session yet')).toBeNull()
+  })
+
+  it('draws no hub and keeps the failure card when the machines could not be read', async () => {
+    const state = scenario('busy')
+    state.machines = { looked: 'failed', age_seconds: 0, error: 'tailscaled is down' } as typeof state.machines
+    mount('desktop', '/machines', state)
+    expect(await screen.findByText('The machines could not be read')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Hub' })).toBeNull()
   })
 })
 

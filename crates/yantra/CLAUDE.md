@@ -17,7 +17,8 @@ the same logic: if yes, it is not CLI code.
 [`yantra_core::notify`](../yantra-core/CLAUDE.md) reaches `ureq` and its bundled root store, and the
 aarch64-musl binary went 1,256,496 → 2,451,504 bytes for it (Y-147). `yantra mcp` (Y-435) is the second
 verb that sends, and `yantra why` (Y-452) the third. Both call `yantrad` in plain HTTP over the `ureq` this binary already carried, so their
-cost should be small; nobody has measured it yet. Weigh the next verb that sends on
+cost should be small; nobody has measured it yet. `yantra dash` (Y-592) adds `ratatui` and its
+`crossterm`, which are not free, and nobody has measured that either. Weigh the next verb that sends on
 `just appliance-size` the same way.
 
 ## Exit codes are a contract
@@ -42,7 +43,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `install`, unless every basic — and the microphone, with `--mic` — is there afterwards | 1 | `doctor`'s rule. A step left for a person, an installer that failed and a machine that could not be asked are each 1, and the output names the command to run there (ADR-0028) |
 | `update --check` when GitHub could not be asked | 1 | a failed read is not *current* (ADR-0027 §4). A newer release is **0**: the read worked, and the verdict is on stdout |
 | `update`, once `yantra-update.service` finished | **0** | the release is installed and what ran has restarted (ADR-0027 §3) |
-| `update` when the unit failed | 1 | nothing was installed and nothing restarted. It names `journalctl -u yantra-update` |
+| `update` when the unit failed | 1 | nothing was installed and nothing restarted. It prints the unit's last stderr lines from `/run/yantra-update` (Y-612), then names `journalctl -u yantra-update` |
 | `update` with no privilege | 1 | the unit runs as root. It prints `sudo systemctl start yantra-update.service` |
 | `update` on a box with no `/usr/local/bin/yantra-update` | 1 | `just appliance-install` leaves none, and the error names `install.sh` |
 | `tokens` on a session that has spent nothing | **0** | it reports a measurement rather than a state, and zero is one — the transcript was read |
@@ -52,12 +53,16 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `github client-id --clear` when no client id line is there | **0** | absence is the state asked for — `down`'s rule |
 | `ssh-identity --machine m --user u` when ssh logs in to `m` as someone else | 1 | a block already in the config, or an owner's `Host *` above the new one, wins, so the verb did not do what it says. It names the account that wins, and it rewrites nothing (ADR-0009, ADR-0029) |
 | `ls repos` with nothing matching `--search` | **0** | a reading: the count under the table says `0 of N`, which is a filter that kept nothing and not an empty account |
+| `room rm` on a room already gone | **0** | absence is the state asked for — `rm`'s rule. `DELETE /api/rooms/{room}` answers `{"removed": false}` for it |
+| `room new`, `ls`, `show`, `edit` or `rm` when yantrad refuses or cannot be reached | 1 | the daemon's words go to stderr. A bad room name is 1 before the daemon is asked, as `room resume` has it |
 | `mcp`, when stdin ends | **0** | an MCP client closes the server by closing its stdin. A daemon that refuses or cannot be reached is a tool result with `isError`, not an exit, because the client is still talking. Only a stdout that cannot be written is 1 |
 | `why`, when no machine has a fresh beat | 1 | R5 fails fast: nothing can be placed. The rejections still print. A daemon that cannot be reached or answers badly, and a missing workspace, are 1 too |
 | `history stage`, unless every transcript has a current redacted copy | 1 | `doctor`'s rule, so a timer's failure shows. A file it could not stage is named on stderr, and no `gitleaks` on PATH stages nothing ([ADR-0032](../../docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md)) |
 | `history extract`, unless the rows are written and every transcript was read | 1 | `history stage`'s rule, so a partial answer shows. No `gitleaks` on PATH, a failed scan, a folder it cannot read and an output it cannot write each write nothing. A row gitleaks still finds a secret in, or every row of a transcript with a finding in no row, is dropped and named on stderr as a bug against Y-430 |
 | `mic`, after Ctrl-C | **0** | Ctrl-C is how the verb ends ([ADR-0031](../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md) §7). It closes the writer's stdin and waits for `pw-cat` to drain first |
 | `mic` with no `pw-record` here, a machine it cannot reach, a writer that exits, a recorder that ends on its own, or a second Ctrl-C during the close | 1 | each stops the stream before it was asked to stop. A writer that exits names `yantra install <machine> --mic`, unless `ssh` itself failed with 255 |
+| `dash`, on `q` or Esc | **0** | the owner asked to leave. A daemon it cannot reach is drawn on the screen and polled again, not an exit |
+| `dash` when stdin or stdout is not a terminal | 1 | checked before it draws, because there is no screen to draw on |
 | `attach`, once it has something to attach to | **none** | see below |
 
 Changing one of these is a breaking change even though nothing declares it.
@@ -67,6 +72,7 @@ process becomes `ssh` and the exit code is `ssh`'s and then tmux's. Everything i
 decides *before* handing over — the workspace exists, a session exists, `TERM` resolves, stdin is a
 terminal — and each of those is a normal exit 1. `exec` rather than spawn-and-wait is deliberate:
 a supervising parent would have to forward `SIGWINCH`, relay signals and reap a child to add nothing.
+**`dash` spawns `ssh` and waits for it instead**, because the dashboard must come back after the detach; the child shares the tty, so `SIGWINCH` reaches it with no forwarding.
 
 ## Saying things
 

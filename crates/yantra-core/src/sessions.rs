@@ -191,7 +191,17 @@ fn worth_asking(machine: &MachineInfo) -> bool {
 
 async fn on(machine: String) -> Result<Vec<Summary>, Error> {
     let ssh = Ssh::new(ssh::machine_at(&machine).ok_or(Error::NoStateDir)?)?;
-    Ok(Tmux::resolve(&ssh).await?.list(&ssh).await?)
+    listed_on(&ssh).await
+}
+
+/// A machine with no tmux answered, so it has no sessions: `doctor` is the one
+/// that says tmux is missing, and an error here would read as *did not answer*.
+async fn listed_on<E: ssh::Exec>(exec: &E) -> Result<Vec<Summary>, Error> {
+    match Tmux::resolve(exec).await {
+        Ok(tmux) => Ok(tmux.list(exec).await?),
+        Err(tmux::Error::NotFound { .. }) => Ok(Vec::new()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 #[cfg(test)]
@@ -214,6 +224,26 @@ mod tests {
             key_expires: None,
             addresses: Vec::new(),
         }
+    }
+
+    struct NoTmux;
+
+    impl ssh::Exec for NoTmux {
+        async fn exec(&self, _command: &str) -> Result<ssh::Output, ssh::Error> {
+            Ok(ssh::Output {
+                status: 1,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    /// Y-585: the machine answered. Calling this a failure made Sessions say
+    /// *did not answer* while Readiness said *tmux is missing*.
+    #[tokio::test]
+    async fn a_machine_with_no_tmux_answered_and_has_no_sessions() {
+        let listed = listed_on(&NoTmux).await.expect("it answered");
+        assert!(listed.is_empty());
     }
 
     #[test]
@@ -268,5 +298,43 @@ mod tests {
             Os::Other("freebsd".to_string()),
             true
         )));
+    }
+
+    /// yantrad's `because`: each error in the chain, joined by `: `.
+    fn chained(error: &dyn std::error::Error) -> String {
+        let mut out = error.to_string();
+        let mut source = error.source();
+        while let Some(cause) = source {
+            out.push_str(&format!(": {cause}"));
+            source = cause.source();
+        }
+        out
+    }
+
+    /// Y-585: the web calls a sessions error an ssh failure only when it starts
+    /// with this prefix (`lib/checks.ts` `answerFailure`).
+    #[test]
+    fn only_an_ssh_transport_error_starts_with_the_prefix_the_web_reads() {
+        const PREFIX: &str = "ssh to pi failed before the command reported a status";
+        let transport = Error::Tmux(tmux::Error::Ssh(ssh::Error::Transport {
+            host: "pi".to_string(),
+            diagnosis: "Permission denied (publickey).".to_string(),
+        }));
+        assert!(
+            chained(&transport).starts_with(PREFIX),
+            "{}",
+            chained(&transport)
+        );
+
+        let listing = Error::Tmux(tmux::Error::Command {
+            command: "list-sessions".to_string(),
+            status: 1,
+            stderr: "error connecting to /tmp/tmux-1000/default (Permission denied)".to_string(),
+        });
+        assert!(
+            !chained(&listing).starts_with("ssh to"),
+            "{}",
+            chained(&listing)
+        );
     }
 }

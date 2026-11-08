@@ -45,7 +45,7 @@ import { asEvents } from '@/shell/notifications'
 import { phrase } from '@/shell/phrase'
 import { usePrefs } from '@/shell/prefs'
 import { useTick } from '@/useTick'
-import { unclaimed, unreachable, work, type WorkRow } from '@/work'
+import { unclaimed, unreachable, waiting, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
@@ -291,17 +291,17 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
  *  D6 §3's GitHub queue under the workspace rows. */
 function Hero(props: {
   rows: WorkRow[]
+  /** Counted over the live bands: the rows above may be held (D3 §4.4), the number may not. */
+  count: number
   attention: Reading<Attention>
   events: Event[]
   now: number
   retry: () => void
 }) {
-  const { rows, attention, events, now, retry } = props
+  const { rows, count, attention, events, now, retry } = props
   // D7 §3.1: where the FAB carries New session, this copy is not also filled.
   const carried = useFab() !== null
-  const items = attention.looked === 'ok' ? attention.data.reviews.length + attention.data.issues.length : 0
-  const count = rows.length + items
-  const empty = count === 0 && attention.looked === 'ok'
+  const empty = count === 0 && rows.length === 0 && attention.looked === 'ok'
   return (
     <Card aria-labelledby="dash-needs" className="dash__hero" surface="primary">
       <div className="dash__hero-head">
@@ -716,9 +716,8 @@ export function Dashboard() {
   // it lands would file every one under *Not read yet* and move them all when
   // it arrives — the reordering §4.4 exists to prevent.
   const reading = listed.looked === 'pending' || agents.looked === 'pending' ? 'pending' : listed.looked
-  const { placed, changed, reorder } = useHeldBands(
-    listed.looked === 'ok' && agents.looked === 'ok' ? work(listed.data, agents) : [],
-  )
+  const live = listed.looked === 'ok' && agents.looked === 'ok' ? work(listed.data, agents) : []
+  const { placed, changed, reorder } = useHeldBands(live)
   const nothing = unreachable([machines, listed, sessions])
   const { gate, firstRun, home } = useSetupHome()
 
@@ -831,6 +830,7 @@ export function Dashboard() {
           <ErrorBoundary eyebrow="Needs you" title="Needs you could not be drawn">
             <Hero
               attention={attention}
+              count={waiting(live, attention.looked === 'ok' ? attention.data : null)}
               events={events}
               now={now}
               retry={retry}

@@ -151,6 +151,35 @@ async fn a_startup_command_that_exits_at_once_leaves_a_dead_pane() -> Result<()>
     Ok(())
 }
 
+/// Y-639: a stopped agent's terminal shows no raw tmux text, and I-4 still
+/// reads the status.
+#[tokio::test]
+async fn a_dead_pane_draws_no_tmux_text_and_keeps_its_status() -> Result<()> {
+    let Some(lab) = Lab::start("deadtext").await? else {
+        return Ok(());
+    };
+
+    let opened = lab
+        .tmux
+        .ensure(&lab.ssh, "deadtext", "/tmp", Some("exit 143"))
+        .await?;
+    let pane = &opened.session().pane_id;
+
+    let out = lab
+        .ssh
+        .exec(&format!(
+            "sleep 1; tmux display-message -p -t '{pane}' '#{{pane_dead}} #{{pane_dead_status}}'; \
+             tmux capture-pane -p -t '{pane}'"
+        ))
+        .await?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.starts_with("1 143\n"), "got `{text}`");
+    assert!(!text.contains("Pane is dead"), "got `{text}`");
+
+    lab.tmux.kill(&lab.ssh, "deadtext").await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn the_session_starts_in_the_requested_directory() -> Result<()> {
     let Some(lab) = Lab::start("cwd").await? else {

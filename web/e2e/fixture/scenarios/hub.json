@@ -1,0 +1,118 @@
+{
+  "extends": "empty",
+  "machines": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "name": "yantra-box",
+        "ownership": "yours",
+        "hub": true,
+        "dns_name": "yantra-box.yantra.tail3a1b.ts.net.",
+        "address": "100.64.0.1",
+        "os": "linux",
+        "online": true,
+        "expired": false,
+        "key_expires": null,
+        "last_seen": null,
+        "heartbeat": {
+          "age_seconds": 3,
+          "arch": "x86_64",
+          "labels": [],
+          "free_ram_mb": 6120,
+          "free_disk_mb": 88210,
+          "cpu_busy_pct": 4,
+          "power": "ac"
+        }
+      },
+      {
+        "name": "macbook",
+        "ownership": "yours",
+        "hub": false,
+        "dns_name": "macbook.yantra.tail3a1b.ts.net.",
+        "address": "100.64.0.2",
+        "os": "macOS",
+        "online": false,
+        "expired": false,
+        "key_expires": null,
+        "last_seen": "2026-09-06T11:00:00Z",
+        "heartbeat": null
+      },
+      {
+        "name": "iphone",
+        "ownership": "yours",
+        "hub": false,
+        "dns_name": "iphone.yantra.tail3a1b.ts.net.",
+        "address": "100.64.0.3",
+        "os": "iOS",
+        "online": true,
+        "expired": false,
+        "key_expires": null,
+        "last_seen": null,
+        "heartbeat": null
+      }
+    ]
+  },
+  "readiness": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "machine": "yantra-box",
+        "checks": [
+          {
+            "check": "reachable",
+            "state": "present",
+            "detail": "a command ran there and reported its own status"
+          },
+          {
+            "check": "sshd",
+            "state": "present",
+            "detail": "OpenSSH_10.0 answered"
+          },
+          {
+            "check": "tmux",
+            "state": "present",
+            "detail": "tmux 3.5a at /usr/bin/tmux"
+          },
+          {
+            "check": "git",
+            "state": "present",
+            "detail": "found at /usr/bin/git"
+          },
+          {
+            "check": "agent-cli",
+            "state": "present",
+            "detail": "claude 2.1.0 at /home/yantra/.local/bin/claude"
+          },
+          {
+            "check": "terminfo",
+            "state": "present",
+            "detail": "xterm-256color is known there"
+          },
+          {
+            "check": "provider-cli",
+            "state": "present",
+            "detail": "gh 2.96.0 at /usr/bin/gh"
+          },
+          {
+            "check": "provider-auth",
+            "state": "present",
+            "detail": "`gh` reports a stored credential there — that it works is not asked"
+          },
+          {
+            "check": "login-session",
+            "state": "present",
+            "detail": "a systemd user session is running"
+          },
+          {
+            "check": "heartbeat",
+            "state": "present",
+            "detail": "a beat arrived 3s ago"
+          }
+        ]
+      }
+    ]
+  },
+  "sshIdentity": null
+}

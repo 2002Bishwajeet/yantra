@@ -1,11 +1,13 @@
 import { useEffect, useEffectEvent, useRef } from 'react'
 import type { Machine, PlacementAsk } from '@/api'
 import type { ApiError } from '@/api/errors'
-import { useMachines } from '@/api/hooks'
+import { useMachines, useReadiness } from '@/api/hooks'
 import { usePlacement } from '@/api/mutations'
+import { isReady } from '@/lib/ready'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Text } from '@/m3/text/Text'
+import { useReports } from '@/screens/setup/progress'
 import { usePrefs } from '@/shell/prefs'
 import { cloneFolders } from './clonePath'
 import { pickMachine, type Source, type Values } from './form'
@@ -48,13 +50,20 @@ export function SuggestMachine(props: { form: SessionForm; values: Values; machi
     if (top) choose(top.machine)
   }, [top])
 
+  // Setup reads the same reports, so the two screens agree on which machine is ready.
+  const sweep = useReadiness()
+  const reports = useReports(machines)
+  const report = top ? (reports[machines.findIndex((one) => one.name === top.machine)] ?? null) : null
+  const caveat =
+    sweep.looked !== 'ok' || !top || isReady(report) ? '' : report ? ' · not ready yet' : ' · not checked yet'
+
   return (
     <>
       <Text aria-live="polite" render={<p role="status" />} className="ns__note" scale="body-medium" tone="variant">
         {placement.data
           ? top
-            ? `${top.machine} suggested: ${top.reason}`
-            : 'no machine reports a heartbeat, so none is suggested'
+            ? `Suggested: ${top.machine}, because ${top.reason}${caveat}`
+            : 'No machine reports a heartbeat, so none is suggested.'
           : ''}
       </Text>
       <Failed error={placement.error} retry={() => mutate({})} title="No machine could be suggested" />

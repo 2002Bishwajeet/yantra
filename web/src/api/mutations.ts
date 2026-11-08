@@ -3,6 +3,7 @@ import type {
   Change,
   Cloning,
   Create,
+  Connection,
   Device,
   Killed,
   Listing,
@@ -16,7 +17,11 @@ import type {
   RoomPosted,
   Stopped,
   Thread,
+  ThreadCommitted,
+  ThreadMessage,
   ThreadOpened,
+  ThreadPrOpened,
+  ThreadPushed,
   Workspace,
 } from '@/api'
 import { fetchJson, json } from '@/api/client'
@@ -32,14 +37,17 @@ const workspace = (name: string, tail = '') =>
  *
  *  Each `201`/`200` still carries the whole answer, and the surfaces draw
  *  that: the sweep is up to 30 s behind its own write, so a refetch alone can
- *  list what was just deleted (I-30). */
+ *  list what was just deleted (I-30). A create keeps its `201` under
+ *  `keys.created`, and the session page draws it until the sweep lists the name. */
 export function useCreateWorkspace() {
   const client = useQueryClient()
   return useMutation<Workspace, ApiError, Create>({
     mutationFn: (body) =>
       fetchJson<Workspace>('/api/workspaces', { method: 'POST', ...json(body) }),
-    onSuccess: () =>
-      client.invalidateQueries({ queryKey: keys.workspaces(), exact: true }),
+    onSuccess: (made) => {
+      client.setQueryData(keys.created(made.name), made)
+      return client.invalidateQueries({ queryKey: keys.workspaces(), exact: true })
+    },
   })
 }
 
@@ -217,8 +225,12 @@ export function useInstall() {
  *  GitHub itself, so there is no poll write; `useGithub()` says when the
  *  grant is held. A 409 is a flow already waiting for its code. */
 export function useGithubLogin() {
+  const client = useQueryClient()
   return useMutation<Device, ApiError, void>({
     mutationFn: () => fetchJson<Device>('/api/github/login', { method: 'POST' }),
+    // Until the next poll, a grant held from before is not the new sign-in.
+    onSuccess: () =>
+      client.setQueryData<Connection>(keys.github(), (held) => (held ? { ...held, pending: true } : held)),
   })
 }
 
@@ -326,6 +338,40 @@ export function useOpenThread(name: string) {
   return useMutation<ThreadOpened, ApiError, string>({
     mutationFn: (issue) =>
       fetchJson<ThreadOpened>(workspace(name, '/threads/new'), { method: 'POST', ...json({ issue }) }),
+  })
+}
+
+// Y-493: the four git verbs on a thread (Y-492, Y-449). Each reaches git or
+// GitHub, so each is a POST a person asks for and none polls (ADR-0019).
+const thread = (name: string, id: string, verb: string) => workspace(name, `/threads/${encodeURIComponent(id)}/${verb}`)
+
+/** `…/message`: `claude -p` drafts a commit message on the machine. 409 is a
+ *  running turn, 502 `claude` failed, 504 it timed out. */
+export function useDraftMessage(name: string) {
+  return useMutation<ThreadMessage, ApiError, string>({
+    mutationFn: (id) => fetchJson<ThreadMessage>(thread(name, id, 'message'), { method: 'POST' }),
+  })
+}
+
+/** `…/commit`. 400 is an empty message, 409 no git identity or nothing to commit. */
+export function useCommit(name: string) {
+  return useMutation<ThreadCommitted, ApiError, { id: string; message: string }>({
+    mutationFn: ({ id, message }) =>
+      fetchJson<ThreadCommitted>(thread(name, id, 'commit'), { method: 'POST', ...json({ message }) }),
+  })
+}
+
+/** `…/push`. 409 is a refused push or no remote. */
+export function usePush(name: string) {
+  return useMutation<ThreadPushed, ApiError, string>({
+    mutationFn: (id) => fetchJson<ThreadPushed>(thread(name, id, 'push'), { method: 'POST' }),
+  })
+}
+
+/** `…/pr`. 409 is not pushed, ahead, behind, no grant or not GitHub; 502 is GitHub. */
+export function useOpenPr(name: string) {
+  return useMutation<ThreadPrOpened, ApiError, string>({
+    mutationFn: (id) => fetchJson<ThreadPrOpened>(thread(name, id, 'pr'), { method: 'POST', ...json({}) }),
   })
 }
 

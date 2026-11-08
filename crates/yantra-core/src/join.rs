@@ -2,15 +2,15 @@
 //! [ADR-0029](../../../docs/adr/0029-a-machine-joins-itself.md)).
 //!
 //! The script is POSIX `sh` in [`join.sh`](join.sh). The daemon fills in three
-//! values and serves it at `GET /join`; `yantra join-script` prints the same
-//! bytes. What the machine reports back is [`crate::identity::join_in`]'s input.
+//! values and `login_server.sh`, and serves it at `GET /join`; `yantra
+//! join-script` prints the same bytes. What the machine reports back is [`crate::identity::join_in`]'s input.
 
 use std::net::{IpAddr, SocketAddr};
 
 /// `yantrad`'s port, here so the CLI names the daemon without a second copy.
 pub const DAEMON_PORT: u16 = 7717;
 
-const SCRIPT: &str = include_str!("join.sh");
+pub(crate) const SCRIPT: &str = include_str!("join.sh");
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -47,7 +47,8 @@ pub fn script(daemon: SocketAddr, public_key: &str) -> Result<String, Error> {
     Ok(SCRIPT
         .replace("__YANTRA_DAEMON__", &daemon.to_string())
         .replace("__YANTRA_KEY__", public_key)
-        .replace("__YANTRA_VERSION__", crate::about::VERSION))
+        .replace("__YANTRA_VERSION__", crate::about::VERSION)
+        .replace("__YANTRA_LOGIN_SERVER__", crate::tmux::LOGIN_SERVER))
 }
 
 #[cfg(test)]
@@ -67,6 +68,55 @@ mod tests {
         assert!(script.contains(&format!("KEY='{KEY}'")));
         assert!(script.contains(&format!("VERSION='{}'", crate::about::VERSION)));
         assert!(!script.contains("__YANTRA_"), "a placeholder was left in");
+    }
+
+    /// The Mac branch calls `login_server`, so the function must be in it.
+    #[test]
+    fn the_script_carries_the_login_server_function() {
+        let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
+        let script = script(daemon, KEY).expect("a usable key");
+        assert!(script.contains(crate::tmux::LOGIN_SERVER));
+        assert!(script.contains("login_server() {"));
+        assert!(script.contains("login_server \"$tmux\""));
+    }
+
+    /// `join.sh`'s `say` and `mac_tmux`, with the login-server function, run on
+    /// a fake Mac. The output is what the person reads.
+    fn mac_tmux_on(mac: &crate::tmux::launchd::Mac) -> String {
+        let start = SCRIPT.find("mac_tmux() {").expect("join.sh has mac_tmux");
+        let end = start + SCRIPT[start..].find("\n}\n").expect("mac_tmux ends") + 3;
+        let say = SCRIPT
+            .lines()
+            .find(|line| line.starts_with("say() {"))
+            .expect("join.sh has say");
+        let out = mac.run(&format!(
+            "{say}\n{}\n{}\nmac_tmux\n",
+            crate::tmux::LOGIN_SERVER,
+            &SCRIPT[start..end]
+        ));
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// A Mac whose Terminal already runs tmux still gets the LaunchAgent, and
+    /// join does not claim the running server is the job's.
+    #[test]
+    fn join_installs_the_launch_agent_beside_a_running_server() {
+        let mac = crate::tmux::launchd::Mac::new("join-running", true, false, None);
+        let said = mac_tmux_on(&mac);
+        let plist = mac.plist().expect("join wrote the plist");
+        assert!(plist.contains("<key>KeepAlive</key><true/>"), "{plist}");
+        assert!(said.contains("was already running"), "{said}");
+        assert!(!said.contains("runs in your login session"), "{said}");
+        assert!(said.contains(crate::tmux::launchd::PLIST), "{said}");
+    }
+
+    #[test]
+    fn join_with_no_server_says_the_login_session_runs_tmux() {
+        let mac = crate::tmux::launchd::Mac::new("join-none", false, false, None);
+        let said = mac_tmux_on(&mac);
+        assert!(mac.plist().is_some());
+        assert!(said.contains("tmux runs in your login session"), "{said}");
     }
 
     /// `sh -n` parses without running, so a syntax error fails here rather

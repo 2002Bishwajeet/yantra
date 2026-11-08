@@ -70,15 +70,13 @@ pub enum Error {
         machine: String,
     },
 
-    /// ADR-0018 §1. A tmux server started by an ssh command sits in launchd's
-    /// `Background` domain, and every pane it forks is a process that cannot
-    /// read the login keychain (I-44) — so on macOS Yantra opens sessions in a
-    /// server the login session started, or in none at all.
+    /// ADR-0018 §1 and its 2026-11-04 amendment. A pane can read the login
+    /// keychain only in a server the login session started (I-44), so with no
+    /// one logged in at the screen there is no server to open a session in.
     #[error(
-        "`{machine}` runs macOS and has no tmux server, and Yantra will not start one there: \
-         panes in a server started over ssh cannot read the login keychain, so the agent would \
-         come up unauthenticated. Start one from a login session on that machine — in Terminal: \
-         `tmux new-session -d`"
+        "`{machine}` runs macOS, and no one is logged in at its screen. Yantra starts the tmux \
+         server there in the login session, because panes in a server started over ssh cannot \
+         read the login keychain. Log in at that Mac, then try again"
     )]
     NoLoginServer { machine: String },
 
@@ -167,19 +165,19 @@ pub async fn open<E: ssh::Exec>(
     Ok(opened)
 }
 
-/// ADR-0018 §1: on macOS, refuse rather than create the tmux server.
+/// ADR-0018 §1 on macOS: a server in the login session, which
+/// [`Tmux::login_server`] starts through a LaunchAgent when none runs.
 ///
 /// Linux is untouched — I-1's plain `new-session -d` with `duplicate session:`
 /// treated as success is reached exactly as before, and this costs that platform
-/// no round trip at all. [`Tmux::list`] already answers an empty vec when there
-/// is no server, so *is one running* needs no new tmux primitive.
+/// no round trip at all.
 pub(crate) async fn require_login_server<E: ssh::Exec>(
     exec: &E,
     tmux: &Tmux,
     os: Os,
     machine: &str,
 ) -> Result<(), Error> {
-    if os == Os::Other || !tmux.list(exec).await?.is_empty() {
+    if os == Os::Other || tmux.login_server(exec).await? {
         return Ok(());
     }
     Err(Error::NoLoginServer {
@@ -226,8 +224,70 @@ fn machine_for(workspace: &Workspace) -> Result<Machine, Error> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::tmux::fake::{Mac, SCRIPT_SAID, Server};
+
+    async fn required(mac: &Mac, os: Os) -> Result<(), Error> {
+        let tmux = Tmux::resolve(mac).await.expect("a tmux");
+        require_login_server(mac, &tmux, os, "mac").await
+    }
+
+    #[tokio::test]
+    async fn linux_asks_nothing_about_a_login_server() {
+        let mac = Mac::new(Server::None, 3);
+        required(&mac, Os::Other).await.expect("Linux is untouched");
+        assert!(!mac.asked_for("list-sessions") && !mac.asked_for("launchctl"));
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_a_session_held_sends_no_launchctl() {
+        let mac = Mac::new(Server::Running, 3);
+        required(&mac, Os::MacOs).await.expect("a server runs");
+        assert!(!mac.asked_for("launchctl"));
+    }
+
+    /// Y-640: an empty server gets the script, which may replace its older
+    /// job, and serves when the script cannot run while the server still
+    /// answers. `tmux.rs` tests the bootout that leaves none.
+    #[tokio::test]
+    async fn a_mac_with_an_empty_server_is_sent_the_script_and_starts() {
+        let mac = Mac::new(Server::Empty, 3);
+        required(&mac, Os::MacOs).await.expect("a server runs");
+        assert!(mac.asked_for("launchctl"));
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_no_server_is_given_one_by_the_launch_agent() {
+        let mac = Mac::new(Server::None, 0);
+        required(&mac, Os::MacOs)
+            .await
+            .expect("the job started one");
+        assert!(mac.asked_for("launchctl bootstrap"));
+    }
+
+    #[tokio::test]
+    async fn no_one_at_the_screen_is_the_only_no_login_server() {
+        let err = required(&Mac::new(Server::None, 3), Os::MacOs)
+            .await
+            .expect_err("refused");
+        assert!(matches!(err, Error::NoLoginServer { .. }), "{err:?}");
+        let said = err.to_string();
+        assert!(
+            said.contains("`mac`") && said.contains("Log in at that Mac"),
+            "{said}"
+        );
+
+        let err = required(&Mac::new(Server::None, 1), Os::MacOs)
+            .await
+            .expect_err("refused");
+        assert!(
+            matches!(&err, Error::Tmux(tmux::Error::Command { command, stderr, .. })
+                if command == "launchctl" && stderr == SCRIPT_SAID),
+            "{err:?}"
+        );
+    }
 
     /// The existence check puts `repo` in front of a remote shell, and a
     /// workspace file is where it comes from — the boundary I-26 drew.

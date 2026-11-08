@@ -21,10 +21,10 @@ export function phrase(status: WorkspaceStatus | null): { mark: MarkState; words
     case 'finished':
       return { mark: 'done', words: 'finished', live: false }
     case 'stopped':
-      return { mark: 'idle', words: 'stopped', live: false }
     case 'no_session':
-      return { mark: 'idle', words: 'no session', live: false }
+      return { mark: 'idle', words: 'stopped', live: false }
     case 'unclear':
-      return { mark: 'unknown', words: 'unclear', live: false }
+      // Its only real cause is a live pane that claude does not list (Y-639).
+      return { mark: 'unknown', words: 'unclear', live: true }
   }
 }

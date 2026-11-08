@@ -6,6 +6,7 @@ import { useMachineReadiness } from '@/api/hooks'
 import { keys } from '@/api/keys'
 import { answer } from '@/test/daemon'
 import { renderInApp } from '@/test/inApp'
+import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 import { ReadinessCard } from './Readiness'
 import { useVerdict } from './useVerdict'
 
@@ -22,9 +23,10 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
 })
 
-const IDS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'heartbeat']
+const IDS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'heartbeat']
 
 const checks = (absent: string[] = [], detail: Record<string, string> = {}): Check[] =>
   IDS.map((id) => ({
@@ -32,6 +34,10 @@ const checks = (absent: string[] = [], detail: Record<string, string> = {}): Che
     state: absent.includes(id) ? 'absent' : 'present',
     detail: detail[id] ?? (absent.includes(id) ? `no \`${id}\` there` : 'found'),
   }))
+
+/** doctor.rs `no_login_server`, word for word. */
+const NO_SERVER =
+  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
 
 const report = (list: Check[]): Looked<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks: list, age_seconds: 0 } })
 
@@ -129,8 +135,8 @@ describe('the Readiness card', () => {
   /** On a ready machine the microphone is all Install could do, so Install
    *  waits for the box; the optional microphone is not counted against it. */
   it.each([
-    ['ready', [] as string[], 'Ready for sessions', '11 of 11'],
-    ['manual', ['provider-auth'], 'gh is not signed in', '10 of 11'],
+    ['ready', [] as string[], 'Ready for sessions', '12 of 12'],
+    ['manual', ['provider-auth'], 'gh is not signed in', '11 of 12'],
   ])('enables Install on a %s machine only while Microphone is ticked', async (_, absent, title, count) => {
     daemon()
     await draw(report([...checks(absent), { check: 'mic', state: 'absent', detail: 'not installed' }]))
@@ -345,11 +351,13 @@ describe('the Readiness card', () => {
     expect(card().queryByRole('button')).toBeNull()
   })
 
-  it('reads a machine nobody asked as Not checked yet, with Check again', async () => {
+  it('reads a machine nobody asked as Not checked yet, with Check', async () => {
     const asked = daemon()
     await draw({ looked: 'never' })
     expect(card().getByRole('heading', { name: 'Not checked yet' })).toBeTruthy()
-    fireEvent.click(card().getByRole('button', { name: 'Check again' }))
+    expect(card().queryByText(/has not asked/)).toBeNull()
+    expect(card().queryByRole('button', { name: 'Check again' })).toBeNull()
+    fireEvent.click(card().getByRole('button', { name: 'Check' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi/readiness'))
     expect(screen.queryByRole('alert')).toBeNull()
   })
@@ -369,9 +377,84 @@ describe('the Readiness card', () => {
       '(Add a device, or `yantra join-script`) · Connection closed by 100.64.0.2 port 22'
     await draw(report(checks(['reachable'], { reachable: said })))
     expect(card().getByRole('heading', { name: 'pi has not joined' })).toBeTruthy()
-    expect(card().getByText(said)).toBeTruthy()
+    expect(card().getByText(/does not know which account/)).toBeTruthy()
+    expect(card().queryByText(said)).toBeNull()
+    fireEvent.click(card().getByRole('button', { name: /What ssh said/ }))
+    expect(card().getAllByText(said).length).toBeGreaterThan(0)
     expect(card().getByRole('link', { name: 'Add a device' }).getAttribute('href')).toBe('/machines/add')
     expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+  })
+
+  /** Y-585: the plain words first, one next step, and the raw text one press
+   *  away with no link in it. */
+  it('tells a browser check in plain words and keeps ssh’s own behind a press', async () => {
+    daemon()
+    const said = 'Tailscale SSH requires an additional check, which needs a browser sign-in that Yantra cannot finish, so ssh was stopped'
+    await draw(report(checks(['reachable'], { reachable: said })))
+    expect(card().getByRole('heading', { name: 'pi needs a browser sign-in' })).toBeTruthy()
+    expect(card().getByText(/waits for a browser sign-in, and the appliance has no browser/)).toBeTruthy()
+    expect(card().getByText(/from check to accept/)).toBeTruthy()
+    expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+
+    const press = card().getByRole('button', { name: /What ssh said/ })
+    expect(press.getAttribute('aria-expanded')).toBe('false')
+    expect(card().queryByText(said)).toBeNull()
+    expect(card().queryByRole('link', { name: /login.tailscale/ })).toBeNull()
+
+    fireEvent.click(press)
+    expect(card().getAllByText(said).length).toBeGreaterThan(0)
+    expect(card().getByText('tmux')).toBeTruthy()
+  })
+
+  /** Y-621: the two lines a daemon before v0.10.1 sends. The sign-in link is
+   *  dead once ssh ends, so it is nowhere on the page, open or closed. */
+  it('reads Tailscale’s real check text with the new cause, the join command and no link', async () => {
+    daemon()
+    await draw(report(checks(['reachable'], { reachable: CHECK_RULE })))
+    expect(card().getByRole('heading', { name: 'pi needs a browser sign-in' })).toBeTruthy()
+    expect(card().getByText('Tailscale SSH on pi waits for a browser sign-in, and the appliance has no browser.')).toBeTruthy()
+    expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+    expect(card().getByRole('button', { name: /^Check/ })).toBeTruthy()
+    fireEvent.click(card().getByRole('button', { name: /What ssh said/ }))
+    expect(card().getAllByText(/Tailscale SSH requires an additional check\./).length).toBeGreaterThan(0)
+    expect(document.body.textContent).not.toContain('login.tailscale.com')
+  })
+
+  /** Y-621: a changed key names the forget command and never the join command. */
+  it('names yantra forget-host-key for a changed host key, and keeps Check', async () => {
+    daemon()
+    await draw(report(checks(['reachable'], { reachable: CHANGED_KEY })))
+    expect(card().getByRole('heading', { name: 'pi’s host key changed' })).toBeTruthy()
+    expect(card().getByText(/pi answered with a different host key than the one the appliance recorded/)).toBeTruthy()
+    expect(card().getByText(/If you know why it changed/)).toBeTruthy()
+    expect(card().getByText('sudo -u yantra -H yantra forget-host-key pi')).toBeTruthy()
+    expect(card().getByRole('button', { name: /^Check/ })).toBeTruthy()
+    expect(card().queryByText(/curl -fsSL/)).toBeNull()
+    expect(card().queryByText(/REMOTE HOST IDENTIFICATION/)).toBeNull()
+  })
+
+  /** R-23 on the page: every failure has words of its own, and none shows
+   *  raw ssh until it is asked for. */
+  it.each([
+    ['yantra@pi: Permission denied (publickey).', 'The key was refused', /did not take the appliance’s key/, true],
+    ['No route to host', 'ssh to pi fails', /can’t reach pi over ssh/, false],
+  ])('keeps the raw text closed for %s', async (said, title, cause, join) => {
+    daemon()
+    await draw(report(checks(['reachable'], { reachable: said })))
+    expect(card().getByRole('heading', { name: title })).toBeTruthy()
+    expect(card().getByText(cause)).toBeTruthy()
+    expect(card().queryByText(said)).toBeNull()
+    if (join) expect(await card().findByText('curl -fsSL http://100.64.0.1:7717/join | sh')).toBeTruthy()
+    else expect(card().queryByText(/curl -fsSL/)).toBeNull()
+  })
+
+  it('says how long a step took, and nothing where no step ran', async () => {
+    daemon()
+    const timed = checks().map((one) => (one.check === 'tmux' ? { ...one, took_ms: 84 } : one))
+    await draw(report(timed))
+    fireEvent.click(card().getByRole('button', { name: /^Show/ }))
+    expect(card().getByText('· 84 ms')).toBeTruthy()
+    expect(card().getAllByText(/^· /)).toHaveLength(1)
   })
 
   it('puts a manual fix beside its check, and still offers a session', async () => {
@@ -382,12 +465,42 @@ describe('the Readiness card', () => {
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
 
+  /** Y-619: a Mac with no login tmux server is signed in, so the card gives
+   *  the Terminal command and never sends the owner to log in. */
+  it('gives a Mac with no login tmux server the Terminal command, with Copy', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    daemon()
+    const both = { 'login-session': NO_SERVER, 'provider-auth': NO_SERVER }
+    await draw(report(checks(['login-session', 'provider-auth'], both)), [earlier], { machine: machine({ os: 'macOS' }) })
+    expect(card().getByRole('heading', { name: 'No tmux server from a login on pi' })).toBeTruthy()
+    expect(card().getAllByText('Open Terminal on pi and run:')).toHaveLength(2)
+    expect(card().getAllByText('tmux new-session -d')).toHaveLength(2)
+    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/log in|sign in/i)
+    fireEvent.click(card().getByRole('button', { name: 'Copy the command that fixes claude signed in' }))
+    expect(await card().findByRole('button', { name: 'Copied the command that fixes claude signed in' })).toBeTruthy()
+    expect(writeText).toHaveBeenCalledWith('tmux new-session -d')
+  })
+
   /** Y-591: a warning with the fix and its cost, and never a block on a session. */
   it('warns that macOS blocks the guarded folders, and still offers a session', async () => {
     daemon()
     await draw(report(checks(['folder-access'])), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'macOS blocks Desktop, Documents and Downloads' })).toBeTruthy()
     expect(card().getByText(/Allow full disk access for remote users\. Every ssh login to pi, agents included/)).toBeTruthy()
+    expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
+  })
+
+  /** Y-640: the detail names the command, and the session is still offered. */
+  it('names the command a hook cannot find, and still offers a session', async () => {
+    daemon()
+    const said = {
+      hooks: 'the agent’s PATH lacks `node` (SessionStart in claude-mem@thedotmack), so those hooks fail each time an agent starts',
+    }
+    await draw(report(checks(['hooks'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
+    expect(card().getByRole('heading', { name: 'a hook cannot run' })).toBeTruthy()
+    expect(card().getByText(/lacks `node` \(SessionStart in claude-mem@thedotmack\)/)).toBeTruthy()
+    expect(card().getByText(/put its directory on PATH in your login shell/)).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
 

@@ -34,6 +34,10 @@ export type PermissionMode = 'supervised' | 'auto-accept-edits' | 'auto' | 'full
 /** Unlike T3 Code, a new thread starts supervised. */
 export const DEFAULT_MODE: PermissionMode = 'supervised'
 
+/** Whether a turn may change anything (Y-565): `plan` only reads and proposes
+ *  a plan. Claude alone has it; T3 Code names `build` `default`. */
+export type Interaction = 'build' | 'plan'
+
 /** T3 Code's names and words for each mode, in its order. */
 export const MODES: readonly { mode: PermissionMode; label: string; description: string }[] = [
   { mode: 'supervised', label: 'Supervised', description: 'Requests approval for commands and file changes.' },
@@ -127,6 +131,10 @@ export type TurnCompleted = {
  *  diff cut at 256 KiB. */
 export type TurnDiff = { turn: number; unifiedDiff: string; truncated: boolean }
 
+/** A slash command the agent expands when `/<name>` opens a prompt (Y-563).
+ *  `hint` says what the argument is for; with none, the command takes no argument. */
+export type SlashCommand = { name: string; description: string; hint?: string }
+
 /** `cursor` is `<run>:<line end>:<part>` on an event read from the agent's
  *  keeper, and absent on one the daemon made (ADR-0035). A reconnect sends the
  *  last one back as `after`. On `thread.started` it is the cursor the replay
@@ -140,6 +148,8 @@ export type ThreadEvent = { threadId: string; cursor?: string } & (
   | { type: 'turn.diff.updated'; payload: TurnDiff }
   /** Not T3 Code's: the files are back as checkpoint `turn` kept them. */
   | { type: 'thread.reverted'; payload: { turn: number } }
+  /** Not T3 Code's: an ACP agent's slash commands, sent when its session opens. */
+  | { type: 'thread.commands.updated'; payload: { commands: SlashCommand[] } }
   | {
       type: 'turn.plan.updated'
       payload: { plan: { step: string; status: 'pending' | 'inProgress' | 'completed' }[] }
@@ -158,16 +168,29 @@ export type ChatQuery = { thread?: string; after?: string }
 
 /** What the browser sends. One turn runs at a time. */
 export type ChatFrame =
-  /** `harness` is read only on the turn that opens a thread. `mode` holds for
-   *  this turn; an absent one is supervised. A Claude turn reads `model` and
-   *  `effort`; an ACP one ignores them. */
-  | { type: 'turn'; text: string; harness?: Harness; mode?: PermissionMode; model?: string; effort?: Effort }
+  /** `harness` is read only on the turn that opens a thread. `mode` and
+   *  `interaction` hold for this turn; absent, they are supervised and build.
+   *  A Claude turn reads `model` and `effort`; an ACP one ignores them. */
+  | {
+      type: 'turn'
+      text: string
+      harness?: Harness
+      mode?: PermissionMode
+      interaction?: Interaction
+      model?: string
+      effort?: Effort
+    }
   | { type: 'answer'; requestId: string; decision: Decision }
   | { type: 'cancel' }
   /** Puts the files back as checkpoint `turn` kept them; the conversation stays. */
   | { type: 'revert'; turn: number }
   /** Asks for the thread's whole-branch diff; answered while a turn runs. */
   | { type: 'diff' }
+  /** A browser cannot send a protocol ping, so it sends this; the daemon answers `pong`. */
+  | { type: 'ping' }
+
+/** The answer to `ping`. It proves the socket is alive and is no event. */
+export type ChatPong = { type: 'pong' }
 
 /** The one daemon frame that is not an event. `notLoggedIn` names the
  *  command to run on the machine, because the login stays there (ADR-0033 §6). */

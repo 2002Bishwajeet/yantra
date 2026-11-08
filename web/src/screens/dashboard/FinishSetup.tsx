@@ -7,16 +7,17 @@ import { Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { usePrefs } from '@/shell/prefs'
 import { REQUIRED, useChecklist } from '@/screens/setup/progress'
-import { marks, statusWord } from '@/screens/setup/steps'
+import { marks, statusWord, TITLES } from '@/screens/setup/steps'
 import { hideSetupCard, setupCardHidden } from './setupCard'
 
 function Unfinished(props: { now: number }) {
   const heading = useId()
-  const { later, done, settled } = useChecklist(props.now)
+  const configured = useId()
+  const { steps, later, githubGrant, done, settled } = useChecklist(props.now)
   // Unsettled, a step says *not yet* for what is only unread.
   if (!settled) return null
   const open = [
-    { key: 'github', title: 'GitHub', step: later.github, action: 'Connect', category: 'providers' },
+    { key: 'github', title: 'GitHub', step: later.github, action: githubGrant.kind === 'refused' ? 'Sign in again' : 'Connect', category: 'providers' },
     { key: 'push', title: 'Push to your phone', step: later.push, action: 'Set up', category: 'notifications' },
   ].filter((one) => one.step.status !== 'done')
   if (open.length === 0) return null
@@ -33,6 +34,21 @@ function Unfinished(props: { now: number }) {
         </Button>
       </div>
       <Track className="dash__setup-track" label={`${all} of ${total} setup steps done`} value={all / total} />
+      {/* R23 change 13: the checklist is gone by the time step 4 is done, so the summary lives here. */}
+      {done === REQUIRED ? (
+        <>
+          <Text id={configured} render={<h3 />} scale="title-small" tone="variant">
+            What setup configured
+          </Text>
+          <ul aria-labelledby={configured} className="dash__setup-configured">
+            {(Object.keys(TITLES) as (keyof typeof TITLES)[]).map((step) => (
+              <Text key={step} render={<li />} scale="body-medium">
+                {TITLES[step]} · {steps[step].words}
+              </Text>
+            ))}
+          </ul>
+        </>
+      ) : null}
       <ul className="dash__setup-list">
         {open.map((one) => (
           <li key={one.key}>

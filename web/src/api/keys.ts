@@ -15,7 +15,14 @@ export const keys = {
       : (['workspaces', name, 'spend', since] as const),
   transcript: (name: string, window: Window) =>
     ['workspaces', name, 'transcript', window] as const,
+  /** The `201` of a create, drawn until the sweep lists the name. */
+  created: (name: string) => ['workspaces', name, 'created'] as const,
   repair: (name: string) => ['workspaces', name, 'repair'] as const,
+  /** `null` is the workspace's repository, before a thread opens. */
+  mentions: (name: string, thread: string | null, harness: string) =>
+    ['workspaces', name, 'mentions', thread, harness] as const,
+  commands: (name: string, thread: string | null, harness: string) =>
+    ['workspaces', name, 'commands', thread, harness] as const,
   sessions: () => ['sessions'] as const,
   /** The whole sweep, or one machine's report under it. */
   readiness: (machine?: string) =>
@@ -24,6 +31,8 @@ export const keys = {
       : (['readiness', machine] as const),
   attention: () => ['attention'] as const,
   github: () => ['github'] as const,
+  /** Under `github`, so a sign-in or sign-out that drops one drops both. */
+  githubReadiness: () => ['github', 'readiness'] as const,
   repos: () => ['repos'] as const,
   notifications: () => ['notifications'] as const,
   about: () => ['about'] as const,

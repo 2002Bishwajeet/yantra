@@ -10,14 +10,14 @@ test('a changed word fails the empty-states baseline', async ({ page, size }, te
   )
   await scenario(page, 'empty')
   await page.goto('/fleet')
-  await expect(page.getByText('Nothing is running').first()).toBeVisible()
+  await expect(page.getByText('No workspaces yet').first()).toBeVisible()
   await keyboardWalk(page, 8)
   await expect(page.locator('.shell__slot')).toHaveCount(0)
   await page.evaluate(() => {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      if (n.nodeValue?.includes('Nothing is running'))
-        n.nodeValue = n.nodeValue.replace('Nothing is running', 'Nothing is stopped')
+      if (n.nodeValue?.includes('No workspaces yet'))
+        n.nodeValue = n.nodeValue.replace('No workspaces yet', 'No workspaces yep')
     }
   })
   await expect(

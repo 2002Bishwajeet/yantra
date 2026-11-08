@@ -35,6 +35,15 @@ describe('ErrorSurface', () => {
     expect(screen.getByRole('button', { name: 'Open Tailscale' })).toBeTruthy()
   })
 
+  it('draws the whole of a long inline sentence, wrapped and never clipped', () => {
+    const said =
+      '`mbp` runs macOS and has no tmux server, and Yantra will not start one there: panes in a server started over ssh cannot read the login keychain, so the agent would come up unauthenticated. Start one from a login session on that machine — in Terminal: `tmux new-session -d`'
+    render(<ErrorSurface.Inline title="Starting was refused" error={new ApiError('refused', said, { status: 409 })} />)
+    const span = screen.getByText(said)
+    expect(span.className).not.toContain('m3-clip')
+    expect(span.className).toContain('m3-wrap')
+  })
+
   it('offers no Try again for an error that is not worth asking twice', () => {
     render(<ErrorSurface.Card title="Usage" error={new ApiError('refused', 'no', { status: 403 })} reset={() => {}} />)
     expect(screen.getByRole('alert').dataset.layout).toBe('card')

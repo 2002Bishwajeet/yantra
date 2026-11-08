@@ -5,7 +5,7 @@ import { fromReading, type Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useAbout } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { fixOf, nameOf } from '@/lib/checks'
+import { fixOf, nameOf, tookOf, withoutSignIn } from '@/lib/checks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -18,10 +18,11 @@ import { Snackbar } from '@/m3/snackbar/Snackbar'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Doctor } from '@/screens/machines/Doctor'
-import { tally, wordOf } from '@/screens/machines/facts'
-import { joinCommand, joinUrl } from '@/lib/join'
+import { counted, tally, wordOf } from '@/screens/machines/facts'
+import { joinUrl } from '@/lib/join'
 import { useTick } from '@/useTick'
 import { answer, LOST_MS, needsSudo, newestInstall } from './install'
+import { ReachFailure } from './ReachFailure'
 import { type Step, SudoSheet } from './SudoSheet'
 import type { Verdicted } from './useVerdict'
 import { sorted, startable, titleOf, type Verdict } from './verdict'
@@ -32,7 +33,7 @@ const marks: Record<Check['state'], MarkState> = { present: 'done', absent: 'nee
 
 function CheckLine(props: { check: Check; machine: string }) {
   const { check, machine } = props
-  const fix = check.state === 'absent' ? fixOf(check.check, machine) : null
+  const fix = check.state === 'absent' ? fixOf(check, machine) : null
   return (
     <li className="machine__check">
       <State size="small" state={marks[check.state]}>
@@ -42,12 +43,17 @@ function CheckLine(props: { check: Check; machine: string }) {
         {wordOf(check.state)}
       </Text>
       <Text className="machine__detail" scale="body-small" tone="variant">
-        {check.detail}
+        {withoutSignIn(check.detail)}
+        {check.took_ms === undefined ? null : <span> · {tookOf(check.took_ms)}</span>}
       </Text>
       {fix?.by === 'command' ? (
         <div className="machine__fix">
           <Text scale="body-small" tone="variant">
-            {fix.where === 'appliance' ? 'Run this on the appliance:' : `Run this on ${machine}:`}
+            {fix.where === 'appliance'
+              ? 'Run this on the appliance:'
+              : fix.where === 'terminal'
+                ? `Open Terminal on ${machine} and run:`
+                : `Run this on ${machine}:`}
           </Text>
           <Copyable text={fix.command} what={`the command that fixes ${nameOf(check.check)}`} />
         </div>
@@ -161,7 +167,7 @@ export function ReadinessCard(props: {
   const installable = verdict.kind === 'missing' || verdict.kind === 'sudo' || (startable(verdict) && offerMic)
   // On a startable machine the microphone is all Install could do.
   const nothingAsked = startable(verdict) && !mic
-  const counted = tally(checks)
+  const tallied = tally(checks)
   const lost = running && watch !== null && now - watch.pressed > LOST_MS
   const already = install.error?.status === 409
   const refused = install.error && !already ? install.error : null
@@ -187,7 +193,7 @@ export function ReadinessCard(props: {
           </Text>
           {readiness.looked === 'ok' && checks.length > 0 && verdict.kind !== 'asleep' ? (
             <Mono className="readiness__count">
-              {counted.present} of {counted.total} · asked {readiness.age_seconds}s ago
+              {counted(tallied)} · asked {readiness.age_seconds}s ago
             </Mono>
           ) : null}
         </div>
@@ -297,7 +303,7 @@ export function ReadinessCard(props: {
                 : 'Install'}
           </Button>
         ) : null}
-        {verdict.kind === 'unasked' ? <Doctor machine={name} variant="tonal" /> : null}
+        {verdict.kind === 'unasked' ? <Doctor first machine={name} variant="tonal" /> : null}
         {verdict.kind === 'ready' || verdict.kind === 'manual' ? (
           <Button render={<Link to="/new" />} role="link" variant={verdict.kind === 'ready' ? 'filled' : 'tonal'}>
             New session
@@ -326,7 +332,7 @@ export function ReadinessCard(props: {
   )
 }
 
-/** D7 §4.3: the twelve, folded to one line. The count is already under the title. */
+/** D7 §4.3: the thirteen, folded to one line. The count is already under the title. */
 function folded(checks: Check[]): string {
   const names = checks.map((one) => nameOf(one.check))
   return names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : names.join(', ')
@@ -365,45 +371,26 @@ function Body(props: {
     case 'unasked':
       return (
         <Text render={<p />} className="readiness__said" scale="body-medium" tone="variant">
-          Yantra has not asked {name} what it has yet. Check again asks it now, one ssh round trip.
+          Check asks {name} what it has now, one ssh round trip.
         </Text>
       )
     case 'unread':
       return <ErrorSurface.Inline error={fromReading(readiness)!} reset={retry} title="The checks could not be read" />
     case 'refused':
-      return (
-        <div className="readiness__left">
-          <Mono className="readiness__detail">{verdict.detail}</Mono>
-          <Text render={<p />} scale="body-small" tone="variant">
-            {name} did not take the appliance’s key. Run the join command on {name}; it places the key.
-          </Text>
-          {join ? <Copyable text={joinCommand(join)} what="the join command" /> : null}
-        </div>
-      )
     case 'unjoined':
+    case 'browser':
+    case 'changed':
+    case 'unreachable':
       return (
-        <div className="readiness__left">
-          <Mono className="readiness__detail">{verdict.detail}</Mono>
-          <Text render={<p />} scale="body-small" tone="variant">
-            The appliance does not know which account to log in to {name} as. Run the join command on {name}; it
-            names the account and places the key. <Link to="/machines/add">Add a device</Link> shows it for each
-            platform.
-          </Text>
-          {join ? <Copyable text={joinCommand(join)} what="the join command" /> : null}
-        </div>
+        <ReachFailure detail={verdict.detail} join={join} kind={verdict.kind} name={name}>
+          {checks.length > 0 ? <Checks checks={checks} machine={name} /> : null}
+        </ReachFailure>
       )
     case 'ready':
       return (
         <Disclosure summary={folded(checks)}>
           <Checks checks={checks} machine={name} />
         </Disclosure>
-      )
-    case 'unreachable':
-      return (
-        <>
-          <Mono className="readiness__detail">{verdict.detail}</Mono>
-          <Checks checks={checks} machine={name} />
-        </>
       )
     default:
       return <Checks checks={checks} machine={name} />

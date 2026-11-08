@@ -1,0 +1,76 @@
+/*
+ * The drawer follows T3 Code's ComposerCommandMenu.tsx at 810e8f6:
+ * https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerCommandMenu.tsx
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ */
+
+.mention-menu {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--m3-page-max-reading);
+  margin-inline: auto;
+  padding: 4px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-large);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.mention-menu__list {
+  max-height: 18rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.mention-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 4px 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
+  color: var(--md-sys-color-on-surface);
+  cursor: pointer;
+}
+
+.mention-menu__option[aria-selected='true'] {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+.mention-menu__label {
+  flex: 0 1 auto;
+  max-width: 55%;
+  font-family: var(--md-ref-typeface-mono);
+  font-size: 13px;
+}
+
+.mention-menu__description {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.mention-menu__hint {
+  flex: 0 1 auto;
+  max-width: 30%;
+  font-family: var(--md-ref-typeface-mono);
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.mention-menu__badge {
+  flex: none;
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.mention-menu__empty {
+  margin: 0;
+  padding: 12px;
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+}

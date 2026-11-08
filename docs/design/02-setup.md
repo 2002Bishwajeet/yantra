@@ -168,6 +168,15 @@ that exists. Off macOS the check is *present*. A refused folder makes it *absent
 names the folders, the fix and its cost: every ssh login to that Mac gets the access, agents
 included. The dashboard warns and does not block a session. The list is now twelve names.
 
+**2026-11-05, [Y-640](../../tracker.md#3-task-board): `hooks` is a check, after `folder-access`.**
+A hook whose program is not on the agent's `PATH` fails each time the agent starts, and nothing
+said so. Two round trips read `~/.claude/settings.json`, `installed_plugins.json` and each enabled
+plugin's `hooks.json`. One more asks for each hook's program where the agent will run: inside a
+running tmux server, or over ssh on Linux, whose next server inherits that `PATH`. A Mac with no
+server is *unknown*, because only the LaunchAgent's server has the agent's `PATH`. A missing program
+is *absent*, and the detail names it, its events and its plugin. The dashboard warns and does not
+block a session. The list is now thirteen names.
+
 ### 3.2 What it must not do
 
 `doctor` is a **read**. It changes nothing, installs nothing, and logs no credential. `yantra doctor

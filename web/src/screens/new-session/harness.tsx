@@ -69,12 +69,14 @@ export const listing = (path: string) => {
  *  2 is about. */
 const fleet: Answers = {
   'GET /api/workspaces': [200, contract.workspaces],
-  'GET /api/machines': [200, contract.machines],
+  // The contract marks cachyos-g14 as the hub; these walks are not about the hub (Y-627).
+  'GET /api/machines': [200, { ...contract.machines, data: contract.machines.data.map((one) => ({ ...one, hub: false })) }],
   'GET /api/sessions': [200, contract.sessions],
   'GET /api/attention': [200, contract.attention],
   'GET /api/notifications': [200, contract.notifications],
   'GET /api/readiness': [200, contract.readiness],
   'GET /api/github': [200, contract.github],
+  'GET /api/readiness/github': [200, contract.githubReadiness],
   'GET /api/repos': [200, contract.repos],
   'POST /api/machines/cachyos-g14/dirs': (sent) => [200, listing(String(sent.path ?? HOME))],
   'POST /api/viewing': [204],
@@ -84,6 +86,7 @@ const fleet: Answers = {
 /** `<App/>` at `/new`, one width, over the contract fixtures with `answers`
  *  laid on top. Returns every request as `METHOD path`. */
 let width = 0
+let coarse = false
 const watchers = new Set<() => void>()
 
 /** Changes the width under a mounted form, as a phone does when it rotates. */
@@ -92,12 +95,19 @@ export function resize(size: FormFactor) {
   act(() => watchers.forEach((notify) => notify()))
 }
 
+/** Makes the next mount a touch screen: `(pointer: coarse)` answers true. */
+export function touchScreen() {
+  coarse = true
+}
+
 export function mountNew(size: FormFactor, path: string, answers: Answers = {}) {
   const asked: string[] = []
   width = WIDTH[size]
   vi.stubGlobal('scrollTo', () => {})
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
+    matches: query.includes('pointer: coarse')
+      ? coarse
+      : width >= Number(/min-width: (\d+)px/.exec(query)?.[1] ?? Infinity),
     media: query,
     addEventListener: (_: string, notify: () => void) => watchers.add(notify),
     removeEventListener: (_: string, notify: () => void) => watchers.delete(notify),
@@ -125,6 +135,7 @@ export function mountNew(size: FormFactor, path: string, answers: Answers = {}) 
 }
 
 export function unmountNew() {
+  coarse = false
   vi.unstubAllGlobals()
   history.pushState(null, '', '/')
   localStorage.clear()

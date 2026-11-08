@@ -3,7 +3,7 @@
 Sixteen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every workspace and machine at `/fleet`, the machines compared at
 `/machines`, the guided Add a device at `/machines/add`, one machine at `/m/$machine`, one tmux session's terminal at
-`/m/$machine/s/$session`, one workspace's chat, terminal, transcript and spend
+`/m/$machine/s/$session`, one workspace's chat, terminal (with its transcript as History) and spend
 at `/w/$name`, its file at `/w/$name/repair`, the four-step create at `/new`,
 spend at `/usage`, the preferences at `/settings` and `/settings/$category`, and
 the phone's notifications at `/notifications`, and the rooms live agents share at
@@ -233,6 +233,11 @@ opens one from an issue. The session page reads the list on mount and on Refresh
 Start session on an inbox issue passes the issue's draft to Chat in router location state, not in
 the URL, so the issue text stays out of logs (ADR-0034).
 
+The Chat bar commits, pushes and opens a PR for its thread (Y-493), through `useDraftMessage`,
+`useCommit`, `usePush` and `useOpenPr`. The commit dialog fills an editable box with `claude`'s draft.
+Each failure is a `GitFailure` in [`git.ts`](src/screens/session/git.ts) with a title, a next step and
+the daemon's own text.
+
 - **There is no machine argument on a verb, and adding one would be a bug.** The
   target is `workspace.machine`, chosen when the workspace was written. A
   transient override would place a session where `down`, `resume`, `status` and
@@ -331,7 +336,10 @@ in [`HarnessPicker.tsx`](src/screens/session/HarnessPicker.tsx), copied in shape
 from T3 Code's provider picker, and the thread keeps it (Y-434).
 [`ModePicker.tsx`](src/screens/session/ModePicker.tsx) picks T3 Code's
 permission mode, Supervised by default (Y-453). Each turn frame carries it, and
-this browser keeps it per thread. On a Claude thread,
+this browser keeps it per thread. [`PlanToggle.tsx`](src/screens/session/PlanToggle.tsx),
+copied from T3 Code's interaction-mode toggle, makes the next Claude turn a plan
+turn that writes nothing (Y-565); this browser keeps it per thread too, and it is
+off for any other harness. On a Claude thread,
 [`ModelPicker.tsx`](src/screens/session/ModelPicker.tsx) and
 [`EffortPicker.tsx`](src/screens/session/EffortPicker.tsx) pick Claude's model
 and effort, and each is kept per thread the same way (Y-564). Each turn runs
@@ -342,7 +350,7 @@ one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
 Attach, harness, permission, model and effort controls, a context ring that turns red above 90%,
 the agent's plan on the card's top edge, a Send button or a Stop with Queue beside it, a draft kept
 per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
-Settings → General. Eight things about the code:
+Settings → General. Ten things about the code:
 
 - **The wire is typed once.** [`api/thread.ts`](src/api/thread.ts) holds the
   events and frames in T3 Code's vocabulary, credited at its top, and
@@ -358,10 +366,36 @@ Settings → General. Eight things about the code:
   text comes back to an empty field.
 - **Every failure is a `ChatError` of its own kind**: refused, unreachable,
   not logged in, unknown thread, busy, bad frame, checkpoint, turn failed and
-  closed.
+  diff.
   Not logged in shows the command to run on the machine and a Retry that
-  reopens the socket. Only unreachable and closed offer Try again, and a socket is never reopened behind the person's
-  back, because the daemon cancels a turn whose socket closed.
+  reopens the socket. Only unreachable offers Try again.
+- **A dropped socket is reopened for as long as the page is visible** (Y-668).
+  The pauses are 1, 2, 4 and 8 seconds, and 8 seconds from then on. A hidden page
+  schedules no reopen; showing it, or the `online` event, reopens at once. An open
+  socket sends `{"type":"ping"}` every 20 seconds, and any frame within 5 seconds
+  counts as the answer. A silent socket is dropped and reopened after the last
+  cursor, because a phone's OS can kill a socket with no close event. A turn
+  outlives its socket (ADR-0035), so no count of failures ends the chat.
+- **`@` and `$` open a menu in the Chat composer** (Y-562). `@` lists the
+  thread's files and `$` the harness's skills, from one `POST …/mentions`
+  (`useMentions`). It asks once when a trigger opens and keeps the answer for
+  five minutes, so nothing polls. [`trigger.ts`](src/composer/trigger.ts)
+  finds the trigger at the caret, [`searchMentions.ts`](src/composer/searchMentions.ts)
+  ranks a name prefix, then a substring, then the letters in order, and
+  [`MentionMenu.tsx`](src/composer/MentionMenu.tsx) draws the list, its
+  loading and empty words, and an `ErrorSurface`. The field is a combobox:
+  the arrows move, Enter or Tab picks, and Escape shuts the menu. A pick
+  inserts `@path ` or `$name `, and the prompt goes out as typed. The Room
+  composer has no menu, because a room spans several workspaces.
+- **`/` opens a menu of slash commands** (Y-563), and only at the start of
+  the prompt, because an agent expands a command only there. Claude's list
+  comes from `POST …/commands` (`useCommands`), asked as `useMentions` is. An
+  ACP agent sends its own on the socket, and the timeline keeps the newest
+  one. Until it comes, the menu says the commands appear after the agent's
+  first reply. [`searchCommands.ts`](src/composer/searchCommands.ts) ranks
+  the name and then the description, as T3 Code does. A pick of a command with
+  no argument sends `/name` at once. A command with an argument puts `/name `
+  in the prompt and waits.
 - **An image goes on the same socket** (Y-424). The composer takes one by
   paste, drag and drop, or the Attach button. `ChatSocket.attach` sends it as a
   binary frame and resolves to its path on the machine; the daemon answers
@@ -766,8 +800,8 @@ measures, and the reading belongs to no frame a reader sees (Y-363).
 **The fixture daemon is Node, not `yantrad`.**
 [`e2e/fixture/server.mjs`](e2e/fixture/server.mjs) answers every `/api` route the
 dashboard calls from `src/contract.gen.ts`, plus both terminal sockets, under one
-of fourteen scenarios — `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
-`contract`, `broken`, `repair`, `firstrun`, `notifications`, `install`, `adding`, `stranger`, `setup`. A test picks one with a cookie
+of twenty-seven scenarios, among them `busy`, `empty`, `unreachable`, `nogrant`, `refused`, `flaky`,
+`contract`, `broken`, `repair`, `firstrun`, `notifications`, `install`, `adding`, `stranger`, `setup`, `fresh` (the first join: machines, no check, no workspace) and `freshdefect` (`fresh` with #514's refused re-check). A test picks one with a cookie
 carrying its own key, so a write in one worker is not a row in another, and
 `page.clock` pins the instant so an age reads the same on every run.
 
@@ -831,7 +865,8 @@ src/
                      Playwright. Dev builds only
   composer/          the card the Chat and the Room both write in (Y-560): its
                      input, footer controls, send and stop button, context ring,
-                     plan badge, image strip, draft and prompt history. Copied
+                     plan badge, image strip, draft, prompt history and the
+                     `@`/`$`/`/` menu (Y-562, Y-563). Copied
                      from T3 Code's composer, credited at the top of each file
   shell/
     Shell.tsx        the three shells (the tablet sheet's list lives here), and the outlet under one boundary that a
@@ -847,7 +882,7 @@ src/
                      verb (`verbs.ts`), and the Kill and Delete confirms
     machines/        `/machines` — a card per machine, its checks, and Doctor
     machine/         `/m/$machine`
-    session/         `/w/$name` — chat, terminal, transcript, spend
+    session/         `/w/$name` — chat, terminal (History), spend
     session-terminal/`/m/$machine/s/$session` — the same terminal on a session
                      no workspace claims (ADR-0022)
     repair/          `/w/$name/repair` — the file itself (ADR-0020)
@@ -865,7 +900,7 @@ src/
                      `inApp`, and the vitest setup
 e2e/
   lib/               sizes, scenario, axe, screenshot, keyboard, routes
-  fixture/           the Node daemon and its eighteen scenarios
+  fixture/           the Node daemon and its twenty-six scenarios
   __screenshots__/   one baseline per screen, scenario and size
 design/              Y-330's options round. A second Vite root; ships nothing
 ```

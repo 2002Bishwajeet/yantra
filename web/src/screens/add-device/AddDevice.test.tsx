@@ -162,6 +162,20 @@ describe('beat 1, on the tailnet', () => {
     expect(beat('Joined').getByText(/not yet · waits for the device to be on the tailnet/)).toBeTruthy()
   })
 
+  it('never offers the hub as a device to add', async () => {
+    const box = aMachine({ name: 'box', os: 'linux', hub: true })
+    mountSettings('desktop', at('platform=linux'), fleet([box, laptop], []))
+    expect(await screen.findByRole('link', { name: 'laptop' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'box' })).toBeNull()
+  })
+
+  it('draws no pick note when the hub is the only node', async () => {
+    const box = aMachine({ name: 'box', os: 'linux', hub: true })
+    mountSettings('desktop', at('platform=linux'), fleet([box], []))
+    expect(await screen.findByText(/waiting · watching the tailnet for a new Linux machine/)).toBeTruthy()
+    expect(screen.queryByText(/Already on the tailnet\? Pick it/)).toBeNull()
+  })
+
   it('draws the failure inline when the tailnet list could not be read', async () => {
     mountSettings('desktop', at('platform=linux'), { 'GET /api/machines': [200, looked.failed('tailscaled is down')] })
     expect(await screen.findByText(/stuck · the tailnet list could not be read/)).toBeTruthy()
@@ -185,6 +199,39 @@ describe('beat 2, joined', () => {
     expect(await screen.findByRole('img', { name: `A QR code for ${HERE}` })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Copy the join command' }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(COMMAND))
+  })
+
+  it('names the key the command adds, and keeps its path in collapsed diagnostics', async () => {
+    mountSettings('desktop', joinAt, fleet([laptop], []))
+    expect(await screen.findByText(/The command adds this key: ed25519 · SHA256:<fingerprint>/)).toBeTruthy()
+    const diagnostics = screen.getByText('Diagnostics').closest('details')!
+    expect(diagnostics.open).toBe(false)
+    expect(within(diagnostics).getByText('/home/<user>/.ssh/id_yantra')).toBeTruthy()
+    expect(screen.queryByText(/ssh-ed25519 AAAA/)).toBeNull()
+  })
+
+  it('shows the public key with Copy in a sheet', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('navigator', { userAgent: navigator.userAgent, clipboard: { writeText } })
+    mountSettings('desktop', joinAt, fleet([laptop], []))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show key' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Public key' }))
+    expect(sheet.getByText(/^ssh-ed25519 AAAA/)).toBeTruthy()
+    expect(sheet.getByText(/add it to ~\/\.ssh\/authorized_keys/)).toBeTruthy()
+    fireEvent.click(sheet.getByRole('button', { name: 'Copy the public key' }))
+    expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^ssh-ed25519 /))
+  })
+
+  it('says the appliance makes its key at the first join when there is none', async () => {
+    mountSettings('desktop', joinAt, fleet([laptop], [], [], { 'GET /api/ssh-identity': [404, { error: 'no identity' }] }))
+    expect(await screen.findByText('The appliance makes its key when the first machine joins.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Show key' })).toBeNull()
+  })
+
+  it('draws a key read error inline and keeps the command', async () => {
+    mountSettings('phone', joinAt, fleet([laptop], [], [], { 'GET /api/ssh-identity': [500, 'boom'] }))
+    expect(await screen.findByText("The appliance's key could not be read")).toBeTruthy()
+    expect(screen.getByText(COMMAND)).toBeTruthy()
   })
 
   it('is done on the join event, and folds its body away', async () => {
@@ -229,10 +276,24 @@ describe('beat 3, reachable', () => {
     expect(await screen.findByText(/done · reachable over ssh/)).toBeTruthy()
   })
 
-  it("is stuck with the check's own detail", async () => {
+  /** Y-585, #520: beat 2 has folded, so beat 3 carries the command itself. */
+  it('is stuck on the plain cause and the join command, with ssh behind a press', async () => {
     const refused = { machine: 'laptop', checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] } as Readiness
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean], [refused]))
-    expect(await screen.findByText(/stuck · Permission denied \(publickey\)/)).toBeTruthy()
+    expect(await screen.findByText(/stuck · laptop did not take the appliance’s key\./)).toBeTruthy()
+    const third = beat('Reachable over ssh')
+    expect(third.getByText('Run the join command on laptop; it places the key.')).toBeTruthy()
+    expect(await third.findByRole('button', { name: 'Copy the join command' })).toBeTruthy()
+    expect(third.queryByText('Permission denied (publickey)')).toBeNull()
+    fireEvent.click(third.getByRole('button', { name: /What ssh said/ }))
+    expect(await third.findByText('Permission denied (publickey)')).toBeTruthy()
+  })
+
+  it('offers no join command to a machine it would not help', async () => {
+    const silent = { machine: 'laptop', checks: [{ check: 'reachable', state: 'absent', detail: 'No route to host' }] } as Readiness
+    mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean], [silent]))
+    expect(await screen.findByText(/stuck · Yantra can’t reach laptop over ssh\./)).toBeTruthy()
+    expect(beat('Reachable over ssh').queryByRole('button', { name: 'Copy the join command' })).toBeNull()
   })
 
   it('draws the refusal when the ask failed', async () => {

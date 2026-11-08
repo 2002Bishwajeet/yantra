@@ -1,7 +1,10 @@
-import type { About, Check, Machine, Readiness } from '@/api'
+import type { About, Check, Connection, Machine, Readiness } from '@/api'
+import type { Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
-import { INSTALLABLE, nameOf, reachableFailure } from '@/lib/checks'
+import { INSTALLABLE, nameOf, reachableFailure, type ReachableFailure } from '@/lib/checks'
+import { grant, REFUSED } from '@/lib/github'
 import { blocking } from '@/lib/ready'
+import { tally } from '@/screens/machines/facts'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** Query's three states, as this screen reads them: nothing more of the
@@ -11,6 +14,14 @@ export type Asked<T> = { data: T | undefined; error: Error | null; isPending: bo
 export type Status = 'done' | 'progress' | 'todo' | 'due' | 'failed'
 
 export type Step = { status: Status; words: string }
+
+/** The four required steps' titles, as the checklist and the Finish setup card both name them. */
+export const TITLES = {
+  tailnet: 'The appliance is on your tailnet',
+  machine: 'Add a machine',
+  ready: 'Get it ready',
+  first: 'Your first session',
+} as const
 
 export const marks: Record<Status, MarkState> = {
   done: 'done',
@@ -48,14 +59,31 @@ export function tailnet(about: Asked<About>, protocol: string): Step {
 
 /** D7 §4.1 step 2: a machine has joined. The key is a line under it, since
  *  the first join makes it (ADR-0029). `unkeyed` is a machine ssh reaches
- *  with no key made, so through the account's own keys and not Yantra's. */
-export function added(joined: string[], unkeyed: string[] = []): Step {
-  if (joined.length > 0) return { status: 'done', words: `${joined.join(', ')} joined` }
+ *  with no key made, so through the account's own keys and not Yantra's.
+ *  `hub` is the daemon's own node once ssh reaches it: it needs no adding. */
+export function added(
+  joined: string[],
+  unkeyed: string[] = [],
+  hub: string | null = null,
+  unchecked: string[] = [],
+  guests = unchecked.length,
+): Step {
+  if (joined.length > 0 || hub) {
+    const who = joined.length > 0 ? `${joined.join(', ')} joined` : `${hub} is the hub and needs no adding`
+    return { status: 'done', words: `${who} · more machines can be added later` }
+  }
   if (unkeyed.length > 0) {
     return {
       status: 'todo',
       words: `${unkeyed.join(', ')} reached without Yantra's key · run the join command on ${unkeyed.length === 1 ? 'it' : 'each'} once`,
     }
+  }
+  if (unchecked.length > 0) {
+    const none = unchecked.length === guests
+    const words = none
+      ? `${guests} machine${guests === 1 ? '' : 's'} on the tailnet, none checked yet`
+      : `${guests - unchecked.length} of ${guests} machines checked, none joined yet`
+    return { status: 'todo', words: `${words} · a check shows which joined` }
   }
   return { status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' }
 }
@@ -81,17 +109,15 @@ export function keyExpiry(machines: Asked<Machine[]>, appliance: Machine | null,
   return { status: 'todo', words: `the key expires on ${date} · turn key expiry off in the admin console` }
 }
 
-/** The grant, read as narrowly as this step needs it: the api layer still
- *  types `/api/github` without `pending`, and the daemon sends it. */
-type Grant = { connected: boolean; login: string | null; pending?: boolean }
-
-export function github(connection: Asked<Grant>): Step {
+export function github(connection: Asked<Connection>, readiness: Reading<Check>): Step {
   if (connection.error) return failed(connection.error)
   if (connection.isPending || !connection.data) return reading()
-  if (connection.data.connected) {
-    return { status: 'done', words: `signed in as ${connection.data.login ?? 'an account not yet read'} on the appliance` }
+  const state = grant(connection.data, readiness)
+  if (state.kind === 'refused') return { status: 'due', words: `${REFUSED} · sign in again` }
+  if (state.kind === 'accepted' || state.kind === 'unasked') {
+    return { status: 'done', words: `signed in${state.login ? ` as ${state.login}` : ''} on the appliance` }
   }
-  if (connection.data.pending) return { status: 'progress', words: 'a sign-in is waiting at github.com' }
+  if (state.kind === 'pending') return { status: 'progress', words: 'a sign-in is waiting at github.com' }
   return { status: 'todo', words: 'not connected · reviews, issues and repositories come through it' }
 }
 
@@ -108,10 +134,8 @@ export function push(about: Asked<About>): Step {
  *  is normal and never an error (D7 §3.3). */
 export type Line =
   | { kind: 'asleep'; since: string | null }
-  | { kind: 'unreachable'; words: string }
+  | { [Kind in ReachableFailure]: { kind: Kind; detail: string } }[ReachableFailure]
   | { kind: 'unchecked' }
-  | { kind: 'refused' }
-  | { kind: 'unjoined' }
   | { kind: 'ready'; present: number; total: number }
   | { kind: 'missing'; present: number; total: number; words: string; installable: boolean }
 
@@ -129,12 +153,9 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   if (!report) return { kind: 'unchecked' }
   const reachable = report.checks.find((one) => one.check === 'reachable')
   if (reachable && reachable.state !== 'present') {
-    const failure = reachableFailure(reachable.detail)
-    if (failure !== 'unreachable') return { kind: failure }
-    return { kind: 'unreachable', words: `ssh did not answer · ${reachable.detail}` }
+    return { kind: reachableFailure(reachable.detail), detail: reachable.detail }
   }
-  const present = report.checks.filter((one) => one.state === 'present').length
-  const total = report.checks.length
+  const { present, total } = tally(report.checks)
   const needs = blocking(report)
   if (needs.length === 0) return { kind: 'ready', present, total }
   const installable = needs.some((one) => INSTALLABLE.includes(one.check) && one.state === 'absent')
@@ -160,7 +181,8 @@ export function machines(lines: { machine: string; line: Line }[]): Step {
 }
 
 /** Done once a workspace exists, which is what a first session starts from. */
-export function firstSession(workspaces: number | null, ready: number): Step {
+export function firstSession(workspaces: number | null, ready: number, noneChecked = false): Step {
   if (workspaces) return { status: 'done', words: `${workspaces} workspace${workspaces === 1 ? '' : 's'} made` }
+  if (ready === 0 && noneChecked) return { status: 'todo', words: 'needs one ready machine · none is checked yet' }
   return { status: 'todo', words: `needs one ready machine, you have ${ready === 0 ? 'none yet' : ready}` }
 }

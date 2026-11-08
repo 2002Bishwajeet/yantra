@@ -27,11 +27,11 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, response::IntoResponse};
 use std::collections::BTreeMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use yantra_core::heartbeat::{Heartbeat, Power};
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::status::{MachineStatus, Verdict};
-use yantra_core::{about, doctor, github, identity};
+use yantra_core::{about, doctor, github, identity, update};
 
 use crate::events::{self, Event};
 use crate::github::Grant;
@@ -64,6 +64,17 @@ pub fn router() -> Router<Fleet> {
 /// name is read off the machines look, for the node holding a bound address.
 async fn about(State(fleet): State<Fleet>) -> Json<About> {
     let snapshot = fleet.model.read().await.clone();
+    let dir = fleet.facts.progress.clone();
+    // A local file, read off the worker (I-13). A file this build cannot read
+    // costs only the progress, and the journal says why.
+    let update = match tokio::task::spawn_blocking(move || update::progress(&dir)).await {
+        Ok(Ok(progress)) => progress,
+        Ok(Err(error)) => {
+            tracing::warn!("the update's progress is unreadable: {}", because(&error));
+            None
+        }
+        Err(_) => None,
+    };
     Json(About {
         version: about::VERSION,
         target: about::TARGET,
@@ -78,26 +89,31 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
         tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
         relay: fleet.facts.relay,
         published: Answer::of(snapshot.release.as_deref(), Published::of),
+        update,
     })
 }
 
-/// The tailnet is `DNSName` past this node's own label. Which node is this one
-/// is answered by the addresses `listen_on` bound — the same join the
-/// heartbeat makes, in the other direction.
+/// The tailnet is `DNSName` past this node's own label.
 fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
     let machines = snapshot.machines.as_deref()?.value().as_ref().ok()?;
-    let bound: Vec<IpAddr> = listening_on
+    let me = machines
         .iter()
-        .map(|address| address.ip().to_canonical())
-        .collect();
-    let me = machines.iter().find(|machine| {
-        machine
-            .addresses
-            .iter()
-            .any(|held| bound.contains(&held.to_canonical()))
-    })?;
+        .find(|machine| is_this_node(machine, listening_on))?;
     let (_, tailnet) = me.dns_name.trim_end_matches('.').split_once('.')?;
     Some(tailnet.to_owned())
+}
+
+/// Which node is this one is answered by the addresses `listen_on` bound — the
+/// same join the heartbeat makes, in the other direction.
+fn is_this_node(
+    machine: &yantra_core::inventory::MachineInfo,
+    listening_on: &[SocketAddr],
+) -> bool {
+    machine.addresses.iter().any(|held| {
+        listening_on
+            .iter()
+            .any(|bound| bound.ip().to_canonical() == held.to_canonical())
+    })
 }
 
 /// `yantra ssh-identity`'s read half. **A 404 and never a key**: a route a
@@ -159,13 +175,13 @@ async fn no_such_route() -> impl IntoResponse {
 /// The one route that joins two memories: the look Tailscale answered and what
 /// each machine last said about itself. Both are already in memory, so the join
 /// is still a read (ADR-0013 §7).
-async fn machines(State(model): State<Model>, State(beats): State<Beats>) -> impl IntoResponse {
-    let snapshot = model.read().await.clone();
-    let beats = beats.read().await;
+async fn machines(State(fleet): State<Fleet>) -> impl IntoResponse {
+    let snapshot = fleet.model.read().await.clone();
+    let beats = fleet.beats.read().await;
     Json(Answer::of(snapshot.machines.as_deref(), |machines| {
         machines
             .iter()
-            .map(|machine| Machine::of(machine, &beats))
+            .map(|machine| Machine::of(machine, &beats, &fleet.facts.listening_on))
             .collect::<Vec<_>>()
     }))
 }
@@ -315,7 +331,8 @@ async fn github(State(model): State<Model>) -> impl IntoResponse {
 /// `yantra github status` on the wire (ADR-0023). A read of what the daemon
 /// holds, so it awaits no network: whether `GET /user` still accepts the grant
 /// is `/readiness/github`'s, on the sweep. **The token is not in it** — the
-/// login is the one thing about the account that is shown.
+/// login and the profile image URL, both public, are what is shown of the
+/// account.
 ///
 /// `client_id` and `client_id_custom` are read fresh here rather than held:
 /// they answer *which app is in use*, and a client id is not a secret
@@ -344,7 +361,7 @@ async fn repos(State(model): State<Model>) -> impl IntoResponse {
 /// is the daemon filling in its own check.
 ///
 /// [`crate::write`]'s re-check calls it too, so a report a person asked for
-/// carries the same twelve answers as the swept one and not eleven plus an
+/// carries the same thirteen answers as the swept one and not twelve plus an
 /// *unknown* the daemon could have filled in.
 pub(crate) fn answered(
     report: &doctor::Report,
@@ -404,6 +421,7 @@ fn heard_from(
         check: doctor::HEARTBEAT,
         state,
         detail,
+        took_ms: None,
     };
     let Some(id) = node_id(machine, snapshot) else {
         return says(
@@ -505,6 +523,9 @@ pub(crate) struct About {
     pub(crate) relay: bool,
     /// The newest release GitHub publishes, read hourly (ADR-0027 §2).
     pub(crate) published: Answer<Published>,
+    /// How far `yantra-update.service` has got (Y-612). `None` when nothing
+    /// runs and the last run did not fail.
+    pub(crate) update: Option<update::Progress>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -565,6 +586,8 @@ struct Machine {
     /// Y-404: `yours`, `shared` or `tagged`. The owner's number and the tag
     /// names stay in the daemon, because the page needs only whose node it is.
     ownership: &'static str,
+    /// Y-582: the node `yantrad` itself runs on, which setup never offers to add.
+    hub: bool,
 }
 
 impl Machine {
@@ -573,6 +596,7 @@ impl Machine {
     fn of(
         machine: &yantra_core::inventory::MachineInfo,
         beats: &BTreeMap<String, Reading<Heartbeat>>,
+        listening_on: &[SocketAddr],
     ) -> Self {
         Self {
             name: machine.name.clone(),
@@ -593,6 +617,7 @@ impl Machine {
                 yantra_core::inventory::Ownership::Shared => "shared",
                 yantra_core::inventory::Ownership::Tagged => "tagged",
             },
+            hub: is_this_node(machine, listening_on),
         }
     }
 }
@@ -731,8 +756,9 @@ impl Session {
     }
 }
 
-/// The two answers on this seam that the router cannot render deterministically
-/// — a build date and a key on the daemon's own disk — built for
+/// The answers on this seam that the router cannot render deterministically
+/// — a build date, a key and an update's progress on the daemon's own disk —
+/// built for
 /// [`crate::contract`] the way `write::answers` builds its own.
 #[cfg(test)]
 #[allow(clippy::expect_used)]
@@ -762,6 +788,24 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         newer: true,
                     },
                 },
+                update: None,
+            }),
+        ),
+        // About's `update` while the unit runs, and after it failed (Y-612).
+        (
+            "updateDownloading",
+            "UpdateProgress",
+            of(&update::Progress::Downloading {
+                version: "0.4.0".to_owned(),
+                received: 3_100_000,
+                total: Some(9_800_000),
+            }),
+        ),
+        (
+            "updateFailed",
+            "UpdateProgress",
+            of(&update::Progress::Failed {
+                said: "install: yantra-0.4.0-aarch64-unknown-linux-musl.tar.gz does not match SHA256SUMS — nothing was installed".to_owned(),
             }),
         ),
         (
@@ -835,6 +879,8 @@ impl Item {
 struct Connection {
     connected: bool,
     login: Option<String>,
+    /// GitHub's public profile image URL, learned with the login.
+    avatar_url: Option<String>,
     scopes: Vec<String>,
     pending: bool,
     client_id: Option<String>,
@@ -846,6 +892,7 @@ impl Connection {
         Self {
             connected: held.token.is_some(),
             login: held.login.clone(),
+            avatar_url: held.avatar_url.clone(),
             scopes: held.scopes.clone(),
             pending: held.pending,
             client_id: client_id.as_ref().map(|(id, _)| id.clone()),
@@ -1341,6 +1388,73 @@ pub(crate) mod tests {
         }
     }
 
+    fn bound_to(listening_on: &str, machines: Vec<MachineInfo>) -> Fleet {
+        Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: vec![listening_on.parse().expect("an address")],
+                ssh_dir: std::path::PathBuf::new(),
+                ssh_state: std::path::PathBuf::new(),
+                relay: false,
+                trigger: std::path::PathBuf::new(),
+                updater: std::path::PathBuf::new(),
+                progress: std::path::PathBuf::new(),
+            }),
+            ..looking_at_machines(machines)
+        }
+    }
+
+    fn at(address: &str, machine: MachineInfo) -> MachineInfo {
+        MachineInfo {
+            addresses: vec![address.parse().expect("an address")],
+            ..machine
+        }
+    }
+
+    async fn hubs(fleet: Fleet) -> Vec<Value> {
+        let body = get_json(fleet, "/machines").await;
+        let listed = body["data"].as_array().expect("a list");
+        listed.iter().map(|m| m["hub"].clone()).collect()
+    }
+
+    /// Y-582: the node holding the address the daemon bound is the hub, and no
+    /// other node is.
+    #[tokio::test]
+    async fn the_node_the_daemon_is_bound_to_is_the_hub() {
+        let fleet = bound_to(
+            "100.64.0.1:7717",
+            vec![
+                at("100.64.0.2", machine("n-2", "pi", true)),
+                at("100.64.0.1", machine("n-1", "yantra-box", true)),
+                at("100.64.0.3", machine("n-3", "mac", false)),
+            ],
+        );
+        assert_eq!(hubs(fleet).await, [json!(false), json!(true), json!(false)]);
+    }
+
+    /// A dual-stack bind reports a v4 peer as `::ffff:a.b.c.d`; it is still the hub.
+    #[tokio::test]
+    async fn a_v4_mapped_bind_still_names_the_hub() {
+        let fleet = bound_to(
+            "[::ffff:100.64.0.1]:7717",
+            vec![at("100.64.0.1", machine("n-1", "yantra-box", true))],
+        );
+        assert_eq!(hubs(fleet).await, [json!(true)]);
+    }
+
+    /// A daemon bound to an address no node holds names no hub, and never guesses.
+    #[tokio::test]
+    async fn no_bound_match_names_no_hub() {
+        let fleet = bound_to(
+            "127.0.0.1:7717",
+            vec![
+                at("100.64.0.1", machine("n-1", "yantra-box", true)),
+                at("100.64.0.2", machine("n-2", "pi", true)),
+            ],
+        );
+        assert_eq!(hubs(fleet).await, [json!(false), json!(false)]);
+    }
+
     /// I-39 again: the dashboard's most actionable machine is the one that is
     /// listed, powered on and still unreachable, so `expired` is its own field.
     #[tokio::test]
@@ -1462,11 +1576,13 @@ pub(crate) mod tests {
                     check: "reachable",
                     state: doctor::State::Present,
                     detail: "a command ran there and reported its own status".into(),
+                    took_ms: None,
                 },
                 doctor::Check {
                     check: doctor::HEARTBEAT,
                     state: doctor::State::Unknown,
                     detail: "only the running daemon holds the beats".into(),
+                    took_ms: None,
                 },
             ],
         }
@@ -1824,6 +1940,7 @@ pub(crate) mod tests {
         let none = get_json(holding(Snapshot::default()), "/github").await;
         assert_eq!(none["connected"], false, "{none}");
         assert_eq!(none["login"], Value::Null, "{none}");
+        assert_eq!(none["avatar_url"], Value::Null, "{none}");
         assert_eq!(none["scopes"], json!([]), "{none}");
         assert_eq!(none["pending"], false, "{none}");
         // `client_id` mirrors this process's own environment (Y-393), which a
@@ -1841,11 +1958,21 @@ pub(crate) mod tests {
             ))),
             ..holding(Snapshot::default())
         };
-        fleet.github.learned("octocat".into()).await;
+        fleet
+            .github
+            .learned(yantra_core::github::Account {
+                login: "octocat".into(),
+                avatar_url: Some("https://avatars.githubusercontent.com/u/1?v=4".into()),
+            })
+            .await;
 
         let held = get_json(fleet, "/github").await;
         assert_eq!(held["connected"], true, "{held}");
         assert_eq!(held["login"], "octocat", "{held}");
+        assert_eq!(
+            held["avatar_url"], "https://avatars.githubusercontent.com/u/1?v=4",
+            "{held}"
+        );
         assert_eq!(held["pending"], false, "{held}");
         assert!(!held.to_string().contains("gho_"), "{held}");
     }
@@ -1860,6 +1987,7 @@ pub(crate) mod tests {
                 check: doctor::GITHUB,
                 state: doctor::State::Absent,
                 detail: "`gh` here holds no credential".into(),
+                took_ms: None,
             }))),
             ..Snapshot::default()
         };
@@ -2100,9 +2228,11 @@ pub(crate) mod tests {
                 started: std::time::Instant::now(),
                 listening_on: vec!["100.64.0.1:7717".parse().expect("an address")],
                 ssh_dir: std::path::PathBuf::new(),
+                ssh_state: std::path::PathBuf::new(),
                 relay: true,
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
+                progress: std::path::PathBuf::new(),
             }),
             ..looking_at_machines(vec![
                 MachineInfo {
@@ -2183,6 +2313,62 @@ pub(crate) mod tests {
         assert_eq!(failed["published"].get("data"), None, "never current");
     }
 
+    /// Y-612: the unit's progress file, read on each request.
+    #[tokio::test]
+    async fn about_says_how_far_an_update_has_got() {
+        let dir = std::env::temp_dir().join(format!("yantra-api-progress-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        let reading = |dir: &std::path::Path| Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: Vec::new(),
+                ssh_dir: std::path::PathBuf::new(),
+                ssh_state: std::path::PathBuf::new(),
+                relay: false,
+                trigger: std::path::PathBuf::new(),
+                updater: std::path::PathBuf::new(),
+                progress: dir.to_owned(),
+            }),
+            ..Fleet::default()
+        };
+
+        let idle = get_json(reading(&dir.join("gone")), "/about").await;
+        assert_eq!(idle["update"], Value::Null, "{idle}");
+
+        std::fs::write(
+            dir.join("status"),
+            "step=downloading\nversion=0.10.0\narchive=a.tar.gz\ntotal=9800000\n",
+        )
+        .expect("a status");
+        std::fs::write(dir.join("a.tar.gz"), [0u8; 3_100]).expect("some bytes");
+        let downloading = get_json(reading(&dir), "/about").await;
+        assert_eq!(
+            downloading["update"],
+            json!({"step": "downloading", "version": "0.10.0", "received": 3_100, "total": 9_800_000})
+        );
+
+        std::fs::write(dir.join("status"), "step=failed\n").expect("a status");
+        std::fs::write(
+            dir.join("said"),
+            "install: a.tar.gz does not match SHA256SUMS — nothing was installed\n",
+        )
+        .expect("said");
+        let failed = get_json(reading(&dir), "/about").await;
+        assert_eq!(
+            failed["update"],
+            json!({"step": "failed", "said": "install: a.tar.gz does not match SHA256SUMS — nothing was installed"})
+        );
+
+        std::fs::write(dir.join("status"), "step=rebooting\n").expect("a status");
+        let unknown = get_json(reading(&dir), "/about").await;
+        assert_eq!(
+            unknown["update"],
+            Value::Null,
+            "an unknown step is not a guess"
+        );
+    }
+
     fn looking_at_machines(machines: Vec<MachineInfo>) -> Fleet {
         holding(Snapshot {
             machines: Some(Arc::new(Reading::new(Ok(machines)))),
@@ -2203,9 +2389,11 @@ pub(crate) mod tests {
                 started: std::time::Instant::now(),
                 listening_on: Vec::new(),
                 ssh_dir: dir.to_owned(),
+                ssh_state: std::path::PathBuf::new(),
                 relay: false,
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
+                progress: std::path::PathBuf::new(),
             }),
             ..Fleet::default()
         };

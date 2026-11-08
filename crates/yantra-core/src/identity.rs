@@ -12,7 +12,9 @@
 //! **Nothing here writes a `known_hosts`.** [`crate::ssh`] already gives every
 //! connection its own under Yantra's state directory with
 //! `StrictHostKeyChecking=accept-new`, so it fills on first contact with nobody
-//! typing anything — and a *changed* host key stays a hard refusal.
+//! typing anything — and a *changed* host key stays a hard refusal. A person
+//! clears one with [`crate::ssh::Machine::forget_host_key`], where `ssh-keygen -R`
+//! removes the line (Y-621). Yantra still writes none.
 //!
 //! **The key has no passphrase.** `BatchMode=yes` has nowhere to type one, and
 //! the alternative is an agent, which is a login session an appliance that
@@ -23,7 +25,6 @@ use std::fs;
 use std::io::Write as _;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::workspace;
 
@@ -170,7 +171,7 @@ pub fn describe_in(dir: &Path) -> Result<Option<Identity>, Error> {
 /// `ssh-keygen -l` rather than a hash written here: it is the spelling every
 /// `authorized_keys` tool prints, and the binary is already required.
 fn fingerprint(public: &Path) -> Result<String, Error> {
-    let out = Command::new("ssh-keygen")
+    let out = crate::scrubbed("ssh-keygen")
         .arg("-lf")
         .arg(public)
         .output()
@@ -291,7 +292,7 @@ fn logs_in_as_in(dir: &Path, machine: &str) -> Option<String> {
 /// `-F` drops `/etc/ssh/ssh_config`, which a real connection reads, so it is
 /// passed only for a directory that is not this account's own `~/.ssh`.
 fn asked_in(dir: &Path, machine: &str, key: &str) -> Option<String> {
-    let mut ssh = Command::new("ssh");
+    let mut ssh = crate::scrubbed("ssh");
     ssh.arg("-G");
     if crate::identity::dir().ok().as_deref() != Some(dir) {
         ssh.arg("-F").arg(dir.join("config"));
@@ -420,7 +421,7 @@ fn names(config: &str, machine: &str) -> bool {
 }
 
 fn keygen(key: &Path) -> Result<(), Error> {
-    let out = Command::new("ssh-keygen")
+    let out = crate::scrubbed("ssh-keygen")
         .args(["-q", "-t", "ed25519", "-N", "", "-C", "yantra"])
         .arg("-f")
         .arg(key)

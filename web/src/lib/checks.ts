@@ -1,6 +1,8 @@
 /** D7 §3.5: one name per check on every screen, and what fixes it. `doctor`
  *  keeps the ids; a person reads the names. */
 
+import type { Check } from '@/api'
+
 /** Apple's words for the one switch that lets an ssh login read the folders
  *  macOS guards (support.apple.com/guide/mac-help/mchlp1066, 2026-11-03), and its cost. */
 export const fullDisk = (machine: string) =>
@@ -10,7 +12,7 @@ export const fullDisk = (machine: string) =>
 export type Fix =
   | { by: 'join' }
   | { by: 'install' }
-  | { by: 'command'; command: string; where: 'appliance' | 'machine' }
+  | { by: 'command'; command: string; where: 'appliance' | 'machine' | 'terminal' }
   | { by: 'hand'; words: string }
 
 /** `session`: a session cannot start on the machine without it, which is what
@@ -54,6 +56,16 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
     fix: (machine) => ({ by: 'hand', words: fullDisk(machine) }),
     session: false,
   },
+  // Y-640: a warning, because the agent starts and only its hooks fail.
+  hooks: {
+    name: 'agent hooks',
+    fix: () => ({
+      by: 'hand',
+      words:
+        'Install the command where the agent finds it, or put its directory on PATH in your login shell. Yantra reads that PATH when it next starts tmux.',
+    }),
+    session: false,
+  },
   heartbeat: {
     name: 'heartbeat',
     fix: () => ({ by: 'hand', words: 'The join command offers yantra-agent, which sends it.' }),
@@ -61,12 +73,23 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
   },
 }
 
-/** `doctor`'s twelve ids, in its order. */
+/** `doctor`'s thirteen ids, in its order. */
 export const CHECK_IDS: readonly string[] = Object.keys(CHECKS)
 
 export const nameOf = (check: string): string => CHECKS[check]?.name ?? check
 
-export const fixOf = (check: string, machine: string): Fix | null => CHECKS[check]?.fix(machine) ?? null
+/** What a person types in Terminal on a Mac to start the login tmux server (I-44). */
+export const LOGIN_SERVER_COMMAND = 'tmux new-session -d'
+
+/** Every daemon sentence for this one refusal: doctor.rs `NO_LOGIN_SERVER` (said by
+ *  `login-session` and `provider-auth`), up.rs, clone.rs and commit.rs. */
+export const noLoginServer = (detail: string) => /no tmux server/.test(detail)
+
+/** A check with no detail gets the fix its id names. */
+export function fixOf(check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'>>, machine: string): Fix | null {
+  if (noLoginServer(check.detail ?? '')) return { by: 'command', command: LOGIN_SERVER_COMMAND, where: 'terminal' }
+  return CHECKS[check.check]?.fix(machine) ?? null
+}
 
 /** An id this table does not know is not one a session needs. */
 export const sessionNeeds = (check: string): boolean => CHECKS[check]?.session ?? false
@@ -75,16 +98,86 @@ export const sessionNeeds = (check: string): boolean => CHECKS[check]?.session ?
  *  every check a session needs (`lib/ready`'s `READY`). The one place this
  *  is derived; `lib/ready`'s `missingBasics` and the setup checklist both
  *  read it from here (Y-402 review). */
-export const INSTALLABLE: readonly string[] = CHECK_IDS.filter((id) => fixOf(id, '')?.by === 'install')
+export const INSTALLABLE: readonly string[] = CHECK_IDS.filter((id) => fixOf({ check: id }, '')?.by === 'install')
 
-/** `reachable`'s failure reads three ways: the appliance's key was refused,
+/** `reachable`'s failure reads five ways: the appliance's key was refused,
  *  which the join command fixes by placing a fresh one, or ssh fails for
- *  another reason (a changed host key, a firewall), which no command here
+ *  another reason (a firewall, a machine that is off), which no command here
  *  can fix. The machine page and the machines list both classify it this
  *  same way, so they cannot disagree (Y-402 review). `unjoined` is a machine
  *  the appliance's ssh config names no account for (doctor.rs
- *  `name_the_account`, Y-412), which the join command also fixes. */
-export type ReachableFailure = 'refused' | 'unjoined' | 'unreachable'
+ *  `name_the_account`, Y-412), which the join command also fixes. `browser`
+ *  is a Tailscale SSH `check` rule (ssh.rs `BROWSER_CHECK`, Y-585): the join
+ *  command offers normal ssh in its place. `changed` is a host key the
+ *  appliance did not record (doctor.rs `diagnose`, Y-621): only a person can
+ *  tell a reinstall from an attack, so `yantra forget-host-key` waits for one. */
+export type ReachableFailure = 'refused' | 'unjoined' | 'browser' | 'changed' | 'unreachable'
 
-export const reachableFailure = (detail: string): ReachableFailure =>
-  /names no account/i.test(detail) ? 'unjoined' : /permission denied/i.test(detail) ? 'refused' : 'unreachable'
+/** The daemon's `known_hosts` belongs to the account yantrad runs as, so the
+ *  verb runs as that account, as docs/appliance.md runs the others. */
+export const forgetHostKey = (machine: string) => `sudo -u yantra -H yantra forget-host-key ${machine}`
+
+export function reachableFailure(detail: string): ReachableFailure {
+  if (/names no account/i.test(detail)) return 'unjoined'
+  if (/requires an additional check/i.test(detail)) return 'browser'
+  if (/host key verification failed|remote host identification has changed/i.test(detail)) return 'changed'
+  return /permission denied/i.test(detail) ? 'refused' : 'unreachable'
+}
+
+/** Tailscale's sign-in link dies with the ssh that asked for it, and a daemon
+ *  before v0.10.1 still sends it, so no page shows a line that holds one. */
+export const withoutSignIn = (said: string): string =>
+  said
+    .split('\n')
+    .filter((line) => !/https:\/\/login\.tailscale\.com\//i.test(line))
+    .join('\n')
+
+/** `ssh::Error::Transport` after yantrad's `because` (sessions.rs pins it). */
+const TRANSPORT = /^ssh to \S+ failed before the command reported a status/
+
+/** `sessions.rs` and `status.rs` send every error as `reached: 'no'`. Only a
+ *  `Transport` one is ssh's; a tmux or local error is `listing` (Y-585). */
+export type AnswerFailure = ReachableFailure | 'listing'
+
+export const answerFailure = (error: string): AnswerFailure =>
+  TRANSPORT.test(error) ? reachableFailure(error) : 'listing'
+
+export const joinFixes = (kind: AnswerFailure) => kind !== 'unreachable' && kind !== 'changed' && kind !== 'listing'
+
+/** The plain cause and the next step, which no title repeats. */
+export function reachWords(kind: AnswerFailure, name: string): { cause: string; next: string } {
+  switch (kind) {
+    case 'refused':
+      return {
+        cause: `${name} did not take the appliance’s key.`,
+        next: `Run the join command on ${name}; it places the key.`,
+      }
+    case 'unjoined':
+      return {
+        cause: `The appliance does not know which account to log in to ${name} as.`,
+        next: `Run the join command on ${name}; it names the account and places the key.`,
+      }
+    case 'browser':
+      return {
+        cause: `Tailscale SSH on ${name} waits for a browser sign-in, and the appliance has no browser.`,
+        next: `Run the join command on ${name}; it turns on normal ssh with the appliance’s key. Or change the tailnet’s SSH rule from check to accept.`,
+      }
+    case 'changed':
+      return {
+        cause: `${name} answered with a different host key than the one the appliance recorded. Turning Tailscale SSH off changes it, and so does a reinstall.`,
+        next: `If you know why it changed, run ${forgetHostKey(name)} on the appliance, then Check again. If you do not, find out first.`,
+      }
+    case 'unreachable':
+      return {
+        cause: `Yantra can’t reach ${name} over ssh. A firewall or a machine that is off can do this.`,
+        next: 'The join command does not fix this. What ssh said names the reason.',
+      }
+    case 'listing':
+      return {
+        cause: `Yantra could not list the sessions on ${name}.`,
+        next: 'This is not an ssh failure, so the join command does not fix it. The full error names the reason.',
+      }
+  }
+}
+
+export const tookOf = (ms: number): string => (ms < 1_000 ? `${ms} ms` : `${(ms / 1_000).toFixed(1)} s`)

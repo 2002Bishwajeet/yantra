@@ -19,7 +19,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 /// The longest `ControlPath` that works. The master binds the path plus a
 /// 17-character temporary suffix, so this is below `sun_path` (108 on Linux).
@@ -30,6 +30,15 @@ const CONTROL_PATH_LIMIT: usize = 90;
 
 /// How long an idle multiplexed connection is kept alive, in seconds.
 const CONTROL_PERSIST: &str = "300";
+
+/// What a Tailscale SSH `check` rule says in its banner before it holds the auth
+/// stage. `join.sh` and `tests/fixture/listen.py` in yantrad read these words.
+pub(crate) const BROWSER_CHECK: &str = "Tailscale SSH requires an additional check";
+
+/// No link: the one Tailscale sent dies with this `ssh`, and it is not for a page.
+pub(crate) const BROWSER_DIAGNOSIS: &str = "Tailscale SSH requires an additional check, which \
+                                            needs a browser sign-in that Yantra cannot finish, so \
+                                            ssh was stopped";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Machine {
@@ -47,18 +56,24 @@ pub struct Machine {
 /// Control sockets are runtime state, and the runtime directory is also the
 /// shortest — which matters against I-28's 90-byte path budget.
 pub fn machine_at(host: &str) -> Option<Machine> {
-    use etcetera::BaseStrategy as _;
-    let base = etcetera::choose_base_strategy().ok()?;
     Some(Machine {
         host: host.to_owned(),
         user: None,
         port: None,
         identity: None,
-        state_dir: base
-            .runtime_dir()
+        state_dir: state_dir()?,
+    })
+}
+
+/// The directory [`machine_at`] gives every machine.
+pub fn state_dir() -> Option<PathBuf> {
+    use etcetera::BaseStrategy as _;
+    let base = etcetera::choose_base_strategy().ok()?;
+    Some(
+        base.runtime_dir()
             .unwrap_or_else(|| base.data_dir())
             .join("yantra"),
-    })
+    )
 }
 
 impl Machine {
@@ -114,6 +129,48 @@ impl Machine {
         args
     }
 
+    /// Removes this machine's line from Yantra's known-hosts, so the next
+    /// connection records the key it is offered (`accept-new`). Answers whether
+    /// a line was there. `ssh -G` names the host the way `ssh` recorded it, and
+    /// `ssh-keygen -R` also finds a hashed line (I-20: both are system binaries).
+    pub async fn forget_host_key(&self) -> Result<bool, Error> {
+        let file = self.known_hosts();
+        if !file.exists() {
+            return Ok(false);
+        }
+        let mut resolve = vec!["-G".to_owned()];
+        resolve.extend(self.connection_args());
+        resolve.extend(self.destination_args());
+        let resolved = String::from_utf8_lossy(&forget_step("ssh", &resolve).await?).into_owned();
+        let said = |key: &str| {
+            resolved
+                .lines()
+                .find_map(|line| line.strip_prefix(key)?.strip_prefix(' '))
+                .map(str::trim)
+        };
+        let (Some(host), Some(port)) = (said("hostname"), said("port")) else {
+            return Err(Error::Forget {
+                said: format!("`ssh -G` named no hostname and port for {}", self.host),
+            });
+        };
+        let name = if port == "22" {
+            host.to_owned()
+        } else {
+            format!("[{host}]:{port}")
+        };
+        let removed = forget_step(
+            "ssh-keygen",
+            &[
+                "-R".to_owned(),
+                name,
+                "-f".to_owned(),
+                file.display().to_string(),
+            ],
+        )
+        .await?;
+        Ok(String::from_utf8_lossy(&removed).contains(" found: line "))
+    }
+
     /// The control sockets live here, and `ssh` will not create the directory.
     fn prepare_sockets(&self) -> Result<(), Error> {
         let sockets = self.state_dir.join("cm");
@@ -122,6 +179,28 @@ impl Machine {
             source,
         })
     }
+}
+
+/// One step of [`Machine::forget_host_key`], answering its stdout.
+async fn forget_step(program: &str, args: &[String]) -> Result<Vec<u8>, Error> {
+    let out = tokio::process::Command::from(crate::scrubbed(program))
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(|e| Error::Forget {
+            said: format!("could not run `{program}`: {e}"),
+        })?;
+    if !out.status.success() {
+        return Err(Error::Forget {
+            said: format!(
+                "`{program}` failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        });
+    }
+    Ok(out.stdout)
 }
 
 /// Which operating system the far side answered with, to the resolution the two
@@ -197,6 +276,9 @@ pub enum Error {
 
     #[error("could not ask that machine which operating system it runs: `uname -s` said `{said}`")]
     Uname { said: String },
+
+    #[error("could not forget the recorded host key: {said}")]
+    Forget { said: String },
 }
 
 /// The seam the layers above are tested against (§B2). Implementations of this
@@ -261,7 +343,7 @@ impl Ssh {
         self.machine.prepare_sockets()?;
         let log = LogFile::new(&self.machine.state_dir)?;
 
-        let mut ssh = tokio::process::Command::new(program);
+        let mut ssh = tokio::process::Command::from(crate::scrubbed(program));
         ssh.args(self.stdio_argv(command, log.path()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -312,6 +394,13 @@ pub(crate) struct Piped {
 
 impl Exec for Ssh {
     async fn exec(&self, command: &str) -> Result<Output, Error> {
+        self.exec_with("ssh", command).await
+    }
+}
+
+impl Ssh {
+    /// [`Exec::exec`] with the binary named, so a test can stand a script in.
+    async fn exec_with(&self, program: &str, command: &str) -> Result<Output, Error> {
         let m = &self.machine;
 
         m.prepare_sockets()?;
@@ -319,7 +408,7 @@ impl Exec for Ssh {
         let log = LogFile::new(&m.state_dir)?;
         let nonce = nonce()?;
 
-        let mut cmd = tokio::process::Command::new("ssh");
+        let mut cmd = tokio::process::Command::from(crate::scrubbed(program));
         cmd.arg("-E").arg(log.path());
         cmd.args(m.connection_args());
         // Not ERROR: ssh prints a server's banner only from INFO up, and
@@ -352,10 +441,16 @@ impl Exec for Ssh {
                 }
             },
             async {
-                match &mut err {
-                    Some(pipe) => pipe.read_to_end(&mut stderr).await.map(|_| ()),
-                    None => Ok(()),
+                let Some(pipe) = &mut err else {
+                    return Ok(false);
+                };
+                let browser = read_stderr(pipe, &mut stderr, &nonce).await?;
+                // A headless daemon cannot finish the browser step, and neither
+                // ConnectTimeout nor ServerAlive ends a held auth stage quickly.
+                if browser {
+                    let _ = child.start_kill();
                 }
+                Ok(browser)
             }
         );
         let status = child.wait().await;
@@ -365,8 +460,12 @@ impl Exec for Ssh {
             diagnosis,
         };
         read_out.map_err(|e| transport(format!("reading stdout: {e}")))?;
-        read_err.map_err(|e| transport(format!("reading stderr: {e}")))?;
+        let browser =
+            read_err.map_err(|e: std::io::Error| transport(format!("reading stderr: {e}")))?;
         status.map_err(|e| transport(format!("waiting for ssh: {e}")))?;
+        if browser {
+            return Err(transport(BROWSER_DIAGNOSIS.to_owned()));
+        }
 
         let (banner, stderr) = split_start(&stderr, &nonce);
         match split_sentinel(stderr, &nonce) {
@@ -386,7 +485,7 @@ impl Exec for Ssh {
 ///
 /// The command runs in a *child* shell — `exit 3` in the wrapper's own shell
 /// would terminate it before the sentinel is printed.
-fn payload(command: &str, nonce: &str) -> String {
+pub(crate) fn payload(command: &str, nonce: &str) -> String {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD;
 
@@ -422,6 +521,29 @@ fn split_start<'a>(stderr: &'a [u8], nonce: &str) -> (&'a [u8], &'a [u8]) {
         Some(at) => (&stderr[..at], &stderr[at + marker.len()..]),
         None => (stderr, &[]),
     }
+}
+
+/// Reads stderr to its end, or answers `true` as soon as the text before the
+/// start marker holds [`BROWSER_CHECK`]. A remote command's own stderr comes
+/// after the marker, so it can never end the read.
+async fn read_stderr<R: AsyncRead + Unpin>(
+    pipe: &mut R,
+    stderr: &mut Vec<u8>,
+    nonce: &str,
+) -> std::io::Result<bool> {
+    let phrase = BROWSER_CHECK.as_bytes();
+    let mut started = false;
+    while pipe.read_buf(stderr).await? > 0 {
+        if started {
+            continue;
+        }
+        let (before, _) = split_start(stderr, nonce);
+        started = before.len() < stderr.len();
+        if before.windows(phrase.len()).any(|said| said == phrase) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// What the server said on stderr, then what `ssh` logged. Empty is a real
@@ -564,6 +686,172 @@ mod tests {
             diagnosis(b"", " \n"),
             "no diagnostics; the connection dropped silently"
         );
+    }
+
+    /// Tailscale's two lines, as forum.tailscale.com/t/4539 and flaviocopes.com
+    /// quote them (both read 2026-11-04).
+    const CHECK_MODE: &[u8] = b"# Tailscale SSH requires an additional check.\n\
+        # To authenticate, visit: https://login.tailscale.com/a/abc\n";
+
+    /// Y-585: read in two pieces, with `ssh` still running, because that is
+    /// how a server holding the auth stage looks from here.
+    #[tokio::test]
+    async fn a_browser_check_before_the_start_marker_ends_the_read_without_eof() {
+        let (mut ours, mut theirs) = tokio::io::duplex(256);
+        let (first, second) = CHECK_MODE.split_at(20);
+        tokio::io::AsyncWriteExt::write_all(&mut theirs, first)
+            .await
+            .expect("the first piece");
+
+        let mut stderr = Vec::new();
+        let read = read_stderr(&mut ours, &mut stderr, "Ydeadbeef");
+        let write = async {
+            tokio::task::yield_now().await;
+            tokio::io::AsyncWriteExt::write_all(&mut theirs, second)
+                .await
+                .expect("the second piece");
+        };
+        let (read, ()) = tokio::join!(read, write);
+
+        assert!(read.expect("the read ends"));
+        drop(theirs);
+    }
+
+    /// A command's own stderr can never stop it, whatever it says.
+    #[tokio::test]
+    async fn a_command_that_prints_the_phrase_is_read_to_its_end() {
+        let mut said = b"Ydeadbeef\n".to_vec();
+        said.extend_from_slice(CHECK_MODE);
+        said.extend_from_slice(b"\nYdeadbeef:0");
+
+        let mut stderr = Vec::new();
+        let asked = read_stderr(&mut said.as_slice(), &mut stderr, "Ydeadbeef")
+            .await
+            .expect("the read ends");
+
+        assert!(!asked);
+        assert_eq!(stderr, said);
+    }
+
+    /// A banner that says something else is only a banner.
+    #[tokio::test]
+    async fn another_banner_is_read_to_its_end() {
+        let said = b"Authorised use only.\nYdeadbeef\n\nYdeadbeef:0".to_vec();
+        let mut stderr = Vec::new();
+        let asked = read_stderr(&mut said.as_slice(), &mut stderr, "Ydeadbeef")
+            .await
+            .expect("the read ends");
+        assert!(!asked);
+    }
+
+    /// `join.sh` and the join fixture read the phrase, and the sign-in link is
+    /// dead once `ssh` stops, so it stays off every page.
+    #[test]
+    fn the_browser_diagnosis_keeps_the_phrase_and_holds_no_link() {
+        assert!(BROWSER_DIAGNOSIS.contains(BROWSER_CHECK));
+        assert!(!BROWSER_DIAGNOSIS.contains("http"), "{BROWSER_DIAGNOSIS}");
+    }
+
+    /// Y-621: `exec` itself, with an `ssh` that prints Tailscale's real two
+    /// lines and then holds, as a server holding the auth stage does.
+    #[tokio::test]
+    async fn the_real_check_text_ends_as_the_diagnosis_with_no_link() {
+        let dir = std::env::temp_dir().join(format!("yantra-check-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a dir");
+        let fake = dir.join("ssh");
+        let banner = String::from_utf8(CHECK_MODE.to_vec()).expect("utf-8");
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\nprintf '{banner}' >&2\nexec sleep 30\n"),
+        )
+        .expect("the fake");
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("executable");
+        let ssh = Ssh::new(test_machine("fixture", None, dir.join("state"))).expect("short");
+
+        let started = std::time::Instant::now();
+        let err = ssh
+            .exec_with(fake.to_str().expect("utf-8"), "true")
+            .await
+            .expect_err("a held login is not a command result");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert!(
+            matches!(&err, Error::Transport { diagnosis, .. } if diagnosis == BROWSER_DIAGNOSIS),
+            "{err:?}"
+        );
+        assert!(!err.to_string().contains("https://"), "{err}");
+    }
+
+    fn test_machine(host: &str, port: Option<u16>, state_dir: PathBuf) -> Machine {
+        Machine {
+            host: host.to_owned(),
+            user: None,
+            port,
+            identity: None,
+            state_dir,
+        }
+    }
+
+    const KEY_A: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK3nWKie+BAYQ/y9zgv6dgW8g5EE71n5muPqQ3gjdbrp";
+
+    fn forget_scratch(label: &str, lines: Option<&str>) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("yantra-forget-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a dir");
+        if let Some(lines) = lines {
+            std::fs::write(dir.join("known_hosts"), lines).expect("known_hosts");
+        }
+        dir
+    }
+
+    /// Y-621: the one line for this host goes, and every other host stays.
+    #[tokio::test]
+    async fn forgetting_removes_only_this_hosts_line() {
+        let lines = format!("forget-me.invalid {KEY_A}\nkeep-me.invalid {KEY_A}\n");
+        let dir = forget_scratch("one", Some(&lines));
+
+        let machine = test_machine("forget-me.invalid", None, dir.clone());
+        let removed = machine.forget_host_key().await.expect("it ran");
+        let left = std::fs::read_to_string(dir.join("known_hosts")).expect("still there");
+        let again = machine.forget_host_key().await.expect("it ran");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(removed);
+        assert_eq!(left, format!("keep-me.invalid {KEY_A}\n"));
+        assert!(!again, "a second forget finds nothing");
+    }
+
+    /// A port other than 22 is recorded as `[host]:port`, which `ssh -G` names.
+    #[tokio::test]
+    async fn forgetting_finds_a_host_on_another_port() {
+        let lines = format!("[forget-me.invalid]:2222 {KEY_A}\nforget-me.invalid {KEY_A}\n");
+        let dir = forget_scratch("port", Some(&lines));
+
+        let machine = test_machine("forget-me.invalid", Some(2222), dir.clone());
+        let removed = machine.forget_host_key().await.expect("it ran");
+        let left = std::fs::read_to_string(dir.join("known_hosts")).expect("still there");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(removed);
+        assert_eq!(left, format!("forget-me.invalid {KEY_A}\n"));
+    }
+
+    /// No known-hosts yet is nothing to forget, not an error.
+    #[tokio::test]
+    async fn forgetting_with_no_file_is_nothing_to_forget() {
+        let dir = forget_scratch("missing", None);
+        let removed = test_machine("forget-me.invalid", None, dir.clone())
+            .forget_host_key()
+            .await
+            .expect("not an error");
+        let created = dir.join("known_hosts").exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!removed);
+        assert!(!created);
     }
 
     #[test]

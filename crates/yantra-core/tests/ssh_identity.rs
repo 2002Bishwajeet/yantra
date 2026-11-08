@@ -25,8 +25,8 @@ use std::process::{Command, Output};
 
 use anyhow::{Result, bail};
 use common::{SshFixture, USER};
-use yantra_core::identity;
 use yantra_core::ssh::{Error, Exec, Machine, Ssh};
+use yantra_core::{doctor, identity};
 
 /// The name a workspace would spell, meaning nothing until the config says so.
 const ALIAS: &str = "fixture-box";
@@ -159,13 +159,14 @@ async fn yantras_own_known_hosts_fills_unprompted_and_refuses_a_changed_key() ->
     let known_hosts = state.join("known_hosts");
 
     let prepared = identity::prepare_in(&dir, &[])?;
-    let ssh = Ssh::new(Machine {
+    let machine = Machine {
         host: fixture.host().to_owned(),
         user: Some(USER.to_owned()),
         port: Some(fixture.port()),
         identity: Some(prepared.key.clone()),
         state_dir: state.clone(),
-    })?;
+    };
+    let ssh = Ssh::new(machine.clone())?;
 
     assert!(
         !known_hosts.exists(),
@@ -202,6 +203,24 @@ async fn yantras_own_known_hosts_fills_unprompted_and_refuses_a_changed_key() ->
         diagnosis.to_lowercase().contains("host key"),
         "the refusal must say what it refused, with nobody there to ask: {diagnosis}"
     );
+    let checks = doctor::of(&ssh, "xterm-256color").await;
+    let reachable = checks
+        .iter()
+        .find(|check| check.check == "reachable")
+        .expect("a reachable check");
+    assert!(
+        reachable
+            .detail
+            .contains("a host key the appliance did not record"),
+        "Y-621: {}",
+        reachable.detail
+    );
+
+    // Y-621: forgetting the line lets `accept-new` record the new key.
+    assert!(machine.forget_host_key().await?, "the line was there");
+    assert!(!known(&known_hosts, &destination)?);
+    ssh.exec("true").await?;
+    assert!(known(&known_hosts, &destination)?);
 
     std::fs::remove_dir_all(&dir)?;
     std::fs::remove_dir_all(&state)?;

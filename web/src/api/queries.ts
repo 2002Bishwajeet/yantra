@@ -1,13 +1,16 @@
-import { type QueryClient, queryOptions } from '@tanstack/react-query'
+import { type QueryClient, queryOptions, useQuery } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
+  Check,
+  Commands,
   Connection,
   Listed,
   Listing,
   Looked,
   Machine,
   MachineSessions,
+  Mentions,
   Probed,
   Readiness,
   Repo,
@@ -227,6 +230,47 @@ export const probeQuery = (name: string, path: string) =>
     ...onRequest,
   })
 
+/** Y-562. What the composer offers after `@` and `$`: one ssh round trip, asked
+ *  when a trigger opens (ADR-0019). Held for a few minutes, so typing more of a
+ *  name or opening the menu again asks nothing. */
+export const mentionsQuery = (name: string, thread: string | null, harness: string) =>
+  queryOptions({
+    queryKey: keys.mentions(name, thread, harness),
+    queryFn: ({ signal }) =>
+      fetchJson<Mentions>(
+        workspace(name, 'mentions'),
+        { method: 'POST', signal, ...json(thread === null ? { harness } : { harness, thread }) },
+        fields('files', 'truncated', 'skills'),
+      ),
+    staleTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+
+export const useMentions = (name: string, thread: string | null, harness: string, enabled: boolean) =>
+  useQuery({ ...mentionsQuery(name, thread, harness), enabled })
+
+/** Y-563. Claude's slash commands for the composer's `/` menu, asked as
+ *  {@link mentionsQuery} is: once when the trigger opens, held for a few minutes. */
+export const commandsQuery = (name: string, thread: string | null, harness: string) =>
+  queryOptions({
+    queryKey: keys.commands(name, thread, harness),
+    queryFn: ({ signal }) =>
+      fetchJson<Commands>(
+        workspace(name, 'commands'),
+        { method: 'POST', signal, ...json(thread === null ? { harness } : { harness, thread }) },
+        fields('commands'),
+      ),
+    staleTime: 5 * 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  })
+
+export const useCommands = (name: string, thread: string | null, harness: string, enabled: boolean) =>
+  useQuery({ ...commandsQuery(name, thread, harness), enabled })
+
 // The reads below are Y-342's and Y-343's. Their envelopes are read from
 // docs/plans/m14-rust-inventory.md §2, and the Rust rows settle them.
 
@@ -238,11 +282,15 @@ export const githubQuery = () =>
       fetchJson<Connection>(
         '/api/github',
         { signal },
-        fields('connected', 'login', 'scopes', 'client_id', 'client_id_custom'),
+        fields('connected', 'login', 'avatar_url', 'scopes', 'client_id', 'client_id_custom'),
       ),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
   })
+
+/** Y-623: what GitHub said about the grant, on the daemon's own sweep. */
+export const githubReadinessQuery = () =>
+  swept<Check>(keys.githubReadiness(), '/api/readiness/github')
 
 /** Y-342. Swept on `attention`'s clock — it leaves the tailnet. */
 export const reposQuery = () =>
@@ -321,7 +369,7 @@ export const roomsQuery = () =>
     refetchInterval: ROOM_POLL_MS,
   })
 
-/** A 404 is a room the daemon lost to a restart, or one never made. */
+/** A 404 is a room never made, one that was ended, or an agent-made room that a restart lost. */
 export const roomQuery = (name: string) =>
   queryOptions({
     queryKey: keys.room(name),

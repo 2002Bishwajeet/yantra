@@ -63,11 +63,10 @@ export function stateOf(status: WorkspaceStatus | null): { state: MarkState; wor
       return { state: 'running', word: 'running' }
     case 'no_agent':
       return { state: 'running', word: 'no agent, opened as a shell' }
-    case 'no_session':
-      return { state: 'idle', word: 'no session' }
     case 'finished':
       return { state: 'idle', word: 'finished' }
     case 'stopped':
+    case 'no_session':
       return { state: 'idle', word: 'stopped' }
     case 'crashed':
       return { state: 'failed', word: `crashed, exit ${agent.exit_status}` }

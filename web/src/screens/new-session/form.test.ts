@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { Machine, Repo } from '@/api'
+import type { Machine, Readiness, Repo } from '@/api'
 import {
   cloneInto,
   complete,
+  expand,
   happenings,
+  hubJoined,
   nameError,
+  offered,
   pickMachine,
   plan,
   reachable,
@@ -116,19 +119,41 @@ describe('the plan the starting screen runs', () => {
 })
 
 describe('what will happen', () => {
-  it('names the clone, the session and what opens in it', () => {
-    const lines = happenings({ ...cloned('no'), opens: 'command', command: 'just dev' }, '/home/biswa')
-    expect(lines[0]).toBe('write ~/.config/yantra/workspaces/quiet-otter.toml')
-    expect(lines[1]).toBe('clone 2002Bishwajeet/homelab-k8s into ~/Github/homelab-k8s on cachyos-g14')
-    expect(lines[2]).toBe('open a tmux session on cachyos-g14 in ~/Github/homelab-k8s')
-    expect(lines[3]).toMatch(/^run just dev in it/)
+  const local = (checked: 'yes' | 'unknown') =>
+    values({ source: { kind: 'local', path: '/home/biswa/Github/x', origin: null, checked } })
+  const lines = (v: Values) => happenings(v, '/home/biswa').map((h) => h.line)
+
+  it('names the clone, the session and what runs in it', () => {
+    const out = happenings({ ...cloned('no'), opens: 'command', command: 'just dev' }, '/home/biswa')
+    expect(out[0]).toEqual({
+      line: 'Yantra saves the workspace as quiet-otter.',
+      detail: '~/.config/yantra/workspaces/quiet-otter.toml',
+    })
+    expect(out[1]?.line).toBe(
+      'It clones 2002Bishwajeet/homelab-k8s into ~/Github/homelab-k8s on cachyos-g14, then opens a session there.',
+    )
+    expect(out[2]?.line).toBe('just dev runs there, and you see it in this window.')
   })
 
-  it('says a directory that is already there is already there', () => {
-    const lines = happenings(cloned('yes'), '/home/biswa')
-    expect(lines).toHaveLength(3)
-    expect(lines[1]).toMatch(/which is already there$/)
-    expect(lines[2]).toMatch(/^start Claude/)
+  it('opens a session in a folder that is there', () => {
+    expect(lines(cloned('yes'))).toEqual([
+      'Yantra saves the workspace as quiet-otter.',
+      'It opens a session in ~/Github/homelab-k8s on cachyos-g14.',
+      'Claude starts there, and you see it in this window.',
+    ])
+    expect(lines(local('yes'))[1]).toBe('It opens a session in ~/Github/x on cachyos-g14.')
+  })
+
+  it('says Yantra checks a folder it has not checked', () => {
+    const checks = ' Yantra checks the folder then.'
+    expect(lines(cloned('unknown'))[1]).toBe(`It opens a session in ~/Github/homelab-k8s on cachyos-g14.${checks}`)
+    expect(lines(local('unknown'))[1]).toBe(`It opens a session in ~/Github/x on cachyos-g14.${checks}`)
+  })
+
+  it('leaves out the words the owner dropped', () => {
+    for (const v of [cloned('no'), cloned('yes'), cloned('unknown'), local('yes'), local('unknown')]) {
+      expect(lines(v).join(' ')).not.toMatch(/tmux|attach|pane|already there/)
+    }
   })
 })
 
@@ -140,6 +165,21 @@ describe('paths', () => {
     expect(tilde('/home/biswa', '/home/biswa')).toBe('~')
     expect(tilde('/srv/x', '/home/biswa')).toBe('/srv/x')
     expect(tilde('/srv/x', null)).toBe('/srv/x')
+  })
+
+  it('draws a path with ~ when home carries a trailing slash', () => {
+    expect(tilde('/Users/biswa/Github/x', '/Users/biswa/')).toBe('~/Github/x')
+    expect(tilde('/Users/biswa', '/Users/biswa/')).toBe('~')
+  })
+
+  it('expands ~ and ~/x under home, and leaves other paths alone', () => {
+    expect(expand('~', '/home/biswa')).toBe('/home/biswa')
+    expect(expand('~/Github/yantra', '/home/biswa')).toBe('/home/biswa/Github/yantra')
+    expect(expand('~/x', '/home/biswa/')).toBe('/home/biswa/x')
+    expect(expand('/srv/x', '/home/biswa')).toBe('/srv/x')
+    expect(expand('~other/x', '/home/biswa')).toBe('~other/x')
+    expect(expand('~/x', null)).toBeNull()
+    expect(expand('/srv/x', null)).toBe('/srv/x')
   })
 
   it('reads an origin as owner/name, however it was written', () => {
@@ -194,5 +234,37 @@ describe('the hint under the source step', () => {
     expect(sourceHint(local('no'), home)).toBe('Choose a folder that exists to continue.')
     expect(sourceHint(local('yes'), home)).toBeNull()
     expect(sourceHint(local('unknown'), home)).toBeNull()
+  })
+})
+
+describe('the hub in New session', () => {
+  const hub = aMachine({ name: 'yantra-box', hub: true })
+  const report = (detail: string, state: 'present' | 'absent'): Readiness => ({
+    machine: hub.name,
+    age_seconds: 0,
+    checks: [{ check: 'reachable', state, detail }],
+  })
+  const joined = report('', 'present')
+
+  it('has joined when it is online and ssh gets in', () => {
+    expect(hubJoined(hub, joined)).toBe(true)
+  })
+
+  it.each([
+    ['refused', report('Permission denied (publickey)', 'absent')],
+    ['unjoined', report('the ssh config here names no account for yantra-box', 'absent')],
+    ['no report', null],
+  ])('has not joined when %s', (_why, given) => {
+    expect(hubJoined(hub, given)).toBe(false)
+  })
+
+  it('has not joined when it is offline, whatever an old report says', () => {
+    expect(hubJoined({ ...hub, online: false }, joined)).toBe(false)
+  })
+
+  it('drops only a hub that has not joined', () => {
+    const other = aMachine({ name: 'cachyos-g14' })
+    expect(offered([hub, other], [null, null])).toEqual([other])
+    expect(offered([hub, other], [joined, null])).toEqual([hub, other])
   })
 })

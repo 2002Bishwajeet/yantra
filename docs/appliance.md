@@ -4,7 +4,7 @@ How Yantra gets onto the always-on box and how it is updated afterwards. For loc
 [`development.md`](development.md); for what the appliance milestone is, see
 [`plans/m7-appliance.md`](plans/m7-appliance.md).
 
-**[v0.9.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.9.0) is the current release**
+**[v0.10.3](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.10.3) is the current release**
 ([Y-405](../tracker.md)), and there are two ways in. [`install.sh`](../install.sh) fetches the
 current release onto the box itself, verifies it, and at a terminal takes the box from bare to an
 open dashboard ([Y-384](../tracker.md)). `just appliance-install` builds on the machine that
@@ -52,7 +52,7 @@ less install.sh
 bash install.sh
 ```
 
-**Take it from `main` or from the v0.9.0 tag.** A copy from v0.2.0 or earlier is the script before
+**Take it from `main` or from the v0.10.3 tag.** A copy from v0.2.0 or earlier is the script before
 Y-384: it asks nothing and starts nothing. [Y-159](../tracker.md) gives the script a name that resolves off the tailnet; until
 then the URL is GitHub's.
 
@@ -154,6 +154,23 @@ same thing, and `yantra update --check` only says whether one exists.
 - **A failed install restarts nothing.** The restart is `ExecStartPost=`, and a checksum mismatch
   or an unreachable GitHub stops the unit before it. Read why with `journalctl -u yantra-update`.
 - `yantra update` needs root. Without it, it prints `sudo systemctl start yantra-update.service`.
+
+**How far an update got** ([Y-612](../tracker.md)). `yantrad` runs as `yantra`, which cannot read
+the root unit's journal. So the unit gives `install.sh` a `RuntimeDirectory`, `/run/yantra-update`,
+mode `0755`, and keeps it after the run:
+
+- `status` holds `key=value` lines: `step` (`resolving`, `downloading`, `verifying`, `installing`,
+  `failed` or `done`), `version`, `archive`, and `total` when the release host sent a length.
+- `said` holds the run's stderr. The journal still gets every line.
+- While the run downloads, the archive is in this directory, so its size is the bytes received.
+
+Settings → About draws the step, a progress bar while the archive arrives, and on a failure the
+last 20 lines of `said`. `yantra update` prints the same to stderr. A run starts by clearing the
+directory. A run of `install.sh` at a terminal removes `status` and `said` once it has installed
+the binaries, so a failure the unit left does not outlive that recovery. To read it by hand:
+`cat /run/yantra-update/status /run/yantra-update/said`. **The first update of a box installed
+before Y-612 shows no progress**: the unit runs the updater already on the box, and that one
+writes none.
 
 **What the restart ends.** Sessions on the machines keep running: their tmux servers belong to the
 login user there, not to `yantrad`. An open terminal in the dashboard loses its socket and
@@ -427,11 +444,12 @@ that way: it holds the key to the whole fleet, and the sessions are not on that 
 sudo -u yantra -H yantra ssh-identity
 sudo -u yantra -H yantra ssh-identity --machine <m> --user <u>
 sudo -u yantra -H yantra join-script
+sudo -u yantra -H yantra forget-host-key <m>
 ```
 
 The first generates `~/.ssh/id_yantra` if that account has no key, adds a `Host` block binding it for
 every machine a workspace names, and prints the public key. The second writes one block, with its
-`User`. The third prints the join script. **`-H` matters**: without it `sudo` may leave `HOME` as
+`User`. The third prints the join script. The fourth removes the host key that account recorded for `<m>`, so the next check records the new one; the dashboard names it when a key changed ([Y-621](../tracker.md#3-task-board)). **`-H` matters**: without it `sudo` may leave `HOME` as
 yours and the verb prepares the wrong account's `~/.ssh`. Each is idempotent — an existing key is
 kept, because regenerating it orphans every `authorized_keys` entry it is in, and a machine the
 config already names is left exactly as it is. A block the first verb wrote has no `User`, so it

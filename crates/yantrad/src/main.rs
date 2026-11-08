@@ -31,6 +31,7 @@ mod contract;
 mod events;
 mod github;
 mod heartbeat;
+mod layout;
 mod mcp;
 mod mic;
 mod notify;
@@ -157,6 +158,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
                     fleet.closing.clone(),
                 ))
                 .merge(terminal::router(authoriser.clone(), fleet.left.clone()))
+                .merge(layout::router(authoriser.clone()))
                 .merge(mic::router(authoriser)),
         )
         .merge(heartbeat::router())
@@ -174,6 +176,10 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         tracing::warn!("no ssh identity can be served: {error}");
         PathBuf::new()
     });
+    let ssh_state = yantra_core::ssh::state_dir().unwrap_or_else(|| {
+        tracing::warn!("no directory for ssh state, so no host key can be forgotten");
+        PathBuf::new()
+    });
     let relay = yantra_core::notify::from_env();
     let ips: Vec<IpAddr> = addresses.iter().map(SocketAddr::ip).collect();
     let chats = chats(yantra_core::join::daemon_address(&ips).ok());
@@ -182,9 +188,11 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             started: std::time::Instant::now(),
             listening_on: addresses.clone(),
             ssh_dir,
+            ssh_state,
             relay: relay.is_some(),
             trigger: PathBuf::from(yantra_core::update::TRIGGER),
             updater: PathBuf::from(yantra_core::update::UPDATER),
+            progress: PathBuf::from(yantra_core::update::PROGRESS),
         }),
         github: github::Grant::from_env(),
         rooms: rooms(chats.clone()),
@@ -288,13 +296,16 @@ fn chats(daemon: Option<SocketAddr>) -> chat::Registry {
 
 /// The rooms, whose pauses go to the relay when there is one.
 fn rooms(chats: chat::Registry) -> room::Rooms {
+    let dir = yantra_core::room_file::rooms_dir()
+        .inspect_err(|error| tracing::warn!("no room can be defined: {error}"))
+        .ok();
     match yantra_core::notify::from_env() {
         Some(relay) => {
             let (pauses, heard) = tokio::sync::mpsc::unbounded_channel();
             tokio::spawn(room::tell(relay, heard));
-            room::Rooms::new(chats, Some(pauses))
+            room::Rooms::new(chats, Some(pauses), dir)
         }
-        None => room::Rooms::new(chats, None),
+        None => room::Rooms::new(chats, None, dir),
     }
 }
 

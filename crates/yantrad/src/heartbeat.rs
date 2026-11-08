@@ -90,6 +90,10 @@ pub struct Fleet {
     pub rooms: crate::room::Rooms,
     /// Each thread's open PR the appliance watches (Y-494), in memory only.
     pub pulls: crate::watch::Pulls,
+    /// Wakes the agent sweep after `up`, `down` or `resume` (Y-639), so the
+    /// verb's result does not wait out `EVERY`. The sweep looks again after
+    /// `SETTLE`, because `claude` registers after `up` returns.
+    pub look_at_agents: Arc<tokio::sync::Notify>,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -101,13 +105,18 @@ pub struct Facts {
     pub listening_on: Vec<SocketAddr>,
     /// This account's `~/.ssh`, a parameter so a test names a scratch one.
     pub ssh_dir: PathBuf,
+    /// [`yantra_core::ssh::state_dir`], which holds Yantra's `known_hosts`, a
+    /// parameter for the same reason.
+    pub ssh_state: PathBuf,
     /// Whether this process started with a relay (Y-388). ADR-0021: a relay
     /// saved since reaches the next start, so this is what a push uses now.
     pub relay: bool,
-    /// [`yantra_core::update::TRIGGER`] and [`yantra_core::update::UPDATER`],
-    /// parameters so a test names a scratch directory.
+    /// [`yantra_core::update::TRIGGER`], [`yantra_core::update::UPDATER`]
+    /// and [`yantra_core::update::PROGRESS`], parameters so a test names a
+    /// scratch directory.
     pub trigger: PathBuf,
     pub updater: PathBuf,
+    pub progress: PathBuf,
 }
 
 impl Default for Fleet {
@@ -122,18 +131,21 @@ impl Default for Fleet {
                 started: Instant::now(),
                 listening_on: Vec::new(),
                 ssh_dir: PathBuf::new(),
+                ssh_state: PathBuf::new(),
                 relay: false,
                 trigger: PathBuf::new(),
                 updater: PathBuf::new(),
+                progress: PathBuf::new(),
             }),
             github: crate::github::Grant::default(),
             joins: Arc::default(),
             env: Arc::default(),
             left: Arc::default(),
             closing: tokio::sync::watch::Sender::new(false),
-            rooms: crate::room::Rooms::new(chats.clone(), None),
+            rooms: crate::room::Rooms::new(chats.clone(), None, None),
             chats,
             pulls: crate::watch::Pulls::default(),
+            look_at_agents: Arc::default(),
         }
     }
 }

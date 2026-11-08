@@ -33,10 +33,10 @@ use yantra_core::install;
 use yantra_core::inventory::{self, Caller, Inventory};
 use yantra_core::notify;
 use yantra_core::{
-    agent, clone, commit, dirs, doctor, down, edit, logs, price, probe, remove, resume, sessions,
-    status, terminfo, thread, tmux, tokens, up, workspace,
+    agent, chat, clone, command, commit, dirs, doctor, down, edit, logs, mention, price, probe,
+    remove, resume, sessions, status, terminfo, thread, tmux, tokens, up, workspace,
 };
-use yantra_core::{identity, join, update};
+use yantra_core::{identity, join, ssh, update};
 
 use crate::api::{Answer, Checked};
 use crate::events::{self, Event};
@@ -116,11 +116,10 @@ where
     let acts: Router<S> = Router::new()
         .route("/workspaces", post(make::<I>))
         .route("/workspaces/{name}", patch(change::<I>).delete(erase::<I>))
-        .route("/workspaces/{name}/up", post(open::<I>))
-        .route("/workspaces/{name}/down", post(stop::<I>))
-        .route("/workspaces/{name}/resume", post(again::<I>))
         .route("/workspaces/{name}/tokens", post(spent::<I>))
         .route("/workspaces/{name}/logs", post(said::<I>))
+        .route("/workspaces/{name}/mentions", post(mentions::<I>))
+        .route("/workspaces/{name}/commands", post(commands::<I>))
         // The `GET` is here rather than in `api.rs` on purpose (ADR-0020): it
         // serves a file's bytes, which is the one thing the read model does not
         // publish, and it asks the same question the `POST` answers.
@@ -143,6 +142,10 @@ where
     // `/relay` is here since Y-343 because its test send is an event (ADR-0025).
     let remembered: Router<S> = Router::new()
         .route("/machines/{name}/readiness", post(recheck::<I>))
+        // Here to wake the agent sweep once the verb is done (Y-639).
+        .route("/workspaces/{name}/up", post(open::<I>))
+        .route("/workspaces/{name}/down", post(stop::<I>))
+        .route("/workspaces/{name}/resume", post(again::<I>))
         .route("/here", get(here::<I>))
         .route("/viewing", post(viewing::<I>))
         .route("/relay", post(relay::<I>))
@@ -153,6 +156,7 @@ where
             post(set_client_id::<I>).delete(clear_client_id::<I>),
         )
         .route("/join", post(join_as::<I>))
+        .route("/join/forget-host-key", post(forget_host_key::<I>))
         .route("/update", post(renew::<I>))
         // Here for the grant: a thread's PR and its issue are read with it.
         .route("/workspaces/{name}/threads", post(threads::<I>))
@@ -525,13 +529,13 @@ fn from_edit(error: &edit::Error) -> StatusCode {
 }
 
 async fn open<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
     body: Option<Json<Start>>,
 ) -> Result<Json<Opened>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     let agent = body
         .and_then(|Json(start)| start.agent)
         .map(up::Agent::from);
@@ -543,6 +547,7 @@ async fn open<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_up(&error),
             said: chain(&error),
         })?;
+    state.fleet.look_at_agents.notify_one();
 
     Ok(Json(Opened {
         machine: report.workspace.machine,
@@ -558,18 +563,19 @@ async fn open<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Stopped>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     tracing::info!("down {name} for {}", caller.node);
 
     let report = down::down(&name).await.map_err(|error| Refused::Verb {
         status: from_down(&error),
         said: chain(&error),
     })?;
+    state.fleet.look_at_agents.notify_one();
 
     Ok(Json(Stopped {
         machine: report.workspace.machine,
@@ -906,7 +912,7 @@ fn from_install(error: &install::Error) -> &'static str {
 /// person taps it and nothing polls it, which is both halves of the ADR's test.
 ///
 /// **It costs an ssh round trip, and an asleep machine costs all ten seconds of
-/// `ConnectTimeout` before it answers.** What it answers then is twelve
+/// `ConnectTimeout` before it answers.** What it answers then is thirteen
 /// *unknown* checks and never a 500: [`doctor::machine`] cannot fail, because a
 /// machine that could not be asked is not a machine that failed (R-23). A name
 /// nothing answers to reads the same way, and deliberately — ADR-0009 leaves
@@ -1202,9 +1208,12 @@ async fn renew<I: Inventory + Clone + Send + Sync + 'static>(
 fn from_update(error: &update::Error) -> StatusCode {
     match error {
         update::Error::NotInstalled { .. } => StatusCode::CONFLICT,
-        update::Error::NoPrivilege { .. } | update::Error::Failed { .. } | update::Error::Io(_) => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        update::Error::NoPrivilege { .. }
+        | update::Error::Failed { .. }
+        | update::Error::Io(_)
+        | update::Error::Unreadable { .. }
+        | update::Error::UnknownStep { .. }
+        | update::Error::ArchivePath { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -1308,24 +1317,7 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
             said: identity::Error::UnusableUser { user: join.user }.to_string(),
         });
     }
-    // I-5 and I-52: `whois` spells the stable id `StableID`, which is what
-    // `status` calls `ID`, so the two join on it.
-    let machine = state
-        .authoriser
-        .inventory
-        .machines()
-        .await
-        .map_err(Refused::CannotAsk)?
-        .into_iter()
-        .find(|machine| machine.id == caller.node)
-        .map(|machine| machine.name)
-        .ok_or_else(|| Refused::Verb {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            said: format!(
-                "tailscale knows the caller as {} but does not list it, so there is no machine name to write",
-                caller.node
-            ),
-        })?;
+    let machine = caller_machine(&state.authoriser, &caller).await?;
 
     let dir = state.fleet.facts.ssh_dir.clone();
     let (named, user) = (machine.clone(), join.user.clone());
@@ -1367,6 +1359,67 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
         kept: joined.kept,
         logs_in_as: joined.logs_in_as,
     }))
+}
+
+/// The tailnet's name for the caller, so a machine acts only on itself.
+/// I-5 and I-52: `whois` spells the stable id `StableID`, which is what
+/// `status` calls `ID`, so the two join on it and never on an address.
+async fn caller_machine<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    caller: &Caller,
+) -> Result<String, Refused> {
+    authoriser
+        .inventory
+        .machines()
+        .await
+        .map_err(Refused::CannotAsk)?
+        .into_iter()
+        .find(|machine| machine.id == caller.node)
+        .map(|machine| machine.name)
+        .ok_or_else(|| Refused::Verb {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            said: format!(
+                "tailscale knows the caller as {} but does not list it, so there is no machine name to act on",
+                caller.node
+            ),
+        })
+}
+
+/// What `forget_host_key` answers: the caller's name, and whether a line was there.
+#[derive(Debug, serde::Serialize)]
+struct Forgotten {
+    machine: String,
+    removed: bool,
+}
+
+/// `yantra forget-host-key <machine>` on the wire, with the machine taken from
+/// the caller as [`join_as`] takes it (Y-621). Tailscale SSH has a host key of
+/// its own, so the join's switch to sshd changes the key this daemon recorded.
+async fn forget_host_key<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Forgotten>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let machine = caller_machine(&state.authoriser, &caller).await?;
+    let target = ssh::Machine {
+        host: machine.clone(),
+        user: None,
+        port: None,
+        identity: None,
+        state_dir: state.fleet.facts.ssh_state.clone(),
+    };
+    let one_at_a_time = state.fleet.joins.lock().await;
+    let removed = target
+        .forget_host_key()
+        .await
+        .map_err(|error| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        })?;
+    drop(one_at_a_time);
+    tracing::info!("forgot {machine}'s host key for {}: {removed}", caller.node);
+    Ok(Json(Forgotten { machine, removed }))
 }
 
 /// `doctor` on the machine that just joined. Only a *refused* reach is an
@@ -1483,6 +1536,109 @@ async fn said<I: Inventory + Clone + Send + Sync + 'static>(
         })?;
 
     Ok(Json(Transcript::of(&read)))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MentionsAsked {
+    harness: String,
+    thread: Option<String>,
+}
+
+/// What the Chat composer offers after `@` and `$` (Y-562): the files of the
+/// thread's worktree, or of the workspace's repository before a thread opens,
+/// and the skills the harness loads.
+///
+/// **A `POST` for [`spent`]'s reason** ([ADR-0019]): one ssh round trip, a
+/// person asks for it by typing a trigger, and nothing polls it.
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn mentions<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Json(asked): Json<MentionsAsked>,
+) -> Result<Json<Mentions>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let harness = crate::chat::harness_named(&asked.harness).map_err(|said| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said,
+    })?;
+    tracing::info!("mentions {name} for {}", caller.node);
+    let found = mention::for_workspace(&name, asked.thread.as_deref(), harness)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_mention(&error),
+            said: chain(&error),
+        })?;
+    Ok(Json(Mentions::of(found)))
+}
+
+/// No wildcard, per Y-135. A directory that is not a repository and a thread
+/// git does not know are the world's state, so `409`.
+fn from_mention(error: &mention::Error) -> StatusCode {
+    match error {
+        mention::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+        mention::Error::NotARepo { .. }
+        | mention::Error::UnknownThread { .. }
+        | mention::Error::Thread(thread::Error::NotARepo { .. }) => StatusCode::CONFLICT,
+        mention::Error::Thread(thread) => crate::tasks::from_delegate(thread),
+        mention::Error::Workspace(workspace) => from_workspace(workspace),
+        mention::Error::Unreadable { .. } | mention::Error::NoStateDir => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+/// What the Chat composer offers after `/` (Y-563): Claude's slash commands in
+/// the thread's worktree, or in the workspace's repository before a thread
+/// opens. An ACP agent sends its own on the chat stream, so it is answered
+/// with none here and no machine is asked.
+///
+/// **A `POST` for [`mentions`]'s reason** ([ADR-0019]).
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn commands<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    Json(asked): Json<MentionsAsked>,
+) -> Result<Json<Commands>, Refused> {
+    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let harness = crate::chat::harness_named(&asked.harness).map_err(|said| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said,
+    })?;
+    if harness.is_some() {
+        return Ok(Json(Commands { commands: vec![] }));
+    }
+    tracing::info!("commands {name} for {}", caller.node);
+    let commands = command::for_workspace(&name, asked.thread.as_deref())
+        .await
+        .map_err(|error| Refused::Verb {
+            status: from_command(&error),
+            said: chain(&error),
+        })?;
+    Ok(Json(Commands { commands }))
+}
+
+/// No wildcard, per Y-135. A machine with no claude is the world's state, as
+/// a directory that is not a repository is, so `409`.
+fn from_command(error: &command::Error) -> StatusCode {
+    match error {
+        command::Error::Ssh(_) => StatusCode::SERVICE_UNAVAILABLE,
+        command::Error::NotARepo { .. }
+        | command::Error::NoClaude { .. }
+        | command::Error::UnknownThread { .. }
+        | command::Error::Thread(thread::Error::NotARepo { .. }) => StatusCode::CONFLICT,
+        command::Error::Thread(thread) => crate::tasks::from_delegate(thread),
+        command::Error::Workspace(workspace) => from_workspace(workspace),
+        command::Error::Unreadable { .. } | command::Error::NoStateDir => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 /// `yantra chat ls <workspace>` on the wire (Y-488): each thread's branch,
@@ -1820,12 +1976,12 @@ async fn erase<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 async fn again<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Resumed>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
     tracing::info!("resume {name} for {}", caller.node);
 
     let report = resume::resume(&name, term())
@@ -1834,6 +1990,7 @@ async fn again<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_resume(&error),
             said: chain(&error),
         })?;
+    state.fleet.look_at_agents.notify_one();
 
     Ok(Json(Resumed {
         machine: report.workspace.machine,
@@ -2151,6 +2308,48 @@ impl ThreadOpened {
             draft: opened.draft,
         }
     }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Mentions {
+    files: Vec<String>,
+    truncated: bool,
+    skills: Vec<MentionSkill>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct MentionSkill {
+    name: String,
+    description: String,
+    scope: &'static str,
+    mention: String,
+}
+
+impl Mentions {
+    fn of(found: mention::Mentions) -> Self {
+        Self {
+            files: found.files,
+            truncated: found.truncated,
+            skills: found
+                .skills
+                .into_iter()
+                .map(|skill| MentionSkill {
+                    name: skill.name,
+                    description: skill.description,
+                    scope: match skill.scope {
+                        mention::Scope::User => "user",
+                        mention::Scope::Project => "project",
+                    },
+                    mention: skill.mention,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Commands {
+    commands: Vec<chat::Command>,
 }
 
 /// The message is never logged (Q5).
@@ -2670,6 +2869,47 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 draft: "Work on 2002Bishwajeet/yantra#488: A workspace lists its threads\n\nThe \
                         listing is a POST."
                     .to_owned(),
+            }),
+        ),
+        (
+            "mentions",
+            "Mentions",
+            of(&Mentions::of(mention::Mentions {
+                files: vec!["README.md".to_owned(), "src/main.rs".to_owned()],
+                truncated: false,
+                skills: vec![
+                    mention::Skill {
+                        name: "code-review".to_owned(),
+                        description: "Reviews a diff for correctness.".to_owned(),
+                        scope: mention::Scope::User,
+                        mention: "$code-review".to_owned(),
+                    },
+                    mention::Skill {
+                        name: "deploy-staging".to_owned(),
+                        description: String::new(),
+                        scope: mention::Scope::Project,
+                        mention: "$deploy-staging".to_owned(),
+                    },
+                ],
+            })),
+        ),
+        (
+            "commands",
+            "Commands",
+            of(&Commands {
+                commands: vec![
+                    chat::Command {
+                        name: "compact".to_owned(),
+                        description: "Free up context by summarizing the conversation so far"
+                            .to_owned(),
+                        hint: None,
+                    },
+                    chat::Command {
+                        name: "review".to_owned(),
+                        description: "Review a pull request".to_owned(),
+                        hint: Some("<pr>".to_owned()),
+                    },
+                ],
             }),
         ),
         (
@@ -5036,9 +5276,11 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: Vec::new(),
                 ssh_dir: PathBuf::new(),
+                ssh_state: PathBuf::new(),
                 relay: false,
                 trigger: trigger.clone(),
                 updater,
+                progress: PathBuf::new(),
             }),
             ..Fleet::default()
         };
@@ -5143,9 +5385,11 @@ mod tests {
                 started: std::time::Instant::now(),
                 listening_on: vec![SocketAddr::new(address(1), 7717)],
                 ssh_dir: dir.to_owned(),
+                ssh_state: dir.join("state"),
                 relay: false,
                 trigger: PathBuf::new(),
                 updater: PathBuf::new(),
+                progress: PathBuf::new(),
             }),
             ..Fleet::default()
         }
@@ -5400,6 +5644,82 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    const RECORDED: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK3nWKie+BAYQ/y9zgv6dgW8g5EE71n5muPqQ3gjdbrp";
+
+    /// Y-621: the join's switch to sshd changes the host key, and the caller
+    /// forgets its own line and no other.
+    #[tokio::test]
+    async fn a_machine_forgets_only_its_own_host_key() {
+        let dir = join_scratch("forget");
+        let fleet = join_fleet(&dir);
+        let state = dir.join("state");
+        std::fs::create_dir_all(&state).expect("scratch");
+        std::fs::write(
+            state.join("known_hosts"),
+            format!("joining-box {RECORDED}\nimpostor-box {RECORDED}\n"),
+        )
+        .expect("known_hosts");
+
+        let (status, _, body) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join/forget-host-key",
+            address(7),
+            "",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).expect("JSON"),
+            serde_json::json!({ "machine": "joining-box", "removed": true })
+        );
+        assert_eq!(
+            std::fs::read_to_string(state.join("known_hosts")).expect("still there"),
+            format!("impostor-box {RECORDED}\n")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A caller the tailnet does not list has no name, so nothing is touched.
+    #[tokio::test]
+    async fn a_caller_tailscale_does_not_list_forgets_nothing() {
+        let dir = join_scratch("forget-unlisted");
+        let fleet = join_fleet(&dir);
+        let state = dir.join("state");
+        std::fs::create_dir_all(&state).expect("scratch");
+        let lines = format!("joining-box {RECORDED}\n");
+        std::fs::write(state.join("known_hosts"), &lines).expect("known_hosts");
+        let mut tailnet = joining_tailnet();
+        tailnet.machines.clear();
+
+        let (status, _, body) = join_send(
+            router::<Fake, ()>(direct(tailnet), fleet.clone()),
+            "POST",
+            "/join/forget-host-key",
+            address(7),
+            "",
+        )
+        .await;
+        let (stranger, _, _) = join_send(
+            joins(&fleet),
+            "POST",
+            "/join/forget-host-key",
+            address(8),
+            "",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+        assert_eq!(stranger, StatusCode::FORBIDDEN);
+        assert_eq!(
+            std::fs::read_to_string(state.join("known_hosts")).expect("still there"),
+            lines
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The owner's ruling, 2026-09-12: a re-join that keeps a block logging in
     /// as another account says so, in the reply and in the event, and the
     /// block is not rewritten (ADR-0009).
@@ -5442,5 +5762,206 @@ mod tests {
             "{events:?}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    async fn ask_mentions(fake: Fake, name: &str, body: &str) -> StatusCode {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let mut request = Request::post(format!("/workspaces/{name}/mentions"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned()))
+            .expect("a request");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(9), 61620)));
+        router::<Fake, ()>(direct(fake), Fleet::default())
+            .oneshot(request)
+            .await
+            .expect("the router is infallible")
+            .status()
+    }
+
+    /// Y-562: a stranger is refused before any workspace is read, and the
+    /// owner's mistakes are refused before any machine is asked.
+    #[tokio::test]
+    async fn mentions_are_asked_only_for_the_owner_and_only_with_a_harness() {
+        let harness = r#"{"harness":"claude"}"#;
+        assert_eq!(
+            ask_mentions(tailnet(vec![]), "site", harness).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ask_mentions(mine(9), "site", r#"{"harness":"cursor"}"#).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ask_mentions(mine(9), "site", r#"{"harness":"claude","dir":"/"}"#).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            ask_mentions(mine(9), ".hidden", r#"{"harness":"codex","thread":"1a2b"}"#).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[test]
+    fn a_mention_refusal_says_whose_it_is() {
+        let ssh = || yantra_core::ssh::Error::Transport {
+            host: "m".into(),
+            diagnosis: "no route".into(),
+        };
+        let cases = [
+            (mention::Error::Ssh(ssh()), StatusCode::SERVICE_UNAVAILABLE),
+            (
+                mention::Error::Thread(thread::Error::Ssh(ssh())),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                mention::Error::NotARepo { dir: "/r".into() },
+                StatusCode::CONFLICT,
+            ),
+            (
+                mention::Error::Thread(thread::Error::NotARepo { repo: "/r".into() }),
+                StatusCode::CONFLICT,
+            ),
+            (
+                mention::Error::UnknownThread {
+                    thread: "1a2b".into(),
+                },
+                StatusCode::CONFLICT,
+            ),
+            (
+                mention::Error::Workspace(workspace::Error::NotFound {
+                    name: "x".into(),
+                    path: PathBuf::from("/x.toml"),
+                }),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                mention::Error::Unreadable { said: "x".into() },
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                mention::Error::NoStateDir,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+        for (error, status) in cases {
+            assert_eq!(from_mention(&error), status, "{error}");
+        }
+    }
+
+    async fn ask_commands(fake: Fake, name: &str, body: &str) -> (StatusCode, String) {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let mut request = Request::post(format!("/workspaces/{name}/commands"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned()))
+            .expect("a request");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(address(9), 61620)));
+        let response = router::<Fake, ()>(direct(fake), Fleet::default())
+            .oneshot(request)
+            .await
+            .expect("the router is infallible");
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .expect("a body");
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// Y-563: a stranger and a mistake are refused before any machine is
+    /// asked, and an ACP agent's list comes on the chat stream instead.
+    #[tokio::test]
+    async fn commands_are_asked_only_of_claude_and_only_for_the_owner() {
+        let claude = r#"{"harness":"claude"}"#;
+        assert_eq!(
+            ask_commands(tailnet(vec![]), "site", claude).await.0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ask_commands(mine(9), "site", r#"{"harness":"cursor"}"#)
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ask_commands(mine(9), "site", r#"{"harness":"claude","dir":"/"}"#)
+                .await
+                .0,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            ask_commands(mine(9), ".hidden", claude).await.0,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            ask_commands(
+                mine(9),
+                "nowhere",
+                r#"{"harness":"opencode","thread":"1a2b"}"#
+            )
+            .await,
+            (StatusCode::OK, r#"{"commands":[]}"#.to_owned())
+        );
+    }
+
+    #[test]
+    fn a_command_refusal_says_whose_it_is() {
+        let ssh = || yantra_core::ssh::Error::Transport {
+            host: "m".into(),
+            diagnosis: "no route".into(),
+        };
+        let cases = [
+            (command::Error::Ssh(ssh()), StatusCode::SERVICE_UNAVAILABLE),
+            (
+                command::Error::Thread(thread::Error::Ssh(ssh())),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            (
+                command::Error::NotARepo { dir: "/r".into() },
+                StatusCode::CONFLICT,
+            ),
+            (
+                command::Error::NoClaude {
+                    said: "claude was not found".into(),
+                },
+                StatusCode::CONFLICT,
+            ),
+            (
+                command::Error::Thread(thread::Error::NotARepo { repo: "/r".into() }),
+                StatusCode::CONFLICT,
+            ),
+            (
+                command::Error::UnknownThread {
+                    thread: "1a2b".into(),
+                },
+                StatusCode::CONFLICT,
+            ),
+            (
+                command::Error::Workspace(workspace::Error::NotFound {
+                    name: "x".into(),
+                    path: PathBuf::from("/x.toml"),
+                }),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                command::Error::Unreadable { said: "x".into() },
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                command::Error::NoStateDir,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+        for (error, status) in cases {
+            assert_eq!(from_command(&error), status, "{error}");
+        }
     }
 }

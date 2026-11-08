@@ -162,9 +162,11 @@ pub async fn locate<E: Exec>(exec: &E, binary: &'static str) -> Result<Option<St
 pub(crate) fn probe(binary: &'static str) -> String {
     // `$HOME` is left unquoted in the loop so the remote shell expands it;
     // every path here is a constant, so there is nothing to inject.
+    // `(/*)`, not `/*)`: callers embed this in `c=$(…)`, and macOS's bash 3.2
+    // ends the substitution at a pattern's unpaired `)` (Y-634).
     format!(
         "p=$(command -v {binary} 2>/dev/null)\n\
-         case \"$p\" in /*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
+         case \"$p\" in (/*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
          for d in {dirs}; do\n\
          \x20 [ -x \"$d/{binary}\" ] && {{ printf '%s\\n' \"$d/{binary}\"; exit 0; }}\n\
          done\n\
@@ -230,7 +232,7 @@ impl Claude {
         if !out.success() {
             return Ok(Vec::new());
         }
-        Ok(serde_json::from_slice(&out.stdout).unwrap_or_default())
+        Ok(registry(&out.stdout))
     }
 
     /// Asks the agent which credential it can find — never whether it works
@@ -381,10 +383,28 @@ fn new_session_id() -> Result<String, Error> {
     ))
 }
 
+fn registry(stdout: &[u8]) -> Vec<Running> {
+    let entries: Vec<serde_json::Value> = serde_json::from_slice(stdout).unwrap_or_default();
+    // 2.1.318 lists background agents with no `pid`; they run in no pane, so
+    // drop each one rather than let it empty the whole registry (Y-639).
+    entries
+        .into_iter()
+        .filter_map(|e| serde_json::from_value(e).ok())
+        .collect()
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+
+    // macOS's bash 3.2 closes a `$(…)` at the first unpaired `)`, and three
+    // callers embed the probe in `c=$(…)` (Y-634).
+    #[test]
+    fn the_probe_pairs_every_paren_so_it_survives_bash_3_2() {
+        let probe = probe("claude");
+        assert_eq!(probe.matches('(').count(), probe.matches(')').count());
+    }
 
     #[test]
     fn a_session_id_is_a_v4_uuid() {
@@ -561,6 +581,26 @@ mod tests {
             auth_command("/home/u/.local/bin/claude", "/usr/bin/tmux", Os::Other),
             "'/home/u/.local/bin/claude' auth status",
             "Linux reads the credential from a file, so the ssh session is the right process"
+        );
+    }
+
+    /// The shape 2.1.318 printed on cachyos-g14, with the names scrubbed.
+    #[test]
+    fn a_background_agent_with_no_pid_does_not_empty_the_registry() {
+        let raw = br#"[
+          {"id":"b01412b5","cwd":"/srv/repo","kind":"background","startedAt":1789245229327,
+           "sessionId":"b01412b5-0000-4000-8000-000000000000","name":"a task","state":"blocked"},
+          {"pid":2956840,"cwd":"/srv/repo","kind":"interactive","startedAt":1793677761631,
+           "sessionId":"a77f3df9-0000-4000-8000-000000000000","name":"a-session","status":"busy"}
+        ]"#;
+        assert_eq!(
+            registry(raw),
+            [Running {
+                pid: 2_956_840,
+                cwd: "/srv/repo".into(),
+                session_id: "a77f3df9-0000-4000-8000-000000000000".into(),
+                status: "busy".into(),
+            }]
         );
     }
 

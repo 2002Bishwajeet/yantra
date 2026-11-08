@@ -24,6 +24,7 @@ import {
   aboutQuery,
   attentionQuery,
   githubQuery,
+  githubReadinessQuery,
   hereQuery,
   machineReadinessQuery,
   machinesQuery,
@@ -370,6 +371,7 @@ export function useResetOnRouteChange() {
 // than a `Reading`, since nothing about them was looked at over ssh.
 
 export const useGithub = () => useQuery(githubQuery())
+export const useGithubReadiness = () => useReading(githubReadinessQuery())
 export const useRepos = () => useReading(reposQuery())
 export const useNotifications = () => useQuery(notificationsQuery())
 export const useAbout = () => useQuery(aboutQuery())

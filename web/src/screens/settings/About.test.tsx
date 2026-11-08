@@ -21,6 +21,12 @@ describe('About', () => {
     expect(screen.getByText(/persists nothing about the fleet/)).toBeTruthy()
   })
 
+  it('says who can open the dashboard, and names the tailnet', async () => {
+    mountSettings('desktop', '/settings/about', { 'GET /api/about': [200, { ...contract.about, tailnet: 'home.ts.net' }] })
+    expect(await screen.findByText('Only devices on your tailnet can open this dashboard. There is no separate login.')).toBeTruthy()
+    expect(await screen.findByText('Tailnet · home.ts.net')).toBeTruthy()
+  })
+
   it('draws the boundary when the daemon answers something else', async () => {
     mountSettings('desktop', '/settings/about', { 'GET /api/about': [500, 'boom'] })
     expect(await screen.findByText('About could not be drawn')).toBeTruthy()
@@ -150,6 +156,77 @@ describe('About', () => {
         'POST /api/update': [409, 'this box has no /usr/local/bin/yantra-update, so it was not installed by install.sh'],
       })
       expect(await dialog.findByText(/install\.sh/)).toBeTruthy()
+    })
+  })
+  describe('the progress of an update (Y-612)', () => {
+    const updating = (update: unknown) => ({ 'GET /api/about': [200, { ...contract.about, update }] as Answer })
+
+    it('draws the bytes received against the total', async () => {
+      mountSettings('desktop', '/settings/about', updating(contract.updateDownloading))
+      const status = await screen.findByText('Downloading v0.4.0 · 3.1 of 9.8 MB')
+      expect(status.closest('[role="status"]')).toBeTruthy()
+      const bar = screen.getByRole('progressbar', { name: 'Downloaded' })
+      expect(bar.getAttribute('aria-valuenow')).toBe('32')
+      expect(bar.getAttribute('aria-valuetext')).toBe('3.1 of 9.8 MB')
+      expect(screen.queryByRole('button', { name: /^Update to/ })).toBeNull()
+    })
+
+    it('draws the bytes alone when the host sent no length', async () => {
+      mountSettings('desktop', '/settings/about', updating({ ...contract.updateDownloading, total: null }))
+      expect(await screen.findByText('Downloading v0.4.0 · 3.1 MB')).toBeTruthy()
+      expect(screen.queryByRole('progressbar')).toBeNull()
+    })
+
+    it('names the step after the download', async () => {
+      mountSettings('desktop', '/settings/about', updating({ step: 'installing' }))
+      expect((await screen.findByRole('status')).textContent).toBe('Installing the release…')
+    })
+
+    it('draws a failure with what the unit said and the journal command', async () => {
+      mountSettings('desktop', '/settings/about', updating(contract.updateFailed))
+      const surface = within(await screen.findByRole('alert'))
+      expect(surface.getByText('The update failed')).toBeTruthy()
+      expect(surface.getByText('Nothing was installed and nothing restarted.')).toBeTruthy()
+      const said = screen.getByText(/does not match SHA256SUMS/)
+      expect(said.tagName).toBe('PRE')
+      expect(said.textContent).toBe(contract.updateFailed.said)
+      expect(screen.getByText('journalctl -u yantra-update')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Update to v0.4.0' })).toBeTruthy()
+    })
+
+    it('draws a failure that said nothing without an empty block', async () => {
+      mountSettings('desktop', '/settings/about', updating({ step: 'failed', said: '' }))
+      expect(await screen.findByText('The update failed')).toBeTruthy()
+      expect(document.querySelector('pre')).toBeNull()
+    })
+
+    it('follows an update it did not ask for, and offers a reload once the version moved', async () => {
+      let reads = 0
+      mountSettings('desktop', '/settings/about', {
+        'GET /api/about': () => [
+          200,
+          reads++ === 0 ? { ...contract.about, update: { step: 'verifying' } } : { ...contract.about, version: '0.4.0' },
+        ],
+      })
+      expect(await screen.findByText('Checking the archive against SHA256SUMS…')).toBeTruthy()
+      expect(await screen.findByRole('button', { name: 'Reload' }, { timeout: 5_000 })).toBeTruthy()
+      expect(screen.getByRole('status').textContent).toContain('yantrad 0.4.0 is running')
+    })
+
+    it('asks again after a failure and draws the new run', async () => {
+      let asked = false
+      mountSettings('desktop', '/settings/about', {
+        'POST /api/update': () => {
+          asked = true
+          return [202]
+        },
+        'GET /api/about': () => [200, { ...contract.about, update: asked ? { step: 'resolving' } : contract.updateFailed }],
+      })
+      expect(await screen.findByText('The update failed')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Update to v0.4.0' }))
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Update' }))
+      expect(await screen.findByText('Finding the current release…', {}, { timeout: 5_000 })).toBeTruthy()
+      expect(screen.queryByText('The update failed')).toBeNull()
     })
   })
 })

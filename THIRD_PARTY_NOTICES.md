@@ -50,6 +50,15 @@ permission modes, their names and their descriptions from
 [`docs/user/permission-modes.md`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/user/permission-modes.md)
 at commit `72d5c32`. Yantra's default is Supervised, where T3 Code's is Full access.
 
+`Interaction` in [`crates/yantra-core/src/chat.rs`](crates/yantra-core/src/chat.rs) and
+[`web/src/screens/session/PlanToggle.tsx`](web/src/screens/session/PlanToggle.tsx) copy the composer's
+interaction-mode toggle, its glyphs and its words from
+[`apps/web/src/components/chat/ChatComposer.tsx`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/apps/web/src/components/chat/ChatComposer.tsx)
+at commit `72d5c32`, and [`crates/yantra-core/src/claude.rs`](crates/yantra-core/src/claude.rs) copies
+the answer to `ExitPlanMode` from
+[`apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts)
+at the same commit.
+
 [`crates/yantra/src/mcp.rs`](crates/yantra/src/mcp.rs) copies the shapes of `steer_task`, `wait_task`
 and `cancel_task` from
 [`docs/orchestration-v2/orchestrator-mcp-server.md`](https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/docs/orchestration-v2/orchestrator-mcp-server.md)
@@ -71,6 +80,11 @@ and
 with its logic ([`EditorMenu.tsx`](web/src/screens/session/diff/EditorMenu.tsx),
 [`editors.ts`](web/src/screens/session/diff/editors.ts)), on Yantra's own menu, tokens and daemon frames.
 Its name, wordmark and icon are not used.
+
+[`web/src/screens/session/git.ts`](web/src/screens/session/git.ts) adapts, at commit `1451e7c`, the
+commit, push and PR cases of
+[`GitActionsControl.logic.ts`](https://github.com/pingdotgg/t3code/blob/1451e7c/apps/web/src/components/GitActionsControl.logic.ts)
+into typed failures for Yantra's daemon routes. Its name, wordmark and icon are not used.
 
 The composer in [`web/src/composer/`](web/src/composer/) adapts, at commit `810e8f6`, these files of T3 Code,
 each with its upstream path in the block comment at its top:
@@ -98,9 +112,20 @@ and
 [`ExpandedImageDialog.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ExpandedImageDialog.tsx)
 ([`Attachments.tsx`](web/src/composer/Attachments.tsx)),
 [`composerPromptHistory.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/composerPromptHistory.ts)
-and its test ([`history.ts`](web/src/composer/history.ts), [`history.test.ts`](web/src/composer/history.test.ts)), and
+and its test ([`history.ts`](web/src/composer/history.ts), [`history.test.ts`](web/src/composer/history.test.ts)),
 [`composer-logic.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/composer-logic.ts)
-([`keys.ts`](web/src/composer/keys.ts)). Yantra keeps the shapes and writes them on its own tokens and daemon
+([`keys.ts`](web/src/composer/keys.ts), [`trigger.ts`](web/src/composer/trigger.ts)), and
+[`ComposerCommandMenu.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerCommandMenu.tsx)
+([`MentionMenu.tsx`](web/src/composer/MentionMenu.tsx), [`MentionMenu.css`](web/src/composer/MentionMenu.css)). The
+skill roots in [`mention.rs`](crates/yantra-core/src/mention.rs) for Claude match T3 Code's
+[`ClaudeSkills.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/server/src/provider/Drivers/ClaudeSkills.ts).
+The slash command ranking in [`searchCommands.ts`](web/src/composer/searchCommands.ts) adapts
+[`composerSlashCommandSearch.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/composerSlashCommandSearch.ts)
+and
+[`searchRanking.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/packages/shared/src/searchRanking.ts),
+and [`command.rs`](crates/yantra-core/src/command.rs) re-expresses the `initialize` probe and the list's clean-up in
+[`ClaudeProvider.ts`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/server/src/provider/ClaudeProvider.ts).
+Yantra keeps the shapes and writes them on its own tokens and daemon
 frames, and leaves out what the daemon does not back. From `ComposerControl.tsx` it copies `ComposerControl`, `Icon`,
 `Chevron` and `Separator`; it leaves out `SelectControl`, which nothing in Yantra uses. Its name, wordmark and icon
 are not used.

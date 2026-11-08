@@ -12,6 +12,7 @@
 # YANTRA_JOIN_ANSWER=y (or n) answers every question at once, for a test or a
 # run with no terminal. With neither, it takes no step that needs root.
 set -eu
+# Each case pattern opens with `(`: bash 3.2 ends a `$(…)` at an unpaired `)` (Y-635).
 
 # yantrad writes these three when it serves this script.
 DAEMON='__YANTRA_DAEMON__'
@@ -38,8 +39,8 @@ ask() {
         answer=n
     fi
     case "$answer" in
-    y | Y | yes | Yes | YES) return 0 ;;
-    *) return 1 ;;
+    (y | Y | yes | Yes | YES) return 0 ;;
+    (*) return 1 ;;
     esac
 }
 
@@ -56,7 +57,7 @@ command -v curl >/dev/null 2>&1 || fail "curl is not installed"
 
 user=$(id -un)
 case "$user" in
-'' | -* | .* | *[!A-Za-z0-9._-]*)
+('' | -* | .* | *[!A-Za-z0-9._-]*)
     fail "the account name '$user' cannot go into an ssh config, so Yantra cannot log in as it"
     ;;
 esac
@@ -64,8 +65,8 @@ esac
 
 os=$(uname -s)
 case "$os" in
-Linux | Darwin) ;;
-*) fail "$os is not a machine Yantra runs sessions on yet" ;;
+(Linux | Darwin) ;;
+(*) fail "$os is not a machine Yantra runs sessions on yet" ;;
 esac
 
 pm=
@@ -78,13 +79,13 @@ done
 
 install_packages() {
     case "$pm" in
-    apt-get) as_root apt-get update -q && as_root apt-get install -y "$@" ;;
-    dnf) as_root dnf install -y "$@" ;;
-    pacman) as_root pacman -S --needed --noconfirm "$@" ;;
-    zypper) as_root zypper --non-interactive install "$@" ;;
-    apk) as_root apk add "$@" ;;
-    brew) brew install "$@" ;;
-    *) return 1 ;;
+    (apt-get) as_root apt-get update -q && as_root apt-get install -y "$@" ;;
+    (dnf) as_root dnf install -y "$@" ;;
+    (pacman) as_root pacman -S --needed --noconfirm "$@" ;;
+    (zypper) as_root zypper --non-interactive install "$@" ;;
+    (apk) as_root apk add "$@" ;;
+    (brew) brew install "$@" ;;
+    (*) return 1 ;;
     esac
 }
 
@@ -238,9 +239,9 @@ linux_agent() {
         return 0
     fi
     case "$(uname -m)" in
-    aarch64 | arm64) target=aarch64-unknown-linux-musl ;;
-    x86_64 | amd64) target=x86_64-unknown-linux-musl ;;
-    *)
+    (aarch64 | arm64) target=aarch64-unknown-linux-musl ;;
+    (x86_64 | amd64) target=x86_64-unknown-linux-musl ;;
+    (*)
         say "no yantra-agent is built for $(uname -m)."
         return 0
         ;;
@@ -272,6 +273,29 @@ linux_agent() {
     say "yantra-agent is running, and reports to $DAEMON."
 }
 
+# yantrad puts tmux.rs's login_server.sh here when it serves this script.
+__YANTRA_LOGIN_SERVER__
+
+# ADR-0018 §7: the tmux server Yantra's sessions run in, started by the login
+# session so that their panes can read the keychain.
+mac_tmux() {
+    if ! tmux=$(command -v tmux); then
+        say "tmux is not here, so its LaunchAgent waits until a session starts."
+        return 0
+    fi
+    # A server that ran before the job may not be in the login session.
+    before=no
+    "$tmux" ls >/dev/null 2>&1 && before=yes
+    status=0
+    login_server "$tmux" || status=$?
+    case "$status:$before" in
+    (0:no) say "tmux runs in your login session, from $plist." ;;
+    (0:yes) say "tmux's LaunchAgent is $plist. A tmux server was already running, so the LaunchAgent starts the next one when it stops." ;;
+    (3:*) say "no one is logged in at this Mac's screen, so tmux's LaunchAgent waits until a session starts." ;;
+    (*) say "tmux's LaunchAgent did not start a server. Yantra tries again when a session starts." ;;
+    esac
+}
+
 # A LaunchAgent in this person's own login session (ADR-0018 §7's domain), so
 # it needs no root. Not measured on a Mac yet.
 mac_agent() {
@@ -282,8 +306,8 @@ mac_agent() {
         return 0
     fi
     case "$(uname -m)" in
-    arm64) target=aarch64-apple-darwin ;;
-    *) target=x86_64-apple-darwin ;;
+    (arm64) target=aarch64-apple-darwin ;;
+    (*) target=x86_64-apple-darwin ;;
     esac
     bin=$HOME/.local/bin/yantra-agent
     say "yantra-agent is the heartbeat that tells the dashboard this Mac is awake."
@@ -334,8 +358,8 @@ report() {
         exit 1
     else
         case "$body" in
-        *'"kept":true'*) say "yantrad's ssh config already named this machine as $user, and kept that block." ;;
-        *) say "yantrad now logs in here as $user." ;;
+        (*'"kept":true'*) say "yantrad's ssh config already named this machine as $user, and kept that block." ;;
+        (*) say "yantrad now logs in here as $user." ;;
         esac
     fi
 }
@@ -346,8 +370,8 @@ browser_needed() {
     say "testing a real login from the appliance, which can take a minute."
     reply=$(curl -sS --max-time 120 -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 1
     case "$reply" in
-    *'Tailscale SSH requires an additional check'*) return 0 ;;
-    *) return 1 ;;
+    (*'Tailscale SSH requires an additional check'*) return 0 ;;
+    (*) return 1 ;;
     esac
 }
 
@@ -368,6 +392,10 @@ use_sshd_instead() {
     fi
     as_root tailscale set --ssh=false
     say "Tailscale SSH is off, and the appliance logs in with its key."
+    # sshd answers with another host key, which yantrad would refuse as changed.
+    if ! curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
+        say "yantrad kept Tailscale SSH's old host key, so its next check fails on a changed key. Run sudo -u yantra -H yantra forget-host-key $machine on the appliance."
+    fi
     if browser_needed; then
         fail "the appliance still cannot log in. The dashboard's Check says why."
     fi
@@ -390,6 +418,7 @@ fi
 place_key
 basics
 if [ "$os" = Darwin ]; then
+    mac_tmux
     mac_agent
 else
     linux_agent

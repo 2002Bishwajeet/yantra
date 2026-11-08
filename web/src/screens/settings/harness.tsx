@@ -37,6 +37,7 @@ const fleet: Answers = {
   'GET /api/here': [200, { machine: null }],
   'GET /api/ssh-identity': [200, contract.sshIdentity],
   'GET /api/github': [200, contract.github],
+  'GET /api/readiness/github': [200, contract.githubReadiness],
   'POST /api/viewing': [204],
 }
 

@@ -1,7 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
-import { Bell, Bot, Info, KeyRound, Palette, Plug, SlidersHorizontal } from 'lucide-react'
+import { Bell, Bot, Info, Palette, Plug, SlidersHorizontal } from 'lucide-react'
 import { About } from './About'
-import { Access } from './Access'
 import { Agents } from './Agents'
 import { Appearance } from './Appearance'
 import { General } from './General'
@@ -18,7 +17,7 @@ export type Category = {
   Screen: ComponentType
 }
 
-/** The register's seven categories, in the boards' order. */
+/** The register's six categories, in the boards' order. */
 export const CATEGORIES: readonly Category[] = [
   {
     id: 'general',
@@ -59,14 +58,6 @@ export const CATEGORIES: readonly Category[] = [
     icon: <Palette />,
     blurb: 'how the dashboard looks on this device',
     Screen: Appearance,
-  },
-  {
-    id: 'access',
-    label: 'Access',
-    group: 'Appliance',
-    icon: <KeyRound />,
-    blurb: 'The key the daemon holds, and who can reach the dashboard. There is no login.',
-    Screen: Access,
   },
   {
     id: 'about',

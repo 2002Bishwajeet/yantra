@@ -539,6 +539,14 @@
   min-height: 48px;
 }
 
+.dash__setup-configured {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 24px;
+}
+
 .dash__setup-text {
   display: flex;
   flex-direction: column;

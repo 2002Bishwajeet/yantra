@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
+import { aMachine, looked } from '@/api/fixtures'
+import type { Readiness } from '@/api'
 import { writePrefs } from '@/shell/prefs'
+import { READY } from '@/lib/ready'
 import { type Answers, HOME, listing, mountNew, resize, unmountNew } from './harness'
 
 afterEach(() => {
@@ -45,25 +48,48 @@ describe('step 1, the name and the machine', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
-  /** The boards name four steps and draw three panels: leaving the first
-   *  ticks Name and Machine together (NewSession, NewSessionSource). */
-  it('names the boards four steps, and ticks two of them at once', async () => {
+  it('names three steps, one per screen', async () => {
     mountNew('desktop', '/new')
     await screen.findByRole('dialog', { name: 'New session' })
     const steps = () => within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')
-    expect(steps().map((one) => one.textContent)).toEqual(['1Name', '2Machine', '3Source', '4Start'])
+    const states = () => steps().map((one) => one.getAttribute('data-state'))
+    expect(steps().map((one) => one.textContent)).toEqual(['1Name', '2Source', '3Start'])
     expect(steps()[0].getAttribute('aria-current')).toBe('step')
+    expect(states()).toEqual(['current', 'ahead', 'ahead'])
 
     type('Name', 'quiet-otter')
     press('cachyos-g14')
     press('Continue')
     await screen.findByText('On this machine')
-    expect(steps().map((one) => one.getAttribute('data-state'))).toEqual([
-      'done',
-      'done',
-      'current',
-      'ahead',
-    ])
+    expect(states()).toEqual(['done', 'current', 'ahead'])
+
+    press(/2002Bishwajeet\/yantra/)
+    press('Continue')
+    await screen.findByText('What opens in the session')
+    expect(states()).toEqual(['done', 'done', 'current'])
+  })
+
+  it('offers no chip for a node that runs no session, and ignores a preset naming one', async () => {
+    const nodes = [
+      aMachine({ name: 'an-iphone', os: 'iOS' }),
+      aMachine({ name: 'a-pixel', os: 'android' }),
+      aMachine({ name: 'a-desktop', os: 'windows' }),
+    ]
+    mountNew('desktop', '/new?machine=an-iphone', {
+      'GET /api/machines': [
+        200,
+        {
+          ...contract.machines,
+          data: [...contract.machines.data.map((one) => ({ ...one, hub: false })), ...nodes],
+        },
+      ],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    const chips = within(screen.getByRole('group', { name: 'Machine' }))
+    expect(chips.getByRole('button', { name: 'cachyos-g14' })).toBeTruthy()
+    for (const node of nodes) expect(chips.queryByRole('button', { name: new RegExp(node.name) })).toBeNull()
+    // The preset names a node that is not offered, so it selects nothing.
+    expect(chips.queryByRole('button', { pressed: true, name: /an-iphone/ })).toBeNull()
   })
 
   it('takes one machine, and never one that is not there', async () => {
@@ -164,6 +190,41 @@ describe('step 2, where the code comes from', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
+  it('says GitHub refused the grant, and lists nothing, when the readiness is absent', async () => {
+    mountNew('desktop', '/new', { 'GET /api/readiness/github': [200, contract.githubRefused] })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    expect(await screen.findByText('GitHub refused the grant')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Sign in again in Settings' }).getAttribute('href')).toBe(
+      '/settings/providers',
+    )
+    expect(screen.queryByText(/private repositories included/)).toBeNull()
+    expect(screen.queryByRole('list', { name: 'Repositories' })).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  })
+
+  it('keeps the list, without the private claim, while GitHub has not been asked', async () => {
+    mountNew('desktop', '/new', {
+      'GET /api/readiness/github': [200, { looked: 'failed', age_seconds: 0, error: 'timeout' }],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    expect(await screen.findByRole('list', { name: 'Repositories' })).toBeTruthy()
+    expect(screen.getByText(/GitHub not asked yet/)).toBeTruthy()
+    expect(screen.queryByText(/private repositories included/)).toBeNull()
+  })
+
+  it('still says private repositories are included for an accepted grant', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    expect(await screen.findByText(/private repositories included/)).toBeTruthy()
+  })
+
   it('does not tell anyone to choose from a list that failed to load', async () => {
     mountNew('desktop', '/new', {
       'GET /api/repos': [200, { looked: 'failed', age_seconds: 0, error: 'rate limited' }],
@@ -237,22 +298,60 @@ describe('step 2, the local browser', () => {
     await waitFor(() => expect(folders.queryByText('.config')).toBeNull())
   })
 
-  it('draws files and closed folders, marked, and neither is a choice', async () => {
+  it('draws closed folders, marked, and no files', async () => {
     const { folders, sent } = await toLocal()
-    const file = await folders.findByText('todo.txt')
-    const closed = folders.getByText('private')
-    expect(folders.getByText('file')).toBeTruthy()
+    const closed = await folders.findByText('private')
+    expect(folders.queryByText('todo.txt')).toBeNull()
     expect(folders.getByText('no access')).toBeTruthy()
-    expect(file.closest('button')).toBeNull()
     expect(closed.closest('button')).toBeNull()
-    expect(folders.queryByRole('button', { name: /^(todo\.txt|private)/ })).toBeNull()
+    expect(folders.queryByRole('button', { name: /^private/ })).toBeNull()
 
     const before = sent.length
-    fireEvent.click(file)
     fireEvent.click(closed)
-    // Nothing was asked and nothing was chosen: the folder is still $HOME.
+    // Nothing was asked and nothing was chosen.
     expect(sent).toHaveLength(before)
-    expect(screen.getAllByText('~').length).toBeGreaterThan(0)
+    expect(document.querySelector('.ns__chosen')).toBeNull()
+  })
+
+  it('says "no folders here" when a folder holds files and no folders', async () => {
+    const only = { ...listing(`${HOME}/Github`), entries: [{ path: `${HOME}/Github/README.md`, name: 'README.md', kind: 'file', access: true, repo: false, origin: null }] }
+    const { folders } = await toLocal({
+      'POST /api/machines/cachyos-g14/dirs': (body) => [200, body.path === `${HOME}/Github` ? only : listing(String(body.path ?? HOME))],
+    })
+    fireEvent.click(await folders.findByRole('button', { name: /^Github/ }))
+    expect(await folders.findByText('no folders here')).toBeTruthy()
+    expect(folders.queryByText('README.md')).toBeNull()
+  })
+
+  it('chooses nothing until the person walks or presses Use', async () => {
+    const { folders } = await toLocal()
+    await folders.findByRole('button', { name: /^Github/ })
+    expect(document.querySelector('.ns__chosen')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use ~' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false))
+    expect(document.querySelector('.ns__chosen')?.textContent).toContain('~')
+  })
+
+  it('chooses a folder by walking into it', async () => {
+    const { folders } = await toLocal()
+    fireEvent.click(await folders.findByRole('button', { name: /^Github/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false))
+    expect(document.querySelector('.ns__chosen')?.textContent).toContain('~/Github')
+  })
+
+  it('writes the missing line and the new-folder hint with ~', async () => {
+    const { folders } = await toLocal({
+      'POST /api/machines/cachyos-g14/probe': [200, { machine: 'cachyos-g14', path: `${HOME}/Github/nope`, exists: false, origin: null }],
+    })
+    await folders.findByRole('button', { name: /^Github/ })
+    expect(screen.getByText('under ~/')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit path' }))
+    const field = screen.getByLabelText('Path')
+    fireEvent.change(field, { target: { value: '~/Github/nope' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(await screen.findByText(/has no directory at ~\/Github\/nope\./)).toBeTruthy()
   })
 
   it('walks above $HOME to / and into another folder there', async () => {
@@ -307,14 +406,30 @@ describe('step 2, the local browser', () => {
 describe('step 3, what opens in the session', () => {
   it('starts Claude unless a command is typed, and says what will happen', async () => {
     await toStepThree()
-    expect(screen.getByText(/^open a tmux session on cachyos-g14/)).toBeTruthy()
-    expect(screen.getByText(/start Claude in it/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'When you press Create and open' })).toBeTruthy()
+    expect(screen.getByText(/^It opens a session in/)).toBeTruthy()
+    expect(screen.getByText(/Claude starts there/)).toBeTruthy()
 
-    press(/A command/)
+    press(/Your command/)
     expect(screen.getByRole('button', { name: 'Create and open' })).toHaveProperty('disabled', true)
     type('Command', 'just dev')
-    await waitFor(() => expect(screen.getByText(/^run just dev in it/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/^just dev runs there/)).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Create and open' })).toHaveProperty('disabled', false)
+  })
+
+  it('heads the dialog with the machine and the folder as the list draws it', async () => {
+    await toStepThree()
+    const description = screen.getByRole('dialog').getAttribute('aria-describedby')
+    const text = document.getElementById(description ?? '')?.textContent ?? ''
+    expect(text).toBe('on cachyos-g14 · ~/Github/yantra')
+    expect(text).not.toContain('/home/biswa')
+  })
+
+  it('offers two options and no placeholder for another agent', async () => {
+    await toStepThree()
+    const group = screen.getByRole('group', { name: 'What opens in the session' })
+    expect(within(group).getAllByRole('button')).toHaveLength(2)
+    expect(screen.queryByText('Another agent')).toBeNull()
   })
 })
 
@@ -376,6 +491,106 @@ describe('step 4, starting', () => {
     expect(screen.getByText(/Creating workspace quiet-otter was refused/)).toBeTruthy()
     press('Try again')
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2))
+  })
+})
+
+/** Y-631: a Mac with no login tmux server refuses the session, and the screen
+ *  says why in full and offers the Terminal command. */
+describe('a Mac with no login tmux server (Y-631)', () => {
+  const UP_SAID =
+    '`cachyos-g14` runs macOS and has no tmux server, and Yantra will not start one there: panes in a server started over ssh cannot read the login keychain, so the agent would come up unauthenticated. Start one from a login session on that machine — in Terminal: `tmux new-session -d`'
+  const DOCTOR_SAID =
+    'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal there: `tmux new-session -d`'
+  const MAC = 'bishwajeets-macbook-pro'
+  const writeText = vi.fn<(text: string) => Promise<void>>()
+  const stubClipboard = (clipboard: unknown) =>
+    Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true })
+  afterEach(() => {
+    writeText.mockReset()
+    Reflect.deleteProperty(navigator, 'clipboard')
+  })
+
+  const refuse = (status = 409, said = UP_SAID) => ({
+    'POST /api/workspaces': (sent: Record<string, unknown>): [number, unknown] => [201, { ...sent, startup: null }],
+    'POST /api/workspaces/quiet-otter/up': [status, said] as [number, unknown],
+  })
+
+  it('shows the whole sentence, and a Copy button that copies the command', async () => {
+    writeText.mockResolvedValue()
+    stubClipboard({ writeText })
+    await toStepThree(refuse())
+    press('Create and open')
+
+    expect(await screen.findByText(UP_SAID)).toBeTruthy()
+    expect(screen.getByText(/In Terminal on cachyos-g14, run this, then Try again/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    press(/Copy the Terminal command/)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('tmux new-session -d'))
+    expect(await screen.findByRole('button', { name: /Copied the Terminal command/ })).toBeTruthy()
+  })
+
+  it('selects the command and says so when the clipboard refuses', async () => {
+    writeText.mockRejectedValue(new Error('denied'))
+    stubClipboard({ writeText })
+    await toStepThree(refuse())
+    press('Create and open')
+    await screen.findByText(UP_SAID)
+    press(/Copy the Terminal command/)
+    expect(await screen.findByText(/this page has no clipboard/)).toBeTruthy()
+  })
+
+  it('offers no command for a refusal that is not this one', async () => {
+    await toStepThree(refuse(409, 'workspace `quiet-otter` opens at `/x`, and `cachyos-g14` has no such directory'))
+    press('Create and open')
+    await screen.findByText(/has no such directory/)
+    expect(screen.queryByRole('button', { name: /Copy/ })).toBeNull()
+  })
+
+  const withMac = (checks: { check: string; state: string; detail: string }[] | 'failed'): Answers => ({
+    'GET /api/machines': [
+      200,
+      {
+        ...contract.machines,
+        data: contract.machines.data.map((one) =>
+          one.name === MAC ? { ...one, online: true, os: 'macOS', hub: false } : { ...one, hub: false },
+        ),
+      },
+    ],
+    'GET /api/readiness': [
+      200,
+      checks === 'failed'
+        ? { looked: 'failed', age_seconds: 0, error: 'ssh: nothing' }
+        : { looked: 'ok', age_seconds: 0, data: [{ machine: MAC, age_seconds: 0, checks }] },
+    ],
+  })
+  const noServer = [
+    { check: 'login-session', state: 'absent', detail: DOCTOR_SAID },
+    { check: 'tmux', state: 'present', detail: '' },
+  ]
+
+  it('warns on the Machine step, with the command, when the chosen Mac has no login server', async () => {
+    mountNew('desktop', '/new', withMac(noServer))
+    await screen.findByRole('dialog', { name: 'New session' })
+    press(MAC)
+    expect(await screen.findByText(/has no tmux server from a login session, so a session cannot start there yet/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Copy the Terminal command/ })).toBeTruthy()
+  })
+
+  it('warns of nothing for a ready Linux machine', async () => {
+    mountNew('desktop', '/new', withMac(noServer))
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'cachyos-g14', pressed: true })).toBeTruthy())
+    expect(screen.queryByText(/cannot start there yet/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Copy/ })).toBeNull()
+  })
+
+  it('warns of nothing when the readiness sweep failed, because unknown is not absent', async () => {
+    mountNew('desktop', '/new', withMac('failed'))
+    await screen.findByRole('dialog', { name: 'New session' })
+    press(MAC)
+    await waitFor(() => expect(screen.getByRole('button', { name: MAC, pressed: true })).toBeTruthy())
+    expect(screen.queryByText(/cannot start there yet/)).toBeNull()
   })
 })
 
@@ -533,16 +748,51 @@ describe('the suggested machine (Y-517)', () => {
     reason,
     ...(path ? { path } : {}),
   })
+  // Every placed machine is checked ready, so the plain Y-517 words hold.
+  const readyReport = (machine: string, ok = true) => ({
+    machine,
+    age_seconds: 0,
+    checks: READY.map((check) => ({ check, state: ok ? 'present' : 'absent', detail: '' })),
+  })
   const ranked = (...machines: ReturnType<typeof placed>[]): Answers => ({
     'POST /api/placement': [200, { ranked: machines, rejected: [] }],
+    'GET /api/readiness': [
+      200,
+      { looked: 'ok', age_seconds: 0, data: machines.map((one) => readyReport(one.machine)) },
+    ],
   })
 
   it('preselects the top machine and says why, and Continue enables with a name', async () => {
     mountNew('desktop', '/new', ranked(placed('pi', 45, 'it is idle and it has RAM to spare'), placed('cachyos-g14', 20, 'x')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(screen.getByRole('status').textContent).toBe('pi suggested: it is idle and it has RAM to spare')
+    expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle and it has RAM to spare')
     type('Name', 'quiet-otter')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
+  })
+
+  it('says the top machine is not checked yet when the sweep has no report for it', async () => {
+    mountNew('desktop', '/new', {
+      ...ranked(placed('pi', 45, 'it is idle')),
+      'GET /api/readiness': [200, { looked: 'ok', age_seconds: 0, data: [] }],
+    })
+    await waitFor(() => expect(pressed()).toEqual(['pi']))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle · not checked yet'))
+  })
+
+  it('says the top machine is not ready yet when its report is not ready', async () => {
+    mountNew('desktop', '/new', {
+      ...ranked(placed('pi', 45, 'it is idle')),
+      'GET /api/readiness': [200, { looked: 'ok', age_seconds: 0, data: [readyReport('pi', false)] }],
+    })
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle · not ready yet'))
+  })
+
+  it('keeps the plain words while the sweep has not been read', async () => {
+    mountNew('desktop', '/new', {
+      ...ranked(placed('pi', 45, 'it is idle')),
+      'GET /api/readiness': [200, { looked: 'failed', age_seconds: 0, error: 'ssh: nothing' }],
+    })
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle'))
   })
 
   it('takes the first of a tie, which the daemon sorts by name', async () => {
@@ -552,7 +802,7 @@ describe('the suggested machine (Y-517)', () => {
 
   it('does not preselect a machine whose chip cannot be pressed', async () => {
     mountNew('desktop', '/new', ranked(placed('bishwajeets-macbook-pro', 45, 'it is idle')))
-    expect(await screen.findByText('bishwajeets-macbook-pro suggested: it is idle')).toBeTruthy()
+    expect(await screen.findByText('Suggested: bishwajeets-macbook-pro, because it is idle')).toBeTruthy()
     expect(pressed()).toEqual([])
   })
 
@@ -563,21 +813,21 @@ describe('the suggested machine (Y-517)', () => {
         { ranked: [], rejected: [{ machine: 'bishwajeets-macbook-pro', why: 'asleep_or_off' }] },
       ],
     })
-    expect(await screen.findByText('no machine reports a heartbeat, so none is suggested')).toBeTruthy()
+    expect(await screen.findByText('No machine reports a heartbeat, so none is suggested.')).toBeTruthy()
     expect(pressed()).toEqual([])
   })
 
   it('yields to ?machine= and to a default machine', async () => {
     mountNew('desktop', '/new?machine=pi', ranked(placed('cachyos-g14', 45, 'it is idle')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(await screen.findByText('cachyos-g14 suggested: it is idle')).toBeTruthy()
+    expect(await screen.findByText('Suggested: cachyos-g14, because it is idle')).toBeTruthy()
     expect(pressed()).toEqual(['pi'])
     cleanup()
     unmountNew()
 
     writePrefs({ general: { defaultMachine: 'pi' } })
     mountNew('desktop', '/new', ranked(placed('cachyos-g14', 45, 'it is idle')))
-    await screen.findByText('cachyos-g14 suggested: it is idle')
+    await screen.findByText('Suggested: cachyos-g14, because it is idle')
     await waitFor(() => expect(pressed()).toEqual(['pi']))
   })
 
@@ -590,14 +840,14 @@ describe('the suggested machine (Y-517)', () => {
   it('skips a top machine whose chip cannot be pressed, and names the one it picks', async () => {
     mountNew('desktop', '/new', ranked(placed('bishwajeets-macbook-pro', 60, 'it is idle'), placed('pi', 45, 'it has RAM to spare')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(screen.getByRole('status').textContent).toBe('pi suggested: it has RAM to spare')
+    expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it has RAM to spare')
   })
 
   it('never overwrites a pick made by hand', async () => {
     mountNew('desktop', '/new', ranked(placed('cachyos-g14', 45, 'it is idle')))
     await screen.findByRole('group', { name: 'Machine' })
     press('pi')
-    await screen.findByText('cachyos-g14 suggested: it is idle')
+    await screen.findByText('Suggested: cachyos-g14, because it is idle')
     expect(pressed()).toEqual(['pi'])
   })
 
@@ -615,7 +865,7 @@ describe('the suggested machine (Y-517)', () => {
     press('cachyos-g14')
     expect(pressed()).toEqual(['cachyos-g14'])
     fireEvent.click(within(alert).getByRole('button', { name: 'Ask again' }))
-    expect(await screen.findByText('no machine reports a heartbeat, so none is suggested')).toBeTruthy()
+    expect(await screen.findByText('No machine reports a heartbeat, so none is suggested.')).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(asked.filter((one) => one === 'POST /api/placement')).toHaveLength(2)
   })
@@ -644,7 +894,7 @@ describe('the suggested machine (Y-517)', () => {
     await waitFor(() => expect(within(dialog).getByText('on pi')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Use pi' })).toBeNull()
     press('Continue')
-    expect(await screen.findByText('on pi · 2002Bishwajeet/yantra')).toBeTruthy()
+    expect(await screen.findByText('on pi · /srv/yantra')).toBeTruthy()
   })
   it.each([
     ['an unreachable machine', [placed('bishwajeets-macbook-pro', 80, 'the repo is there', '/srv/y'), placed('cachyos-g14', 45, 'it is idle')]],
@@ -666,5 +916,91 @@ describe('the suggested machine (Y-517)', () => {
     await waitFor(() => expect(answered).toBe(true))
     await new Promise((done) => setTimeout(done, 50))
     expect(screen.queryByRole('button', { name: /^Use / })).toBeNull()
+  })
+})
+
+/** Y-627: the hub is the daemon's own host, so it is offered once an account on it has joined. */
+describe('the hub (Y-627)', () => {
+  const box = aMachine({ name: 'yantra-box', hub: true, address: '100.64.0.9' })
+  const machines = () => looked.ok([...contract.machines.data.map((one) => ({ ...one, hub: false })), box])
+  const said = (state: 'present' | 'absent', detail: string): Readiness => ({
+    machine: box.name,
+    age_seconds: 0,
+    checks: [{ check: 'reachable', state, detail }],
+  })
+  const swept = (report: Readiness | null) =>
+    looked.ok<Readiness[]>([...contract.readiness.data, ...(report ? [report] : [])] as Readiness[])
+  const mount = (readiness: unknown, path = '/new', more: Answers = {}) =>
+    mountNew('desktop', path, {
+      'GET /api/machines': [200, machines()],
+      'GET /api/readiness': [200, readiness],
+      'GET /api/about': [200, contract.about],
+      'POST /api/placement': [200, { ranked: [], rejected: [] }],
+      ...more,
+    })
+  const group = async () => within(await screen.findByRole('group', { name: 'Machine' }))
+  const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
+
+  it('gives a hub that ssh gets into a pressable chip, and no note', async () => {
+    mount(swept(said('present', 'a command ran there')))
+    const chips = await group()
+    await waitFor(() => expect(chips.getByRole('button', { name: 'yantra-box' })).toBeTruthy())
+    expect(chips.getByRole('button', { name: 'yantra-box' })).toHaveProperty('disabled', false)
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+
+  it.each([
+    ['Permission denied (publickey)'],
+    ['the ssh config here names no account for yantra-box, so ssh tried `yantra`'],
+  ])('draws no chip for a hub that said %j, and names the join step', async (detail) => {
+    mount(swept(said('absent', detail)))
+    const chips = await group()
+    const note = await screen.findByRole('note')
+    expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
+    expect(note.textContent).toMatch(/after an account on it joins/)
+    expect(note.textContent).toMatch(/separate account without sudo/)
+    expect(await within(note).findByText(COMMAND)).toBeTruthy()
+    expect(within(note).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+  })
+
+  it('draws no chip and a note for a hub no report speaks of', async () => {
+    mount(swept(null))
+    const chips = await group()
+    expect((await screen.findByRole('note')).textContent).toMatch(/without sudo/)
+    expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
+  })
+
+  it('does not preselect a ?machine= hub that has not joined', async () => {
+    mount(swept(said('absent', 'Permission denied (publickey)')), '/new?machine=yantra-box')
+    await screen.findByRole('note')
+    type('Name', 'quiet-otter')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  })
+
+  it('preselects a ?machine= hub that has joined', async () => {
+    mount(swept(said('present', '')), '/new?machine=yantra-box')
+    const chips = await group()
+    await waitFor(() => expect(chips.getByRole('button', { name: 'yantra-box' }).getAttribute('aria-pressed')).toBe('true'))
+  })
+
+  it('draws no hub chip when the readiness read failed, and says so in the note', async () => {
+    mount(looked.failed('the sweep did not run'))
+    const chips = await group()
+    expect(await screen.findByRole('note')).toBeTruthy()
+    expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
+  })
+
+  it('draws a skeleton, no chip and no note while readiness is still pending', async () => {
+    mount(null, '/new', { 'GET /api/readiness': () => new Promise<never>(() => {}) })
+    await screen.findByRole('dialog', { name: 'New session' })
+    expect(screen.queryByRole('group', { name: 'Machine' })).toBeNull()
+    expect(screen.queryByRole('note')).toBeNull()
+  })
+
+  it('gives the note without the command when /api/about is missing', async () => {
+    mount(swept(said('absent', 'Permission denied (publickey)')), '/new', { 'GET /api/about': [404, 'gone'] })
+    const note = await screen.findByRole('note')
+    expect(note.textContent).toMatch(/without sudo/)
+    expect(within(note).queryByText(/curl -fsSL/)).toBeNull()
   })
 })

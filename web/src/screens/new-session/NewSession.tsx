@@ -1,8 +1,11 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '@tanstack/react-form'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
-import { useGithub, useMachines, useRepos } from '@/api/hooks'
+import { dirsQuery } from '@/api/queries'
+import { useGithub, useGithubReadiness, useMachines, useRepos } from '@/api/hooks'
+import { grant } from '@/lib/github'
 import type { Step } from '@/router'
 import { Button } from '@/m3/button/Button'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
@@ -15,11 +18,12 @@ import { useFormFactor } from '@/shell/formFactor'
 import { usePrefs } from '@/shell/prefs'
 import { readGeneral } from '@/screens/settings/general'
 import { useCloneFolder } from './clonePath'
-import { complete, pickMachine, plan, type Plan, reachable, sourceHint, STEPS, type Values } from './form'
+import { complete, pickMachine, plan, type Plan, reachable, sourceHint, STEPS, tilde, type Values } from './form'
 import { Starting } from './Starting'
 import { StepName } from './StepName'
 import { StepSource } from './StepSource'
 import { StepStart } from './StepStart'
+import { useOffered } from './useOffered'
 import { useSessionForm } from './useSessionForm'
 import { generateName } from './words'
 import './NewSession.css'
@@ -40,7 +44,9 @@ function SourceHint(props: { values: Values }) {
   const { root, home } = useCloneFolder(props.values.machine)
   const github = useGithub()
   const repos = useRepos()
-  const listed = !github.error && github.data?.connected === true && repos.looked === 'ok' && !home.error
+  const refused = grant(github.data, useGithubReadiness()).kind === 'refused'
+  const listed =
+    !github.error && github.data?.connected === true && !refused && repos.looked === 'ok' && !home.error
   const hint = sourceHint(props.values, root, listed)
   return (
     <Text className="ns__hint" id={HINT_ID} render={<p role="status" />} scale="body-medium" tone="variant">
@@ -84,21 +90,23 @@ export function NewSession() {
   // The list can arrive after mount, so the preset is resolved once it reads
   // ok; a pick made meanwhile is never overwritten.
   const machines = useMachines()
+  const { shown, waiting } = useOffered()
   const seeded = useRef(false)
   useEffect(() => {
-    if (seeded.current || machines.looked !== 'ok') return
+    // A hub is offered only once readiness shows an account on it joined (Y-627).
+    if (seeded.current || machines.looked !== 'ok' || waiting) return
     seeded.current = true
-    const picked = pickMachine(preset, machines.data)
+    const picked = pickMachine(preset, shown)
     if (picked !== '' && form.getFieldValue('machine') === '') form.setFieldValue('machine', picked)
-  }, [machines, preset, form])
+  }, [machines.looked, waiting, shown, preset, form])
 
   // A step the values do not reach yet draws the first one that is unfinished.
   const step = Math.min(requested, starting ? 4 : Math.min(3, reachable(values))) as Step
   const go = (to: Step) => void navigate({ to: '/new', search: { step: to } })
 
   const source = values.source
-  const sourceLabel =
-    source?.kind === 'github' ? source.repo.full_name : source ? source.path : null
+  const home = useQuery({ ...dirsQuery(values.machine, null), enabled: true })
+  const sourceLabel = source ? tilde(source.path, home.data?.path ?? null) : null
   const on = `on ${values.machine}${step === 3 && sourceLabel ? ` · ${sourceLabel}` : ''}`
 
   // The body is portalled into one host node that moves between the page and
@@ -129,7 +137,7 @@ export function NewSession() {
           {...(step === 1
             ? {
                 title: 'New session',
-                description: 'a name, a machine, a repository, and what to start in it',
+                description: 'A name, a machine, a repository, and what to start in it',
               }
             : {
                 leading: <Tile className="ns-dialog__tile" name={values.name} />,
@@ -166,7 +174,7 @@ export function NewSession() {
         <header className="ns__head">
           {step === 1 ? (
             <Text render={<p />} className="ns__lead" scale="body-medium" tone="variant">
-              a name, a machine, a repository, and what to start in it
+              A name, a machine, a repository, and what to start in it
             </Text>
           ) : (
             <p className="ns__recap">
@@ -182,9 +190,7 @@ export function NewSession() {
         </header>
       ) : null}
 
-      {/* Panel 1 answers labels 1 and 2, so step 2 is at label 3 and step 3
-          at label 4 (NewSession, NewSessionSource, NewSessionStart). */}
-      <Stepper className="ns__stepper" current={step === 1 ? 0 : step} steps={STEPS} />
+      <Stepper className="ns__stepper" current={step - 1} steps={STEPS} />
 
       {step === 1 ? <StepName form={form} preset={preset} values={values} /> : null}
       {step === 2 ? <StepSource form={form} values={values} /> : null}

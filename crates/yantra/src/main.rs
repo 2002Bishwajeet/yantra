@@ -22,6 +22,7 @@ use yantra_core::history;
 use yantra_core::identity;
 use yantra_core::install::{self, Outcome};
 use yantra_core::inventory::{Inventory as _, MachineInfo, Tailscale};
+use yantra_core::layout;
 use yantra_core::logs;
 use yantra_core::mic;
 use yantra_core::notify;
@@ -39,6 +40,7 @@ use yantra_core::up;
 use yantra_core::update;
 use yantra_core::workspace::{self, Listing};
 
+mod dash;
 mod mcp;
 mod why;
 
@@ -261,6 +263,11 @@ enum Command {
         /// ssh destination, spelled the way a workspace's `machine` spells it
         machine: String,
     },
+    /// Forget the host key Yantra recorded for a machine, so the next check records the new one
+    ForgetHostKey {
+        /// ssh destination, spelled the way a workspace's `machine` spells it
+        machine: String,
+    },
     /// Prepare this account's ssh identity, and print the public key to place
     SshIdentity {
         /// Write this one machine's block, logging in as `--user`. The join
@@ -289,6 +296,11 @@ enum Command {
         #[arg(long)]
         daemon: String,
     },
+    /// The dashboard layout yantrad serves, in ~/.config/yantra/dashboard.json
+    Layout {
+        #[command(subcommand)]
+        action: LayoutAction,
+    },
     /// Steer the rooms live agents talk in (ADR-0038)
     Room {
         #[command(subcommand)]
@@ -309,6 +321,16 @@ enum Command {
         /// yantrad's address, such as http://appliance:7717
         #[arg(long)]
         daemon: String,
+    },
+    /// The fleet in the terminal: what needs you, the sessions and the machines.
+    /// Enter attaches to the selected session over ssh; detach to come back
+    Dash {
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+        /// Read only: no key reaches a session
+        #[arg(long)]
+        view_only: bool,
     },
 }
 
@@ -374,7 +396,70 @@ enum PrAction {
 }
 
 #[derive(Debug, Subcommand)]
+enum LayoutAction {
+    /// Print the layout as JSON
+    Show,
+    /// Replace the layout. The file names the rev it was read at, and a
+    /// newer rev on disk refuses it
+    Set {
+        /// A layout as `show` prints it, or `-` for stdin
+        file: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum RoomAction {
+    /// Define a room in a workspace. Its definition outlives a restart of
+    /// yantrad; its messages do not
+    New {
+        /// The room's name: 1 to 32 of a-z, 0-9 and -
+        room: String,
+        /// The workspace the room belongs to
+        #[arg(long)]
+        workspace: String,
+        /// What the room is for, at most 500 characters
+        #[arg(long)]
+        brief: Option<String>,
+        /// The branch handoffs start from; the workspace's current branch when absent
+        #[arg(long)]
+        base: Option<String>,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// List the rooms yantrad holds
+    Ls {
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// Show a room and the messages it keeps
+    Show {
+        /// The room's name
+        room: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// Set a defined room's brief. An empty brief clears it
+    Edit {
+        /// The room's name
+        room: String,
+        /// What the room is for, at most 500 characters
+        #[arg(long)]
+        brief: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
+    /// End a room and delete its definition. A room already gone exits 0
+    Rm {
+        /// The room's name
+        room: String,
+        /// yantrad's address, such as http://appliance:7717
+        #[arg(long)]
+        daemon: String,
+    },
     /// Set a room's turn budget back to 0, so its agents may send again
     Resume {
         /// The room's name
@@ -578,6 +663,7 @@ async fn main() -> ExitCode {
         }) => history_extract(&folder, &out),
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
+        Some(Command::ForgetHostKey { machine }) => forget_host_key(&machine).await,
         Some(Command::SshIdentity {
             machine: Some(machine),
             user: Some(user),
@@ -596,12 +682,110 @@ async fn main() -> ExitCode {
         Some(Command::Room {
             action: RoomAction::Post { room, text, daemon },
         }) => room_post(room, text, daemon).await,
+        Some(Command::Room {
+            action:
+                RoomAction::New {
+                    room,
+                    workspace,
+                    brief,
+                    base,
+                    daemon,
+                },
+        }) => {
+            let said = format!("room {room} made in workspace {workspace}");
+            let name = room.clone();
+            room_verb(
+                "new",
+                Some(&name),
+                move || {
+                    mcp::create(
+                        &daemon,
+                        &room,
+                        &workspace,
+                        brief.as_deref(),
+                        base.as_deref(),
+                    )
+                },
+                |_| println!("{said}"),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Ls { daemon },
+        }) => {
+            room_verb(
+                "ls",
+                None,
+                move || mcp::list(&daemon),
+                |rooms| {
+                    print!("{}", room_table(rooms));
+                },
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Show { room, daemon },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "show",
+                Some(&name),
+                move || mcp::show(&daemon, &room),
+                |view| print!("{}", room_view(view)),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action:
+                RoomAction::Edit {
+                    room,
+                    brief,
+                    daemon,
+                },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "edit",
+                Some(&name),
+                move || mcp::edit(&daemon, &room, &brief),
+                |_| println!("room {name}: brief saved"),
+            )
+            .await
+        }
+        Some(Command::Room {
+            action: RoomAction::Rm { room, daemon },
+        }) => {
+            let name = room.clone();
+            room_verb(
+                "rm",
+                Some(&name),
+                move || mcp::remove(&daemon, &room),
+                |answer| match answer["removed"].as_bool() {
+                    Some(false) => println!("room {name} was already gone"),
+                    _ => println!("room {name} removed"),
+                },
+            )
+            .await
+        }
+        Some(Command::Layout {
+            action: LayoutAction::Show,
+        }) => layout_show(),
+        Some(Command::Layout {
+            action: LayoutAction::Set { file },
+        }) => layout_set(&file),
         Some(Command::Why {
             workspace,
             repo,
             path,
             daemon,
         }) => why(workspace, repo.or(path), daemon).await,
+        Some(Command::Dash { daemon, view_only }) => {
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                eprintln!("yantra: dash needs a terminal on stdin and stdout");
+                return ExitCode::FAILURE;
+            }
+            dash::run(daemon, view_only).await
+        }
         // clap would make a bare `yantra` an error exiting 2. It printed help
         // and exited 0 before this crate had a parser, and that is the contract.
         None => match Cli::command().print_help() {
@@ -611,6 +795,60 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+    }
+}
+
+/// A file that is not a layout prints the default, as yantrad serves it.
+fn layout_show() -> ExitCode {
+    let shown = match layout::read() {
+        Err(layout::Error::Corrupt(reason)) => {
+            eprintln!("yantra: dashboard.json is not a layout ({reason}), so this is the default");
+            Ok(layout::Layout::default())
+        }
+        read => read,
+    };
+    match shown {
+        Ok(shown) => {
+            // A plain struct always serialises.
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&shown).unwrap_or_default()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn layout_set(file: &Path) -> ExitCode {
+    let bytes = if file == Path::new("-") {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin(), &mut bytes).map(|_| bytes)
+    } else {
+        std::fs::read(file)
+    };
+    let saved = match bytes {
+        Ok(bytes) => layout::Layout::parse(&bytes).and_then(|sent| layout::replace(&sent)),
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    match saved {
+        Ok(saved) => {
+            println!("saved the layout at rev {}", saved.rev);
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            if matches!(err, layout::Error::Stale(_)) {
+                eprintln!("\x20 note: `yantra layout show` prints the current layout to edit.");
+            }
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -681,6 +919,108 @@ async fn room_post(name: String, text: String, daemon: String) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `room new`, `ls`, `show`, `edit` and `rm`: refuses a bad name before the
+/// daemon is asked, as `room resume` does, and hands the answer to `done`.
+async fn room_verb(
+    verb: &str,
+    name: Option<&str>,
+    call: impl FnOnce() -> Result<String, String> + Send + 'static,
+    done: impl FnOnce(&serde_json::Value),
+) -> ExitCode {
+    if let Some(name) = name
+        && !yantra_core::room::valid_name(name)
+    {
+        eprintln!(
+            "yantra: {}",
+            yantra_core::room::Error::BadName(name.to_owned())
+        );
+        return ExitCode::FAILURE;
+    }
+    match tokio::task::spawn_blocking(call).await {
+        Ok(Ok(said)) => {
+            done(&serde_json::from_str(&said).unwrap_or_default());
+            ExitCode::SUCCESS
+        }
+        Ok(Err(said)) => {
+            eprintln!("yantra: {said}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("yantra room {verb}: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// One line per room. A room with no workspace is one an agent made.
+fn room_table(rooms: &serde_json::Value) -> String {
+    let rooms = rooms.as_array().map(Vec::as_slice).unwrap_or_default();
+    if rooms.is_empty() {
+        return "no rooms\n".to_owned();
+    }
+    rooms
+        .iter()
+        .map(|room| {
+            format!(
+                "{:<32}  {:<20}  {} members  {} messages  {}/{}{}\n",
+                room["name"].as_str().unwrap_or_default(),
+                room["workspace"].as_str().unwrap_or("(made by an agent)"),
+                room["members"],
+                room["messages"],
+                room["spent"],
+                room["budget"],
+                if room["paused"] == true {
+                    "  paused"
+                } else {
+                    ""
+                },
+            )
+        })
+        .collect()
+}
+
+/// The summary, then each message as `seq from: text`.
+fn room_view(room: &serde_json::Value) -> String {
+    let field = |key: &str| room[key].as_str().map(terminal_safe);
+    let mut out = format!(
+        "room {}\nworkspace {}\n",
+        field("name").unwrap_or_default(),
+        field("workspace").unwrap_or_else(|| "(made by an agent)".to_owned()),
+    );
+    if let Some(base) = field("base") {
+        out.push_str(&format!("base {base}\n"));
+    }
+    if let Some(brief) = field("brief") {
+        out.push_str(&format!("brief {brief}\n"));
+    }
+    for message in room["log"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        out.push_str(&format!(
+            "{:>4} {}: {}\n",
+            message["seq"].as_u64().unwrap_or_default(),
+            terminal_safe(message["from"].as_str().unwrap_or_default()),
+            terminal_safe(message["text"].as_str().unwrap_or_default()),
+        ));
+    }
+    out
+}
+
+/// A message is another agent's text, so no escape sequence reaches the terminal.
+fn terminal_safe(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() && c != '\n' {
+                '\u{fffd}'
+            } else {
+                c
+            }
+        })
+        .collect()
 }
 
 async fn why(name: Option<String>, wanted: Option<placement::Wanted>, daemon: String) -> ExitCode {
@@ -1324,6 +1664,31 @@ async fn fix_terminfo(machine: &str) -> ExitCode {
     }
 }
 
+/// Y-621: the fix the dashboard names for a changed host key. Only a person
+/// can tell a reinstall from an attack, so the dashboard never runs it.
+async fn forget_host_key(machine: &str) -> ExitCode {
+    let Some(target) = yantra_core::ssh::machine_at(machine) else {
+        eprintln!("yantra: could not determine a directory for ssh state");
+        return ExitCode::FAILURE;
+    };
+    match target.forget_host_key().await {
+        Ok(true) => {
+            println!(
+                "forgot the host key recorded for {machine}; the next check records the new one"
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(false) => {
+            println!("no host key was recorded for {machine}, so nothing changed");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// `POST /api/join`'s half, for a machine whose account is typed rather than
 /// reported (ADR-0029). The daemon names the machine from the caller; here the
 /// person at this terminal names it.
@@ -1480,9 +1845,28 @@ async fn update_check_with(github: &Github, token: Option<&github::Token>) -> Ex
     }
 }
 
-/// ADR-0027 §3: the same unit the daemon's trigger starts, waited for.
+/// ADR-0027 §3: the same unit the daemon's trigger starts, waited for. While
+/// it runs, the unit's own progress file says how far it got (Y-612).
 async fn update_apply() -> ExitCode {
-    match update::apply().await {
+    let dir = Path::new(update::PROGRESS);
+    let applying = update::apply();
+    tokio::pin!(applying);
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
+    let mut shown = None;
+    let applied = loop {
+        tokio::select! {
+            applied = &mut applying => break applied,
+            _ = tick.tick() => {
+                // A progress file this build cannot read only costs the progress lines.
+                let Ok(Some(now)) = update::progress(dir) else { continue };
+                if let Some(line) = progress_line(shown.as_ref(), &now) {
+                    eprintln!("{line}");
+                }
+                shown = Some(now);
+            }
+        }
+    };
+    match applied {
         Ok(()) => {
             println!(
                 "installed the current release; yantrad and yantra-agent restarted if they were running"
@@ -1491,10 +1875,53 @@ async fn update_apply() -> ExitCode {
         }
         Err(err) => {
             report_error(&err);
+            if let (update::Error::Failed { .. }, Ok(Some(update::Progress::Failed { said }))) =
+                (&err, update::progress(dir))
+            {
+                eprint!("{}", render_said(&said));
+            }
             eprint!("{}", update_next(&err));
             ExitCode::FAILURE
         }
     }
+}
+
+/// A line when the step changed or more bytes arrived, and none for a failure:
+/// that is printed once the unit has ended.
+fn progress_line(before: Option<&update::Progress>, now: &update::Progress) -> Option<String> {
+    use update::Progress;
+    if before == Some(now) {
+        return None;
+    }
+    let mb = |bytes: u64| format!("{:.1}", bytes as f64 / 1_000_000.0);
+    Some(match now {
+        Progress::Resolving => "resolving the current release".to_owned(),
+        Progress::Downloading {
+            version,
+            received,
+            total,
+        } => match total {
+            Some(total) => format!(
+                "downloading v{version}: {} of {} MB",
+                mb(*received),
+                mb(*total)
+            ),
+            None => format!("downloading v{version}: {} MB", mb(*received)),
+        },
+        Progress::Verifying => "checking the archive against SHA256SUMS".to_owned(),
+        Progress::Installing => "installing".to_owned(),
+        Progress::Failed { .. } => return None,
+    })
+}
+
+fn render_said(said: &str) -> String {
+    if said.is_empty() {
+        return String::new();
+    }
+    said.lines()
+        .fold("  the unit said:\n".to_owned(), |out, line| {
+            out + "    " + line + "\n"
+        })
 }
 
 /// The next command, where there is one. `NotInstalled` names `install.sh`
@@ -1505,7 +1932,11 @@ fn update_next(err: &update::Error) -> &'static str {
             "  run it as root: sudo systemctl start yantra-update.service\n"
         }
         update::Error::Failed { .. } => "  read why: journalctl -u yantra-update --no-pager\n",
-        update::Error::NotInstalled { .. } | update::Error::Io(_) => "",
+        update::Error::NotInstalled { .. }
+        | update::Error::Io(_)
+        | update::Error::Unreadable { .. }
+        | update::Error::UnknownStep { .. }
+        | update::Error::ArchivePath { .. } => "",
     }
 }
 
@@ -1878,13 +2309,14 @@ fn render_doctor(reports: &[Report]) -> String {
                     report.machine.clone(),
                     check.check.to_owned(),
                     state(check.state).to_owned(),
+                    took(check.took_ms),
                     check.detail.clone(),
                 ]
             })
         })
         .collect();
 
-    let mut out = table(&["MACHINE", "CHECK", "STATE", "DETAIL"], &rows);
+    let mut out = table(&["MACHINE", "CHECK", "STATE", "TOOK", "DETAIL"], &rows);
     let count = |wanted: State| {
         reports
             .iter()
@@ -1903,6 +2335,15 @@ fn render_doctor(reports: &[Report]) -> String {
         count(State::Unknown),
     ));
     out
+}
+
+/// A dash where no step ran: a zero would say it did (R-23).
+fn took(ms: Option<u64>) -> String {
+    match ms {
+        None => "-".to_owned(),
+        Some(ms) if ms < 1_000 => format!("{ms}ms"),
+        Some(ms) => format!("{}.{}s", ms / 1_000, ms % 1_000 / 100),
+    }
 }
 
 fn state(state: State) -> &'static str {
@@ -2350,8 +2791,8 @@ async fn github_login() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let login = match api.login_name(&grant.token).await {
-        Ok(login) => login,
+    let login = match api.account(&grant.token).await {
+        Ok(account) => account.login,
         Err(err) => {
             report_error(&err);
             return ExitCode::FAILURE;
@@ -2403,9 +2844,9 @@ async fn github_status() -> ExitCode {
     let Some(token) = grant() else {
         return ExitCode::FAILURE;
     };
-    match Github::default().login_name(&token).await {
-        Ok(login) => {
-            println!("signed in as {login}");
+    match Github::default().account(&token).await {
+        Ok(account) => {
+            println!("signed in as {}", account.login);
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -2821,6 +3262,17 @@ mod tests {
     }
 
     #[test]
+    fn forget_host_key_needs_a_machine() {
+        let parsed = Cli::try_parse_from(["yantra", "forget-host-key", "pi"])
+            .expect("`forget-host-key <machine>` parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::ForgetHostKey { machine }) if machine == "pi"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "forget-host-key"]).is_err());
+    }
+
+    #[test]
     fn mcp_needs_the_daemons_address() {
         let parsed = Cli::try_parse_from(["yantra", "mcp", "--daemon", "http://x:7717"])
             .expect("`mcp --daemon <url>` parses");
@@ -2881,6 +3333,128 @@ mod tests {
         )
         .await;
         assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn the_room_definition_verbs_parse() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(["yantra", "room"].iter().chain(args).copied())
+                .map(|cli| cli.command)
+        };
+        assert!(matches!(
+            parse(&["new", "r2", "--workspace", "web", "--brief", "b", "--base", "main", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::New { room, workspace, brief, base, daemon } }))
+                if room == "r2" && workspace == "web" && brief.as_deref() == Some("b")
+                    && base.as_deref() == Some("main") && daemon == "d"
+        ));
+        assert!(matches!(
+            parse(&["new", "r2", "--workspace", "web", "--daemon", "d"]),
+            Ok(Some(Command::Room {
+                action: RoomAction::New {
+                    brief: None,
+                    base: None,
+                    ..
+                }
+            }))
+        ));
+        assert!(
+            parse(&["new", "r2", "--daemon", "d"]).is_err(),
+            "a room needs a workspace"
+        );
+        assert!(matches!(
+            parse(&["ls", "--daemon", "d"]),
+            Ok(Some(Command::Room {
+                action: RoomAction::Ls { .. }
+            }))
+        ));
+        assert!(matches!(
+            parse(&["show", "r2", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Show { room, .. } })) if room == "r2"
+        ));
+        assert!(matches!(
+            parse(&["edit", "r2", "--brief", "", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Edit { brief, .. } })) if brief.is_empty()
+        ));
+        assert!(
+            parse(&["edit", "r2", "--daemon", "d"]).is_err(),
+            "edit needs a brief"
+        );
+        assert!(matches!(
+            parse(&["rm", "r2", "--daemon", "d"]),
+            Ok(Some(Command::Room { action: RoomAction::Rm { room, .. } })) if room == "r2"
+        ));
+        for verb in [&["ls"][..], &["show", "r2"], &["rm", "r2"]] {
+            assert!(parse(verb).is_err(), "{verb:?} needs the daemon");
+        }
+    }
+
+    #[test]
+    fn the_layout_verbs_parse() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(["yantra", "layout"].iter().chain(args).copied())
+                .map(|cli| cli.command)
+        };
+        assert!(matches!(
+            parse(&["show"]),
+            Ok(Some(Command::Layout {
+                action: LayoutAction::Show
+            }))
+        ));
+        assert!(matches!(
+            parse(&["set", "-"]),
+            Ok(Some(Command::Layout { action: LayoutAction::Set { file } })) if file == Path::new("-")
+        ));
+        assert!(matches!(
+            parse(&["set", "mine.json"]),
+            Ok(Some(Command::Layout { action: LayoutAction::Set { file } })) if file == Path::new("mine.json")
+        ));
+        assert!(parse(&["set"]).is_err(), "set needs a file");
+        assert!(parse(&["show", "x"]).is_err());
+        assert!(parse(&[]).is_err());
+    }
+
+    #[test]
+    fn layout_set_refuses_a_file_that_is_not_a_layout_before_writing() {
+        let file = std::env::temp_dir().join(format!("yantra-layout-set-{}", std::process::id()));
+        std::fs::write(&file, r#"{"v":2}"#).expect("written");
+        assert_eq!(layout_set(&file), ExitCode::FAILURE);
+        assert_eq!(
+            layout_set(&file.with_extension("absent")),
+            ExitCode::FAILURE
+        );
+    }
+
+    #[tokio::test]
+    async fn a_room_definition_verb_refuses_a_bad_name_before_asking_the_daemon() {
+        let code = room_verb(
+            "rm",
+            Some("Bad Name"),
+            || unreachable!("the daemon is not asked"),
+            |_| {},
+        )
+        .await;
+        assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn a_room_view_names_its_home_and_keeps_escapes_out_of_the_terminal() {
+        let view = room_view(&serde_json::json!({
+            "name": "r2", "workspace": "web", "brief": "Ship it.", "base": null,
+            "log": [{"seq": 1, "from": "yantrad", "text": "restarted"},
+                    {"seq": 2, "from": "alpha", "text": "\u{1b}[2Jgone\nnext"}]
+        }));
+        assert_eq!(
+            view,
+            "room r2\nworkspace web\nbrief Ship it.\n   1 yantrad: restarted\n   2 alpha: \u{fffd}[2Jgone\nnext\n"
+        );
+        assert_eq!(room_table(&serde_json::json!([])), "no rooms\n");
+        let table = room_table(&serde_json::json!([
+            {"name": "r2", "workspace": null, "members": 1, "messages": 3, "spent": 3, "budget": 20, "paused": true}
+        ]));
+        assert!(
+            table.contains("(made by an agent)") && table.ends_with("3/20  paused\n"),
+            "{table}"
+        );
     }
 
     #[test]
@@ -3720,6 +4294,7 @@ mod tests {
             check: name,
             state,
             detail: detail.to_owned(),
+            took_ms: None,
         }
     }
 
@@ -3782,7 +4357,7 @@ mod tests {
             ],
         }]);
 
-        assert!(rendered.contains("reachable  absent"), "{rendered}");
+        assert!(rendered.contains("reachable  absent "), "{rendered}");
         assert!(rendered.contains("tmux       unknown"), "{rendered}");
         assert!(
             rendered.ends_with("2 checks on 1 machine: 0 present, 1 absent, 1 unknown\n"),
@@ -3791,6 +4366,38 @@ mod tests {
         for line in rendered.lines() {
             assert_eq!(line, line.trim_end(), "trailing space in {line:?}");
         }
+    }
+
+    /// Y-585: a step that ran says how long, and one that did not says so with
+    /// a dash, because a zero would read as *asked*. `--json` carries the same
+    /// number and leaves the key out where there is none.
+    #[test]
+    fn the_time_each_step_took_has_a_column_and_a_step_not_asked_has_none() {
+        let reports = [Report {
+            machine: "pi".to_owned(),
+            checks: vec![
+                doctor::Check {
+                    took_ms: Some(1_240),
+                    ..check("reachable", State::Present, "a command ran there")
+                },
+                doctor::Check {
+                    took_ms: Some(85),
+                    ..check("tmux", State::Present, "found at /usr/bin/tmux")
+                },
+                check("heartbeat", State::Unknown, "nothing to read"),
+            ],
+        }];
+
+        let rendered = render_doctor(&reports);
+        let lines: Vec<&str> = rendered.lines().collect();
+        assert!(lines[0].contains("STATE    TOOK  DETAIL"), "{rendered}");
+        assert!(lines[1].contains("present  1.2s  a command"), "{rendered}");
+        assert!(lines[2].contains("present  85ms  found"), "{rendered}");
+        assert!(lines[3].contains("unknown  -     nothing"), "{rendered}");
+
+        let json = render_doctor_json(&reports).expect("a report serialises");
+        assert!(json.contains("\"took_ms\": 1240"), "{json}");
+        assert_eq!(json.matches("took_ms").count(), 2, "{json}");
     }
 
     /// A fleet with nothing in it is not a clean one — nothing was asked, so the
@@ -4246,6 +4853,62 @@ mod tests {
             said: "the control process exited with error code".to_owned(),
         });
         assert!(failed.contains("journalctl -u yantra-update"), "{failed}");
+    }
+
+    /// Y-612: a line per step and per change in bytes, and none twice.
+    #[test]
+    fn update_progress_prints_each_step_and_the_bytes() {
+        use update::Progress;
+        let downloading = |received, total| Progress::Downloading {
+            version: "0.10.0".into(),
+            received,
+            total,
+        };
+        assert_eq!(
+            progress_line(None, &Progress::Resolving).as_deref(),
+            Some("resolving the current release")
+        );
+        assert_eq!(
+            progress_line(Some(&Progress::Resolving), &Progress::Resolving),
+            None
+        );
+        let first = downloading(3_100_000, Some(9_800_000));
+        assert_eq!(
+            progress_line(Some(&Progress::Resolving), &first).as_deref(),
+            Some("downloading v0.10.0: 3.1 of 9.8 MB")
+        );
+        assert_eq!(progress_line(Some(&first), &first), None);
+        assert_eq!(
+            progress_line(Some(&first), &downloading(4_000_000, None)).as_deref(),
+            Some("downloading v0.10.0: 4.0 MB")
+        );
+        assert_eq!(
+            progress_line(Some(&first), &Progress::Verifying).as_deref(),
+            Some("checking the archive against SHA256SUMS")
+        );
+        assert_eq!(
+            progress_line(Some(&Progress::Verifying), &Progress::Installing).as_deref(),
+            Some("installing")
+        );
+        assert_eq!(
+            progress_line(
+                Some(&Progress::Installing),
+                &Progress::Failed { said: "x".into() }
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_failed_update_prints_what_the_unit_said_above_the_journal_hint() {
+        let said = render_said(
+            "install: yantra-0.10.0.tar.gz does not match SHA256SUMS — nothing was installed",
+        );
+        assert_eq!(
+            said,
+            "  the unit said:\n    install: yantra-0.10.0.tar.gz does not match SHA256SUMS — nothing was installed\n"
+        );
+        assert_eq!(render_said(""), "");
     }
 
     #[test]

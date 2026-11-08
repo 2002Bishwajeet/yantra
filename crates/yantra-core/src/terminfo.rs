@@ -145,7 +145,7 @@ fn known(term: &str) -> String {
 
 /// This machine's description of `term`, in the source form `tic` reads.
 async fn describe(term: &str) -> Result<Vec<u8>, Error> {
-    let out = tokio::process::Command::new("infocmp")
+    let out = tokio::process::Command::from(crate::scrubbed("infocmp"))
         .args(["-x", term])
         .stdin(std::process::Stdio::null())
         .output()

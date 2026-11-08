@@ -1,5 +1,6 @@
-import type { Machine, Repo } from '@/api'
+import type { Machine, Readiness, Repo } from '@/api'
 import { USABLE_NAME } from '@/lib/name'
+import { trimSlash } from '@/lib/path'
 import type { Step } from '@/router'
 
 /** D4 §5's three answers: only a proven absence blocks. */
@@ -20,13 +21,12 @@ export type Values = {
   machine: string
   provider: Provider
   source: Source | null
-  opens: 'claude' | 'command' | 'later'
+  opens: 'claude' | 'command'
   command: string
 }
 
-/** The boards' four labels. The first panel answers two of them, so leaving
- *  it ticks Name and Machine together and the walk lands on Source. */
-export const STEPS = ['Name', 'Machine', 'Source', 'Start'] as const
+/** One label per panel. */
+export const STEPS = ['Name', 'Source', 'Start'] as const
 
 export const nameError = (name: string): string | undefined =>
   name === ''
@@ -41,6 +41,15 @@ export const pickMachine = (given: string, machines: Machine[]): string =>
   machines.some((one) => one.name === given && one.ownership === 'yours' && one.online && !one.expired)
     ? given
     : ''
+
+/** The hub is the daemon's own host, and sessions run there only as an account
+ *  that joined. Same rule as Setup: online, and ssh got in (Y-627). */
+export const hubJoined = (machine: Machine, report: Readiness | null): boolean =>
+  machine.online && !!report?.checks.some((one) => one.check === 'reachable' && one.state === 'present')
+
+/** The machines a chip may be drawn for: a hub no account has joined is left out. */
+export const offered = (machines: Machine[], reports: (Readiness | null)[]): Machine[] =>
+  machines.filter((one, index) => !one.hub || hubJoined(one, reports[index] ?? null))
 
 /** Whether a step is complete enough to leave. */
 export function complete(step: Step, values: Values): boolean {
@@ -80,8 +89,18 @@ export const cloneInto = (folder: string, repo: Repo): string => `${folder}/${re
 /** `/home/you/Github/x` drawn as `~/Github/x`, as the boards write paths. */
 export function tilde(path: string, home: string | null): string {
   if (home === null) return path
-  if (path === home) return '~'
-  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path
+  const base = trimSlash(home)
+  if (path === base) return '~'
+  return path.startsWith(`${base}/`) ? `~${path.slice(base.length)}` : path
+}
+
+export const NO_HOME = 'This machine has not said where home is yet. Type the full path.'
+
+/** What `tilde` draws, read back: `~` and `~/x` become paths under `home`. `null` when `~` needs a home not yet known. */
+export function expand(path: string, home: string | null): string | null {
+  if (path !== '~' && !path.startsWith('~/')) return path
+  if (home === null) return null
+  return `${trimSlash(home).replace(/\/$/, '')}${path.slice(1)}`
 }
 
 /** `origin` as the boards write it: `owner/name`, without host or `.git`. */
@@ -123,31 +142,29 @@ export function plan(values: Values): Plan | null {
   }
 }
 
-/** The "What will happen" list, derived from the choices (NewSessionStart). */
-export function happenings(values: Values, home: string | null): string[] {
+/** The list under "When you press Create and open", derived from the choices. */
+export function happenings(values: Values, home: string | null): { line: string; detail?: string }[] {
   const { source } = values
   const where = source ? tilde(source.path, home) : '…'
-  const out = [`write ~/.config/yantra/workspaces/${values.name}.toml`]
-  if (source?.kind === 'github' && source.here === 'no') {
-    out.push(`clone ${source.repo.full_name} into ${where} on ${values.machine}`)
-    out.push(`open a tmux session on ${values.machine} in ${where}`)
-  } else {
-    const state =
-      source?.kind === 'github'
-        ? source.here === 'yes'
-          ? ', which is already there'
-          : ', which will be tried then'
-        : source?.checked === 'unknown'
-          ? ', which will be tried then'
-          : ', which is already there'
-    out.push(`open a tmux session on ${values.machine} in ${where}${state}`)
-  }
-  out.push(
-    values.opens === 'command'
-      ? `run ${values.command.trim() || '…'} in it and attach this browser to the pane`
-      : 'start Claude in it and attach this browser to the pane',
-  )
-  return out
+  const { machine } = values
+  const clone = source?.kind === 'github' && source.here === 'no'
+  const unchecked = source?.kind === 'github' ? source.here === 'unknown' : source?.checked === 'unknown'
+  const second = clone
+    ? `It clones ${source.repo.full_name} into ${where} on ${machine}, then opens a session there.`
+    : `It opens a session in ${where} on ${machine}.${unchecked ? ' Yantra checks the folder then.' : ''}`
+  return [
+    {
+      line: `Yantra saves the workspace as ${values.name}.`,
+      detail: `~/.config/yantra/workspaces/${values.name}.toml`,
+    },
+    { line: second },
+    {
+      line:
+        values.opens === 'command'
+          ? `${values.command.trim() || '…'} runs there, and you see it in this window.`
+          : 'Claude starts there, and you see it in this window.',
+    },
+  ]
 }
 
 /** The line under step 2 that says why Continue is off, or what it will do. */

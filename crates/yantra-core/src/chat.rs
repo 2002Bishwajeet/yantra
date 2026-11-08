@@ -50,6 +50,9 @@ pub enum Event {
     ThreadReverted { turn: u32 },
     #[serde(rename = "turn.plan.updated")]
     PlanUpdated { plan: Vec<PlanStep> },
+    /// Not T3 Code's event: an ACP agent's slash commands (Y-563).
+    #[serde(rename = "thread.commands.updated")]
+    CommandsUpdated { commands: Vec<Command> },
     #[serde(rename = "content.delta")]
     ContentDelta(ContentDelta),
     #[serde(rename = "item.started")]
@@ -110,6 +113,16 @@ pub enum StopReason {
     MaxTurnRequests,
     Refusal,
     Cancelled,
+}
+
+/// A slash command the agent expands when `/<name>` opens a prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Command {
+    pub name: String,
+    pub description: String,
+    /// What the argument is for. `None` takes no argument.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -284,6 +297,22 @@ impl PermissionMode {
             _ => None,
         }
     }
+}
+
+/*
+ * The two interaction modes are T3 Code's `interactionMode` (`default` and `plan`), at commit 72d5c32:
+ * https://github.com/pingdotgg/t3code/blob/72d5c32ba67953805feb6fe9ad3b70b632a64c47/apps/web/src/components/chat/ChatComposer.tsx
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ */
+/// Whether a turn may change anything (Y-565). `Plan` only reads and proposes a
+/// plan; T3 Code names `Build` `default`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Interaction {
+    #[default]
+    Build,
+    Plan,
 }
 
 /// How hard Claude thinks on a turn: `claude --effort` (Y-564).
@@ -497,6 +526,21 @@ mod tests {
             assert_eq!(
                 serde_json::to_value(mode).expect("a mode serialises"),
                 json!(name)
+            );
+        }
+    }
+
+    #[test]
+    fn interaction_is_build_by_default_and_kebab_case_on_the_wire() {
+        assert_eq!(Interaction::default(), Interaction::Build);
+        for (interaction, name) in [(Interaction::Build, "build"), (Interaction::Plan, "plan")] {
+            assert_eq!(
+                serde_json::to_value(interaction).expect("an interaction serialises"),
+                json!(name)
+            );
+            assert_eq!(
+                serde_json::from_value::<Interaction>(json!(name)).expect("it parses"),
+                interaction
             );
         }
     }

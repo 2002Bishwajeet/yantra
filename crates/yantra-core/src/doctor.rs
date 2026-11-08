@@ -1,9 +1,9 @@
 //! What a machine can and cannot do, asked without changing it.
 //!
 //! The check list is [D2 §3.1] and the constraint is [D2 §3.2]: `doctor` is a
-//! **read**. Nothing here installs, writes or starts anything — the one place
-//! that could is the macOS branch of [`login_session`], which asks whether a
-//! tmux server exists rather than creating one (ADR-0018 §1).
+//! **read**. Nothing here installs, writes or starts anything — the places that
+//! could are the macOS branches of [`login_session`] and [`provider_auth`],
+//! which ask whether a tmux server exists rather than creating one (ADR-0018 §1).
 //!
 //! **Every branch answers `Unknown` where it could not ask**, which is R-23 and
 //! the reason this module is longer than the commands it runs: *absent* sends a
@@ -13,6 +13,14 @@
 //!
 //! [D2 §3.1]: ../../../docs/design/02-setup.md
 //! [D2 §3.2]: ../../../docs/design/02-setup.md
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
+use std::time::Duration;
+
+use serde_json::Value;
+
+use tokio::time::Instant;
 
 use crate::agent::{self, Claude};
 use crate::github;
@@ -36,6 +44,7 @@ const PROVIDER_AUTH: &str = "provider-auth";
 const LOGIN_SESSION: &str = "login-session";
 const MIC: &str = "mic";
 const FOLDER_ACCESS: &str = "folder-access";
+const HOOKS: &str = "hooks";
 /// Public because the one caller that can answer this check finds it by name —
 /// see [`heartbeat`].
 pub const HEARTBEAT: &str = "heartbeat";
@@ -45,7 +54,7 @@ pub const GITHUB: &str = "github";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.
-const BEHIND_SSH: [&str; 9] = [
+const BEHIND_SSH: [&str; 10] = [
     TMUX,
     GIT,
     AGENT_CLI,
@@ -55,6 +64,7 @@ const BEHIND_SSH: [&str; 9] = [
     LOGIN_SESSION,
     MIC,
     FOLDER_ACCESS,
+    HOOKS,
 ];
 
 /// What every check behind ssh says when ssh itself did not answer. The reason
@@ -64,6 +74,31 @@ const NOT_ASKED: &str = "nothing behind ssh could be asked — see the `reachabl
 /// The provider CLIs D2 §3.1 names. `tea` is deliberately not here: it was
 /// measured absent on this fleet and nothing in Yantra reads it.
 const PROVIDERS: [&str; 2] = ["gh", "glab"];
+
+/// What a provider CLI inside the tmux server prints once it found a credential.
+const FOUND: &str = "yantra-credential-found";
+
+/// The web matches on this phrase to show the Terminal fix, so changing it is a
+/// breaking change. Both login-keychain checks say it.
+const NO_LOGIN_SERVER: &str = "no tmux server from a login session is running on this Mac";
+
+/// What [`NO_LOGIN_SERVER`] costs and how to end it — the command `up` and
+/// `commit` give for the same refusal.
+fn no_login_server(check: &'static str) -> Check {
+    absent(
+        check,
+        format!(
+            "{NO_LOGIN_SERVER}. Panes in a server started over ssh cannot read the login \
+             keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a \
+             session starts. Start one in Terminal there: `tmux new-session -d`"
+        ),
+    )
+}
+
+/// The longest a login may take. `ConnectTimeout` does not cover a server that
+/// holds the auth stage, so wording [`ssh::BROWSER_CHECK`] misses would otherwise
+/// cost ServerAlive's 45 s on every sweep.
+const REACH_LIMIT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -82,6 +117,11 @@ pub struct Check {
     /// What was found, or why nothing could be. Carries no credential and no
     /// account name: the provider checks discard their output on the far side.
     pub detail: String,
+    /// How long the step that answered this took. `None` where no step ran,
+    /// which zero would misreport (R-23). One command answers `reachable` and
+    /// `sshd`, so both carry its time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub took_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -154,7 +194,7 @@ pub async fn fleet_with(extra: &[String], term: &str) -> Result<Vec<Report>, Err
 ///
 /// Never fails: a connection that cannot even be built is a report of unknowns
 /// with the reason in it, because a caller asking *what is wrong with this box*
-/// is answered better by twelve states than by one error.
+/// is answered better by thirteen states than by one error.
 pub async fn machine(name: &str, term: &str) -> Report {
     let ssh = ssh::machine_at(name)
         .ok_or_else(|| "no directory for ssh control sockets on this machine".to_owned())
@@ -200,7 +240,11 @@ pub async fn name_the_account(checks: &mut [Check], machine: &str, dir: &std::pa
 /// `term` is the terminal the caller is sitting at, which is what the terminfo
 /// check is about (I-36) — it is a property of the asker, not of the machine.
 pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
-    let (reachable, sshd) = reached(exec).await;
+    let (reachable, sshd) = timed(reached(exec)).await;
+    let sshd = Check {
+        took_ms: reachable.took_ms,
+        ..sshd
+    };
     if reachable.state != State::Present {
         // The diagnosis stays on the check that has it rather than being copied
         // onto six more rows, none of which a reader would act on twice.
@@ -210,41 +254,77 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         return checks;
     }
 
-    let (tmux, found_tmux) = tmux(exec).await;
-    let (agent_cli, found_claude) = agent_cli(exec).await;
-    let (provider_cli, providers) = provider_cli(exec).await;
+    let (tmux, found_tmux) = timed(tmux(exec)).await;
+    let (agent_cli, found_claude) = timed(agent_cli(exec)).await;
+    let (provider_cli, providers) = timed(provider_cli(exec)).await;
+    let gated = found_tmux.is_some() && found_claude.is_some();
+    let has_provider = !providers.is_empty();
+    let os = ssh::os(exec).await;
 
     vec![
         reachable,
         sshd,
         tmux,
-        git(exec).await,
+        timed_one(git(exec)).await,
         agent_cli,
-        terminfo(exec, term).await,
+        timed_one(terminfo(exec, term)).await,
         provider_cli,
-        provider_auth(exec, providers).await,
-        login_session(exec, found_tmux.as_ref(), found_claude.as_ref()).await,
-        mic(exec).await,
-        folder_access(exec).await,
+        timed_if(
+            has_provider,
+            provider_auth(exec, providers, found_tmux.as_ref(), &os),
+        )
+        .await,
+        timed_if(
+            gated,
+            login_session(exec, found_tmux.as_ref(), found_claude.as_ref(), &os),
+        )
+        .await,
+        timed_one(mic(exec)).await,
+        timed_one(folder_access(exec)).await,
+        timed_one(hooks(exec, found_tmux.as_ref(), &os)).await,
         heartbeat(),
     ]
+}
+
+async fn timed<T>(step: impl Future<Output = (Check, T)>) -> (Check, T) {
+    let started = Instant::now();
+    let (mut check, found) = step.await;
+    check.took_ms = Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+    (check, found)
+}
+
+async fn timed_one(step: impl Future<Output = Check>) -> Check {
+    timed(async { (step.await, ()) }).await.0
+}
+
+/// `asked` is false where a step has nothing to ask with and answers at once.
+async fn timed_if(asked: bool, step: impl Future<Output = Check>) -> Check {
+    if asked {
+        timed_one(step).await
+    } else {
+        step.await
+    }
 }
 
 /// One command that does nothing, which is the whole of *can Yantra reach this
 /// machine* — and, when it fails, the only evidence about the far end's sshd.
 async fn reached<E: Exec>(exec: &E) -> (Check, Check) {
-    match exec.exec("true").await {
-        Ok(_) => (
+    match tokio::time::timeout(REACH_LIMIT, exec.exec("true")).await {
+        Ok(Ok(_)) => (
             present(REACHABLE, "a command ran there and reported its own status"),
             present(SSHD, "it answered, so one is listening"),
         ),
         // The transport failed before the command reported anything, so `ssh`'s
         // own diagnostic is all there is to go on (ADR-0006's `-E` log).
-        Err(ssh::Error::Transport { diagnosis, .. }) => diagnose(&diagnosis),
-        Err(err) => (
+        Ok(Err(ssh::Error::Transport { diagnosis, .. })) => diagnose(&diagnosis),
+        Ok(Err(err)) => (
             unknown(REACHABLE, format!("ssh could not be run from here: {err}")),
             unknown(SSHD, format!("ssh could not be run from here: {err}")),
         ),
+        Err(_) => diagnose(&format!(
+            "the login did not finish within {}s",
+            REACH_LIMIT.as_secs()
+        )),
     }
 }
 
@@ -258,6 +338,12 @@ fn diagnose(diagnosis: &str) -> (Check, Check) {
     let said = diagnosis.to_lowercase();
     let unreachable = |detail: String| absent(REACHABLE, detail);
 
+    if diagnosis.contains(ssh::BROWSER_CHECK) {
+        return (
+            unreachable(diagnosis.to_owned()),
+            present(SSHD, "Tailscale SSH answered on the ssh port"),
+        );
+    }
     if said.contains("connection refused") {
         return (
             unreachable(format!("the connection was refused: {diagnosis}")),
@@ -268,9 +354,22 @@ fn diagnose(diagnosis: &str) -> (Check, Check) {
             ),
         );
     }
-    // sshd itself wrote these, so it exists — what failed is this key or this
-    // known-hosts file, which is a different thing to go and fix.
-    if said.contains("permission denied") || said.contains("host key verification failed") {
+    // Y-621: Tailscale SSH has its own host key, so turning it off changes the
+    // key, and so does a reinstall. Only a person can tell those from an attack.
+    if said.contains("host key verification failed")
+        || said.contains("remote host identification has changed")
+    {
+        return (
+            unreachable(format!(
+                "the machine answered with a host key the appliance did not record for it: \
+                 {diagnosis}"
+            )),
+            present(SSHD, "a server sent its host key, so one is running"),
+        );
+    }
+    // sshd itself wrote this, so it exists — what failed is this key, which is
+    // a different thing to go and fix.
+    if said.contains("permission denied") {
         return (
             unreachable(format!("sshd refused this connection: {diagnosis}")),
             present(SSHD, "the refusal came from sshd itself, so one is running"),
@@ -314,9 +413,10 @@ async fn tmux<E: Exec>(exec: &E) -> (Check, Option<Tmux>) {
 /// Command Line Tools, and it is git once `xcode-select -p` answers.
 /// [`crate::install`] asks this too, so the two never disagree.
 pub(crate) async fn find_git<E: Exec>(exec: &E) -> Result<Option<String>, agent::Error> {
+    // `(/*)`, as in `agent::probe` (Y-634, Y-635).
     let probe = format!(
         "p=$(command -v git 2>/dev/null)\n\
-         case \"$p\" in /*) ;; *) p=\n\
+         case \"$p\" in (/*) ;; (*) p=\n\
          \x20 for d in {dirs}; do [ -x \"$d/git\" ] && {{ p=\"$d/git\"; break; }}; done ;;\n\
          esac\n\
          [ -n \"$p\" ] || exit 1\n\
@@ -419,7 +519,16 @@ async fn provider_cli<E: Exec>(exec: &E) -> (Check, Vec<(&'static str, String)>)
 ///
 /// What a pass claims is bounded exactly as I-53 bounds the agent's: a
 /// credential was found, and nothing about whether it works.
-async fn provider_auth<E: Exec>(exec: &E, providers: Vec<(&'static str, String)>) -> Check {
+///
+/// On macOS a token in the login keychain is out of ssh's reach (I-44), so a
+/// miss there is asked again inside the login session's tmux server, as the
+/// agent's gate is (ADR-0018 §5).
+async fn provider_auth<E: Exec>(
+    exec: &E,
+    providers: Vec<(&'static str, String)>,
+    tmux: Option<&Tmux>,
+    os: &Result<Os, ssh::Error>,
+) -> Check {
     if providers.is_empty() {
         return unknown(
             PROVIDER_AUTH,
@@ -433,6 +542,17 @@ async fn provider_auth<E: Exec>(exec: &E, providers: Vec<(&'static str, String)>
         match exec.exec(&command).await {
             Ok(out) if out.success() => credentialled.push(*name),
             Ok(_) => {}
+            Err(err) => return unknown(PROVIDER_AUTH, format!("could not be asked: {err}")),
+        }
+    }
+
+    if credentialled.is_empty() {
+        match os {
+            Ok(Os::Other) => {}
+            Ok(Os::MacOs) => match asked_inside(exec, &providers, tmux).await {
+                Ok(found) => credentialled = found,
+                Err(check) => return check,
+            },
             Err(err) => return unknown(PROVIDER_AUTH, format!("could not be asked: {err}")),
         }
     }
@@ -453,19 +573,61 @@ async fn provider_auth<E: Exec>(exec: &E, providers: Vec<(&'static str, String)>
     )
 }
 
+/// [`provider_auth`]'s question again, inside the Mac's login-session tmux
+/// server. `Err` is the check to report, because it could not be asked there.
+async fn asked_inside<E: Exec>(
+    exec: &E,
+    providers: &[(&'static str, String)],
+    tmux: Option<&Tmux>,
+) -> Result<Vec<&'static str>, Check> {
+    let Some(tmux) = tmux else {
+        return Err(unknown(
+            PROVIDER_AUTH,
+            "macOS keeps the credential in the login keychain, which only that machine's tmux \
+             server can reach, and tmux was not found there",
+        ));
+    };
+    let could_not =
+        |err: &dyn std::fmt::Display| unknown(PROVIDER_AUTH, format!("could not be asked: {err}"));
+    if !tmux.running(exec).await.map_err(|err| could_not(&err))? {
+        return Err(no_login_server(PROVIDER_AUTH));
+    }
+
+    let mut found = Vec::new();
+    for (name, path) in providers {
+        // run-shell ends in `exit 0`, so the status crosses as a mark on stdout.
+        let command = format!("{} auth status >/dev/null 2>&1 && echo {FOUND}", sq(path));
+        let out = exec
+            .exec(&tmux::run_shell(tmux.path(), &command))
+            .await
+            .map_err(|err| could_not(&err))?;
+        if !out.success() {
+            return Err(could_not(&String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        if String::from_utf8_lossy(&out.stdout).contains(FOUND) {
+            found.push(*name);
+        }
+    }
+    Ok(found)
+}
+
 /// ADR-0018's gate: can the process that will fork the agent reach the account?
 ///
 /// On macOS both halves are asked, and neither may be skipped. §1 is the
 /// precondition — a tmux server the *login session* started — and asking for it
-/// is [`Tmux::list`], which answers an empty vec where there is no server and
-/// starts none. §5 is the gate itself, which on that platform runs inside that
-/// server because ssh lands in launchd's `Background` domain and would answer
-/// `false` there forever (I-44).
+/// is [`Tmux::running`], which starts none. §5 is the gate itself, which on that
+/// platform runs inside that server because ssh lands in launchd's `Background`
+/// domain and would answer `false` there forever (I-44).
 ///
 /// Linux has no such split — the credential is a file this ssh session can read
 /// — so the same question is asked directly, and a pass means what I-53 says it
 /// means and no more.
-async fn login_session<E: Exec>(exec: &E, tmux: Option<&Tmux>, claude: Option<&Claude>) -> Check {
+async fn login_session<E: Exec>(
+    exec: &E,
+    tmux: Option<&Tmux>,
+    claude: Option<&Claude>,
+    os: &Result<Os, ssh::Error>,
+) -> Check {
     let (Some(tmux), Some(claude)) = (tmux, claude) else {
         return unknown(
             LOGIN_SESSION,
@@ -474,22 +636,15 @@ async fn login_session<E: Exec>(exec: &E, tmux: Option<&Tmux>, claude: Option<&C
         );
     };
 
-    let os = match ssh::os(exec).await {
-        Ok(os) => os,
+    let os = match os {
+        Ok(os) => *os,
         Err(err) => return unknown(LOGIN_SESSION, format!("could not be asked: {err}")),
     };
 
     if os == Os::MacOs {
-        match tmux.list(exec).await {
-            Ok(sessions) if sessions.is_empty() => {
-                return absent(
-                    LOGIN_SESSION,
-                    "macOS, and no tmux server is running — Yantra will not start one, because \
-                     panes in a server started over ssh cannot read the login keychain \
-                     (ADR-0018 §1, I-44)",
-                );
-            }
-            Ok(_) => {}
+        match tmux.running(exec).await {
+            Ok(false) => return no_login_server(LOGIN_SESSION),
+            Ok(true) => {}
             Err(err) => return unknown(LOGIN_SESSION, format!("could not be asked: {err}")),
         }
     }
@@ -628,6 +783,245 @@ fn folder_access_from(said: &str) -> Check {
     }
 }
 
+/// Splits what [`read_files`] printed. A file it could not read is empty.
+const HOOK_FILE: &str = "yantra-hook-file";
+
+/// Each of `files` (shell words) after a [`HOOK_FILE`] line, in one round trip.
+fn read_files(files: &str) -> String {
+    format!(
+        "for f in {files}; do printf '\\n%s\\n' {HOOK_FILE}; cat \"$f\" 2>/dev/null; done; exit 0"
+    )
+}
+
+/// The `count` files [`read_files`] printed, each as JSON, or `None` when the
+/// output is not that shape. An empty file is `Value::Null`; `Err` names the
+/// file that is not JSON, and never its contents (Q5).
+fn files_from(said: &str, names: &[&str]) -> Option<Result<Vec<Value>, String>> {
+    let mark = format!("\n{HOOK_FILE}\n");
+    let mut parts = said.split(&mark);
+    parts.next()?;
+    let files: Vec<&str> = parts.collect();
+    if files.len() != names.len() {
+        return None;
+    }
+    Some(
+        files
+            .iter()
+            .zip(names)
+            .map(|(text, name)| match text.trim() {
+                "" => Ok(Value::Null),
+                text => serde_json::from_str(text).map_err(|_| (*name).to_owned()),
+            })
+            .collect(),
+    )
+}
+
+/// Each program a hook needs on `PATH`, with the events and sources that run it.
+type Uses = BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)>;
+
+/// Words that are no program to find on `PATH`. A hook that starts with
+/// `command -v node &&` guards itself.
+const BUILTINS: [&str; 8] = [
+    "command", "exec", "export", "if", "test", "true", "exit", "cd",
+];
+
+/// The program a hook runs: `command` itself when it has `args`, else the shell
+/// line's first word after any `VAR=value`. A path or a word the shell would
+/// expand is not looked up on `PATH`, so it is `None`.
+fn program(hook: &Value) -> Option<&str> {
+    let command = hook.get("command")?.as_str()?.trim();
+    let name = if hook.get("args").is_some() {
+        command
+    } else {
+        command.split_whitespace().find(|word| {
+            !word.split_once('=').is_some_and(|(key, _)| {
+                !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+        })?
+    };
+    let plain = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c));
+    (plain && !BUILTINS.contains(&name)).then_some(name)
+}
+
+/// The command hooks in a `hooks` object, as settings.json and a plugin's
+/// hooks.json both hold it.
+fn hooks_in(hooks: Option<&Value>, source: &str, uses: &mut Uses) {
+    let Some(events) = hooks.and_then(Value::as_object) else {
+        return;
+    };
+    for (event, groups) in events {
+        let groups = groups.as_array().into_iter().flatten();
+        for hook in groups
+            .filter_map(|group| group.get("hooks")?.as_array())
+            .flatten()
+        {
+            if hook.get("type").and_then(Value::as_str) != Some("command") {
+                continue;
+            }
+            if let Some(name) = program(hook) {
+                let (events, sources) = uses.entry(name.to_owned()).or_default();
+                events.insert(event.clone());
+                sources.insert(source.to_owned());
+            }
+        }
+    }
+}
+
+/// The hooks the agent runs: settings.json's own, then each enabled plugin's.
+/// `Err` is the check to report.
+async fn hook_commands<E: Exec>(exec: &E) -> Result<Uses, Check> {
+    let could_not =
+        |err: &dyn std::fmt::Display| unknown(HOOKS, format!("could not be asked: {err}"));
+    let not_read = || unknown(HOOKS, "the probe answered nothing Yantra reads");
+    let not_json = |file: String| unknown(HOOKS, format!("{file} is not JSON Yantra can read"));
+
+    let names = [
+        "~/.claude/settings.json",
+        "~/.claude/plugins/installed_plugins.json",
+    ];
+    let words: Vec<String> = names
+        .iter()
+        .map(|name| name.replacen('~', "\"$HOME", 1) + "\"")
+        .collect();
+    let out = exec
+        .exec(&read_files(&words.join(" ")))
+        .await
+        .map_err(|err| could_not(&err))?;
+    let files = files_from(&String::from_utf8_lossy(&out.stdout), &names)
+        .ok_or_else(not_read)?
+        .map_err(not_json)?;
+    let (settings, installed) = (&files[0], &files[1]);
+
+    let mut uses = Uses::new();
+    hooks_in(settings.get("hooks"), "settings.json", &mut uses);
+
+    let plugins: Vec<(&str, String)> = settings
+        .get("enabledPlugins")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, on)| on.as_bool() == Some(true))
+        .filter_map(|(name, _)| {
+            let root = installed
+                .get("plugins")?
+                .get(name)?
+                .get(0)?
+                .get("installPath")?;
+            Some((
+                name.as_str(),
+                format!("{}/hooks/hooks.json", root.as_str()?),
+            ))
+        })
+        .collect();
+    if plugins.is_empty() {
+        return Ok(uses);
+    }
+
+    let paths: Vec<String> = plugins.iter().map(|(_, path)| sq(path)).collect();
+    let out = exec
+        .exec(&read_files(&paths.join(" ")))
+        .await
+        .map_err(|err| could_not(&err))?;
+    let names: Vec<&str> = plugins.iter().map(|(name, _)| *name).collect();
+    let files = files_from(&String::from_utf8_lossy(&out.stdout), &names)
+        .ok_or_else(not_read)?
+        .map_err(|plugin| not_json(format!("the hooks.json of {plugin}")))?;
+    for (file, plugin) in files.iter().zip(names) {
+        hooks_in(file.get("hooks"), plugin, &mut uses);
+    }
+    Ok(uses)
+}
+
+/// Precedes the names [`hooks`] could not find.
+const UNRESOLVED: &str = "yantra-unresolved";
+
+/// Y-640: a hook whose program the agent's `PATH` lacks fails each time the
+/// agent starts. That `PATH` is the tmux server's, so a running server is
+/// asked through `run-shell` (I-55). With none, Linux's next server inherits
+/// ssh's, and a Mac's is the LaunchAgent's, which cannot be asked yet.
+async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Error>) -> Check {
+    let could_not =
+        |err: &dyn std::fmt::Display| unknown(HOOKS, format!("could not be asked: {err}"));
+    let uses = match hook_commands(exec).await {
+        Ok(uses) => uses,
+        Err(check) => return check,
+    };
+    if uses.is_empty() {
+        return present(HOOKS, "no hook names a command");
+    }
+
+    let words: Vec<String> = uses.keys().map(|name| sq(name)).collect();
+    let probe = format!(
+        "echo {UNRESOLVED}; for n in {}; do command -v \"$n\" >/dev/null 2>&1 || echo \"$n\"; done",
+        words.join(" ")
+    );
+    let os = match os {
+        Ok(os) => *os,
+        Err(err) => return could_not(err),
+    };
+    let inside = match tmux {
+        Some(tmux) => match tmux.running(exec).await {
+            Ok(running) => running.then_some(tmux),
+            Err(err) => return could_not(&err),
+        },
+        None => None,
+    };
+    let command = match (inside, os) {
+        (Some(tmux), _) => tmux::run_shell(tmux.path(), &probe),
+        (None, Os::Other) => probe,
+        (None, Os::MacOs) => {
+            return unknown(
+                HOOKS,
+                "an agent on this Mac gets the PATH of the tmux server Yantra's LaunchAgent \
+                 starts, and it cannot be asked until that server runs",
+            );
+        }
+    };
+
+    let out = match exec.exec(&command).await {
+        Ok(out) if out.success() => out,
+        Ok(out) => return could_not(&String::from_utf8_lossy(&out.stderr).trim()),
+        Err(err) => return could_not(&err),
+    };
+    let said = String::from_utf8_lossy(&out.stdout);
+    let Some((_, after)) = said.split_once(&format!("{UNRESOLVED}\n")) else {
+        return unknown(HOOKS, "the probe answered nothing Yantra reads");
+    };
+    let missing: Vec<String> = after
+        .lines()
+        .filter_map(|line| uses.get_key_value(line.trim()))
+        .map(|(name, (events, sources))| {
+            let events: Vec<&str> = events.iter().map(String::as_str).collect();
+            let sources: Vec<&str> = sources.iter().map(String::as_str).collect();
+            format!(
+                "`{name}` ({} in {})",
+                events.join(", "),
+                sources.join(" and ")
+            )
+        })
+        .collect();
+    if missing.is_empty() {
+        let names: Vec<&str> = uses.keys().map(String::as_str).collect();
+        return present(
+            HOOKS,
+            format!(
+                "the agent's PATH has every command a hook names: {}",
+                names.join(", ")
+            ),
+        );
+    }
+    absent(
+        HOOKS,
+        format!(
+            "the agent's PATH lacks {}, so those hooks fail each time an agent starts",
+            missing.join("; ")
+        ),
+    )
+}
+
 /// **Unknown from every caller there is today**, and it is the architecture
 /// rather than an omission: the beats live in the running daemon's memory and
 /// nothing persists them (Y-044), while the CLI calls the library in-process and
@@ -687,6 +1081,7 @@ fn present(check: &'static str, detail: impl Into<String>) -> Check {
         check,
         state: State::Present,
         detail: detail.into(),
+        took_ms: None,
     }
 }
 
@@ -695,6 +1090,7 @@ fn absent(check: &'static str, detail: impl Into<String>) -> Check {
         check,
         state: State::Absent,
         detail: detail.into(),
+        took_ms: None,
     }
 }
 
@@ -703,6 +1099,7 @@ fn unknown(check: &'static str, detail: impl Into<String>) -> Check {
         check,
         state: State::Unknown,
         detail: detail.into(),
+        took_ms: None,
     }
 }
 
@@ -744,6 +1141,45 @@ mod tests {
         );
     }
 
+    /// Y-621: OpenSSH's own words for a changed key, as `ssh -E` logged them
+    /// against github.com with a wrong key recorded (2026-11-04).
+    #[test]
+    fn a_changed_host_key_says_so_and_is_a_server_that_answered() {
+        let said = "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n\
+                    @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\n\
+                    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n\
+                    IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\n\
+                    Someone could be eavesdropping on you right now (man-in-the-middle attack)!\n\
+                    It is also possible that a host key has just been changed.\n\
+                    The fingerprint for the ED25519 key sent by the remote host is\n\
+                    SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU.\n\
+                    Please contact your system administrator.\n\
+                    Add correct host key in /run/user/1000/yantra/known_hosts to get rid of this message.\n\
+                    Offending ED25519 key in /run/user/1000/yantra/known_hosts:1\n\
+                    Host key for pi has changed and you have requested strict checking.\n\
+                    Host key verification failed.";
+        let (reachable, sshd) = diagnose(said);
+        assert_eq!(reachable.state, State::Absent);
+        assert!(
+            reachable
+                .detail
+                .starts_with("the machine answered with a host key the appliance did not record"),
+            "{}",
+            reachable.detail
+        );
+        assert!(
+            reachable.detail.contains("known_hosts:1"),
+            "{}",
+            reachable.detail
+        );
+        assert!(
+            !reachable.detail.contains("sshd refused"),
+            "{}",
+            reachable.detail
+        );
+        assert_eq!(sshd.state, State::Present, "{}", sshd.detail);
+    }
+
     /// Y-412, as the appliance logged it on 2026-09-28: the banner is the
     /// reason, and the server that sent it is running.
     #[test]
@@ -763,6 +1199,128 @@ mod tests {
             reachable.detail
         );
         assert_eq!(sshd.state, State::Present, "{}", sshd.detail);
+    }
+
+    /// Y-585: `ssh::exec` stops at this phrase, and the server that sent it
+    /// is running, so this is not a silence.
+    #[test]
+    fn a_browser_check_is_a_server_that_answered() {
+        let (reachable, sshd) = diagnose(ssh::BROWSER_DIAGNOSIS);
+        assert_eq!(reachable.state, State::Absent);
+        assert!(
+            reachable.detail.contains(ssh::BROWSER_CHECK),
+            "{}",
+            reachable.detail
+        );
+        assert!(
+            !reachable.detail.contains("no answer"),
+            "{}",
+            reachable.detail
+        );
+        assert_eq!(sshd.state, State::Present, "{}", sshd.detail);
+    }
+
+    /// Answers every command the same way, as a machine with nothing to say.
+    struct Answers {
+        status: i32,
+        stdout: &'static str,
+    }
+
+    impl Exec for Answers {
+        async fn exec(&self, _command: &str) -> Result<ssh::Output, ssh::Error> {
+            Ok(ssh::Output {
+                status: self.status,
+                stdout: self.stdout.as_bytes().to_vec(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    fn took(checks: &[Check], name: &str) -> Option<u64> {
+        checks
+            .iter()
+            .find(|check| check.check == name)
+            .expect("the list holds it")
+            .took_ms
+    }
+
+    #[tokio::test]
+    async fn every_step_that_ran_says_how_long_it_took() {
+        let machine = Answers {
+            status: 0,
+            stdout: "/usr/bin/found\n",
+        };
+        let checks = of(&machine, "alacritty").await;
+        for check in &checks {
+            assert_eq!(
+                check.took_ms.is_some(),
+                check.check != HEARTBEAT,
+                "{}: {:?}",
+                check.check,
+                check.took_ms
+            );
+        }
+    }
+
+    /// R-23: a step with nothing to ask with has no time, and zero would say
+    /// it ran.
+    #[tokio::test]
+    async fn a_step_that_had_nothing_to_ask_with_has_no_time() {
+        let machine = Answers {
+            status: 1,
+            stdout: "",
+        };
+        let checks = of(&machine, "alacritty").await;
+        assert!(took(&checks, "tmux").is_some());
+        assert_eq!(took(&checks, PROVIDER_AUTH), None);
+        assert_eq!(took(&checks, LOGIN_SESSION), None);
+        assert_eq!(took(&checks, HEARTBEAT), None);
+    }
+
+    struct Refuses;
+
+    impl Exec for Refuses {
+        async fn exec(&self, _command: &str) -> Result<ssh::Output, ssh::Error> {
+            Err(ssh::Error::Transport {
+                host: "pi".to_owned(),
+                diagnosis: "Connection refused".to_owned(),
+            })
+        }
+    }
+
+    /// One command answers both, and nothing behind ssh was asked.
+    #[tokio::test]
+    async fn a_failed_reach_times_only_the_command_that_failed() {
+        let checks = of(&Refuses, "alacritty").await;
+        assert_eq!(took(&checks, REACHABLE), took(&checks, SSHD));
+        assert!(took(&checks, REACHABLE).is_some());
+        for check in BEHIND_SSH.into_iter().chain([HEARTBEAT]) {
+            assert_eq!(took(&checks, check), None, "{check}");
+        }
+    }
+
+    struct Hangs;
+
+    impl Exec for Hangs {
+        async fn exec(&self, _command: &str) -> Result<ssh::Output, ssh::Error> {
+            std::future::pending().await
+        }
+    }
+
+    /// The limit behind the phrase: a server that holds the auth stage in
+    /// words Yantra does not know still ends here, and says nothing about sshd.
+    #[tokio::test(start_paused = true)]
+    async fn a_login_that_never_finishes_ends_at_the_limit() {
+        let checks = of(&Hangs, "alacritty").await;
+        let reachable = &checks[0];
+        assert_eq!(reachable.state, State::Absent);
+        assert!(
+            reachable.detail.contains("no answer"),
+            "{}",
+            reachable.detail
+        );
+        assert_eq!(checks[1].state, State::Unknown);
+        assert_eq!(reachable.took_ms, Some(REACH_LIMIT.as_millis() as u64));
     }
 
     /// Only a failed `reachable` is annotated, and only when no block names
@@ -819,7 +1377,7 @@ mod tests {
     #[test]
     fn a_machine_that_cannot_be_asked_is_never_reported_as_missing_anything() {
         let checks = nothing_asked("ssh could not be set up here");
-        assert_eq!(checks.len(), 12);
+        assert_eq!(checks.len(), 13);
         assert!(
             checks.iter().all(|c| c.state == State::Unknown),
             "{checks:?}"
@@ -976,5 +1534,478 @@ mod tests {
                 .detail
                 .contains("octocat")
         );
+    }
+
+    /// Y-619: a Mac answering by command. gh over ssh finds nothing, as it
+    /// does when its token is in the login keychain (I-44).
+    struct Mac {
+        os: &'static str,
+        server: bool,
+        /// A `tmux -D` server with no session still answers `list-sessions`.
+        sessions: bool,
+        gh_inside: bool,
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl Mac {
+        fn new(os: &'static str, server: bool, gh_inside: bool) -> Self {
+            Self {
+                os,
+                server,
+                sessions: true,
+                gh_inside,
+                asked: std::sync::Mutex::default(),
+            }
+        }
+
+        fn asked(&self, part: &str) -> bool {
+            let asked = self.asked.lock().expect("not poisoned");
+            asked.iter().any(|command| command.contains(part))
+        }
+    }
+
+    impl Exec for Mac {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            self.asked
+                .lock()
+                .expect("not poisoned")
+                .push(command.to_owned());
+            let no_server = "no server running on /tmp/tmux-501/default\n";
+            let (status, stdout, stderr) = if command == "uname -s" {
+                (0, self.os, "")
+            } else if command.contains("run-shell") {
+                match (self.server, self.gh_inside) {
+                    (false, _) => (1, "", no_server),
+                    (true, true) => (0, "yantra-credential-found\n", ""),
+                    (true, false) => (0, "", ""),
+                }
+            } else if command.contains("list-sessions") {
+                if self.server && !self.sessions {
+                    (0, "", "")
+                } else if self.server {
+                    (0, "1|0|Mon Nov  3 09:00:00 2026|1793696400|main\n", "")
+                } else {
+                    (1, "", no_server)
+                }
+            } else if command.contains("auth status") {
+                (1, "", "")
+            } else if command.contains("command -v gh") || command.contains("command -v tmux") {
+                (0, "/opt/homebrew/bin/found\n", "")
+            } else if command.contains("command -v claude") {
+                (0, "/Users/me/.local/bin/claude\n", "")
+            } else {
+                (1, "", "")
+            };
+            Ok(ssh::Output {
+                status,
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            })
+        }
+    }
+
+    fn check<'a>(checks: &'a [Check], name: &str) -> &'a Check {
+        checks
+            .iter()
+            .find(|check| check.check == name)
+            .expect("the list holds it")
+    }
+
+    fn gh() -> Vec<(&'static str, String)> {
+        vec![("gh", "/opt/homebrew/bin/gh".to_owned())]
+    }
+
+    /// The card reads this detail, so it names the server and the command,
+    /// and never sends the owner to sign in to an account that is signed in.
+    #[tokio::test]
+    async fn a_mac_with_no_login_server_is_told_to_start_one_not_to_log_in() {
+        let checks = of(&Mac::new("Darwin\n", false, false), "alacritty").await;
+        for name in [LOGIN_SESSION, PROVIDER_AUTH] {
+            let found = check(&checks, name);
+            assert_eq!(found.state, State::Absent, "{name}: {}", found.detail);
+            assert!(found.detail.contains(NO_LOGIN_SERVER), "{}", found.detail);
+            assert!(
+                found.detail.contains("`tmux new-session -d`"),
+                "{}",
+                found.detail
+            );
+            let said = found.detail.to_lowercase();
+            assert!(
+                !said.contains("log in") && !said.contains("sign in"),
+                "{said}"
+            );
+        }
+    }
+
+    /// The LaunchAgent's `tmux -D` server holds no session until one starts,
+    /// and it is the login server all the same.
+    #[tokio::test]
+    async fn an_empty_login_server_is_not_reported_absent() {
+        let mut mac = Mac::new("Darwin\n", true, true);
+        mac.sessions = false;
+        let checks = of(&mac, "alacritty").await;
+        for name in [LOGIN_SESSION, PROVIDER_AUTH] {
+            let found = check(&checks, name);
+            assert!(
+                !found.detail.contains(NO_LOGIN_SERVER),
+                "{name}: {}",
+                found.detail
+            );
+        }
+        assert_eq!(check(&checks, PROVIDER_AUTH).state, State::Present);
+        assert!(!mac.asked("launchctl"), "doctor is a read");
+    }
+
+    /// ADR-0018 §5 for gh: where ssh cannot reach the keychain, the server can.
+    #[tokio::test]
+    async fn gh_on_a_mac_is_asked_again_inside_the_login_server() {
+        let mac = Mac::new("Darwin\n", true, true);
+        let tmux = Tmux::resolve(&mac).await.expect("a tmux");
+        let found = provider_auth(&mac, gh(), Some(&tmux), &Ok(Os::MacOs)).await;
+        assert_eq!(found.state, State::Present, "{}", found.detail);
+
+        let mac = Mac::new("Darwin\n", true, false);
+        let found = provider_auth(&mac, gh(), Some(&tmux), &Ok(Os::MacOs)).await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert!(
+            found.detail.contains("found no credential"),
+            "{}",
+            found.detail
+        );
+
+        let found = provider_auth(&mac, gh(), None, &Ok(Os::MacOs)).await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+    }
+
+    /// Y-640: a machine's Claude files, and the names its agent's PATH lacks.
+    struct Agent {
+        os: Os,
+        server: bool,
+        settings: &'static str,
+        installed: &'static str,
+        plugin_hooks: &'static str,
+        missing: &'static str,
+        asked: std::sync::Mutex<Vec<String>>,
+    }
+
+    /// claude-mem 15.9.0's hooks, cut to one of each form.
+    const CLAUDE_MEM: &str = r#"{"hooks": {
+        "Setup": [{"hooks": [{"type": "command", "command": "/bin/sh -c 'export PATH=x'"}]}],
+        "SessionStart": [{"matcher": "startup", "hooks": [
+            {"type": "command", "command": "claude-mem", "args": ["start"]},
+            {"type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/x.cjs"]}
+        ]}],
+        "Stop": [{"hooks": [{"type": "command", "command": "claude-mem", "args": ["summarize"]}]}]
+    }}"#;
+
+    const ENABLED: &str =
+        r#"{"enabledPlugins": {"claude-mem@thedotmack": true, "off@market": false}}"#;
+
+    const INSTALLED: &str = r#"{"version": 2, "plugins": {
+        "claude-mem@thedotmack": [{"installPath": "/Users/me/.claude/plugins/cache/claude-mem/15.9.0"}],
+        "off@market": [{"installPath": "/Users/me/.claude/plugins/cache/off/1.0.0"}]
+    }}"#;
+
+    impl Agent {
+        fn new(settings: &'static str, plugin_hooks: &'static str, missing: &'static str) -> Self {
+            Self {
+                os: Os::Other,
+                server: false,
+                settings,
+                installed: INSTALLED,
+                plugin_hooks,
+                missing,
+                asked: std::sync::Mutex::default(),
+            }
+        }
+
+        fn asked(&self, part: &str) -> Vec<String> {
+            let asked = self.asked.lock().expect("not poisoned");
+            asked.iter().filter(|c| c.contains(part)).cloned().collect()
+        }
+
+        async fn check(&self) -> Check {
+            let tmux = Tmux::resolve(self).await.expect("a tmux");
+            hooks(self, Some(&tmux), &Ok(self.os)).await
+        }
+    }
+
+    impl Exec for Agent {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            self.asked
+                .lock()
+                .expect("not poisoned")
+                .push(command.to_owned());
+            let file = |body: &str| format!("\n{HOOK_FILE}\n{body}");
+            let (status, stdout, stderr) = if command.contains("settings.json") {
+                (
+                    0,
+                    file(self.settings) + &file(self.installed),
+                    String::new(),
+                )
+            } else if command.contains("hooks/hooks.json") {
+                (0, file(self.plugin_hooks), String::new())
+            } else if command.contains(UNRESOLVED) {
+                (0, format!("{UNRESOLVED}\n{}", self.missing), String::new())
+            } else if command.contains("list-sessions") {
+                match self.server {
+                    true => (0, String::new(), String::new()),
+                    false => (
+                        1,
+                        String::new(),
+                        "no server running on /tmp/tmux-501/default\n".to_owned(),
+                    ),
+                }
+            } else if command.contains("command -v tmux") {
+                (0, "/opt/homebrew/bin/tmux\n".to_owned(), String::new())
+            } else {
+                (1, String::new(), String::new())
+            };
+            Ok(ssh::Output {
+                status,
+                stdout: stdout.into_bytes(),
+                stderr: stderr.into_bytes(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn no_hooks_is_present() {
+        for (settings, installed) in [("", ""), ("{}", INSTALLED), (ENABLED, "")] {
+            let mut agent = Agent::new(settings, CLAUDE_MEM, "");
+            agent.installed = installed;
+            let found = agent.check().await;
+            assert_eq!(found.state, State::Present, "{}", found.detail);
+            assert_eq!(found.detail, "no hook names a command");
+            assert!(agent.asked("hooks/hooks.json").is_empty());
+        }
+    }
+
+    /// Only the enabled plugin's hooks.json is read, and the exec form's
+    /// `command` is the program.
+    #[tokio::test]
+    async fn every_resolved_command_is_present_and_named() {
+        let agent = Agent::new(ENABLED, CLAUDE_MEM, "");
+        let found = agent.check().await;
+        assert_eq!(found.state, State::Present, "{}", found.detail);
+        assert!(
+            found.detail.ends_with(": claude-mem, node"),
+            "{}",
+            found.detail
+        );
+        let read = agent.asked("hooks/hooks.json");
+        assert_eq!(read.len(), 1, "{read:?}");
+        assert!(
+            read[0]
+                .contains("'/Users/me/.claude/plugins/cache/claude-mem/15.9.0/hooks/hooks.json'")
+        );
+        assert!(!read[0].contains("off/1.0.0"), "{read:?}");
+        let probe = &agent.asked(UNRESOLVED)[0];
+        assert!(probe.contains("'claude-mem' 'node'"), "{probe}");
+        assert!(
+            !probe.contains("/bin/sh"),
+            "a path is not looked up: {probe}"
+        );
+    }
+
+    /// The walk on bishwajeets-macbook-pro: the detail names each command,
+    /// its events and its plugin, and nothing else from the files.
+    #[tokio::test]
+    async fn a_missing_command_is_absent_with_its_event_and_plugin() {
+        let agent = Agent::new(ENABLED, CLAUDE_MEM, "node\nclaude-mem\n");
+        let found = agent.check().await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert!(
+            found
+                .detail
+                .contains("`claude-mem` (SessionStart, Stop in claude-mem@thedotmack)"),
+            "{}",
+            found.detail
+        );
+        assert!(
+            found
+                .detail
+                .contains("`node` (SessionStart in claude-mem@thedotmack)"),
+            "{}",
+            found.detail
+        );
+        assert!(found.detail.contains("PATH lacks"), "{}", found.detail);
+        for private in ["summarize", "CLAUDE_PLUGIN_ROOT", "/Users/me"] {
+            assert!(
+                !found.detail.contains(private),
+                "{private}: {}",
+                found.detail
+            );
+        }
+    }
+
+    /// A shell line's program is its first word after `VAR=value`; a builtin
+    /// that guards the line, a path and an expansion are not looked up.
+    #[test]
+    fn a_shell_lines_program_is_its_first_plain_word() {
+        let program_of = |command: &str| {
+            program(&serde_json::json!({"type": "command", "command": command})).map(str::to_owned)
+        };
+        assert_eq!(program_of("node x.js").as_deref(), Some("node"));
+        assert_eq!(program_of("FOO=1 BAR=x bun run y").as_deref(), Some("bun"));
+        assert_eq!(program_of("command -v node && node x || exit 0"), None);
+        assert_eq!(
+            program_of("bash \"${CLAUDE_PLUGIN_ROOT}/x.sh\"").as_deref(),
+            Some("bash")
+        );
+        assert_eq!(program_of("\"${CLAUDE_PLUGIN_ROOT}/x.sh\""), None);
+        assert_eq!(program_of("$HOME/bin/x"), None);
+        assert_eq!(program_of("/usr/bin/env node"), None);
+        assert_eq!(program_of("[ -f x ] && y"), None);
+        assert_eq!(program_of(""), None);
+        let exec = serde_json::json!({"command": "node", "args": ["a b"]});
+        assert_eq!(program(&exec), Some("node"));
+    }
+
+    /// settings.json's own hooks count, and a shell line's guard is skipped.
+    #[tokio::test]
+    async fn settings_hooks_are_read_too() {
+        let agent = Agent::new(
+            r#"{"hooks": {"PreToolUse": [{"hooks": [
+                {"type": "command", "command": "jq -r .tool"},
+                {"type": "command", "command": "command -v node && node x || exit 0"},
+                {"type": "prompt", "prompt": "is this safe?"}
+            ]}]}}"#,
+            "",
+            "jq\n",
+        );
+        let found = agent.check().await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert!(
+            found.detail.contains("`jq` (PreToolUse in settings.json)"),
+            "{}",
+            found.detail
+        );
+        assert!(!found.detail.contains("node"), "{}", found.detail);
+    }
+
+    /// R-23: a file that is not JSON was not read, so nothing is missing.
+    #[tokio::test]
+    async fn unparseable_json_is_unknown() {
+        let found = Agent::new("{not json", "", "").check().await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+        assert!(found.detail.contains("settings.json"), "{}", found.detail);
+        assert!(!found.detail.contains("not json"), "{}", found.detail);
+
+        let found = Agent::new(ENABLED, "{\"hooks\": [", "").check().await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+        assert!(
+            found.detail.contains("claude-mem@thedotmack"),
+            "{}",
+            found.detail
+        );
+
+        let found = hooks(
+            &Answers {
+                status: 0,
+                stdout: "/usr/bin/found\n",
+            },
+            None,
+            &Ok(Os::Other),
+        )
+        .await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+        let found = hooks(&Refuses, None, &Ok(Os::Other)).await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+    }
+
+    /// The agent's PATH is the tmux server's, so a running server answers.
+    #[tokio::test]
+    async fn a_running_server_is_asked_inside() {
+        for os in [Os::MacOs, Os::Other] {
+            let mut agent = Agent::new(ENABLED, CLAUDE_MEM, "node\n");
+            (agent.os, agent.server) = (os, true);
+            let found = agent.check().await;
+            assert_eq!(found.state, State::Absent, "{os:?}: {}", found.detail);
+            let probe = &agent.asked(UNRESOLVED)[0];
+            assert!(probe.contains("run-shell"), "{probe}");
+        }
+    }
+
+    /// Linux's next server inherits ssh's PATH, so ssh answers. A Mac's next
+    /// server is the LaunchAgent's, whose PATH ssh does not have.
+    #[tokio::test]
+    async fn with_no_server_linux_asks_over_ssh_and_a_mac_cannot_ask() {
+        let linux = Agent::new(ENABLED, CLAUDE_MEM, "");
+        assert_eq!(linux.check().await.state, State::Present);
+        assert!(!linux.asked(UNRESOLVED)[0].contains("run-shell"));
+
+        let mut mac = Agent::new(ENABLED, CLAUDE_MEM, "node\n");
+        mac.os = Os::MacOs;
+        let found = mac.check().await;
+        assert_eq!(found.state, State::Unknown, "{}", found.detail);
+        assert!(found.detail.contains("LaunchAgent"), "{}", found.detail);
+        assert!(mac.asked(UNRESOLVED).is_empty());
+        assert!(mac.asked("launchctl").is_empty(), "doctor is a read");
+    }
+
+    /// The three probes under a real `sh`, with `$HOME` a scratch directory.
+    struct Local(std::path::PathBuf);
+
+    impl Exec for Local {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            let out = std::process::Command::new("sh")
+                .args(["-c", command])
+                .env("HOME", &self.0)
+                .output()
+                .expect("sh is on every machine this builds on");
+            Ok(ssh::Output {
+                status: out.status.code().unwrap_or(-1),
+                stdout: out.stdout,
+                stderr: out.stderr,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn the_probes_work_under_a_real_shell() {
+        let home = std::env::temp_dir().join(format!("yantra-hooks-{}", std::process::id()));
+        let plugin = home.join("plugin's dir");
+        std::fs::create_dir_all(home.join(".claude/plugins")).expect("a directory");
+        std::fs::create_dir_all(plugin.join("hooks")).expect("a directory");
+        std::fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"enabledPlugins": {"p@m": true},
+                "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "sh -c true"}]}]}}"#,
+        )
+        .expect("a file");
+        let installed = serde_json::json!({"plugins": {"p@m": [{"installPath": plugin}]}});
+        std::fs::write(
+            home.join(".claude/plugins/installed_plugins.json"),
+            installed.to_string(),
+        )
+        .expect("a file");
+        std::fs::write(
+            plugin.join("hooks/hooks.json"),
+            r#"{"hooks": {"SessionStart": [{"hooks": [
+                {"type": "command", "command": "yantra-no-such-program", "args": []}
+            ]}]}}"#,
+        )
+        .expect("a file");
+
+        let found = hooks(&Local(home.clone()), None, &Ok(Os::Other)).await;
+        let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert_eq!(
+            found.detail,
+            "the agent's PATH lacks `yantra-no-such-program` (SessionStart in p@m), so those \
+             hooks fail each time an agent starts"
+        );
+    }
+
+    /// Linux keeps one question over ssh, and never asks tmux.
+    #[tokio::test]
+    async fn gh_on_linux_is_asked_over_ssh_alone() {
+        let linux = Mac::new("Linux\n", true, true);
+        let tmux = Tmux::resolve(&linux).await.expect("a tmux");
+        let found = provider_auth(&linux, gh(), Some(&tmux), &Ok(Os::Other)).await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert_eq!(found.detail, "gh found no credential there");
+        assert!(!linux.asked("list-sessions") && !linux.asked("run-shell"));
     }
 }

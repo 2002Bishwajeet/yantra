@@ -46,7 +46,7 @@ const NOT_PUSHED: i32 = 7;
 const AHEAD: i32 = 8;
 const BEHIND: i32 = 9;
 const DIVERGED: i32 = 10;
-const TIMED_OUT: i32 = 124;
+pub(crate) const TIMED_OUT: i32 = 124;
 const NO_CLAUDE: i32 = 127;
 /// How long a draft, a commit with its hooks, or a push may run.
 const TIME_LIMIT_SECS: u64 = 5 * 60;
@@ -75,8 +75,9 @@ pub enum Error {
     TimedOut { minutes: u64 },
 
     #[error(
-        "the Mac has no tmux server from a login session, so git and claude there cannot read \
-         the login keychain (ADR-0018 §1). Start one there: `tmux new-session -d`"
+        "the Mac has no tmux server from a login session, because no one is logged in at its \
+         screen, so git and claude there cannot read the login keychain (ADR-0018 §1). Log in at \
+         that Mac, then try again"
     )]
     NoLoginServer,
 
@@ -142,7 +143,7 @@ async fn run<E: Exec>(exec: &E, script: &str, tmux: Option<&str>) -> Result<ssh:
 
 /// Stops `script` and every process under it after `secs`: a dropped ssh
 /// leaves it running (I-27). `STOP` first, so no child escapes the walk.
-fn bounded(script: &str, secs: u64) -> String {
+pub(crate) fn bounded(script: &str, secs: u64) -> String {
     format!(
         "k() {{ kill -STOP \"$1\" 2>/dev/null; for c in $(pgrep -P \"$1\"); do k \"$c\"; done; \
          kill -TERM \"$1\" 2>/dev/null; kill -CONT \"$1\" 2>/dev/null; }}\n\
@@ -460,7 +461,7 @@ async fn tip<E: Exec>(exec: &E, place: &Place, branch: &str) -> Result<Tip, Fail
 }
 
 /// `branch` is the upstream's branch, as [`thread::Listed`] read it.
-fn tip_command(place: &Place, branch: &str) -> String {
+pub(crate) fn tip_command(place: &Place, branch: &str) -> String {
     format!(
         "cd {worktree} || exit {GIT_FAILED}\n\
          r=$(git config --get {remote}) || exit {NOT_PUSHED}\n\
@@ -649,12 +650,12 @@ async fn reach(name: &str) -> Result<(Workspace, Ssh), Failed> {
 
 /// The tmux server a Mac drafts and pushes in, or `None` elsewhere: over ssh
 /// a Mac cannot read the login keychain (I-44, ADR-0018 §5).
-async fn login_server(ssh: &Ssh) -> Result<Option<String>, Failed> {
-    if ssh::os(ssh).await.map_err(Error::Ssh)? != Os::MacOs {
+async fn login_server<E: Exec>(exec: &E) -> Result<Option<String>, Failed> {
+    if ssh::os(exec).await.map_err(Error::Ssh)? != Os::MacOs {
         return Ok(None);
     }
-    let tmux = Tmux::resolve(ssh).await?;
-    if tmux.list(ssh).await?.is_empty() {
+    let tmux = Tmux::resolve(exec).await?;
+    if !tmux.login_server(exec).await? {
         return Err(Error::NoLoginServer.into());
     }
     Ok(Some(tmux.path().to_owned()))
@@ -791,6 +792,79 @@ mod tests {
 
     fn issue() -> IssueRef {
         "o/r#42".parse().expect("an issue")
+    }
+
+    /// A Mac with no tmux server, whose login-server script exits `script`.
+    fn serverless_mac(script: i32) -> Machine {
+        Machine::answering(vec![
+            out(0, "Darwin\n", ""),
+            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(1, "", "no server running on /private/tmp/tmux-501/default"),
+            out(script, "", "launchctl said no"),
+        ])
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_no_server_drafts_in_the_one_the_launch_agent_starts() {
+        let mac = serverless_mac(0);
+        let tmux = login_server(&mac).await.expect("a server");
+        assert_eq!(tmux.as_deref(), Some("/opt/homebrew/bin/tmux"));
+        assert!(mac.asked()[3].ends_with("\nlogin_server '/opt/homebrew/bin/tmux'\n"));
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_no_one_at_the_screen_is_no_login_server() {
+        assert!(matches!(
+            login_server(&serverless_mac(3)).await,
+            Err(Failed::Commit(Error::NoLoginServer))
+        ));
+        assert!(matches!(
+            login_server(&serverless_mac(1)).await,
+            Err(Failed::Tmux(tmux::Error::Command { ref command, ref stderr, .. }))
+                if command == "launchctl" && stderr == "launchctl said no"
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_mac_holding_a_session_sends_no_launchctl() {
+        let mac = Machine::answering(vec![
+            out(0, "Darwin\n", ""),
+            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "main: 1 windows\n", ""),
+        ]);
+        assert!(login_server(&mac).await.expect("a server").is_some());
+        assert_eq!(mac.asked().len(), 3);
+    }
+
+    /// Y-640: an empty server gets the script, and serves if it fails while
+    /// it still answers. The script's bootout may have ended it.
+    #[tokio::test]
+    async fn a_mac_with_an_empty_server_is_sent_the_script() {
+        let mac = Machine::answering(vec![
+            out(0, "Darwin\n", ""),
+            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "", ""),
+            out(1, "", "launchctl said no"),
+            out(0, "", ""),
+        ]);
+        assert!(login_server(&mac).await.expect("a server").is_some());
+        assert!(mac.asked()[3].ends_with("\nlogin_server '/opt/homebrew/bin/tmux'\n"));
+
+        let mac = Machine::answering(vec![
+            out(0, "Darwin\n", ""),
+            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "", ""),
+            out(1, "", "launchctl said no"),
+            out(1, "", "no server running on /private/tmp/tmux-501/default"),
+        ]);
+        assert!(login_server(&mac).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn linux_has_no_login_server() {
+        let linux = Machine::answering(vec![out(0, "Linux\n", "")]);
+        assert_eq!(login_server(&linux).await.expect("answered"), None);
+        assert_eq!(linux.asked().len(), 1);
     }
 
     /// What the machine's shell receives for `word` once `sq` quoted it.

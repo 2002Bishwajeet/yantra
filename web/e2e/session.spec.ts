@@ -51,9 +51,9 @@ test.describe('the session screen, chat first', () => {
     await expect(page.getByRole('heading', { level: 1, name: NAME }).first()).toBeVisible()
   })
 
-  test('opens on Chat, with the four views as links', async ({ page }) => {
+  test('opens on Chat, with the three views as links', async ({ page }) => {
     const links = views(page).getByRole('link')
-    await expect(links).toHaveText(['Chat', 'Terminal', 'Transcript', 'Spend'])
+    await expect(links).toHaveText(['Chat', 'Terminal', 'Spend'])
     await expect(views(page).getByRole('link', { name: 'Chat' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -181,12 +181,12 @@ test.describe('the session screen, chat first', () => {
     await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription('')
   })
 
-  /** The walk runs on Transcript rather than Chat: `keyboard.ts` reads the
+  /** The walk runs on Spend rather than Chat: `keyboard.ts` reads the
    *  focused element, and m3's text field draws its ring on the box around the
    *  input, so the composer reads as a stop with no indicator. */
   test('walks by keyboard', async ({ page }) => {
-    await open(page, 'Transcript')
-    await expect(page.getByText('read from the transcript on')).toBeVisible()
+    await open(page, 'Spend')
+    await expect(page.getByText('This session')).toBeVisible()
     await keyboardWalk(page, 12)
   })
 
@@ -196,7 +196,7 @@ test.describe('the session screen, chat first', () => {
   })
 })
 
-test.describe('the session screen, the other three views', () => {
+test.describe('the session screen, the other two views', () => {
   test.beforeEach(async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto(PATH)
@@ -264,23 +264,29 @@ test.describe('the session screen, the other three views', () => {
     await expect(row.locator(':focus')).toHaveCount(0)
   })
 
-  test('the Transcript view reads over ssh, on request', async ({ page, size }) => {
-    await open(page, 'Transcript')
+  /** The transcript is the Terminal's History: opening it is the request that reads it. */
+  test("the Terminal's History reads over ssh, on request", async ({ page }) => {
+    await open(page, 'Terminal')
+    await expect(page.locator('.xterm-rows')).toContainText('Do you want to proceed?')
+    await expect(page.getByText('read from the transcript on')).toHaveCount(0)
 
-    await expect(page.getByText('read from the transcript on')).toBeVisible()
+    await page.getByRole('button', { name: 'Show History' }).click()
+    await expect(
+      page.getByText(
+        'What the agent in this terminal said, read from its transcript on cachyos-g14. Chat turns are not here.',
+      ),
+    ).toBeVisible()
+    await expect(page.getByText('read from the transcript on cachyos-g14 over ssh')).toBeVisible()
     await expect(page.getByText('the last 50 of 1,944 records')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Take control' })).toHaveAttribute(
-      'href',
-      `${PATH}?view=terminal`,
-    )
-    // Finding 132: the board sends the answer to the pane, which is Terminal.
-    await expect(page.getByRole('link', { name: 'Terminal tab' })).toHaveAttribute(
-      'href',
-      `${PATH}?view=terminal`,
-    )
+    // The tab is the terminal, so the history has no link to itself.
+    await expect(page.getByRole('link', { name: 'Take control' })).toHaveCount(0)
     await axe(page)
-    await screenshot(page, 'session-transcript', 'busy', size)
+  })
+
+  test('an old ?view=transcript link lands on the Terminal', async ({ page }) => {
+    await page.goto(`${PATH}?view=transcript`)
+    await expect(views(page).getByRole('link', { name: 'Terminal' })).toHaveAttribute('aria-current', 'page')
   })
 
   /** ADR-0019 and D6 §5.1: spend is an ssh transcript read, so it is asked for

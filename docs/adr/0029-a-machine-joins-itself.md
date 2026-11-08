@@ -69,6 +69,8 @@ owner edits it.
 nothing to disk, and systemd reads `/etc/yantra/agent.env` as root before it drops privileges. The
 appliance keeps its `yantra` account, because `yantrad` runs as it.
 
+> **2026-11-08, [Y-665](../../tracker.md):** [ADR-0042](0042-the-proxy-hop-is-proved-by-the-kernel.md) amends decision 3 for a join on the hub: an account on the hub joins through the socket. Since agent sessions run on the hub under their own account, a local process is no longer the owner, so the kernel, not the address, proves the `tailscale serve` hop.
+
 ## Consequences
 
 - **The daemon writes a second file.** ADR-0004's amendment says it writes one. That file is

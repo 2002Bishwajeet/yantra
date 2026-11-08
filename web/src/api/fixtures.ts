@@ -1,7 +1,8 @@
 // Test fixtures only: nothing under `routes/` or `components/` imports this.
 // The generated ones are responses yantrad really rendered; the builders are
 // for a test that needs one field to differ.
-import type { Beat, Listed, Looked, Machine, Workspace } from '@/api'
+import type { Beat, Listed, Looked, Machine, Mentions, Workspace } from '@/api'
+import { mentions } from '@/contract.gen'
 
 export * from '@/contract.gen'
 
@@ -30,6 +31,7 @@ export function aMachine(overrides: Partial<Machine> = {}): Machine {
     last_seen: '2026-07-07T09:00:00Z',
     heartbeat: aBeat(),
     ownership: 'yours',
+    hub: false,
     ...overrides,
   }
 }
@@ -43,6 +45,9 @@ export function aWorkspace(overrides: Partial<Workspace> = {}): Workspace {
     ...overrides,
   }
 }
+
+/** The answer `POST …/mentions` rendered, with fields to differ. */
+export const aMentions = (overrides: Partial<Mentions> = {}): Mentions => ({ ...mentions, ...overrides })
 
 /** As `GET /api/workspaces` lists one, which since Y-141 says it loaded. */
 export const aListed = (workspace: Workspace = aWorkspace()): Listed => ({

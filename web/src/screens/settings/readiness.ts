@@ -18,5 +18,6 @@ export function presentOn(
 /** The sentence a row draws for a count, or for the lack of one. */
 export function onMachines(count: { present: number; of: number } | null, verb: string): string {
   if (count === null) return `${verb} on the machines is still being read`
+  if (count.of === 0) return /^[A-Z]/.test(verb) ? 'No machine is checked yet' : 'no machine is checked yet'
   return `${verb} on ${count.present} of ${count.of} machines`
 }

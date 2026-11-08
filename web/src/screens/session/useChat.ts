@@ -65,8 +65,7 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         }
         if (
           asking.current &&
-          (failure.kind === 'closed' ||
-            failure.kind === 'refused' ||
+          (failure.kind === 'refused' ||
             failure.kind === 'unknownThread' ||
             failure.kind === 'notLoggedIn')
         ) {
@@ -80,7 +79,6 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         // A missing login fails every turn the same way until a person logs
         // in, so the composer waits for Retry.
         if (
-          failure.kind === 'closed' ||
           failure.kind === 'refused' ||
           failure.kind === 'unknownThread' ||
           failure.kind === 'notLoggedIn'

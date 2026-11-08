@@ -80,6 +80,50 @@ test.describe('the chat, across views, tabs and reloads', () => {
     await expect(page.getByText('Reverted')).toBeVisible()
   })
 
+  test('a 60 s outage mid-turn reconnects after the last cursor and the turn finishes (Y-668)', async ({ page }) => {
+    test.setTimeout(150_000)
+    await turn(page)
+    const reopened = new Promise<string>((resolve) => {
+      page.on('websocket', (socket) => {
+        if (socket.url().includes('after=')) socket.on('framereceived', () => resolve(socket.url()))
+      })
+    })
+    await page.request.post('/api/fixture/chat-outage', { data: { ms: 60_000 } })
+
+    // The old client gave up after about 15 s; the chat must still show no error at 20 s.
+    await page.waitForTimeout(20_000)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
+    await expect(asking(page)).toBeVisible()
+
+    expect(decodeURIComponent(await reopened)).toMatch(/after=F\d+:0:0/)
+    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+
+  test('a page shown again opens a fresh socket at once (Y-668)', async ({ page }) => {
+    await turn(page)
+    const opened: string[] = []
+    page.on('websocket', (socket) => opened.push(socket.url()))
+    const visibility = (state: 'hidden' | 'visible') =>
+      page.evaluate((one) => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => one })
+        document.dispatchEvent(new Event('visibilitychange'))
+      }, state)
+    await visibility('hidden')
+    await page.request.post('/api/fixture/chat-outage', { data: { ms: 1 } })
+    // A hidden page schedules no reopen, whatever its backoff would have been.
+    await page.waitForTimeout(3_000)
+    expect(opened).toEqual([])
+
+    await visibility('visible')
+    await expect.poll(() => opened.length, { timeout: 2_000 }).toBe(1)
+    expect(decodeURIComponent(opened[0]!)).toMatch(/after=F\d+:0:0/)
+    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
+  })
+
   test('Full access draws no permission card', async ({ page }) => {
     await fullAccess(page)
     await send(page)
@@ -126,11 +170,15 @@ test.describe('the composer', () => {
     await expect(page.getByRole('heading', { level: 1, name: NAME }).first()).toBeVisible()
   })
 
-  test('rests as one line, and looks like the board', async ({ page, size }) => {
+  test('keeps one height for an empty field, focused or not, and looks like the board', async ({ page, size }) => {
     await expect(shell(page)).toHaveAttribute('data-empty', '')
-    const box = await composer(page).boundingBox()
-    expect(box?.height ?? 0).toBeLessThanOrEqual(32)
+    const before = (await composer(page).boundingBox())?.height ?? 0
+    expect(before).toBeGreaterThan(0)
     await screenshot(page, 'composer-resting', 'busy', size, { overlay: size === 'phone' })
+    await composer(page).focus()
+    await expect(composer(page)).toBeFocused()
+    await expect(shell(page)).toHaveAttribute('data-empty', '')
+    await expect.poll(async () => (await composer(page).boundingBox())?.height).toBe(before)
   })
 
   test('grows with a three-line draft and looks like the board', async ({ page, size }) => {
@@ -275,7 +323,7 @@ test.describe('the composer', () => {
       'The chat is not connected, so nothing can be sent.',
     )
     // Where a phone ends up scrolled depends on whether the thread list or the banner arrived first, so the capture is the top.
-    await expect(page.getByRole('link', { name: /^3a1b2c3d4e5f6a7b/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Threads, / })).toBeVisible()
     await page.evaluate(() => window.scrollTo(0, 0))
     await screenshot(page, 'composer-closed', 'busy', size, { overlay: size === 'phone' })
   })
@@ -340,17 +388,17 @@ test.describe('the composer', () => {
       .poll(() =>
         page.evaluate(() => {
           const all = [...document.querySelectorAll<HTMLElement>('.composer__controls button')]
+          if (all.length === 0) return ['no controls']
           return all.flatMap((control) => {
             const box = control.getBoundingClientRect()
-            return [-20, 20].map((dx) => {
+            return [-20, 20].flatMap((dx) => {
               const hit = document.elementFromPoint(box.x + box.width / 2 + dx, box.y + box.height / 2)?.closest('button')
-              return !hit || hit === control || !all.includes(hit)
+              return !hit || hit === control || !all.includes(hit) ? [] : [`${control.ariaLabel ?? control.textContent} ${dx}`]
             })
           })
         }),
       )
-      // Attach, harness, mode, model and effort, each tapped on both sides.
-      .toEqual(Array(10).fill(true))
+      .toEqual([])
   })
 
   test('rides at the foot of the screen while the page scrolls', async ({ page }) => {
@@ -456,6 +504,13 @@ test('an issue draft fills the card with no label over it', async ({ page, size 
     .click()
   await expect(composer(page)).toHaveValue(/^Work on /)
   await expect(shell(page).locator('label')).toHaveCount(0)
+  // The overlay capture races the history, the thread list and the scroll; wait for all three, then scroll to the end.
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Threads, / })).toBeVisible()
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await expect
+    .poll(() => page.evaluate(() => Math.round(window.innerHeight + window.scrollY - document.documentElement.scrollHeight)))
+    .toBe(0)
   await screenshot(page, 'composer-issue-draft', 'busy', size, { overlay: size === 'phone' })
 })
 

@@ -3,7 +3,7 @@ import type { Machine, Readiness } from '@/api'
 import { ApiError } from '@/api/errors'
 import * as contract from '@/contract.gen'
 import { joinCommand, joinUrl } from '@/lib/join'
-import { added, github, keyExpiry, line, machines, push, ready, tailnet } from './steps'
+import { added, firstSession, github, keyExpiry, line, machines, push, ready, tailnet } from './steps'
 
 const reading = { data: undefined, error: null, isPending: true }
 const got = <T,>(data: T) => ({ data, error: null, isPending: false })
@@ -43,7 +43,38 @@ describe('the step each read makes', () => {
     const none = added([])
     expect(none).toEqual({ status: 'todo', words: 'no machine has joined yet · Add a device shows the steps' })
     expect(none.words).not.toMatch(/yantra|`/)
-    expect(added(['pi-5', 'nas'])).toEqual({ status: 'done', words: 'pi-5, nas joined' })
+    expect(added(['pi-5', 'nas'])).toEqual({ status: 'done', words: 'pi-5, nas joined · more machines can be added later' })
+  })
+
+  /** Y-615: a guest not checked yet may have joined, so step 2 counts it and does not deny it. */
+  it('counts the machines on the tailnet that no check has read yet', () => {
+    expect(added([], [], null, ['pi-5', 'nas', 'mac'])).toEqual({
+      status: 'todo',
+      words: '3 machines on the tailnet, none checked yet · a check shows which joined',
+    })
+    expect(added([], [], null, ['pi-5', 'nas'], 3).words).toBe(
+      '1 of 3 machines checked, none joined yet · a check shows which joined',
+    )
+    expect(added([], [], null, ['pi-5']).words).toBe('1 machine on the tailnet, none checked yet · a check shows which joined')
+    expect(added(['pi-5'], [], null, ['nas']).status).toBe('done')
+    expect(added([], [], null, []).words).toBe('no machine has joined yet · Add a device shows the steps')
+  })
+
+  it('says no machine is checked ready when none is checked, and keeps the old words otherwise', () => {
+    expect(firstSession(null, 0, true).words).toBe('needs one ready machine · none is checked yet')
+    expect(firstSession(null, 0, false).words).toBe('needs one ready machine, you have none yet')
+    expect(firstSession(null, 0, false).words).not.toContain('none is checked')
+    expect(firstSession(null, 1, false).words).toBe('needs one ready machine, you have 1')
+    expect(firstSession(2, 0, true).status).toBe('done')
+  })
+
+  /** Y-582: the hub is the daemon's own node, so a fresh install has nothing to add. */
+  it('is done once ssh reaches the hub, which needs no adding', () => {
+    expect(added([], [], 'yantra-box')).toEqual({
+      status: 'done',
+      words: 'yantra-box is the hub and needs no adding · more machines can be added later',
+    })
+    expect(added(['pi-5'], [], 'yantra-box').words).toBe('pi-5 joined · more machines can be added later')
   })
 
   /** With no key made, ssh that gets in used the account's own keys. */
@@ -57,12 +88,28 @@ describe('the step each read makes', () => {
   })
 
   it('says who GitHub is signed in as, and that a flow is waiting', () => {
-    expect(github(got(contract.github)).words).toContain('signed in as 2002Bishwajeet')
-    expect(github(got(contract.disconnected)).status).toBe('todo')
-    expect(github(got({ ...contract.disconnected, pending: true }))).toEqual({
+    const accepted = contract.githubReadiness
+    expect(github(got(contract.github), accepted).words).toContain('signed in as 2002Bishwajeet')
+    expect(github(got(contract.disconnected), accepted).status).toBe('todo')
+    expect(github(got({ ...contract.disconnected, pending: true }), accepted)).toEqual({
       status: 'progress',
       words: 'a sign-in is waiting at github.com',
     })
+  })
+
+  it('says a refused grant is due, and never says someone', () => {
+    const refused = github(got(contract.github), contract.githubRefused)
+    expect(refused).toEqual({ status: 'due', words: 'GitHub refused the grant · sign in again' })
+    for (const connection of [contract.github, { ...contract.github, login: null }]) {
+      for (const readiness of [contract.githubReadiness, contract.githubRefused, { looked: 'never' as const }]) {
+        expect(github(got(connection), readiness).words).not.toContain('someone')
+      }
+    }
+  })
+
+  it('counts a grant GitHub was not asked about as done', () => {
+    const unread = { ...contract.github, login: null }
+    expect(github(got(unread), { looked: 'never' })).toEqual({ status: 'done', words: 'signed in on the appliance' })
   })
 
   /** ADR-0021: a saved relay is the next start's, so the step reads what the
@@ -95,14 +142,13 @@ describe("a machine's line", () => {
    *  key is the join command, an unanswered host is not. */
   it('separates a refused key from a host that did not answer', () => {
     const refused = report([check('reachable', 'absent', 'Permission denied (publickey)')])
-    expect(line(machine(), refused, null)).toEqual({ kind: 'refused' })
+    expect(line(machine(), refused, null)).toEqual({ kind: 'refused', detail: 'Permission denied (publickey)' })
     const unjoined = report([check('reachable', 'absent', 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).')])
-    expect(line(machine(), unjoined, null)).toEqual({ kind: 'unjoined' })
+    expect(line(machine(), unjoined, null)).toMatchObject({ kind: 'unjoined' })
+    const browser = report([check('reachable', 'absent', 'Tailscale SSH requires an additional check')])
+    expect(line(machine(), browser, null)).toMatchObject({ kind: 'browser' })
     const silent = report([check('reachable', 'absent', 'No route to host')])
-    expect(line(machine(), silent, null)).toEqual({
-      kind: 'unreachable',
-      words: 'ssh did not answer · No route to host',
-    })
+    expect(line(machine(), silent, null)).toEqual({ kind: 'unreachable', detail: 'No route to host' })
   })
 
   it('is ready when the seven checks a session needs are present', () => {

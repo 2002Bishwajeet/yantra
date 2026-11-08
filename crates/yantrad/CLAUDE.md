@@ -113,9 +113,10 @@ asked. Two answers are *absent* and both are earned — no grant, and a grant Gi
 could not be reached says nothing about the grant. It has no `failed`: a look it could not take is
 already *unknown* inside the check. `doctor::github` is a pure mapper over `GET /user`'s answer, and
 `refresh.rs` is what asks — on the slow clock, since it spends the owner's quota like the inbox does.
+The look logs each change between accepted and refused, with the login and never the token (Y-648).
 
 **The grant itself is `GET /api/github`, and it never carries the token.** `connected`, the login,
-the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
+the profile image URL, the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
 /api/github/login` and `DELETE /api/github` are in `write.rs` on the gate; `GET /api/repos` is the
 repository list, a class on the same slow clock, and **the search box filters it in the browser** —
 a typed box polls, and a read handler never awaits the network.
@@ -125,18 +126,22 @@ a typed box polls, and a read handler never awaits the network.
 with the grant when there is one and anonymously when there is not. A failed read is `failed`, and
 the page never draws it as *current*.
 
-**It is a class on the refresh sweep, not a handler that runs `doctor`.** Eleven checks over ssh per
+**It is a class on the refresh sweep, not a handler that runs `doctor`.** Twelve checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
 It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
 handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
 their own, so readiness rides them at any interval. It is the same constant because Q6 left nothing
 to tune and because the load is already this daemon's shape: the agents sweep runs `claude agents
---json` on every machine every 30 s, and this adds the auth gate beside it.
+--json` on every machine every 30 s, and this adds the auth gate beside it. **A successful `up`,
+`down` or `resume` wakes the agents sweep at once** (Y-639), so the browser's next poll shows the
+verb's result and not a reading 30 s old. **The wake looks twice**: now, and `SETTLE` (5 s) later.
+`up` and `resume` return before `claude` registers, so the first look can read the agent as
+unclear, and the second look corrects it.
 
 **The daemon keeps the latest check of each machine** (Y-579). The sweep asks the machines workspaces
 name and each online tailnet peer that the dashboard's `runsSessions` counts: your own Linux or
 macOS machines. A Windows, shared or tagged peer gets no check, because `presentOn` divides by
-this list and such a peer is never counted. Each machine asked pays twelve checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
+this list and such a peer is never counted. Each machine asked pays thirteen checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
 candidates come from the last machines reading, so this adds no `tailscale` call. `Snapshot::checks`
 holds one report per machine with its own age, and `refresh::settle` is the one place a sweep
 lands. A failed sweep changes nothing there, and a machine the sweep skipped keeps its report. An
@@ -153,10 +158,23 @@ installed `tmux` by hand needs the answer before the next sweep, and the `GET` b
 serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
 authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
 type, and it keeps the report before it answers. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
-ssh destinations to refuse one against, and a name nothing answers to is twelve *unknown* checks like
+ssh destinations to refuse one against, and a name nothing answers to is thirteen *unknown* checks like
 any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
 `ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
 of itself, and debounce belongs in the browser.
+
+**A failed check ends fast and speaks plainly** (Y-585). A Tailscale SSH `check` rule stops at its
+banner, and `REACH_LIMIT` bounds any other held login at 20 s. Each check carries `took_ms` where a
+step ran. `sessions.rs` and `status.rs` send every error as `reached: no`, and only an error that
+starts with `ssh::Error::Transport`'s words is an ssh failure. The web reads that prefix in one place
+(`answerFailure`), and a `sessions.rs` test pins it. A tmux or local failure is never called an ssh or
+key failure: it reads *could not list the sessions*, with its text behind *The full error*. On the
+machine page an ssh sessions error decides the verdict only where readiness holds nothing, because the
+sweep skips a machine no workspace names. Sessions then shows the title Readiness shows. An empty list
+claims a tmux listing only where the verdict read tmux, because `sessions.rs` answers an empty list for
+a machine with no tmux. Readiness, Sessions, the session page, Fleet, Machines, Setup and Add a device
+each give a plain cause and next step, and ssh's own words sit behind *What ssh said*. Two readings
+taken at different times can still differ for one sweep.
 
 ## The one thing it sends, and the two rules that keep it useful
 
@@ -201,7 +219,10 @@ refusal to start — it is every deployment but the appliance, and it is the one
 run. The token is never a workspace field, never written to disk, never logged and never served,
 which is ADR-0013 §4's rule for `YANTRA_DAEMON` applied to the first byte that leaves the tailnet.
 The startup line saying which of the two it got is there because a unit's environment is not the
-shell's, and a headless box has only the journal to say so.
+shell's, and a headless box has only the journal to say so. **No process the daemon starts receives
+`YANTRA_GITHUB_TOKEN`, `YANTRA_NTFY_TOKEN` or `YANTRA_NTFY_URL`** (Y-647): every spawn removes
+`yantra_core::SECRETS`, and [`tests/secrets.rs`](tests/secrets.rs) reads a real child's environment
+to prove it.
 
 **The relay is settable now, and the read above is unchanged** —
 [ADR-0021](../../docs/adr/0021-the-relay-is-written-to-an-environment-file.md), Y-199. `/settings`
@@ -317,17 +338,28 @@ directory to walk.
 ## The routes that act
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
-`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new}`,
+`POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new,mentions,commands}`,
 `POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr}`, `POST /api/relay`,
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
-`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms/{room}/resume`,
-`POST /api/rooms/{room}/messages` and
+`DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms`,
+`PATCH`/`DELETE /api/rooms/{room}`, `POST /api/rooms/{room}/resume`,
+`POST /api/rooms/{room}/messages`, `PUT /api/layout`, `POST /api/join/forget-host-key` and
 `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
 `repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
-`room resume` (Y-534), `room post` (Y-536) and `update` (Y-368). The daemon may do
+`room resume` (Y-534), `room post` (Y-536), `room new`, `room edit`, `room rm` (Y-550), `layout set` (Y-515),
+`forget-host-key` (Y-621) and `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new
 verb here starts in the CLI, and `yantra relay` was written before this route was.
+
+**`PUT /api/layout` replaces the dashboard layout** (Y-515,
+[ADR-0036](../../docs/adr/0036-the-dashboard-layout-syncs-through-the-daemon.md)), in
+`~/.config/yantra/dashboard.json` through [`layout`](../yantra-core/src/layout.rs). The body names
+the `rev` it read. A different `rev` on disk is **409** with the current layout as JSON, a bad shape
+is **400**, and a file that cannot be written is **500**. The save goes to `dashboard.json.tmp` and is
+renamed over the file, at the next `rev`. A lock makes the read, the compare and the write one step.
+`GET /api/layout` is a read and is not gated; no file is the default at `rev` 0, and a file that is
+not a layout is logged and read as the default. [`tests/layout.rs`](tests/layout.rs) is the proof.
 
 **`install` answers before its work is done too** (Y-386,
 [ADR-0028](../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md) §4). It answers
@@ -354,6 +386,13 @@ the account it runs as may ask for *the current release* and nothing else. A box
 The paths are `Facts` fields, so a test names a scratch directory. `tests/update.rs` is the proof that
 a restart leaves the far tmux session running and the terminal socket reconnects.
 
+**`GET /api/about` reads how far the unit has got** (Y-612). This account cannot read the root unit's
+journal, so `install.sh` writes its step and its stderr to `/run/yantra-update`, the unit's
+`RuntimeDirectory`, and downloads the archive there. `about` reads that directory with
+`update::progress` on a blocking thread (I-13) and answers `update`: `null`, or the step with the
+bytes received, or `failed` with the unit's last 20 stderr lines. It still fetches nothing and
+applies nothing. A file it cannot read is `null` and a warning in the journal.
+
 **`POST /api/join` is `yantra ssh-identity --machine <m> --user <u>` with the machine taken from the
 caller** ([ADR-0029](../../docs/adr/0029-a-machine-joins-itself.md), Y-387). The body is `{user}`
 under `deny_unknown_fields`, so a `machine` field is a `422`: the name comes from `whois` joined to
@@ -363,7 +402,11 @@ resolves**, and the owner ruled the page must say when it is not `user` — a ke
 owner's `Host *` above the new one, wins. The route adds a `joined` event that says the same, and
 spawns a readiness re-check that records only a refused reach. **One join at a time**:
 `Fleet::joins` is held around the key-making and the append, because two first fetches would
-both run `ssh-keygen` on one path. **`GET /join` sits beside
+both run `ssh-keygen` on one path. **`POST /api/join/forget-host-key` is `yantra forget-host-key`
+for the caller** (Y-621). It names the machine as `/api/join` does, so a machine forgets only its own
+line, and it answers `{machine, removed}`. `join.sh` calls it after `tailscale set --ssh=false`,
+because sshd's host key is not Tailscale SSH's. It holds `Fleet::joins` too, and it adds no field to
+`/api/join`'s body. **`GET /join` sits beside
 `/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
 `yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
 owner ruled that generation is Yantra's and happens on first use.
@@ -449,9 +492,9 @@ login keychain (I-44). The rule the mappers apply is the one `from_create` and `
 wrote down. **`409`** is a refusal about state: the world already answers and a person changes that
 answer, which covers the trust dialog, an agent whose credential the gate did not find, a session
 opened as a shell, a workspace that runs something of its own, a `repo` the machine does not have,
-and — since Y-151 — a macOS machine with **no tmux server**, which
-[ADR-0018](../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md) §1 forbids Yantra
-to start there and a person fixes by starting one from their own login session. **`503`** is
+and — since Y-151 — a macOS machine with **no tmux server** that
+[ADR-0018](../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md) §1 lets Yantra
+start. Since Y-632 that means no one is logged in at its screen, and a person fixes it by logging in. **`503`** is
 nothing decided at all — ssh, tmux, terminfo, a status that could not be read, and a `resume` whose
 two sources disagree (R-23). **`500`** is left for what is genuinely this daemon's: no state
 directory, and a session id it could not generate. **Adding a variant to `up::Error`,
@@ -494,6 +537,20 @@ A bad issue is `400`, an issue GitHub does not have is `404`, no grant is `409` 
 `yantra github login`, GitHub's own failure is `502`, and a machine that could not be asked is
 `503`, as in `from_logs`. The issue's title and body are never logged (ADR-0034 decision 4); the log
 says `threads {name} for {node}` and `thread new {name} for {node}`.
+
+**`mentions` is what the Chat composer offers after `@` and `$`** (Y-562). A terminal cannot mean
+it, so it has no CLI verb. The body is `{harness, thread?}`, with no other field. The answer is
+`{files, truncated, skills}`: git's tracked and untracked files, cut at 5000, and each skill's
+`{name, description, scope, mention}`. The skill roots per harness are in
+[`mention.rs`](../yantra-core/src/mention.rs). An unknown harness is `400`. A directory that is not a
+repository and an unknown thread are `409`. A machine that could not be asked is `503`.
+
+**`commands` is what the Chat composer offers after `/`** (Y-563). It takes the same body as
+`mentions` and answers `{commands}`, each `{name, description, hint?}`. For Claude it asks the machine
+([`command.rs`](../yantra-core/src/command.rs)). An ACP harness is answered `{commands: []}` at once,
+because its agent sends its list on the chat socket as `thread.commands.updated`. An unknown harness
+is `400`. A directory that is not a repository, an unknown thread and a machine with no claude are
+`409`. A machine that could not be asked is `503`.
 
 **`message`, `commit` and `push` are `yantra commit --draft`, `commit` and `push`** (Y-492,
 [ADR-0034](../../docs/adr/0034-the-coding-loop-writes-to-github.md) decisions 2 and 5). They sit in
@@ -701,8 +758,9 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 
 The rules from before the keeper still hold:
 
-- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`
-  and `diff`; the daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
+- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`,
+  `diff` and `ping`; the daemon answers a `ping` with `{"type":"pong"}`, sends protocol pings itself and
+  ends a chat socket after two misses (Y-668). The daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
   `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn`, `checkpoint` and `diff`. `notLoggedIn`
   adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
   `chatQuery`.
@@ -808,9 +866,23 @@ the wait and the wakes.
   dashboard never joins one, so every member counts as delivered and every member thread wakes. An
   unknown room is `404`, and an empty text or one over 16 KiB is `400`.
 - **The dashboard reads rooms through `GET /api/rooms` and `GET /api/rooms/{room}`** (Y-536). Both
-  are behind `allowed()`, both read memory, and both drop expired members first.
-- **A restart loses every room**, with its members, cursors, count, pause and queued wakes. The
-  threads and keepers stay on their machines.
+  are behind `allowed()`, both read memory, and both drop expired members first. Each summary
+  carries the room's `workspace`, `brief` and `base`, `null` for a room an agent made, and each
+  message a `kind`, `text` or `system`.
+- **A room may have a definition** (Y-550, [ADR-0039](../../docs/adr/0039-a-room-is-a-shared-project.md)
+  decision 2): `~/.config/yantra/rooms/<name>.toml`, through
+  [`room_file`](../yantra-core/src/room_file.rs). `POST /api/rooms` takes
+  `{name, workspace, brief?, base?}` as application/json only, and answers **201** with the summary.
+  A bad field is **400**, a workspace that does not load **404**, an existing file **409**, and a
+  file that cannot be written **500**. `PATCH /api/rooms/{room}` takes `{brief}`, where `null`
+  clears it, and an undefined room is **404**. `DELETE /api/rooms/{room}` answers
+  `200 {"removed": bool}`, as the workspace delete does. Each writes the file first and then
+  changes memory, under the store's lock. A defined room never expires. A room an agent makes with
+  `room_send` stays in memory only.
+- **A restart reloads each definition with one system message** that says when yantrad restarted.
+  It spends no budget and wakes no thread. Every message, member, cursor, count, pause and queued
+  wake is lost, and so is every room with no definition. A file that does not load is logged by
+  name and skipped. The threads and keepers stay on their machines.
 - **Q5.** The log names a room, a seq, a node and counts. It never names a message's text, and the
   pause notification carries none.
 - [`tests/rooms.rs`](tests/rooms.rs) is the done test: two fixture machines, a wake in
@@ -837,10 +909,10 @@ read the route yet. Y-314 wrote those types by hand nine rows later, and Y-322 w
 join them up. **Land a DTO and the type that checks it in one change**, which is why Y-307's
 `Transcript` arrived with its own entry rather than with a comment deferring one.
 
-**`/readiness/github` still holds `github: None`**, and that deferral has not expired: nothing in
-`web/src` reads that route, so there is no type for an entry to satisfy. **`/api/github`,
-`/api/repos` and the `Device` answer are in it since Y-342**, with their types appended at the end
-of `api.ts` in one block.
+**`/readiness/github` is in it since Y-623**, as `githubReadiness` (accepted) and `githubRefused`
+(a 401), both `Looked<Check>`. Settings and Setup read the route, so the entries have a type to
+satisfy. **`/api/github`, `/api/repos` and the `Device` answer are in it since Y-342**, with their
+types appended at the end of `api.ts` in one block.
 
 **`terminalSize` is the entry travelling the other way** — a shape the *browser* writes and the
 daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
@@ -886,7 +958,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Eleven things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Thirteen things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -938,11 +1010,21 @@ repository or folder a person picked, for at most 5 s each. The new-session page
 opens and once when a source is picked, and nothing polls it. A machine that does not answer in time
 scores 0 on that term and is never filtered out.
 
+**Y-562 is the twelfth, and it is a read on the probe licence.**
+`POST /api/workspaces/{name}/mentions` runs one script in the thread's worktree, or in the
+workspace's repository before a thread opens. It lists git's files and the harness's skills. The
+composer asks once when a person types `@` or `$`, and holds the answer for five minutes. Nothing
+polls it.
+
+**Y-563 is the thirteenth, on the same licence.** `POST /api/workspaces/{name}/commands` runs one
+bounded `claude -p` that answers `initialize` and exits. The composer asks once when a person types
+`/` at the start of a prompt, and holds the answer for five minutes.
+
 **`room_read` waits beside the tasks licence, and holds no ssh at all** (Y-534). Its wait is in
 memory, it ends at 50 s or when the daemon shuts down, and a `room_send` spawns its wakes as tasks
 rather than awaiting them.
 
-None of the eleven licenses a **read handler** that awaits ssh, which is still the bug this module
+None of the thirteen licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.
@@ -960,7 +1042,7 @@ own quota, which their `gh` and their `git push` draw on too. GitHub asks for th
 `/notifications` answered **`X-Poll-Interval: 60`** on 2026-08-10, so `EVERY` would poll it at twice
 the rate its server requests. `ATTENTION` is five minutes, and the freshness that costs is a field
 rather than a lie — the reading carries its own age like every other. **A change to the grant wakes
-those classes early** (Y-342), which is the one exception to the clock: a sign-in that showed its
+those classes early** (Y-342), which is the one exception to that clock: a sign-in that showed its
 repositories five minutes later would read as a sign-in that failed.
 
 Two measurements from that day worth keeping, because both invert what the obvious worry would be.

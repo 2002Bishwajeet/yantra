@@ -24,9 +24,9 @@ export function verbs(workspace: Workspace, status: WorkspaceStatus | null): { s
     case 'stopped':
     case 'crashed':
     case 'killed':
-      return { stop: false, resume: workspace.startup === null }
+    // The daemon's resume opens a session that is gone (Y-639).
     case 'no_session':
-      return { stop: false, resume: false }
+      return { stop: false, resume: workspace.startup === null }
   }
 }
 

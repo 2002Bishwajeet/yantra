@@ -1,22 +1,23 @@
 import { useState } from 'react'
-import { ExternalLink, FileKey, Scale } from 'lucide-react'
+import { ExternalLink, FileKey, Scale, Shield } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import type { Looked, Published } from '@/api'
+import type { Looked, Published, UpdateProgress } from '@/api'
 import { fromReading } from '@/api/client'
 import { useApplyUpdate } from '@/api/mutations'
 import { aboutQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
-import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { type Described, ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListChevron, ListItem } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
+import { Track } from '@/m3/track/Track'
 import { Group, Note } from './Group'
 import { Sheet } from './Sheet'
 import { Reload, refused } from './update'
 
-/** While the daemon restarts after an update, About asks this often, so the
- *  new version is seen soon after it answers (ADR-0027 §5). */
+/** While an update runs and the daemon restarts after it, About asks this
+ *  often, so each step and the new version are seen soon (ADR-0027 §5). */
 const UPDATE_POLL_MS = 2_000
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -40,9 +41,11 @@ export function About() {
   // The version this page saw when the person asked for an update.
   const [asked, setAsked] = useState<string | null>(null)
   const about = useQuery({ ...aboutQuery(), ...(asked === null ? {} : { refetchInterval: UPDATE_POLL_MS }) })
-  // The restart is a moment with no daemon; the facts already drawn stay.
-  if (about.error && !(asked !== null && about.data)) throw about.error
   const facts = about.data
+  // Y-612: a page opened mid-update follows it as if it had asked.
+  if (asked === null && facts?.update && facts.update.step !== 'failed') setAsked(facts.version)
+  // The restart is a moment with no daemon; the facts already drawn stay.
+  if (about.error && !(asked !== null && facts)) throw about.error
 
   return (
     <>
@@ -70,8 +73,27 @@ export function About() {
             title="The newest release could not be read"
           />
         ) : null}
-        {facts ? <Update asked={asked} onAsked={setAsked} published={facts.published} running={facts.version} /> : null}
+        {facts ? (
+          <Update
+            asked={asked}
+            onAsked={setAsked}
+            progress={facts.update ?? null}
+            published={facts.published}
+            running={facts.version}
+          />
+        ) : null}
       </section>
+      <Group label="Who can open the dashboard">
+        <ListItem
+          headline="Only devices on your tailnet can open this dashboard. There is no separate login."
+          supporting={facts?.tailnet ? `Tailnet · ${facts.tailnet}` : undefined}
+          leading={
+            <Lead>
+              <Shield />
+            </Lead>
+          }
+        />
+      </Group>
       <Group label="Daemon">
         <ListItem
           headline={<Mono>/etc/yantra/daemon.env</Mono>}
@@ -80,7 +102,7 @@ export function About() {
               <FileKey />
             </Lead>
           }
-          supporting="0600 · the one file the daemon writes · the relay and the GitHub grant"
+          supporting="0600 · the relay and the GitHub grant"
         />
       </Group>
       <Group label="Project">
@@ -124,22 +146,26 @@ function Release(props: { published: Exclude<Looked<Published>, { looked: 'faile
 }
 
 /** ADR-0027 §3 on the wire: the daemon only asks, and the root unit installs
- *  and restarts it. The page learns the result from `version` on its next
- *  read, and offers a reload, because its chunks belong to the old build. */
+ *  and restarts it. The unit's progress file says how far it got (Y-612). The
+ *  page learns the result from `version` on its next read, and offers a
+ *  reload, because its chunks belong to the old build. */
 function Update(props: {
   running: string
   published: Looked<Published>
   asked: string | null
   onAsked: (running: string) => void
+  progress: UpdateProgress | null
 }) {
-  const { running, published, asked, onAsked } = props
+  const { running, published, asked, onAsked, progress } = props
   const [open, setOpen] = useState(false)
   const update = useApplyUpdate()
 
   if (asked !== null && running !== asked) {
     return <Reload asked={asked} running={running} />
   }
-  if (asked !== null) {
+  if (progress && progress.step !== 'failed') return <Progress progress={progress} />
+  // A box whose updater predates Y-612 writes no progress.
+  if (asked !== null && !progress) {
     return (
       <Text render={<p role="status" />} scale="body-medium" tone="variant">
         Updating from <Mono>{asked}</Mono>. The daemon installs the release and restarts. If nothing changes in a few
@@ -147,7 +173,8 @@ function Update(props: {
       </Text>
     )
   }
-  if (published.looked !== 'ok' || !published.data.newer) return null
+  const failed = progress ? <Failed said={progress.said} /> : null
+  if (published.looked !== 'ok' || !published.data.newer) return failed
 
   const { version } = published.data
   const confirm = () =>
@@ -160,6 +187,7 @@ function Update(props: {
 
   return (
     <div className="settings__update">
+      {failed}
       <Button onClick={() => setOpen(true)} variant="tonal">
         Update to v{version}
       </Button>
@@ -184,6 +212,59 @@ function Update(props: {
       >
         {update.error ? <ErrorSurface.Inline error={update.error} title={refused(update.error)} /> : null}
       </Sheet>
+    </div>
+  )
+}
+
+const STEPS = {
+  resolving: 'Finding the current release',
+  verifying: 'Checking the archive against SHA256SUMS',
+  installing: 'Installing the release',
+} as const
+
+function mb(bytes: number): string {
+  return (bytes / 1_000_000).toFixed(1)
+}
+
+/** The step, and while the archive arrives, how much of it has. */
+function Progress(props: { progress: Exclude<UpdateProgress, { step: 'failed' }> }) {
+  const { progress } = props
+  if (progress.step !== 'downloading') {
+    return (
+      <Text render={<p role="status" />} scale="body-medium">
+        {STEPS[progress.step]}…
+      </Text>
+    )
+  }
+  const { version, received, total } = progress
+  const amount = total === null ? `${mb(received)} MB` : `${mb(received)} of ${mb(total)} MB`
+  return (
+    <div className="settings__progress" role="status">
+      <Text render={<p />} scale="body-medium">
+        Downloading v{version} · {amount}
+      </Text>
+      {total ? <Track aria-valuetext={amount} label="Downloaded" value={received / total} /> : null}
+    </div>
+  )
+}
+
+/** The unit's own words, which the daemon's account cannot read in the journal. */
+const failure: Described = {
+  kind: 'update',
+  said: '',
+  retryable: false,
+  describe: () => 'Nothing was installed and nothing restarted.',
+}
+
+function Failed(props: { said: string }) {
+  const { said } = props
+  return (
+    <div className="settings__failed">
+      <ErrorSurface.Inline error={failure} eyebrow="Update" title="The update failed" />
+      {said ? <pre className="settings__said">{said}</pre> : null}
+      <Text render={<p />} scale="body-small" tone="variant">
+        The whole log is on the box: <Mono>journalctl -u yantra-update</Mono>
+      </Text>
     </div>
   )
 }

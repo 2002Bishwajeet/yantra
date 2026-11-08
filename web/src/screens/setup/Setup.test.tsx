@@ -6,11 +6,19 @@ import { aListed, aMachine, looked } from '@/api/fixtures'
 import * as contract from '@/contract.gen'
 import { answer } from '@/test/daemon'
 import { renderRouted } from '@/test/inRouter'
+import { CHANGED_KEY } from '@/test/sshSaid'
 import { useSetupGate } from './progress'
 import { Setup } from './Setup'
 
 /* The checklist on its own, so every line state is drawn and asserted — the
    ones the Dashboard only shows once a machine is online. */
+
+/* The FAB belongs to the shell; a test sets what it carries. */
+const fab = vi.hoisted(() => ({ carries: false }))
+vi.mock('@/shell/primary', async (original) => ({
+  ...(await original<typeof import('@/shell/primary')>()),
+  useFab: () => (fab.carries ? ({ kind: 'add-device' } as never) : null),
+}))
 
 const NOW = Date.parse('2026-09-06T12:00:00Z')
 const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
@@ -50,6 +58,7 @@ const base = (machines: Machine[] = [linux, mac, phone, tablet, windows]): Route
   'GET /api/about': [200, { ...contract.about, relay: false }],
   'GET /api/ssh-identity': [404, 'no ssh identity yet — the first join makes one'],
   'GET /api/github': [200, contract.disconnected],
+  'GET /api/readiness/github': [200, contract.githubReadiness],
 })
 
 async function draw(routes: Routes) {
@@ -88,6 +97,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  fab.carries = false
   vi.useRealTimers()
   vi.unstubAllGlobals()
   cleanup()
@@ -107,9 +117,21 @@ describe('the steps', () => {
     expect(later.getByRole('link', { name: 'Connect' }).dataset.variant).toBe('tonal')
   })
 
+  it('says GitHub refused the grant and links Sign in again to Providers', async () => {
+    await draw({
+      ...base(),
+      'GET /api/github': [200, contract.github],
+      'GET /api/readiness/github': [200, contract.githubRefused],
+    })
+    const later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
+    expect(await later.findByText(/GitHub refused the grant · sign in again/)).toBeTruthy()
+    expect(later.getByRole('link', { name: 'Sign in again' }).getAttribute('href')).toBe('/settings/providers')
+    expect(document.body.textContent).not.toContain('someone')
+  })
+
   /** Y-477: the appliance is the node the daemon is bound to. */
   it('shows the appliance key expiry with a link to the admin console, and no link when expiry is off', async () => {
-    const node = aMachine({ name: 'pi', address: '100.64.0.1', key_expires: '2026-09-12T12:00:00Z' })
+    const node = aMachine({ name: 'pi', address: '100.64.0.1', hub: true, key_expires: '2026-09-12T12:00:00Z' })
     await draw(base([node]))
     let later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
     expect(later.getByText("The appliance's Tailscale key")).toBeTruthy()
@@ -157,6 +179,54 @@ describe('the steps', () => {
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([checks(tools)])] })
     expect(screen.getByText("not yet · cachyos-g14 reached without Yantra's key · run the join command on it once")).toBeTruthy()
     expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+    expect(filled()).toEqual(['Add a device'])
+  })
+
+  /** Y-615: a fresh install lists guests nobody has checked, so step 2 does not deny them. */
+  it('says how many machines wait for a check, and puts Check all on step 3', async () => {
+    await draw(base([up, upToo]))
+    expect(screen.getByText('not yet · 2 machines on the tailnet, none checked yet · a check shows which joined')).toBeTruthy()
+    expect(screen.getByText('not yet · needs one ready machine · none is checked yet')).toBeTruthy()
+    const row = (title: string) => screen.getByText(title).closest('.m3-list__row') as HTMLElement
+    expect(within(row('Get it ready')).getByRole('button', { name: 'Check all' })).toBeTruthy()
+    expect(within(row('Add a machine')).queryByRole('button', { name: 'Check all' })).toBeNull()
+    expect(document.querySelector('.setup__bulk')).toBeNull()
+  })
+
+  it('puts Install on all on step 3 once every machine is checked', async () => {
+    await draw({
+      ...base([up]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks({ ...tools, tmux: 'absent' })])],
+    })
+    const row = screen.getByText('Get it ready').closest('.m3-list__row') as HTMLElement
+    expect(within(row).getByRole('button', { name: 'Install on all' })).toBeTruthy()
+    expect(within(row).queryByRole('button', { name: 'Check all' })).toBeNull()
+  })
+
+  it('keeps Install on all beside Check all while one machine is unchecked', async () => {
+    await draw({
+      ...base([up, upToo]),
+      'GET /api/ssh-identity': [200, contract.sshIdentity],
+      'GET /api/readiness': [200, looked.ok([checks({ ...tools, tmux: 'absent' })])],
+    })
+    const row = screen.getByText('Get it ready').closest('.m3-list__row') as HTMLElement
+    expect(within(row).getByRole('button', { name: 'Check all' })).toBeTruthy()
+    expect(within(row).getByRole('button', { name: 'Install on all' })).toBeTruthy()
+    expect(screen.queryByText(/none is checked/)).toBeNull()
+  })
+
+  /** Y-615: the FAB is the one Add a device on a phone and a tablet. */
+  it('draws no Add a device in the page while the FAB carries it', async () => {
+    fab.carries = true
+    await draw(base())
+    expect(screen.queryByRole('link', { name: 'Add a device' })).toBeNull()
+    expect(filled()).toEqual([])
+  })
+
+  it('keeps one filled Add a device on a desktop, which has no FAB', async () => {
+    await draw(base())
+    expect(screen.getAllByRole('link', { name: 'Add a device' })).toHaveLength(1)
     expect(filled()).toEqual(['Add a device'])
   })
 
@@ -261,6 +331,11 @@ describe('the setup gate', () => {
     expect(await gate(up)).toBe('passed')
   })
 
+  /** Y-582: the hub runs agents, so a ready hub alone passes the gate. */
+  it('passes on a ready hub with no other machine', async () => {
+    expect(await gate({ ...up, hub: true })).toBe('passed')
+  })
+
   it('holds on a ready machine another account shares, or the tailnet owns', async () => {
     expect(await gate({ ...up, ownership: 'shared' })).toBe('held')
     cleanup()
@@ -268,15 +343,150 @@ describe('the setup gate', () => {
   })
 })
 
+/** Y-582: the hub is the daemon's own node. Setup shows it under step 1 and
+ *  never offers to add it. */
+describe('the hub', () => {
+  const box = aMachine({ name: 'yantra-box', os: 'linux', online: true, hub: true, address: '100.64.0.1' })
+  const keyed = { 'GET /api/ssh-identity': [200, contract.sshIdentity] } as Routes
+  const hubList = () => within(screen.getByRole('list', { name: 'The hub' }))
+
+  it('is ready with no action on a fresh install, and step 2 has nothing to add', async () => {
+    await draw({
+      ...base([box, phone]),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name)])],
+    })
+    const hub = hubList()
+    expect(hub.getByText('yantra-box')).toBeTruthy()
+    expect(hub.getByText('ready · 7 of 7')).toBeTruthy()
+    expect(hub.getByText('19,942 MB free · 15% busy')).toBeTruthy()
+    expect(hub.queryByRole('button')).toBeNull()
+    expect(hub.queryByRole('link')).toBeNull()
+    expect([...document.querySelectorAll('.m3-lead')][0]!.querySelector('svg')).toBeTruthy()
+    expect(
+      screen.getByText('done · yantra-box is the hub and needs no adding · more machines can be added later'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Other machines' })).toBeNull()
+    expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+    expect(screen.queryByText('Devices that open the dashboard')).toBeNull()
+    expect(screen.queryByText('iphone')).toBeNull()
+    expect(filled()).toEqual(['New session'])
+  })
+
+  it('lists only the other machines under step 3, with the key and strangers under step 2', async () => {
+    await draw({
+      ...base([box, up]),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name), checks(tools)])],
+    })
+    const added = within(screen.getByRole('list', { name: 'Other machines' }))
+    expect(added.getByText('cachyos-g14')).toBeTruthy()
+    expect(added.queryByText('yantra-box')).toBeNull()
+    expect(hubList().queryByText('cachyos-g14')).toBeNull()
+    expect(screen.getByText('done · cachyos-g14 joined · more machines can be added later')).toBeTruthy()
+    expect(screen.getByText(/done · 2 of 2 machines ready/)).toBeTruthy()
+    const rows = [...document.querySelectorAll('.setup__list > li')]
+    const lines = screen.getByRole('list', { name: 'Other machines' })
+    const step = (title: string) => rows.findIndex((one) => one.textContent?.includes(title))
+    expect(rows.indexOf(lines.closest('.setup__sub')!)).toBe(step('Get it ready') + 1)
+  })
+
+  it('links a hub that is not ready to its machine page, and offers no Check or Install', async () => {
+    await draw({
+      ...base([box]),
+      ...keyed,
+      'GET /api/readiness': [200, looked.ok([checks({ ...tools, tmux: 'absent' }, '', box.name)])],
+    })
+    const hub = hubList()
+    expect(hub.getByText('missing tmux')).toBeTruthy()
+    expect(hub.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+    expect(hub.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Install/ })).toBeNull()
+  })
+
+  /** Y-585: the hub speaks as plainly as a machine line, and it is never
+   *  added, so it never offers the join command. */
+  it('gives a hub ssh cannot reach a cause and a next step, with ssh behind a press and no join command', async () => {
+    const silent = { machine: box.name, checks: [{ check: 'reachable', state: 'absent', detail: 'No route to host' }] }
+    await draw({ ...base([box]), ...keyed, 'GET /api/readiness': [200, looked.ok([silent as Readiness])] })
+    const hub = hubList()
+    expect(hub.getByText(/^Yantra can’t reach yantra-box over ssh\./)).toBeTruthy()
+    expect(hub.getByText(/^The join command does not fix this\./)).toBeTruthy()
+    expect(hub.queryByText('No route to host')).toBeNull()
+    const press = hub.getByRole('button', { name: /What ssh said/ })
+    expect(press.getAttribute('aria-expanded')).toBe('false')
+    expect(hub.queryByRole('button', { name: /Copy the join command/ })).toBeNull()
+    expect(screen.queryByText(COMMAND)).toBeNull()
+    fireEvent.click(press)
+    expect(await hub.findByText('No route to host')).toBeTruthy()
+  })
+
+  it('says the key was refused on a refused hub, with ssh behind a press and no join command', async () => {
+    const refused = { machine: box.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
+    await draw({ ...base([box]), ...keyed, 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
+    const hub = hubList()
+    expect(hub.getByText('the key was refused · its machine page shows how')).toBeTruthy()
+    expect(hub.queryByText(/join command/)).toBeNull()
+    expect(hub.queryByText('Permission denied (publickey)')).toBeNull()
+    expect(hub.queryByRole('button', { name: /Copy the join command/ })).toBeNull()
+    fireEvent.click(hub.getByRole('button', { name: /What ssh said/ }))
+    expect(await hub.findByText('Permission denied (publickey)')).toBeTruthy()
+  })
+
+  /** Y-622: the box is the hub, so no word on the page sends the owner to the join command. */
+  const named = { name: 'yantra-box', dns_name: 'yantra-box.tail3a1b.ts.net.', hub: true }
+  const otherMachines = () => screen.queryByRole('list', { name: 'Other machines' })
+
+  it.each([
+    ['unjoined', 'the ssh config here names no account for yantra-box, so ssh tried `yantra` · Permission denied (publickey).', 'no account named for it · its machine page shows how'],
+    ['browser', 'Tailscale SSH requires an additional check', 'Tailscale asks for a browser sign-in · its machine page shows how'],
+  ])('lists a %s hub once, under step 1, with no join command', async (_kind, detail, words) => {
+    const one = aMachine({ ...named, os: 'linux', online: true, address: '100.64.0.1' })
+    const report = { machine: one.name, checks: [{ check: 'reachable', state: 'absent', detail }] }
+    await draw({ ...base([one]), ...keyed, 'GET /api/readiness': [200, looked.ok([report as Readiness])] })
+    expect(screen.getAllByText('yantra-box')).toHaveLength(1)
+    const hub = hubList()
+    expect(hub.getByText('yantra-box')).toBeTruthy()
+    expect(hub.getByText(words)).toBeTruthy()
+    expect(otherMachines()).toBeNull()
+    expect(hub.queryByText(/join command/)).toBeNull()
+    expect(hub.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+  })
+
+  it('lists a tagged hub once, under step 1, and not among the devices the account does not own', async () => {
+    const one = aMachine({ ...named, os: 'linux', online: true, ownership: 'tagged', address: '100.64.0.1' })
+    await draw({ ...base([one]), ...keyed })
+    expect(screen.getAllByText('yantra-box')).toHaveLength(1)
+    expect(hubList().getByText(/^tagged, so the tailnet owns it/)).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Devices your account does not own' })).toBeNull()
+    expect(hubList().queryByRole('button')).toBeNull()
+  })
+
+  it('still draws the hub when the key could not be read', async () => {
+    await draw({
+      ...base([box]),
+      'GET /api/ssh-identity': [500, 'the key file could not be read'],
+      'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name)])],
+    })
+    expect(await screen.findByText("The appliance's key could not be read")).toBeTruthy()
+    expect(hubList().getByText('ready · 7 of 7')).toBeTruthy()
+  })
+
+  it('draws no hub and keeps the failure when the machines could not be read', async () => {
+    await draw({ ...base(), 'GET /api/machines': [200, { looked: 'failed', age_seconds: 0, error: 'tailscaled is down' }] })
+    expect(screen.getByText('Machines could not be read')).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'The hub' })).toBeNull()
+  })
+})
+
 describe('the machine lines', () => {
-  it('lists only the machines that run a session, and shows the rest apart', async () => {
+  /** Y-582: the devices block lives on Machines, so Setup lists only what runs a session. */
+  it('lists only the machines that run a session, and no devices block', async () => {
     await draw(base())
     expect(screen.getByText(/0 of 2 machines ready/)).toBeTruthy()
-    const apart = within(screen.getByRole('list', { name: 'Devices that open the dashboard' }))
-    expect(apart.getByText('iphone')).toBeTruthy()
-    expect(apart.getAllByText('opens the dashboard · runs no session')).toHaveLength(2)
-    expect(apart.getByText(/Windows · coming soon/)).toBeTruthy()
-    expect(apart.queryByText('cachyos-g14')).toBeNull()
+    expect(screen.queryByText('Devices that open the dashboard')).toBeNull()
+    expect(screen.queryByText('iphone')).toBeNull()
+    expect(within(screen.getByRole('list', { name: 'Other machines' })).getByText('cachyos-g14')).toBeTruthy()
   })
 
   /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */
@@ -303,10 +513,43 @@ describe('the machine lines', () => {
     expect(screen.getByRole('link', { name: 'Add a device' })).toBeTruthy()
   })
 
+  it('gives a machine that wants a browser the join command too', async () => {
+    const browser = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Tailscale SSH requires an additional check' }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([browser as Readiness])] })
+    expect(screen.getByText('Tailscale asks for a browser sign-in · run the join command on it')).toBeTruthy()
+  })
+
+  /** Y-621: a changed key names the forget command, and the join command
+   *  would not help, so it is not offered. */
+  it('gives a machine whose host key changed the forget command, and no join command', async () => {
+    const changed = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: CHANGED_KEY }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([changed as Readiness])] })
+    expect(
+      screen.getByText('its host key changed · run sudo -u yantra -H yantra forget-host-key cachyos-g14 once you know why'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeNull()
+  })
+
+  /** Y-585, #520: the first-run page speaks plainly, and the join command
+   *  would not help this machine, so it is not offered. */
+  it('gives a machine ssh cannot reach a cause and a next step, with ssh behind a press', async () => {
+    const silent = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'No route to host' }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([silent as Readiness])] })
+    expect(screen.getByText(/^Yantra can’t reach cachyos-g14 over ssh\./)).toBeTruthy()
+    expect(screen.getByText(/^The join command does not fix this\./)).toBeTruthy()
+    expect(screen.queryByText('No route to host')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
+    expect(await screen.findByText('No route to host')).toBeTruthy()
+  })
+
   it('gives a refused machine the join command to run on it', async () => {
     const refused = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
     expect(screen.getByText('the key was refused · run the join command on it')).toBeTruthy()
+    expect(screen.queryByText('Permission denied (publickey)')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
+    expect(await screen.findByText('Permission denied (publickey)')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
     expect(screen.getAllByText(COMMAND)).toHaveLength(1)
   })

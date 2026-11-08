@@ -1,10 +1,12 @@
 import { type FormEvent, useState } from 'react'
 import { Box, GitBranch, GitFork, KeyRound, Sparkles } from 'lucide-react'
 import type { Connection } from '@/api'
-import { useGithub, useReadiness } from '@/api/hooks'
+import { useGithub, useGithubReadiness, useReadiness } from '@/api/hooks'
 import { useClearGithubClientId, useGithubLogout, useSetGithubClientId } from '@/api/mutations'
+import { grant, held, REFUSED, signedIn } from '@/lib/github'
 import { Button } from '@/m3/button/Button'
 import { Lead } from '@/m3/lead/Lead'
+import { Avatar } from '@/shell/Avatar'
 import { ListItem, ListValue } from '@/m3/list/List'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
@@ -18,6 +20,7 @@ import { Sheet } from './Sheet'
 export function Providers() {
   const github = useGithub()
   const readiness = useReadiness()
+  const asked = useGithubReadiness()
   const [sheet, setSheet] = useState<'connect' | 'manage' | 'client-id' | null>(null)
   const [appPending, setAppPending] = useState<AppPending>(null)
   // The phone row is 390 px less a lead and a chevron, and `.m3-clip` cuts
@@ -26,6 +29,7 @@ export function Providers() {
   // The restart is a moment with no daemon; the facts already drawn stay.
   if (github.error && !(appPending !== null && github.data)) throw github.error
   const connection = github.data
+  const state = grant(connection, asked)
 
   return (
     <>
@@ -33,27 +37,33 @@ export function Providers() {
         <ListItem
           headline="GitHub"
           leading={
-            <Lead>
-              <GitBranch />
+            <Lead className="avatar-host">
+              <Avatar connection={connection}>
+                <GitBranch />
+              </Avatar>
             </Lead>
           }
           supporting={
-            connection === undefined
-              ? 'asking the daemon'
-              : connection.connected
-                ? phone
-                  ? `Connected as ${connection.login ?? 'someone'}`
-                  : `signed in as ${connection.login ?? 'someone'} · repositories, reviews, issues`
-                : 'Not connected'
+            state.kind === 'asking' ? (
+              'asking the daemon'
+            ) : state.kind === 'none' || state.kind === 'pending' ? (
+              'Not connected'
+            ) : state.kind === 'refused' ? (
+              <Text render={<span />} scale="body-medium" tone="error">
+                {REFUSED}
+              </Text>
+            ) : (
+              held(state, phone)
+            )
           }
           trailing={
-            connection === undefined ? undefined : connection.connected ? (
+            state.kind === 'asking' ? undefined : state.kind === 'accepted' || state.kind === 'unasked' ? (
               <Button onClick={() => setSheet('manage')} variant="text">
                 Manage
               </Button>
             ) : (
               <Button onClick={() => setSheet('connect')} variant="tonal">
-                Connect
+                {state.kind === 'refused' ? 'Sign in again' : 'Connect'}
               </Button>
             )
           }
@@ -168,7 +178,7 @@ function ManageSheet(props: { open: boolean; onOpenChange: (open: boolean) => vo
           </Button>
         </>
       }
-      description={`Signed in as ${login ?? 'someone'}. Yantra keeps this grant on the appliance and never sends it to a machine; signing out drops it from memory and from the env file.`}
+      description={`${login ? `${signedIn(login)}. ` : ''}Yantra keeps this grant on the appliance and never sends it to a machine; signing out drops it from memory and from the env file.`}
       onOpenChange={onOpenChange}
       open={open}
       title="GitHub"

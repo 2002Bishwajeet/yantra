@@ -39,6 +39,11 @@
 //! attached to see sends one Y-451 notification, which names only the
 //! workspace and the thread.
 //!
+//! **A `turn` may carry `interaction: plan`** (Y-565), on a Claude thread
+//! only; any other harness gets `badFrame`. Claude runs in its own plan mode,
+//! and the turn runs as `supervised` whatever its mode, so the daemon accepts
+//! nothing for it and the keeper's `mode` file says `supervised`. A room wake
+//! is never a plan turn.
 //! **A `turn` may name a [`Model`] and an [`Effort`]** (Y-564). A Claude turn
 //! starts with them as `--model` and `--effort`; an ACP turn ignores them.
 //!
@@ -81,10 +86,11 @@ use axum::response::Response;
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OnceCell, broadcast, mpsc, oneshot};
+use tokio::time::MissedTickBehavior;
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
-    ContentDelta, Decision, Effort, Event, Model, PermissionMode, RequestOption, Scope, StopReason,
-    StreamKind, ThreadEvent, TurnDiff, TurnState,
+    ContentDelta, Decision, Effort, Event, Interaction, Model, PermissionMode, RequestOption,
+    Scope, StopReason, StreamKind, ThreadEvent, TurnDiff, TurnState,
 };
 use yantra_core::checkpoint::{self, BranchDiff, Diff};
 use yantra_core::claude::{self, Events, Said, Turn};
@@ -99,6 +105,7 @@ use yantra_core::thread::{self, Place};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::{self, Workspace};
 
+use crate::terminal::{MISSES, PING_EVERY};
 use crate::write::{Authoriser, Refused, allowed, chain};
 
 /// How many transcript records an attach replays.
@@ -251,6 +258,10 @@ enum Frame {
         /// Holds for this turn; the browser keeps it between turns.
         #[serde(default)]
         mode: PermissionMode,
+        /// Holds for this turn, as `mode` does. Only Claude has a plan mode.
+        #[serde(default)]
+        #[cfg_attr(test, serde(skip_serializing_if = "is_build"))]
+        interaction: Interaction,
         /// Claude's `--model` and `--effort`, each only when picked.
         #[serde(default)]
         #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
@@ -271,6 +282,15 @@ enum Frame {
     },
     /// Asks for the thread's whole-branch diff.
     Diff,
+    /// A browser cannot send a protocol ping, so it sends this and waits for a [`Pong`].
+    Ping,
+}
+
+/// The answer to [`Frame::Ping`]. It proves the socket is alive, nothing more.
+#[derive(Debug, Serialize)]
+struct Pong {
+    #[serde(rename = "type")]
+    tag: &'static str,
 }
 
 /// The one frame the daemon sends that is not a [`ThreadEvent`].
@@ -379,17 +399,24 @@ impl QueueFrame {
     }
 }
 
+/// The browser sends no `interaction` for a build turn.
+#[cfg(test)]
+fn is_build(interaction: &Interaction) -> bool {
+    *interaction == Interaction::Build
+}
+
 /// A turn a person sent while one ran, held for that turn's end.
 struct Next {
     text: String,
     mode: PermissionMode,
+    interaction: Interaction,
     images: Option<String>,
     model: Option<Model>,
     effort: Option<Effort>,
 }
 
-/// The held turns as one: their texts joined with a blank line, with the last one's mode, images,
-/// model and effort.
+/// The held turns as one: their texts joined with a blank line, with the last one's modes,
+/// images, model and effort.
 fn joined(mut next: Vec<Next>) -> Option<Next> {
     let last = next.pop()?;
     let mut texts: Vec<String> = next.into_iter().map(|next| next.text).collect();
@@ -461,7 +488,7 @@ fn name_of(harness: Option<Harness>) -> &'static str {
     harness.map_or("claude", Harness::name)
 }
 
-fn harness_named(name: &str) -> Result<Option<Harness>, String> {
+pub(crate) fn harness_named(name: &str) -> Result<Option<Harness>, String> {
     if name == "claude" {
         return Ok(None);
     }
@@ -541,12 +568,14 @@ trait Machine: Send + Sync + 'static {
         place: &Place,
     ) -> impl Future<Output = Result<Vec<logs::Entry>, String>> + Send;
     /// Starts a Claude turn in a keeper. `images` is the directory it may read.
+    #[allow(clippy::too_many_arguments)]
     fn start(
         &self,
         place: &Place,
         text: &str,
         images: Option<&str>,
         mode: PermissionMode,
+        interaction: Interaction,
         model: Option<&Model>,
         effort: Option<Effort>,
     ) -> impl Future<Output = Result<Started<KeptTurn>, String>> + Send;
@@ -728,6 +757,7 @@ impl Machine for Fleet {
         text: &str,
         images: Option<&str>,
         mode: PermissionMode,
+        interaction: Interaction,
         model: Option<&Model>,
         effort: Option<Effort>,
     ) -> Result<Started<KeptTurn>, String> {
@@ -738,7 +768,15 @@ impl Machine for Fleet {
             url: format!("http://{daemon}/api/mcp"),
             thread: format!("{}/{}", self.workspace.name, thread::name(place)),
         });
-        let agent = claude::command(&place.worktree, images, mode, model, effort, mcp.as_ref());
+        let agent = claude::command(
+            &place.worktree,
+            images,
+            mode,
+            interaction,
+            model,
+            effort,
+            mcp.as_ref(),
+        );
         let started = keep::start(&self.ssh, tmux, &keeper, &agent, &run, Limits::default())
             .await
             .map_err(|error| chain(&error))?;
@@ -1643,12 +1681,15 @@ async fn flush<P: Peer>(sub: &mut Option<Sub>, peer: &mut P) -> bool {
 enum Heard {
     Text(String),
     Binary(Bytes),
+    /// The answer to a protocol ping.
+    Pong,
 }
 
 /// The browser's end of the socket. `None` is a socket that closed or failed.
 trait Peer {
     async fn hear(&mut self) -> Option<Heard>;
     async fn say_text(&mut self, text: String) -> bool;
+    async fn ping(&mut self) -> bool;
 
     async fn say<T: Serialize + Sync>(&mut self, frame: &T) -> bool {
         match serde_json::to_string(frame) {
@@ -1664,6 +1705,7 @@ impl Peer for WebSocket {
             match self.recv().await? {
                 Ok(Message::Text(text)) => return Some(Heard::Text(text.to_string())),
                 Ok(Message::Binary(bytes)) => return Some(Heard::Binary(bytes)),
+                Ok(Message::Pong(_)) => return Some(Heard::Pong),
                 Ok(Message::Close(_)) | Err(_) => return None,
                 // A ping is still axum's to answer.
                 Ok(_) => {}
@@ -1673,6 +1715,10 @@ impl Peer for WebSocket {
 
     async fn say_text(&mut self, text: String) -> bool {
         self.send(Message::Text(text.into())).await.is_ok()
+    }
+
+    async fn ping(&mut self) -> bool {
+        self.send(Message::Ping(Bytes::new())).await.is_ok()
     }
 }
 
@@ -1729,6 +1775,11 @@ async fn converse<M: Machine, P: Peer>(
     let (diffs, mut diffed) = mpsc::unbounded_channel::<String>();
     // The thread's next keeper, such as one a queued turn or a room starts.
     let mut waiter = None;
+    // Two missed pings end the socket, as terminal.rs bridge() does; the turn
+    // goes on in its keeper. A phone that slept leaves a socket nobody closes.
+    let mut unanswered = 0u8;
+    let mut pings = tokio::time::interval(PING_EVERY);
+    pings.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         if waiter.is_none()
             && let Some(here) = &here
@@ -1738,6 +1789,10 @@ async fn converse<M: Machine, P: Peer>(
         let open = tokio::select! {
             heard = peer.hear() => match heard {
                 None => false,
+                Some(Heard::Pong) => {
+                    unanswered = 0;
+                    true
+                }
                 Some(Heard::Binary(bytes)) => {
                     let reply = land(&machine, name, here.as_ref(), &mut early, &mut images, &bytes).await;
                     peer.say(&reply).await
@@ -1747,6 +1802,15 @@ async fn converse<M: Machine, P: Peer>(
                 }
             },
             Some(text) = diffed.recv() => peer.say_text(text).await,
+            _ = pings.tick() => {
+                if unanswered >= MISSES {
+                    tracing::info!("chat {name}: the socket answered no ping");
+                    false
+                } else {
+                    unanswered += 1;
+                    peer.ping().await
+                }
+            }
             followed = next_keeper(&mut waiter) => {
                 waiter = None;
                 match followed {
@@ -1809,6 +1873,7 @@ async fn heard_frame<M: Machine, P: Peer>(
             text,
             harness,
             mode,
+            interaction,
             model,
             effort,
         }) => {
@@ -1827,11 +1892,26 @@ async fn heard_frame<M: Machine, P: Peer>(
                     );
                     peer.say(&failure(Kind::BadFrame, said)).await
                 }
+                (Ok(asked), theirs)
+                    if interaction == Interaction::Plan
+                        && theirs.unwrap_or_else(|| asked.flatten()).is_some() =>
+                {
+                    peer.say(&failure(
+                        Kind::BadFrame,
+                        "plan mode needs the Claude harness",
+                    ))
+                    .await
+                }
                 (Ok(asked), _) => {
                     let images = images.and_then(Images::dir);
                     let next = Next {
                         text,
-                        mode,
+                        // A plan turn asks about all it relays, here and in an adopting daemon.
+                        mode: match interaction {
+                            Interaction::Plan => PermissionMode::Supervised,
+                            Interaction::Build => mode,
+                        },
+                        interaction,
                         images: images.map(str::to_owned),
                         model,
                         effort,
@@ -1917,6 +1997,7 @@ async fn heard_frame<M: Machine, P: Peer>(
                 true
             }
         },
+        Ok(Frame::Ping) => peer.say(&Pong { tag: "pong" }).await,
         Err(error) => {
             let said =
                 format!("a frame is a turn, an answer, a cancel, a revert or a diff: {error}");
@@ -2451,11 +2532,12 @@ fn delta(place: &Place, stream_kind: StreamKind, text: String, item: &str) -> Th
 }
 
 /// One turn the person sent: what they wrote, the directory of the images it
-/// may read, the thread's permission mode, and Claude's model and effort.
+/// may read, the thread's permission and interaction modes, and Claude's model and effort.
 struct Typed<'a> {
     text: String,
     images: Option<&'a str>,
     mode: PermissionMode,
+    interaction: Interaction,
     model: Option<&'a Model>,
     effort: Option<Effort>,
 }
@@ -2627,6 +2709,7 @@ async fn start_or_hold<M: Machine>(
             text: next.text.clone(),
             images: next.images.as_deref(),
             mode: next.mode,
+            interaction: next.interaction,
             model: next.model.as_ref(),
             effort: next.effort,
         };
@@ -2655,6 +2738,7 @@ async fn claude_turn<M: Machine>(
         text,
         images,
         mode,
+        interaction,
         model,
         effort,
     }: Typed<'_>,
@@ -2671,7 +2755,7 @@ async fn claude_turn<M: Machine>(
         return Ok(Turned::Lost);
     };
     let started = machine
-        .start(place, &text, images, mode, model, effort)
+        .start(place, &text, images, mode, interaction, model, effort)
         .await;
     let KeptTurn { turn, events, run } = match started {
         Ok(Started::Running(kept)) => kept,
@@ -3477,6 +3561,7 @@ fn wake_on<M: Machine>(
                 text: prompt.clone(),
                 images: None,
                 mode,
+                interaction: Interaction::Build,
                 model: None,
                 effort: None,
             };
@@ -3764,6 +3849,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     output: Some("test result: ok".to_owned()),
                     changes: vec![],
                 })),
+                event(Event::CommandsUpdated {
+                    commands: vec![yantra_core::chat::Command {
+                        name: "review".to_owned(),
+                        description: "review changes".to_owned(),
+                        hint: Some("<branch>".to_owned()),
+                    }],
+                }),
                 event(Event::TokenUsageUpdated(TokenUsage {
                     used_tokens: 29_149,
                     max_tokens: 200_000,
@@ -3880,6 +3972,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 &[Next {
                     text: "and the docs".to_owned(),
                     mode: PermissionMode::Supervised,
+                    interaction: Interaction::Build,
                     images: None,
                     model: None,
                     effort: None,
@@ -3904,6 +3997,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     text: "run the tests".to_owned(),
                     harness: Some("opencode".to_owned()),
                     mode: PermissionMode::AutoAcceptEdits,
+                    interaction: Interaction::Build,
                     model: None,
                     effort: None,
                 }),
@@ -3911,6 +4005,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     text: "and the docs".to_owned(),
                     harness: None,
                     mode: PermissionMode::Supervised,
+                    interaction: Interaction::Plan,
                     model: None,
                     effort: None,
                 }),
@@ -3918,6 +4013,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     text: "think it through".to_owned(),
                     harness: None,
                     mode: PermissionMode::Supervised,
+                    interaction: Interaction::Build,
                     model: Model::try_from("opus".to_owned()).ok(),
                     effort: Some(Effort::High),
                 }),
@@ -3928,7 +4024,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 frame(Frame::Cancel),
                 frame(Frame::Revert { turn: 0 }),
                 frame(Frame::Diff),
+                frame(Frame::Ping),
             ]),
+        ),
+        (
+            "chatPong",
+            "ChatPong",
+            serde_json::to_value(Pong { tag: "pong" }).expect("a pong serialises"),
         ),
         (
             "chatQuery",
@@ -3949,6 +4051,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::watch;
@@ -4192,8 +4295,8 @@ mod tests {
         started_with: Mutex<Vec<Option<String>>>,
         /// The permission mode each Claude turn was started with.
         modes: Mutex<Vec<PermissionMode>>,
-        /// The model and the effort each Claude turn was started with.
-        picks: Mutex<Vec<(Option<Model>, Option<Effort>)>>,
+        /// The command each Claude turn would run.
+        commands: Mutex<Vec<String>>,
         /// How long each `finish` was given, and each closed stdin.
         finished: Mutex<Vec<Duration>>,
         stdin_closed: Mutex<usize>,
@@ -4336,6 +4439,7 @@ mod tests {
             text: &str,
             images: Option<&str>,
             mode: PermissionMode,
+            interaction: Interaction,
             model: Option<&Model>,
             effort: Option<Effort>,
         ) -> Result<Started<KeptTurn>, String> {
@@ -4344,7 +4448,15 @@ mod tests {
             };
             lock(&self.started_with).push(images.map(str::to_owned));
             lock(&self.modes).push(mode);
-            lock(&self.picks).push((model.cloned(), effort));
+            lock(&self.commands).push(claude::command(
+                &place.worktree,
+                images,
+                mode,
+                interaction,
+                model,
+                effort,
+                None,
+            ));
             lock(&self.turns).push(Claude(end));
             if let Some(gate) = &self.start_gate {
                 gate.notified().await;
@@ -4605,6 +4717,9 @@ mod tests {
         from: mpsc::UnboundedReceiver<Heard>,
         to: mpsc::UnboundedSender<String>,
         held: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+        pings: Arc<AtomicUsize>,
+        /// Answers each ping; a tab that slept has none.
+        pong: Option<mpsc::WeakUnboundedSender<Heard>>,
     }
 
     impl Peer for Browser {
@@ -4618,6 +4733,14 @@ mod tests {
                 let _ = released.await;
             }
             self.to.send(text).is_ok()
+        }
+
+        async fn ping(&mut self) -> bool {
+            self.pings.fetch_add(1, Ordering::SeqCst);
+            if let Some(back) = self.pong.as_ref().and_then(|back| back.upgrade()) {
+                let _ = back.send(Heard::Pong);
+            }
+            true
         }
     }
 
@@ -4686,14 +4809,35 @@ mod tests {
         after: Option<&str>,
         held: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
     ) -> (Tab, tokio::task::JoinHandle<()>) {
+        let (tab, served, _) = connect_pinged(script, thread, after, held, true);
+        (tab, served)
+    }
+
+    fn connect_pinged(
+        script: Arc<Script>,
+        thread: Option<&str>,
+        after: Option<&str>,
+        held: Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+        answering: bool,
+    ) -> (Tab, tokio::task::JoinHandle<()>, Arc<AtomicUsize>) {
         let (send, from) = mpsc::unbounded_channel();
+        let pong = answering.then(|| send.downgrade());
+        let pings = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&pings);
         let (to, heard) = mpsc::unbounded_channel();
         let query = ChatQuery {
             thread: thread.map(str::to_owned),
             after: after.map(str::to_owned),
         };
         let served = tokio::spawn(async move {
-            converse(script, "web", query, &mut Browser { from, to, held }).await;
+            let mut browser = Browser {
+                from,
+                to,
+                held,
+                pings: counted,
+                pong,
+            };
+            converse(script, "web", query, &mut browser).await;
         });
         (
             Tab {
@@ -4701,6 +4845,7 @@ mod tests {
                 heard,
             },
             served,
+            pings,
         )
     }
 
@@ -4793,6 +4938,7 @@ mod tests {
                     text: "hi".to_owned(),
                     harness: None,
                     mode: PermissionMode::Supervised,
+                    interaction: Interaction::Build,
                     model: None,
                     effort: None,
                 },
@@ -4803,6 +4949,18 @@ mod tests {
                     text: "hi".to_owned(),
                     harness: Some("codex".to_owned()),
                     mode: PermissionMode::FullAccess,
+                    interaction: Interaction::Build,
+                    model: None,
+                    effort: None,
+                },
+            ),
+            (
+                r#"{"type":"turn","text":"hi","interaction":"plan"}"#,
+                Frame::Turn {
+                    text: "hi".to_owned(),
+                    harness: None,
+                    mode: PermissionMode::Supervised,
+                    interaction: Interaction::Plan,
                     model: None,
                     effort: None,
                 },
@@ -4820,6 +4978,7 @@ mod tests {
                     text: "hi".to_owned(),
                     harness: None,
                     mode: PermissionMode::Supervised,
+                    interaction: Interaction::Build,
                     model: Model::try_from("claude-opus-5-5".to_owned()).ok(),
                     effort: Some(Effort::Xhigh),
                 },
@@ -5326,6 +5485,36 @@ mod tests {
             )
             .await;
         assert_eq!(agent.heard().await["method"], "session/new");
+    }
+
+    #[tokio::test]
+    async fn a_ping_frame_gets_a_pong_and_no_error() {
+        let (mut tab, _served) = connect(Arc::new(Script::default()), None);
+        assert_eq!(
+            tab.next_after(json!({"type": "ping"})).await,
+            json!({"type": "pong"})
+        );
+        assert!(tab.quiet().await);
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_answers_no_ping_is_closed_after_the_misses() {
+        let (_tab, served, pings) =
+            connect_pinged(Arc::new(Script::default()), None, None, None, false);
+        tokio::time::timeout(PING_EVERY * (u32::from(MISSES) + 6), served)
+            .await
+            .expect("the socket closes")
+            .expect("the task ends cleanly");
+        assert_eq!(pings.load(Ordering::SeqCst), usize::from(MISSES));
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_answers_pings_stays_open() {
+        let (_tab, served, pings) =
+            connect_pinged(Arc::new(Script::default()), None, None, None, true);
+        tokio::time::sleep(PING_EVERY * (u32::from(MISSES) + 4)).await;
+        assert!(!served.is_finished());
+        assert!(pings.load(Ordering::SeqCst) > usize::from(MISSES));
     }
 
     #[tokio::test(start_paused = true)]
@@ -6182,11 +6371,16 @@ mod tests {
 
     /// The first turn of a Claude thread in `mode`, up to Claude's prompt.
     async fn a_claude_turn_in(script: &Arc<Script>, mode: Option<&str>) -> (Tab, Claude) {
-        let (mut tab, _served) = connect(Arc::clone(script), None);
         let mut turn = json!({"type": "turn", "text": "fix it"});
         if let Some(mode) = mode {
             turn["mode"] = json!(mode);
         }
+        a_claude_turn(script, turn).await
+    }
+
+    /// The first turn of a Claude thread, sent as `turn`, up to Claude's prompt.
+    async fn a_claude_turn(script: &Arc<Script>, turn: Value) -> (Tab, Claude) {
+        let (mut tab, _served) = connect(Arc::clone(script), None);
         tab.send(turn);
         assert_eq!(tab.next().await["type"], "thread.started");
         assert_eq!(tab.next().await["payload"]["itemId"], "user:1");
@@ -6277,6 +6471,73 @@ mod tests {
             [PermissionMode::FullAccess],
             "Claude itself still runs in its own default mode"
         );
+    }
+
+    /// Y-565: a plan turn runs in Claude's plan mode.
+    #[tokio::test]
+    async fn plan_a_turn_runs_claude_in_plan_mode() {
+        let script = Arc::new(Script::default());
+        a_claude_turn(
+            &script,
+            json!({"type": "turn", "text": "fix it", "interaction": "plan"}),
+        )
+        .await;
+        let commands = lock(&script.commands);
+        assert_eq!(commands.len(), 1);
+        assert!(
+            commands[0].contains("--permission-mode plan -p"),
+            "{}",
+            commands[0]
+        );
+    }
+
+    /// Y-565: Full access does not hold in a plan turn. A command is relayed,
+    /// and the keeper keeps `supervised` for a daemon that adopts the turn.
+    #[tokio::test]
+    async fn plan_in_full_access_relays_a_command_and_keeps_supervised() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn(
+            &script,
+            json!({"type": "turn", "text": "fix it", "mode": "full-access",
+                   "interaction": "plan"}),
+        )
+        .await;
+        assert_eq!(*lock(&script.modes), [PermissionMode::Supervised]);
+        let kept = lock(&script.keep)
+            .as_ref()
+            .map(|keep| lock(&keep.journal).mode);
+        assert_eq!(kept, Some(Some(PermissionMode::Supervised)));
+
+        claude.say(a_command("r1")).await;
+        let asked = tab.next().await;
+        assert_eq!(asked["type"], "request.opened", "{asked}");
+        assert_eq!(asked["payload"]["requestId"], "r1");
+    }
+
+    /// Y-565: only Claude has a plan mode, so a plan turn for another harness
+    /// is refused, and no thread opens for it.
+    #[tokio::test]
+    async fn plan_a_turn_for_an_acp_harness_is_a_bad_frame() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _agent, _prompt) = an_opencode_thread(&script).await;
+        let said = tab
+            .next_after(json!({"type": "turn", "text": "plan it", "interaction": "plan"}))
+            .await;
+        assert_eq!(
+            said,
+            json!({"type": "error", "kind": "badFrame",
+                   "said": "plan mode needs the Claude harness"})
+        );
+
+        let (mut fresh, _served) = connect(Arc::clone(&script), None);
+        let said = fresh
+            .next_after(
+                json!({"type": "turn", "text": "plan it", "harness": "codex",
+                               "interaction": "plan"}),
+            )
+            .await;
+        assert_eq!(said["kind"], "badFrame", "{said}");
+        assert_eq!(*lock(&script.opened), 1, "only the opencode thread opened");
     }
 
     #[tokio::test]
@@ -7109,8 +7370,35 @@ mod tests {
         );
     }
 
-    fn pick(model: &str, effort: Effort) -> (Option<Model>, Option<Effort>) {
-        (Model::try_from(model.to_owned()).ok(), Some(effort))
+    /// Y-565: a queued plan turn starts as a plan turn.
+    #[tokio::test]
+    async fn queue_a_plan_turn_keeps_plan() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn_in(&script, Some("full-access")).await;
+        tab.send(
+            json!({"type": "turn", "text": "then plan", "mode": "full-access",
+                        "interaction": "plan"}),
+        );
+        assert_eq!(tab.next().await, queue(&["then plan"]));
+
+        claude.say(ended()).await;
+        until_prompt(&mut tab).await;
+        script.claude().await.heard().await.expect("a line");
+        let commands = lock(&script.commands);
+        assert!(
+            commands[0].contains("--permission-mode default -p"),
+            "{}",
+            commands[0]
+        );
+        assert!(
+            commands[1].contains("--permission-mode plan -p"),
+            "{}",
+            commands[1]
+        );
+        assert_eq!(
+            *lock(&script.modes),
+            [PermissionMode::FullAccess, PermissionMode::Supervised]
+        );
     }
 
     /// Y-564: a Claude turn starts with the model and effort its frame names,
@@ -7129,9 +7417,16 @@ mod tests {
         until_script(&script, |script| lock(&script.finished).len() == 1).await;
         tab.send(json!({"type": "turn", "text": "and the docs"}));
         script.claude().await.heard().await;
-        assert_eq!(
-            *lock(&script.picks),
-            [pick("opus", Effort::Max), (None, None)]
+        let commands = lock(&script.commands);
+        assert!(
+            commands[0].contains("--permission-mode default --model 'opus' --effort max -p"),
+            "{}",
+            commands[0]
+        );
+        assert!(
+            commands[1].contains("--permission-mode default -p"),
+            "{}",
+            commands[1]
         );
     }
 
@@ -7152,9 +7447,16 @@ mod tests {
         claude.say(ended()).await;
         assert_eq!(until_prompt(&mut tab).await["delta"], "one\n\ntwo");
         script.claude().await.heard().await;
-        assert_eq!(
-            *lock(&script.picks),
-            [(None, None), pick("sonnet", Effort::High)]
+        let commands = lock(&script.commands);
+        assert!(
+            commands[0].contains("--permission-mode default -p"),
+            "{}",
+            commands[0]
+        );
+        assert!(
+            commands[1].contains("--permission-mode default --model 'sonnet' --effort high -p"),
+            "{}",
+            commands[1]
         );
     }
 
@@ -7177,7 +7479,7 @@ mod tests {
         assert_eq!(tab.next().await["payload"]["itemId"], "user:1:1");
         assert_eq!(agent.heard().await["method"], "session/prompt");
         assert_eq!(tab.next().await["type"], "turn.started");
-        assert!(lock(&script.picks).is_empty(), "no Claude turn started");
+        assert!(lock(&script.commands).is_empty(), "no Claude turn started");
     }
 
     #[tokio::test]
@@ -7647,6 +7949,8 @@ mod tests {
             from,
             to,
             held: None,
+            pings: Arc::default(),
+            pong: None,
         };
         (browser, heard)
     }
@@ -7656,6 +7960,7 @@ mod tests {
             text: text.to_owned(),
             images: None,
             mode: PermissionMode::default(),
+            interaction: Interaction::default(),
             model: None,
             effort: None,
         }

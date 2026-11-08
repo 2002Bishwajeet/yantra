@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, File, Folder, FolderGit2, FolderLock } from 'lucide-react'
+import { ChevronRight, Folder, FolderGit2, FolderLock } from 'lucide-react'
 import type { Entry } from '@/api'
 import { asApiError } from '@/api/errors'
 import { dirsQuery } from '@/api/queries'
@@ -33,7 +33,7 @@ type Walk = {
 }
 
 /** The folders under one folder, fetched when it opens: one level per
- *  request, as everywhere else (D4 §2). Files are not drawn here. */
+ *  request, as everywhere else (D4 §2). Only folders are drawn. */
 function Children(props: Walk & { entry: Entry }) {
   const { entry, ...walk } = props
   const listing = useQuery({ ...dirsQuery(walk.machine, entry.path), enabled: true })
@@ -65,24 +65,11 @@ function Children(props: Walk & { entry: Entry }) {
 }
 
 /** A folder that can be entered is a button, and a second button opens its
- *  subfolders in place. A closed folder and a file are drawn and marked, and
+ *  subfolders in place. A closed folder is drawn and marked, and
  *  nothing happens when one is pressed (Y-414). */
 function Node(props: Walk & { entry: Entry }) {
   const { entry, ...walk } = props
   const [open, setOpen] = useState(false)
-  if (entry.kind === 'file') {
-    return (
-      <div className="ns__node">
-        <span className="ns__toggle" />
-        <Row className="ns__inert" tone="plain">
-          <Lead>
-            <File />
-          </Lead>
-          <RowText headline={entry.name} supporting="file" />
-        </Row>
-      </div>
-    )
-  }
   if (!entry.access) {
     return (
       <div className="ns__node">

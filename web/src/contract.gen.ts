@@ -14,9 +14,12 @@ import type {
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatPong,
   ChatQuery,
   ChatQueue,
+  Check,
   Cloning,
+  Commands,
   Connection,
   Device,
   Event,
@@ -27,6 +30,7 @@ import type {
   Looked,
   Machine,
   MachineSessions,
+  Mentions,
   Opened,
   Placement,
   Readiness,
@@ -34,6 +38,7 @@ import type {
   Resumed,
   Room,
   RoomPosted,
+  RoomRemoved,
   RoomSummary,
   Spend,
   SshIdentity,
@@ -48,6 +53,7 @@ import type {
   ThreadPrOpened,
   ThreadPushed,
   Transcript,
+  UpdateProgress,
   Workspace,
   WorkspaceStatus,
 } from './api'
@@ -71,6 +77,7 @@ export const machines = {
         ],
         "power": "ac"
       },
+      "hub": true,
       "key_expires": "2027-01-18T10:11:44Z",
       "last_seen": null,
       "name": "cachyos-g14",
@@ -98,6 +105,7 @@ export const machines = {
           }
         }
       },
+      "hub": false,
       "key_expires": null,
       "last_seen": "2026-07-07T09:00:00Z",
       "name": "bishwajeets-macbook-pro",
@@ -110,6 +118,7 @@ export const machines = {
       "dns_name": "pi.<tailnet>.ts.net.",
       "expired": false,
       "heartbeat": null,
+      "hub": false,
       "key_expires": null,
       "last_seen": null,
       "name": "pi",
@@ -317,7 +326,8 @@ export const readiness = {
         {
           "check": "reachable",
           "detail": "a command ran there and reported its own status",
-          "state": "present"
+          "state": "present",
+          "took_ms": 120
         },
         {
           "check": "provider-auth",
@@ -338,7 +348,8 @@ export const readiness = {
         {
           "check": "reachable",
           "detail": "a command ran there and reported its own status",
-          "state": "present"
+          "state": "present",
+          "took_ms": 120
         },
         {
           "check": "provider-auth",
@@ -365,7 +376,8 @@ export const oneReadiness = {
       {
         "check": "reachable",
         "detail": "a command ran there and reported its own status",
-        "state": "present"
+        "state": "present",
+        "took_ms": 120
       },
       {
         "check": "provider-auth",
@@ -433,6 +445,7 @@ export const repos = {
 } satisfies Looked<Repo[]>
 
 export const github = {
+  "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4",
   "client_id": null,
   "client_id_custom": false,
   "connected": true,
@@ -441,7 +454,28 @@ export const github = {
   "scopes": []
 } satisfies Connection
 
+export const githubReadiness = {
+  "age_seconds": 0,
+  "data": {
+    "check": "github",
+    "detail": "GitHub accepts the grant, signed in as 2002Bishwajeet",
+    "state": "present"
+  },
+  "looked": "ok"
+} satisfies Looked<Check>
+
+export const githubRefused = {
+  "age_seconds": 0,
+  "data": {
+    "check": "github",
+    "detail": "GitHub refused the grant — it was revoked or replaced, so sign in again",
+    "state": "absent"
+  },
+  "looked": "ok"
+} satisfies Looked<Check>
+
 export const disconnected = {
+  "avatar_url": null,
   "client_id": null,
   "client_id_custom": false,
   "connected": false,
@@ -561,9 +595,22 @@ export const about = {
   "relay": true,
   "tailnet": "<tailnet>.ts.net",
   "target": "aarch64-unknown-linux-musl",
+  "update": null,
   "uptime_seconds": 86412,
   "version": "0.1.0"
 } satisfies About
+
+export const updateDownloading = {
+  "received": 3100000,
+  "step": "downloading",
+  "total": 9800000,
+  "version": "0.4.0"
+} satisfies UpdateProgress
+
+export const updateFailed = {
+  "said": "install: yantra-0.4.0-aarch64-unknown-linux-musl.tar.gz does not match SHA256SUMS — nothing was installed",
+  "step": "failed"
+} satisfies UpdateProgress
 
 export const sshIdentity = {
   "fingerprint": "SHA256:<fingerprint>",
@@ -789,6 +836,42 @@ export const threadOpened = {
   "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
 } satisfies ThreadOpened
 
+export const mentions = {
+  "files": [
+    "README.md",
+    "src/main.rs"
+  ],
+  "skills": [
+    {
+      "description": "Reviews a diff for correctness.",
+      "mention": "$code-review",
+      "name": "code-review",
+      "scope": "user"
+    },
+    {
+      "description": "",
+      "mention": "$deploy-staging",
+      "name": "deploy-staging",
+      "scope": "project"
+    }
+  ],
+  "truncated": false
+} satisfies Mentions
+
+export const commands = {
+  "commands": [
+    {
+      "description": "Free up context by summarizing the conversation so far",
+      "name": "compact"
+    },
+    {
+      "description": "Review a pull request",
+      "hint": "<pr>",
+      "name": "review"
+    }
+  ]
+} satisfies Commands
+
 export const threadMessage = {
   "message": "Add the commit and push verbs\n\n- yantra commit\n- yantra push"
 } satisfies ThreadMessage
@@ -987,6 +1070,19 @@ export const chatEvents = [
   },
   {
     "payload": {
+      "commands": [
+        {
+          "description": "review changes",
+          "hint": "<branch>",
+          "name": "review"
+        }
+      ]
+    },
+    "threadId": "1a2b3c4d",
+    "type": "thread.commands.updated"
+  },
+  {
+    "payload": {
       "maxTokens": 200000,
       "usedTokens": 29149
     },
@@ -1104,6 +1200,7 @@ export const chatFrames = [
     "type": "turn"
   },
   {
+    "interaction": "plan",
     "mode": "supervised",
     "text": "and the docs",
     "type": "turn"
@@ -1129,8 +1226,15 @@ export const chatFrames = [
   },
   {
     "type": "diff"
+  },
+  {
+    "type": "ping"
   }
 ] satisfies ChatFrame[]
+
+export const chatPong = {
+  "type": "pong"
+} satisfies ChatPong
 
 export const chatQuery = {
   "after": "Y0123456789abcdef:812:0",
@@ -1139,33 +1243,50 @@ export const chatQuery = {
 
 export const rooms = [
   {
+    "base": "main",
+    "brief": "Ship the login page.",
     "budget": 20,
     "last_at": 1800000000,
     "members": 2,
     "messages": 2,
     "name": "design-review",
     "paused": false,
-    "spent": 3
+    "spent": 3,
+    "workspace": "web"
   },
   {
+    "base": null,
+    "brief": null,
     "budget": 20,
     "last_at": null,
     "members": 0,
     "messages": 0,
     "name": "quiet",
     "paused": false,
-    "spent": 0
+    "spent": 0,
+    "workspace": null
   }
 ] satisfies RoomSummary[]
 
 export const room = {
+  "base": "main",
+  "brief": "Ship the login page.",
   "budget": 20,
   "last_at": 1800000060,
   "log": [
     {
+      "at": 1799999000,
+      "budget": 0,
+      "from": "yantrad",
+      "kind": "system",
+      "seq": 18,
+      "text": "yantrad restarted at 09:43 UTC. Earlier messages are in each agent's own thread."
+    },
+    {
       "at": 1800000000,
       "budget": 19,
       "from": "cachyos-g14 · chat 1a2b3c4d",
+      "kind": "text",
       "seq": 19,
       "text": "The API is ready for review."
     },
@@ -1173,18 +1294,37 @@ export const room = {
       "at": 1800000060,
       "budget": 0,
       "from": "owner on pixel",
+      "kind": "text",
       "seq": 20,
       "text": "Go ahead."
     }
   ],
   "members": 2,
-  "messages": 2,
+  "messages": 3,
   "name": "design-review",
   "paused": true,
-  "spent": 20
+  "spent": 20,
+  "workspace": "web"
 } satisfies Room
 
 export const roomPosted = {
   "delivered": 2,
   "seq": 21
 } satisfies RoomPosted
+
+export const roomCreated = {
+  "base": "main",
+  "brief": "Ship the login page.",
+  "budget": 20,
+  "last_at": null,
+  "members": 0,
+  "messages": 0,
+  "name": "design-review",
+  "paused": false,
+  "spent": 0,
+  "workspace": "web"
+} satisfies RoomSummary
+
+export const roomRemoved = {
+  "removed": true
+} satisfies RoomRemoved
