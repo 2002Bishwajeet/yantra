@@ -21,6 +21,9 @@ const SCENARIOS: readonly Scenario[] = [
  *  in the page can suppress it. */
 const ALLOWED = /^Failed to load resource: the server responded with a status of \d+/
 
+/** WebKit words a read that the next navigation cancelled as a refusal (Y-660). */
+const CANCELLED_IN_WEBKIT = / due to access control checks\.$/
+
 const PATHS = [
   ...new Set(ROUTES.map((one) => one.path)),
   '/w/landing?view=spend',
@@ -29,7 +32,7 @@ const PATHS = [
 ]
 
 for (const name of SCENARIOS) {
-  test(`on ${name}: no console error, warning or page error`, async ({ page }) => {
+  test(`on ${name}: no console error, warning or page error`, async ({ page, browserName }) => {
     const seen: string[] = []
     let path = ''
     const open = new Set<Request>()
@@ -42,6 +45,7 @@ for (const name of SCENARIOS) {
       if (frame === page.mainFrame()) open.clear()
     })
     page.on('pageerror', (error) => {
+      if (browserName === 'webkit' && CANCELLED_IN_WEBKIT.test(error.message)) return
       seen.push(`${path}: pageerror ${error.message}`)
     })
     page.on('console', (message) => {

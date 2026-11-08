@@ -6,11 +6,14 @@ import type { Size } from './sizes'
 export const test = base.extend<{ size: Size }>({
   // oxlint-disable-next-line no-empty-pattern -- Playwright's fixture signature
   size: async ({}, provide, testInfo) => {
-    await provide(testInfo.project.name as Size)
+    await provide((testInfo.project.metadata.size ?? testInfo.project.name) as Size)
   },
 })
 
 export { expect } from '@playwright/test'
+
+/** The first run in WebKit found it: an iPhone gets a tailscale.com/download link that axe and the press table refuse. */
+export const IPHONE_ADD_DEVICE = 'Y-684: Add a device on an iPhone draws a link that fails axe link-in-text-block'
 export { axe } from './axe'
 export { keyboardWalk } from './keyboard'
 export { firstReading, scenario } from './scenario'

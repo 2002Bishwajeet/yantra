@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import type { Scenario } from './scenario'
 import type { Size } from './sizes'
 
@@ -14,6 +14,8 @@ export async function screenshot(
   size: Size,
   options: { overlay?: boolean } = {},
 ) {
+  // Y-660: every baseline is a Chromium render, so WebKit runs the spec's assertions and skips the image.
+  if (test.info().project.use.browserName === 'webkit') return
   // Shell's lazy Account and BellPopover show a slot fallback until they load (321 px).
   await expect(page.locator('.shell__slot')).toHaveCount(0)
   // A full-page capture resizes the viewport under a sticky dock, and the Chat scrolls itself as the page resizes,
