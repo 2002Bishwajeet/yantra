@@ -401,6 +401,14 @@ test.describe('the composer', () => {
       .toEqual([])
   })
 
+  // Y-564: six controls do not fit a phone's row, and a hidden scroll would hide the last ones.
+  test('shows every control, wrapping rather than scrolling', async ({ page }) => {
+    await composer(page).focus()
+    await expect(page.getByRole('button', { name: /^Effort: / })).toBeVisible()
+    const row = page.locator('.composer__controls')
+    expect(await row.evaluate((one) => one.scrollWidth <= one.clientWidth)).toBe(true)
+  })
+
   test('rides at the foot of the screen while the page scrolls', async ({ page }) => {
     await page.setViewportSize({ width: page.viewportSize()!.width, height: 520 })
     await page.evaluate(() => window.scrollTo(0, 0))
