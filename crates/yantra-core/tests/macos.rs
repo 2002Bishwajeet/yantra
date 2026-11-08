@@ -350,7 +350,9 @@ async fn a_chat_turn_runs_through_the_keeper_on_the_mac() -> Result<()> {
     .context("the turn did not end in 60 s")?
     .context("the events ended before turn.completed")?;
     keep::kill(&lab.ssh, &lab.tmux, &keeper).await?;
-    let seen = lab.run("cat \"$HOME/.yantra-stub-seen\"").await?;
+    let seen = lab
+        .run("cat \"$HOME/.yantra-stub-seen\" 2>/dev/null || true")
+        .await?;
     lab.run("rm -f \"$HOME/.local/bin/claude\" \"$HOME/.yantra-stub-seen\"")
         .await?;
 
