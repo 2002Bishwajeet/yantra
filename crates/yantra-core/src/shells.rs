@@ -417,13 +417,25 @@ async fn every_script() -> Vec<(String, String)> {
         "claude",
         claude::command(
             WORKTREE,
-            Some("/tmp/images"),
+            &Keeper::new("web", "11111111"),
             chat::PermissionMode::Auto,
             chat::Interaction::Plan,
             Some(&claude::Mcp {
                 url: "http://yantra:7717/api/mcp".to_owned(),
                 thread: "web/11111111".to_owned(),
             }),
+            None,
+        ),
+    );
+    r.keep(
+        "claude",
+        claude::command(
+            WORKTREE,
+            &Keeper::new("web", "11111111"),
+            chat::PermissionMode::Supervised,
+            chat::Interaction::Build,
+            None,
+            Some("9a11f727-ba24-4f1a-9c4b-76ce3721282e"),
         ),
     );
     for harness in [

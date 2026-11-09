@@ -184,4 +184,20 @@ describe('the timeline', () => {
     expect(reduce(planned, { type: 'sent' }).plan).toEqual([])
     expect(fold([event({ threadId: 't', type: 'turn.started' })], planned).plan).toEqual([])
   })
+
+  it('keeps the background tasks the agent last listed, and a reset drops them', () => {
+    const [running, none] = chatEvents.filter((one) => one.type === 'thread.background.updated')
+    const listed = fold([event(running!)])
+    expect(listed.background).toEqual([
+      { taskId: 'b561loltj', kind: 'local_bash', description: 'Background sleep then echo completion marker' },
+    ])
+    expect(fold([event(none!)], listed).background).toEqual([])
+    expect(reduce(listed, { type: 'reset' }).background).toEqual([])
+  })
+
+  it('keeps the tasks across a turn end, since they outlive the turn', () => {
+    const [running] = chatEvents.filter((one) => one.type === 'thread.background.updated')
+    const ended = chatEvents.find((one) => one.type === 'turn.completed')!
+    expect(fold([event(running!), event(ended)]).background).toHaveLength(1)
+  })
 })

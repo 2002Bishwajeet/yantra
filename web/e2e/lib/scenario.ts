@@ -21,6 +21,7 @@ export type Scenario =
   | 'gitfails'
   | 'rooms'
   | 'composer'
+  | 'background'
   | 'longrepo'
   | 'longtitle'
   | 'avatar'

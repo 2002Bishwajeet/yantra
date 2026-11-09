@@ -9,10 +9,12 @@
 //! address from its own file. The test opens each HTTP connection from the
 //! loopback address of the machine it plays, so `whois` sees that machine.
 //!
-//! The Claude stand-in records its arguments and its prompt, then prints a
-//! recorded `init` and `result`. **No real `claude` calls the route**: a
-//! fixture cannot reach the host's loopback. The arguments prove that a turn
-//! gets the server; the owner's walk in Y-535 proves the real client.
+//! The Claude stand-in records its arguments and each prompt, and prints a
+//! recorded `init` and `result` for each. It reads stdin until it closes, as
+//! a `claude` that keeps its thread (ADR-0041). **No real `claude` calls the
+//! route**: a fixture cannot reach the host's loopback. The arguments prove
+//! that a turn gets the server; the owner's walk in Y-535 proves the real
+//! client.
 //!
 //! `wa` names alpha the way an ssh config often does, as a user at a DNS
 //! name, and not by its Tailscale name, so the header must still route.
@@ -49,13 +51,22 @@ const ALPHA_SSH: &str = "alpha.example.ts.net";
 const RECORDING: &str =
     include_str!("../../yantra-core/tests/recordings/claude-2.1.291-accept.jsonl");
 
-/// Records `$@` and the prompt line under its pid, then plays a turn.
+/// Keeps each stdin line, and for each prompt records `$@` and the prompt
+/// under its pid and turn, then plays a turn.
 const CLAUDE_STAND_IN: &str = r#"#!/bin/sh
-IFS= read -r prompt || exit 1
 mkdir -p /home/yantra/calls
-printf '%s\n' "$*" > "/home/yantra/calls/$$.args"
-printf '%s\n' "$prompt" > "/home/yantra/calls/$$.prompt"
-cat /home/yantra/turn.jsonl
+n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "/home/yantra/calls/$$.stdin"
+  case "$line" in
+  *'"type":"user"}')
+    n=$((n + 1))
+    printf '%s\n' "$*" > "/home/yantra/calls/$$-$n.args"
+    printf '%s\n' "$line" > "/home/yantra/calls/$$-$n.prompt"
+    cat /home/yantra/turn.jsonl
+    ;;
+  esac
+done
 "#;
 
 const TAILSCALE: &str = r#"#!/bin/sh
@@ -552,9 +563,10 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     let sent: Value = serde_json::from_str(text(&sent))?;
     assert!(sent["delivered"].as_u64() >= Some(1), "{sent}");
 
-    // 4. Thread B wakes on beta, in acceptEdits though its mode is full access.
+    // 4. Thread B wakes on beta, in acceptEdits though its mode is full
+    //    access: its live Claude is told the mode before the prompt.
     let calls = beta.until_calls(2).await?;
-    let (args, prompt) = &calls[1];
+    let (_, prompt) = &calls[1];
     assert!(
         prompt.starts_with(&format!(
             "<room name=\"r1\" from=\"alpha · chat {a}\" seq=\"1\""
@@ -562,7 +574,12 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
         "{prompt}"
     );
     assert!(prompt.contains("hello from A"), "{prompt}");
-    assert!(args.contains("--permission-mode acceptEdits"), "{args}");
+    let stdin = beta.sh("cat /home/yantra/calls/*.stdin")?;
+    let capped = stdin
+        .lines()
+        .position(|line| line.contains("set_permission_mode") && line.contains("acceptEdits"));
+    let woken = stdin.lines().position(|line| line.contains("hello from A"));
+    assert!(capped.is_some() && capped < woken, "{stdin}");
 
     // 5. A reader on alpha waits and gets B's reply, and B's reply wakes
     //    thread A without A's own message, which is after A's cursor too.

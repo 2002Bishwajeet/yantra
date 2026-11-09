@@ -32,6 +32,8 @@ export type ChatErrorKind =
   | 'checkpoint'
   // git could not diff the thread's branch (Y-490).
   | 'diff'
+  // The agent could not stop a background task, or it no longer runs (ADR-0041).
+  | 'stopTask'
   // The agent's turn ended failed: ssh refused, the harness not found.
   | 'turnFailed'
 
@@ -44,6 +46,7 @@ const sentences: Record<ChatErrorKind, string> = {
   badFrame: 'The daemon could not read what the dashboard sent.',
   checkpoint: "git on the workspace's machine could not keep or restore this chat's files.",
   diff: "git on the workspace's machine could not diff this chat's branch.",
+  stopTask: 'The agent could not stop that background task. It may have ended already.',
   turnFailed: 'The agent could not finish the turn.',
 }
 
@@ -153,6 +156,10 @@ export type ChatSocket = {
   send: (text: string, harness?: Harness, mode?: PermissionMode, interaction?: Interaction) => boolean
   answer: (requestId: string, decision: Decision) => boolean
   stop: () => boolean
+  /** Stops one background task (ADR-0041); a failure is `stopTask`. */
+  stopTask: (taskId: string) => boolean
+  /** Stops every background task and the turn, and lets the agent go. */
+  stopAll: () => boolean
   /** Puts the files back as checkpoint `turn` kept them. */
   revert: (turn: number) => boolean
   /** Asks for the thread's whole-branch diff, which `onBranchDiff` receives. */
@@ -164,7 +171,16 @@ export type ChatSocket = {
   close: () => void
 }
 
-const KINDS: ReadonlySet<string> = new Set(['unknownThread', 'busy', 'badFrame', 'unreachable', 'notLoggedIn', 'checkpoint', 'diff'])
+const KINDS: ReadonlySet<string> = new Set([
+  'unknownThread',
+  'busy',
+  'badFrame',
+  'unreachable',
+  'notLoggedIn',
+  'checkpoint',
+  'diff',
+  'stopTask',
+])
 const NAMES: ReadonlySet<string> = new Set(HARNESSES)
 
 function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
@@ -522,6 +538,8 @@ export function openChat(
     },
     answer: (requestId, decision) => send({ type: 'answer', requestId, decision }),
     stop: () => send({ type: 'cancel' }),
+    stopTask: (taskId) => send({ type: 'stopTask', taskId }),
+    stopAll: () => send({ type: 'stopAll' }),
     revert: (turn) => send({ type: 'revert', turn }),
     diff: () => send({ type: 'diff' }),
     attach: (file) => {

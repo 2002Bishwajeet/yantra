@@ -1,4 +1,5 @@
 import type {
+  BackgroundTask,
   ChatItem,
   Harness,
   ItemStatus,
@@ -62,6 +63,8 @@ export type Timeline = {
   ended: TurnCompleted | null
   /** What the person sent while a turn ran, which the daemon sends when it ends (Y-561). */
   queued: string[]
+  /** The tasks the agent runs past its turn, as the agent last listed them (ADR-0041). */
+  background: BackgroundTask[]
 }
 
 export const empty: Timeline = {
@@ -75,6 +78,7 @@ export const empty: Timeline = {
   turn: 'idle',
   ended: null,
   queued: [],
+  background: [],
 }
 
 export type Action =
@@ -164,6 +168,8 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
       return { ...timeline, plan: event.payload.plan }
     case 'thread.commands.updated':
       return { ...timeline, commands: event.payload.commands }
+    case 'thread.background.updated':
+      return { ...timeline, background: event.payload.tasks }
     case 'thread.metadata.updated':
       return timeline
   }

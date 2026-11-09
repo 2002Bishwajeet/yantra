@@ -2,10 +2,10 @@
 //! thread on a WebSocket ([ADR-0026] decision 3).
 //!
 //! A thread is a worktree of the workspace's repository ([`thread`]), and one
-//! harness speaks in it, chosen by the turn that opens it. Claude's turns are
-//! each one `claude -p` ([`yantra_core::claude`]). Every other harness is one
-//! ACP agent ([`yantra_core::acp`], [ADR-0033] decision 2), whose session id
-//! the thread's git config keeps. Without `?thread=` the first turn opens a
+//! harness speaks in it, chosen by the turn that opens it. Claude is one
+//! `claude -p` that lives across turns ([`yantra_core::claude`], [ADR-0041]).
+//! Every other harness is one ACP agent ([`yantra_core::acp`], [ADR-0033]
+//! decision 2). The thread's git config keeps either one's session id. Without `?thread=` the first turn opens a
 //! thread and the socket says so with `thread.started`; with it, the socket
 //! says `thread.started` too, replays the conversation and continues there.
 //! **There is no session-addressed form**: a bare session names no worktree.
@@ -19,9 +19,18 @@
 //! `cancel` frame and the thread's removal stop a turn. `?after=` is the last
 //! cursor the browser drew, and the socket sends only the events after it.
 //!
-//! The browser sends five frames, `turn`, `answer`, `cancel`, `revert` and
-//! `diff`, and one turn runs at a time in a thread, across every tab and every
-//! restart. The daemon sends [`ThreadEvent`]s and one typed [`Failure`].
+//! The browser sends seven frames, `turn`, `answer`, `cancel`, `revert`,
+//! `diff`, `stopTask` and `stopAll`, and one turn runs at a time in a thread,
+//! across every tab and every restart. The daemon sends [`ThreadEvent`]s and
+//! one typed [`Failure`].
+//!
+//! **A Claude keeper holds the thread, not the turn** ([ADR-0041]). A
+//! background task outlives its turn, and its end opens a wake turn that gets
+//! its own checkpoint and diff. `cancel` stops the turn and leaves the tasks,
+//! `stopTask` stops one, and `stopAll` stops every one and closes the keeper.
+//! A keeper closes after [`CLAUDE_IDLE`] with no turn and no task. A task pins
+//! it open until Claude has been silent for [`PIN`]. A turn that ends with no
+//! socket attached sends one notification.
 //!
 //! **A `turn` sent while one runs is queued** (Y-561): every socket of the
 //! thread gets a [`QueueFrame`], an attaching one too, empty or not, and the
@@ -67,6 +76,7 @@
 //! [ADR-0026]: ../../../docs/adr/0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md
 //! [ADR-0033]: ../../../docs/adr/0033-other-harnesses-speak-acp-and-claude-delegates.md
 //! [ADR-0035]: ../../../docs/adr/0035-a-chat-turn-outlives-its-ssh-pipe.md
+//! [ADR-0041]: ../../../docs/adr/0041-a-claude-keeper-holds-the-thread.md
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -91,7 +101,7 @@ use yantra_core::chat::{
     StreamKind, ThreadEvent, TurnDiff, TurnState,
 };
 use yantra_core::checkpoint::{self, BranchDiff, Diff};
-use yantra_core::claude::{self, Events, Said, Turn};
+use yantra_core::claude::{self, Events, Said, Session};
 use yantra_core::image::{self, Images};
 use yantra_core::inventory::Inventory;
 use yantra_core::keep::{self, Cursor, File, Keeper, Limits};
@@ -109,8 +119,8 @@ use crate::write::{Authoriser, Refused, allowed, chain};
 /// How many transcript records an attach replays.
 const HISTORY: usize = 200;
 /// How long a cancelled turn has to end by itself before its keeper is
-/// killed, and how long an ended Claude keeper has to exit before its session
-/// is removed.
+/// killed, and how long a closed keeper has to exit before its session is
+/// removed.
 const STOP_GRACE: Duration = Duration::from_secs(10);
 /// How long a harness may take to start and open its session. Meanwhile no
 /// frame is read, so a hung agent must not hold the socket for good.
@@ -130,6 +140,12 @@ const CHECKPOINT_WITHIN: Duration = Duration::from_secs(60);
 const IDLE: Duration = Duration::from_secs(15 * 60);
 /// How often an ACP keeper looks at whether it is idle.
 const IDLE_TICK: Duration = Duration::from_secs(60);
+/// A Claude keeper with no turn and no background task for this long closes
+/// (ADR-0041 decision 4).
+const CLAUDE_IDLE: Duration = Duration::from_secs(30 * 60);
+/// A background task holds a Claude keeper open until Claude has said nothing
+/// for this long, T3 Code's `DEFAULT_MAX_IDLE_PIN_MS`.
+const PIN: Duration = Duration::from_secs(4 * 60 * 60);
 /// How many events a slow socket may fall behind before it is closed, to
 /// reconnect from its cursor.
 const BACKLOG: usize = 4096;
@@ -273,6 +289,13 @@ enum Frame {
     },
     /// Asks for the thread's whole-branch diff.
     Diff,
+    /// Stops one of Claude's background tasks.
+    StopTask {
+        #[serde(rename = "taskId")]
+        task_id: String,
+    },
+    /// Stops the turn and every background task, and closes the keeper.
+    StopAll,
     /// A browser cannot send a protocol ping, so it sends this and waits for a [`Pong`].
     Ping,
 }
@@ -396,25 +419,33 @@ fn is_build(interaction: &Interaction) -> bool {
     *interaction == Interaction::Build
 }
 
-/// A turn a person sent while one ran, held for that turn's end.
+/// One turn: what the person or a room wrote, and the thread's permission and
+/// interaction modes. A turn sent while one runs is held as one for that turn's end.
 struct Next {
     text: String,
     mode: PermissionMode,
     interaction: Interaction,
-    images: Option<String>,
 }
 
-/// The held turns as one: their texts joined with a blank line, with the last one's modes and
-/// images.
+impl Next {
+    fn prompt(&self) -> claude::Prompt<'_> {
+        claude::Prompt {
+            text: &self.text,
+            mode: self.mode,
+            interaction: self.interaction,
+        }
+    }
+}
+
+/// The held turns as one: their texts joined with a blank line, with the last one's modes.
 fn joined(next: Vec<Next>) -> Option<Next> {
     let last = next.last()?;
-    let (mode, interaction, images) = (last.mode, last.interaction, last.images.clone());
+    let (mode, interaction) = (last.mode, last.interaction);
     let texts: Vec<String> = next.into_iter().map(|next| next.text).collect();
     Some(Next {
         text: texts.join("\n\n"),
         mode,
         interaction,
-        images,
     })
 }
 
@@ -443,6 +474,8 @@ enum Kind {
     Checkpoint,
     /// git could not diff the thread's branch.
     Diff,
+    /// A background task could not be stopped.
+    StopTask,
 }
 
 fn failure(kind: Kind, said: impl Into<String>) -> Failure {
@@ -495,11 +528,13 @@ enum Started<T> {
     Running(T),
 }
 
-/// A Claude turn in a new keeper, and the run its cursors carry.
-struct KeptTurn {
-    turn: Turn,
+/// A Claude session in a new keeper, the run its cursors carry, and the
+/// session id it resumed.
+struct KeptClaude {
+    session: Session,
     events: Events,
     run: String,
+    resumed: Option<String>,
 }
 
 /// An ACP agent in a new keeper, and the run its cursors carry.
@@ -513,12 +548,13 @@ struct KeptAgent {
 /// (ADR-0035 decision 9). `replayed` is every event its `out` made so far.
 enum Adopted {
     Claude {
-        turn: Turn,
+        session: Session,
         events: Events,
         run: String,
         replayed: Vec<ThreadEvent>,
         mode: PermissionMode,
-        completed: bool,
+        running: bool,
+        prompts: usize,
     },
     Acp {
         agent: Agent,
@@ -558,15 +594,13 @@ trait Machine: Send + Sync + 'static {
         &self,
         place: &Place,
     ) -> impl Future<Output = Result<Vec<logs::Entry>, String>> + Send;
-    /// Starts a Claude turn in a keeper. `images` is the directory it may read.
+    /// Starts Claude in a keeper, resuming the session the thread keeps, and
+    /// sends it `first`.
     fn start(
         &self,
         place: &Place,
-        text: &str,
-        images: Option<&str>,
-        mode: PermissionMode,
-        interaction: Interaction,
-    ) -> impl Future<Output = Result<Started<KeptTurn>, String>> + Send;
+        first: &claude::Prompt<'_>,
+    ) -> impl Future<Output = Result<Started<KeptClaude>, String>> + Send;
     /// Writes one image on the machine and returns its path.
     fn put(
         &self,
@@ -583,6 +617,12 @@ trait Machine: Send + Sync + 'static {
         &self,
         place: &Place,
         harness: Harness,
+        session: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
+    /// Keeps a Claude thread's session id (ADR-0041 decision 8).
+    fn remember_claude(
+        &self,
+        place: &Place,
         session: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
     /// Starts `harness` in a keeper.
@@ -742,11 +782,8 @@ impl Machine for Fleet {
     async fn start(
         &self,
         place: &Place,
-        text: &str,
-        images: Option<&str>,
-        mode: PermissionMode,
-        interaction: Interaction,
-    ) -> Result<Started<KeptTurn>, String> {
+        first: &claude::Prompt<'_>,
+    ) -> Result<Started<KeptClaude>, String> {
         let keeper = keeper_of(place)?;
         let tmux = self.tmux().await?;
         let run = keep::run_id().map_err(|error| chain(&error))?;
@@ -754,14 +791,24 @@ impl Machine for Fleet {
             url: format!("http://{daemon}/api/mcp"),
             thread: format!("{}/{}", self.workspace.name, thread::name(place)),
         });
-        let agent = claude::command(&place.worktree, images, mode, interaction, mcp.as_ref());
+        let resumed = thread::claude_session(&self.ssh, place)
+            .await
+            .map_err(|error| chain(&error))?;
+        let agent = claude::command(
+            &place.worktree,
+            &keeper,
+            first.mode,
+            first.interaction,
+            mcp.as_ref(),
+            resumed.as_deref(),
+        );
         let started = keep::start(&self.ssh, tmux, &keeper, &agent, &run, Limits::default())
             .await
             .map_err(|error| chain(&error))?;
         let keep::Started::Running { pane } = started else {
             return Ok(Started::Busy);
         };
-        if let Err(error) = keep::write_mode(&self.ssh, &keeper, &mode_name(mode)).await {
+        if let Err(error) = keep::write_mode(&self.ssh, &keeper, &mode_name(first.mode)).await {
             // The lock goes with the start that failed; `keep::stale` catches a
             // kill that fails too.
             let _ = keep::kill(&self.ssh, tmux, &keeper).await;
@@ -770,8 +817,14 @@ impl Machine for Fleet {
         let reader = keep::follow(self.ssh.clone(), tmux.clone(), keeper.clone(), pane, 0);
         let writer = keep::feed(self.ssh.clone(), tmux.clone(), keeper.clone(), &run, 0);
         let said = self.said(&keeper);
-        let (turn, events) = Turn::kept(reader, writer, thread::name(place), &run, text, said);
-        Ok(Started::Running(KeptTurn { turn, events, run }))
+        let (session, events) =
+            Session::kept(reader, writer, thread::name(place), &run, first, said);
+        Ok(Started::Running(KeptClaude {
+            session,
+            events,
+            run,
+            resumed,
+        }))
     }
 
     async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error> {
@@ -793,6 +846,12 @@ impl Machine for Fleet {
 
     async fn remember(&self, place: &Place, harness: Harness, session: &str) -> Result<(), String> {
         thread::remember(&self.ssh, place, harness, session)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn remember_claude(&self, place: &Place, session: &str) -> Result<(), String> {
+        thread::remember_claude(&self.ssh, place, session)
             .await
             .map_err(|error| chain(&error))
     }
@@ -881,16 +940,21 @@ impl Machine for Fleet {
         Ok(Some(match harness {
             None => {
                 let replayed = claude::replay(thread::name(place), &run, &out, &input);
-                let (events, completed) = (replayed.events.clone(), replayed.completed());
+                let (events, running, prompts) = (
+                    replayed.events.clone(),
+                    replayed.running(),
+                    replayed.prompts.len(),
+                );
                 let reader = follow(replayed.offset);
-                let (turn, live) = Turn::resume(reader, writer, replayed, said);
+                let (session, live) = Session::resume(reader, writer, replayed, said);
                 Adopted::Claude {
-                    turn,
+                    session,
                     events: live,
                     run,
                     replayed: events,
                     mode,
-                    completed,
+                    running,
+                    prompts,
                 }
             }
             Some(harness) => {
@@ -1033,22 +1097,25 @@ impl Machine for Fleet {
     }
 }
 
-/// A wait that nobody is attached to see (ADR-0035 decision 10). It names the
-/// workspace and the thread, and no word of the request (Q5).
+/// A wait or a turn's end that nobody is attached to see (ADR-0035 decision
+/// 10, ADR-0041 decision 3). It names the workspace and the thread, and no word
+/// of the request or the reply (Q5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Wait {
     pub workspace: String,
     pub thread: String,
+    pub phase: Phase,
 }
 
 impl Wait {
     fn message(&self) -> notify::Message {
+        let what = match self.phase {
+            Phase::Completed => "finished a turn",
+            _ => "waits for an answer",
+        };
         notify::Message {
-            body: format!(
-                "{}: chat thread {} waits for an answer",
-                self.workspace, self.thread
-            ),
-            title: Some(Phase::WaitingForApproval.headline().to_owned()),
+            body: format!("{}: chat thread {} {what}", self.workspace, self.thread),
+            title: Some(self.phase.headline().to_owned()),
             priority: None,
         }
     }
@@ -1317,12 +1384,15 @@ impl Registry {
         self.lock().modes.get(id).copied()
     }
 
-    /// Queues `prompt` while a keeper holds thread `id`; its task's end
-    /// sends it, and the receiver says whether that turn started. `None` is a
-    /// thread with no keeper.
+    /// Queues `prompt` while a turn runs or ends in thread `id`, or its
+    /// keeper closes; that end sends it, and the receiver says whether its
+    /// turn started. `None` is a thread whose keeper is free or gone.
     fn queue(&self, id: &str, prompt: &str) -> Option<oneshot::Receiver<Woke>> {
         let mut held = self.lock();
-        if !held.lives.contains_key(id) {
+        if !held.lives.get(id).is_some_and(|live| {
+            let state = live.lock();
+            state.busy || state.checkpointing || state.closing
+        }) {
             return None;
         }
         let (woke, heard) = oneshot::channel();
@@ -1331,6 +1401,25 @@ impl Registry {
             .or_default()
             .push((prompt.to_owned(), woke));
         Some(heard)
+    }
+
+    /// Takes the room prompts queued for `live`'s thread and marks it busy
+    /// with them, unless a turn runs or the keeper is closing. A thread that
+    /// reverts gives them back to their rooms.
+    fn take_queued(&self, live: &Live) -> Vec<Queued> {
+        let mut held = self.lock();
+        if held.reverting.contains(&live.id) {
+            for (_, woke) in held.queued.remove(&live.id).unwrap_or_default() {
+                let _ = woke.send(Woke::Failed);
+            }
+            return Vec::new();
+        }
+        let mut state = live.lock();
+        if state.busy || state.closing || !held.queued.contains_key(&live.id) {
+            return Vec::new();
+        }
+        state.busy = true;
+        held.queued.remove(&live.id).unwrap_or_default()
     }
 
     /// Lets `live`'s thread go, and returns the room prompts and the person's
@@ -1350,14 +1439,28 @@ impl Registry {
         (held.queued.remove(&live.id).unwrap_or_default(), next)
     }
 
-    fn wait(&self, workspace: &str, thread: &str) {
+    fn wait(&self, workspace: &str, thread: &str, phase: Phase) {
         if let Some(waits) = &self.waits {
             let _ = waits.send(Wait {
                 workspace: workspace.to_owned(),
                 thread: thread.to_owned(),
+                phase,
             });
         }
     }
+}
+
+/// `YANTRA_CHAT_IDLE`, in seconds, shortens [`CLAUDE_IDLE`] for the podman
+/// tests. A release build ignores it.
+fn claude_idle() -> Duration {
+    #[cfg(debug_assertions)]
+    if let Some(seconds) = std::env::var("YANTRA_CHAT_IDLE")
+        .ok()
+        .and_then(|seconds| seconds.parse().ok())
+    {
+        return Duration::from_secs(seconds);
+    }
+    CLAUDE_IDLE
 }
 
 /// A thread's claim, released however the task that holds it ends. A keeper
@@ -1428,16 +1531,18 @@ impl<M: Machine> Drop for Claim<M> {
 
 /// What a keeper's task is asked by a socket.
 enum Command {
-    Turn {
-        text: String,
-        mode: PermissionMode,
-    },
+    Turn(Next),
     Answer {
         request: String,
         decision: Decision,
         reply: oneshot::Sender<Result<(), String>>,
     },
     Cancel,
+    StopTask {
+        task: String,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    StopAll,
 }
 
 /// One frame sent to every socket of a thread, with the cursor of the event
@@ -1520,6 +1625,16 @@ impl Live {
     fn unsettled(&self) -> bool {
         let state = self.lock();
         state.busy || state.checkpointing
+    }
+
+    /// Marks the keeper closing, so it takes no turn, unless one runs.
+    fn close_unless_busy(&self) -> bool {
+        let mut state = self.lock();
+        if state.busy {
+            return false;
+        }
+        state.closing = true;
+        true
     }
 
     /// Whether any socket is attached.
@@ -1776,7 +1891,7 @@ async fn converse<M: Machine, P: Peer>(
                     peer.say(&reply).await
                 }
                 Some(Heard::Text(text)) => {
-                    heard_frame(&machine, name, &text, &mut here, &mut sub, &mut early, images.as_ref(), &diffs, peer).await
+                    heard_frame(&machine, name, &text, &mut here, &mut sub, &mut early, &diffs, peer).await
                 }
             },
             Some(text) = diffed.recv() => peer.say_text(text).await,
@@ -1839,7 +1954,6 @@ async fn heard_frame<M: Machine, P: Peer>(
     here: &mut Option<Here>,
     sub: &mut Option<Sub>,
     early: &mut Option<String>,
-    images: Option<&Images>,
     diffs: &mpsc::UnboundedSender<String>,
     peer: &mut P,
 ) -> bool {
@@ -1879,7 +1993,6 @@ async fn heard_frame<M: Machine, P: Peer>(
                     .await
                 }
                 (Ok(asked), _) => {
-                    let images = images.and_then(Images::dir);
                     let next = Next {
                         text,
                         // A plan turn asks about all it relays, here and in an adopting daemon.
@@ -1888,7 +2001,6 @@ async fn heard_frame<M: Machine, P: Peer>(
                             Interaction::Build => mode,
                         },
                         interaction,
-                        images: images.map(str::to_owned),
                     };
                     let next = match &live {
                         Some(live) => match machine.registry().hold(live, next) {
@@ -1935,6 +2047,36 @@ async fn heard_frame<M: Machine, P: Peer>(
             }
             true
         }
+        Ok(Frame::StopTask { task_id }) => {
+            let stopped = match live {
+                Some(live) => {
+                    let (reply, replied) = oneshot::channel();
+                    live.command(Command::StopTask {
+                        task: task_id,
+                        reply,
+                    });
+                    replied
+                        .await
+                        .unwrap_or_else(|_| Err("the keeper has ended".to_owned()))
+                }
+                None => Err("no keeper runs in this thread, so no task runs".to_owned()),
+            };
+            match stopped {
+                Ok(()) => {
+                    tracing::info!("chat {name}: a background task was stopped");
+                    true
+                }
+                Err(said) => peer.say(&failure(Kind::StopTask, said)).await,
+            }
+        }
+        Ok(Frame::StopAll) => {
+            if let Some(live) = live {
+                tracing::info!("chat {name}: every background task was stopped");
+                machine.registry().clear_next(&live);
+                live.command(Command::StopAll);
+            }
+            true
+        }
         Ok(Frame::Revert { turn }) => match here.as_ref() {
             None => {
                 let said = "no thread is open, so there is nothing to revert";
@@ -1973,8 +2115,9 @@ async fn heard_frame<M: Machine, P: Peer>(
         },
         Ok(Frame::Ping) => peer.say(&Pong { tag: "pong" }).await,
         Err(error) => {
-            let said =
-                format!("a frame is a turn, an answer, a cancel, a revert or a diff: {error}");
+            let said = format!(
+                "a frame is a turn, an answer, a cancel, a revert, a diff or a stop: {error}"
+            );
             peer.say(&failure(Kind::BadFrame, said)).await
         }
     }
@@ -2375,7 +2518,7 @@ async fn replay_live<M: Machine, P: Peer>(
     peer: &mut P,
 ) -> Option<Sub> {
     let subscribed = live.subscribe()?;
-    replay_subscribed(machine, here, &live.run, subscribed, after, peer).await
+    replay_subscribed(machine, here, subscribed, after, peer).await
 }
 
 /// A live keeper's subscription.
@@ -2385,7 +2528,6 @@ type Subscribed = (Option<Cursor>, Vec<ThreadEvent>, broadcast::Receiver<Sent>);
 async fn replay_subscribed<M: Machine, P: Peer>(
     machine: &M,
     here: &Here,
-    run: &str,
     (last, remade, receiver): Subscribed,
     after: Option<Cursor>,
     peer: &mut P,
@@ -2402,7 +2544,8 @@ async fn replay_subscribed<M: Machine, P: Peer>(
     let (events, prompt) = match here.harness {
         None => {
             let replayed = claude::replay(id, &journals.run, &journals.out, &journals.input);
-            (replayed.events, replayed.prompt)
+            // The keeper's replay draws this run's prompts, so the transcript stops at the first.
+            (replayed.events, replayed.prompts.into_iter().next())
         }
         Some(_) => {
             let replayed = acp::replay(&journals.run, &journals.out, &journals.input);
@@ -2418,17 +2561,10 @@ async fn replay_subscribed<M: Machine, P: Peer>(
     let events = match after {
         Some(after) => missed(events, &after),
         None => {
-            if here.harness.is_none() {
-                if !replay(machine, &here.place, prompt.as_deref(), peer).await {
-                    return None;
-                }
-                if let Some(prompt) = prompt
-                    && !peer
-                        .say(&delta(&here.place, StreamKind::UserText, prompt, run))
-                        .await
-                {
-                    return None;
-                }
+            if here.harness.is_none()
+                && !replay(machine, &here.place, prompt.as_deref(), peer).await
+            {
+                return None;
             }
             events
         }
@@ -2505,15 +2641,6 @@ fn delta(place: &Place, stream_kind: StreamKind, text: String, item: &str) -> Th
     }
 }
 
-/// One turn the person sent: what they wrote, the directory of the images it
-/// may read, and the thread's permission and interaction modes.
-struct Typed<'a> {
-    text: String,
-    images: Option<&'a str>,
-    mode: PermissionMode,
-    interaction: Interaction,
-}
-
 /// Opens the thread on the first turn with the harness `pick` names, and
 /// starts the turn. `false` is a socket that went away.
 #[allow(clippy::too_many_arguments)]
@@ -2569,10 +2696,9 @@ async fn begin<M: Machine, P: Peer>(
                     receiver,
                     seen: None,
                 }),
-                Follow::Replay(run, subscribed) => {
+                Follow::Replay(subscribed) => {
                     let replayed =
-                        replay_subscribed(machine.as_ref(), here, &run, subscribed, None, peer)
-                            .await;
+                        replay_subscribed(machine.as_ref(), here, subscribed, None, peer).await;
                     if replayed.is_none() {
                         return false;
                     }
@@ -2648,15 +2774,6 @@ enum Turned<T> {
     Lost,
 }
 
-impl<T> Turned<T> {
-    fn map<U>(self, f: impl FnOnce(T) -> U) -> Turned<U> {
-        match self {
-            Self::Started(started) => Turned::Started(f(started)),
-            Self::Lost => Turned::Lost,
-        }
-    }
-}
-
 /// Starts `next`, or holds it behind the turn that another task started first, until
 /// [`CONNECT_WITHIN`]. `Ok(None)` is a held turn; the socket follows the next keeper.
 async fn start_or_hold<M: Machine>(
@@ -2677,16 +2794,13 @@ async fn start_or_hold<M: Machine>(
                 Err(back) => next = back,
             }
         }
-        let turn = Typed {
+        let turn = Next {
             text: next.text.clone(),
-            images: next.images.as_deref(),
             mode: next.mode,
             interaction: next.interaction,
         };
         let turned = match here.harness {
-            None => claude_turn(machine, name, &here.place, turn)
-                .await?
-                .map(|receiver| receiver.map(Follow::New)),
+            None => claude_turn(machine, name, &here.place, turn, unsubscribed).await?,
             Some(harness) => acp_turn(machine, name, here, harness, turn, unsubscribed).await?,
         };
         match turned {
@@ -2699,31 +2813,48 @@ async fn start_or_hold<M: Machine>(
     }
 }
 
-/// Starts a Claude turn in a new keeper and subscribes the socket to it.
+/// Sends a turn to the thread's Claude keeper, or starts one that resumes the
+/// session when there is none (ADR-0041 decision 1). A socket whose
+/// subscription ended, `unsubscribed`, follows the keeper that takes the turn.
 async fn claude_turn<M: Machine>(
     machine: &Arc<M>,
     name: &str,
     place: &Place,
-    Typed {
-        text,
-        images,
-        mode,
-        interaction,
-    }: Typed<'_>,
-) -> Result<Turned<Option<broadcast::Receiver<Sent>>>, Failure> {
-    // The last turn's keeper may still be exiting; its turn has ended.
+    turn: Next,
+    unsubscribed: bool,
+) -> Result<Turned<Option<Follow>>, Failure> {
+    // A keeper that is closing takes no turn; the next one resumes the session.
     let deadline = tokio::time::Instant::now() + STOP_GRACE + STOP_GRACE;
     while let Some(live) = machine.registry().live(&place.id)
-        && !live.busy()
+        && live.lock().closing
         && tokio::time::Instant::now() < deadline
     {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    if let Some(live) = machine.registry().live(&place.id) {
+        if !machine.registry().mark_busy(&live)? {
+            return Ok(Turned::Lost);
+        }
+        let follow = if unsubscribed {
+            live.subscribe()
+                .map(|(_, _, receiver)| Follow::New(receiver))
+        } else {
+            None
+        };
+        tracing::info!("chat {name}: a turn started");
+        live.command(Command::Turn(turn));
+        return Ok(Turned::Started(follow));
+    }
     let Some(mut claim) = Claim::take(machine, place) else {
         return Ok(Turned::Lost);
     };
-    let started = machine.start(place, &text, images, mode, interaction).await;
-    let KeptTurn { turn, events, run } = match started {
+    let started = machine.start(place, &turn.prompt()).await;
+    let KeptClaude {
+        session,
+        events,
+        run,
+        resumed,
+    } = match started {
         Ok(Started::Running(kept)) => kept,
         Ok(Started::Busy) => {
             // A keeper no task reads yet is read now, so the next attach sees it.
@@ -2739,6 +2870,7 @@ async fn claude_turn<M: Machine>(
     };
     claim.started = true;
     let (live, commands) = Live::new(place, run, true);
+    live.lock().prompts = 1;
     let receiver = live.subscribe().map(|(_, _, receiver)| receiver);
     if !machine.registry().insert(&live) {
         return Ok(Turned::Lost);
@@ -2746,29 +2878,34 @@ async fn claude_turn<M: Machine>(
     claim.started = false;
     drop(claim);
     tracing::info!("chat {name}: a turn started");
-    live.publish(&delta(place, StreamKind::UserText, text, &live.run), None);
+    live.event(&claude::prompted(
+        thread::name(place),
+        &live.run,
+        1,
+        turn.text,
+    ));
     tokio::spawn(keep_claude(
         Arc::clone(machine),
         name.to_owned(),
         place.clone(),
         live,
         commands,
-        ClaudeTurn {
-            turn,
-            events,
-            mode,
-            completed: false,
+        ClaudeKeeper {
+            session,
+            events: Some(events),
+            mode: turn.mode,
+            remembered: resumed,
         },
     ));
-    Ok(Turned::Started(receiver))
+    Ok(Turned::Started(receiver.map(Follow::New)))
 }
 
 /// How a socket follows the keeper that takes its turn.
 enum Follow {
     /// A subscription taken before the keeper sent anything.
     New(broadcast::Receiver<Sent>),
-    /// A keeper of run `.0` that another task started; its events so far are replayed.
-    Replay(String, Subscribed),
+    /// A keeper that another task started; its events so far are replayed.
+    Replay(Subscribed),
 }
 
 /// Sends a turn to the thread's ACP keeper, starting one that loads the session when it has gone.
@@ -2778,7 +2915,7 @@ async fn acp_turn<M: Machine>(
     name: &str,
     here: &Here,
     harness: Harness,
-    Typed { text, mode, .. }: Typed<'_>,
+    Next { text, mode, .. }: Next,
     unsubscribed: bool,
 ) -> Result<Turned<Option<Follow>>, Failure> {
     let mut subscribed = None;
@@ -2807,7 +2944,7 @@ async fn acp_turn<M: Machine>(
             subscribed = Some(match receiver {
                 Some(receiver) => Follow::New(receiver),
                 // Another task started it meanwhile, and has sent events already.
-                None => Follow::Replay(live.run.clone(), live.subscribe().ok_or_else(gone)?),
+                None => Follow::Replay(live.subscribe().ok_or_else(gone)?),
             });
             live
         }
@@ -2816,7 +2953,11 @@ async fn acp_turn<M: Machine>(
         return Ok(Turned::Lost);
     }
     tracing::info!("chat {name}: a turn started");
-    live.command(Command::Turn { text, mode });
+    live.command(Command::Turn(Next {
+        text,
+        mode,
+        interaction: Interaction::Build,
+    }));
     Ok(Turned::Started(subscribed))
 }
 
@@ -2977,96 +3118,173 @@ async fn open_session<M: Machine>(
     Ok((session, login))
 }
 
-/// A Claude turn a keeper holds.
-struct ClaudeTurn {
-    turn: Turn,
-    events: Events,
+/// One Claude session a keeper holds, across turns.
+struct ClaudeKeeper {
+    session: Session,
+    /// `None` once Claude's stdout has ended.
+    events: Option<Events>,
+    /// The mode the running turn was sent with.
     mode: PermissionMode,
-    /// An adopted turn whose `result` was already in `out`.
-    completed: bool,
+    /// The session id the thread's git config keeps.
+    remembered: Option<String>,
 }
 
-/// Reads one Claude keeper until its turn ends, then keeps the checkpoint,
-/// removes the keeper's session and lets the thread go.
+/// What a Claude keeper's task heard next.
+enum Heeded {
+    Command(Option<Command>),
+    Event(Option<ThreadEvent>),
+    Kill,
+    Idle,
+}
+
+/// Reads one Claude keeper for as long as its process lives (ADR-0041): runs
+/// each turn, answers what the mode answers, keeps each turn's checkpoint, a
+/// wake turn's too, and closes the keeper once the thread is idle, its
+/// background tasks have been silent too long, or `out` has passed half its
+/// cap with no task running.
 async fn keep_claude<M: Machine>(
     machine: Arc<M>,
     name: String,
     place: Place,
     live: Arc<Live>,
     mut commands: mpsc::UnboundedReceiver<Command>,
-    ClaudeTurn {
-        turn,
-        mut events,
-        mode,
-        completed,
-    }: ClaudeTurn,
+    mut claude: ClaudeKeeper,
 ) {
     let thread = thread::name(&place).to_owned();
+    let idle = claude_idle();
     let mut kill_at: Option<tokio::time::Instant> = None;
-    // The turn is held to the end: its writer closes stdin after `result`, and
-    // that close is what lets claude exit.
-    let mut failed = None;
-    while !completed && failed.is_none() {
-        tokio::select! {
-            command = commands.recv() => match command {
-                Some(Command::Answer { request, decision, reply }) => {
-                    let _ = reply.send(turn.answer(&request, decision).map_err(|error| chain(&error)));
-                }
-                Some(Command::Cancel) => {
-                    turn.cancel();
+    // When the thread last had a turn end or a task start or end.
+    let mut quiet = tokio::time::Instant::now();
+    // Background work pins the keeper, and every line Claude writes restarts the pin.
+    let close_at = |claude: &ClaudeKeeper, quiet: tokio::time::Instant| {
+        let state = live.lock();
+        (!state.busy && !state.closing).then(|| {
+            if claude.session.background().is_empty() {
+                quiet + idle
+            } else {
+                claude.session.heard().map_or(quiet, |at| at.max(quiet)) + PIN
+            }
+        })
+    };
+    loop {
+        let closes = close_at(&claude, quiet);
+        let heeded = tokio::select! {
+            command = commands.recv() => Heeded::Command(command),
+            event = next_event(&mut claude.events) => Heeded::Event(event),
+            () = until(kill_at) => Heeded::Kill,
+            () = until(closes) => Heeded::Idle,
+        };
+        match heeded {
+            Heeded::Command(Some(Command::Turn(turn))) => {
+                send_turn(machine.as_ref(), &name, &place, &live, &mut claude, turn).await;
+            }
+            Heeded::Command(Some(Command::Answer {
+                request,
+                decision,
+                reply,
+            })) => {
+                let answered = claude.session.answer(&request, decision);
+                let _ = reply.send(answered.map_err(|error| chain(&error)));
+            }
+            Heeded::Command(Some(Command::Cancel)) => {
+                if live.busy() {
+                    claude.session.cancel();
                     kill_at.get_or_insert(tokio::time::Instant::now() + STOP_GRACE);
                 }
-                Some(Command::Turn { .. }) | None => {}
-            },
-            event = events.recv() => {
-                let Some(event) = event else {
-                    failed = Some(true);
-                    break;
-                };
-                if let Event::RequestOpened(opened) = &event.event {
-                    if let Some(decision) = claude::answers(mode, opened.scope) {
-                        match turn.answer(&opened.request_id, decision) {
-                            Ok(()) => continue,
-                            Err(error) => tracing::warn!("chat {name}: {mode:?} could not answer: {error}"),
+            }
+            Heeded::Command(Some(Command::StopTask { task, reply })) => {
+                let stopped = claude.session.stop_task(&task);
+                let _ = reply.send(stopped.map_err(|error| chain(&error)));
+            }
+            Heeded::Command(Some(Command::StopAll)) => {
+                for task in claude.session.background() {
+                    let _ = claude.session.stop_task(&task);
+                }
+                if live.busy() {
+                    claude.session.cancel();
+                }
+                live.lock().closing = true;
+                close_claude(&claude, &mut kill_at);
+            }
+            Heeded::Command(None) => {}
+            Heeded::Event(None) => break,
+            Heeded::Event(Some(event)) => {
+                match &event.event {
+                    Event::RequestOpened(opened) => {
+                        if let Some(decision) = claude::answers(claude.mode, opened.scope) {
+                            match claude.session.answer(&opened.request_id, decision) {
+                                Ok(()) => continue,
+                                Err(error) => tracing::warn!(
+                                    "chat {name}: {:?} could not answer: {error}",
+                                    claude.mode
+                                ),
+                            }
+                        }
+                        if !live.watched() {
+                            machine
+                                .registry()
+                                .wait(&name, &thread, Phase::WaitingForApproval);
                         }
                     }
-                    if !live.watched() {
-                        machine.registry().wait(&name, &thread);
+                    Event::TurnStarted => {
+                        live.set_busy(true);
+                        remember(machine.as_ref(), &name, &place, &mut claude).await;
                     }
+                    Event::BackgroundUpdated { .. } => quiet = tokio::time::Instant::now(),
+                    _ => {}
                 }
                 live.event(&event);
                 if let Event::TurnCompleted(done) = &event.event {
                     tracing::info!("chat {name}: the turn ended {:?}", done.state);
-                    let lost = done.state == TurnState::Failed;
-                    if let Some(said) = done.message.as_ref().filter(|said| {
-                        lost && said.starts_with(CLAUDE_NOT_LOGGED_IN)
-                    }) {
+                    let failed = done.state == TurnState::Failed;
+                    if let Some(said) = done
+                        .message
+                        .as_ref()
+                        .filter(|said| failed && said.starts_with(CLAUDE_NOT_LOGGED_IN))
+                    {
                         live.publish(&not_logged_in(None, machine.machine(), said.clone()), None);
                     }
-                    failed = Some(lost);
+                    // A closing keeper keeps the deadline its close armed.
+                    if !live.lock().closing {
+                        kill_at = None;
+                    }
+                    claude_turn_ended(machine.as_ref(), &name, &place, &live, failed).await;
+                    // A keeper with background work waits for it (ADR-0041 decision 9).
+                    if claude.session.background().is_empty()
+                        && let Ok(size) = machine.out_size(&place).await
+                        && size > Limits::default().cap / 2
+                        && live.close_unless_busy()
+                    {
+                        tracing::info!(
+                            "chat {name}: the keeper's out is past half its cap, so it is replaced"
+                        );
+                        close_claude(&claude, &mut kill_at);
+                    }
+                    claude_next(machine.as_ref(), &name, &place, &live, &mut claude).await;
+                    quiet = tokio::time::Instant::now();
                 }
-            },
-            () = until(kill_at) => {
-                tracing::info!("chat {name}: the turn did not stop, so its keeper is killed");
+            }
+            Heeded::Kill => {
                 kill_at = None;
+                tracing::info!("chat {name}: claude did not stop, so its keeper is killed");
                 if let Err(said) = machine.finish(&place, Duration::ZERO).await {
                     tracing::warn!("chat {name}: {said}");
                 }
-            },
+            }
+            Heeded::Idle => {
+                // A line that made no event moved the pin since the wait began.
+                let due =
+                    close_at(&claude, quiet).is_some_and(|at| at <= tokio::time::Instant::now());
+                if due && live.close_unless_busy() {
+                    tracing::info!("chat {name}: the thread is idle, so its keeper closes");
+                    close_claude(&claude, &mut kill_at);
+                }
+            }
         }
     }
-    // A Claude keeper ends with its turn, so a turn sent from here on is held for the next one.
-    live.lock().closing = true;
-    checkpointed(
-        machine.as_ref(),
-        &name,
-        &place,
-        failed.unwrap_or(false),
-        &live,
-    )
-    .await;
+    tracing::info!("chat {name}: claude ended");
     let (queued, next) = finish(machine.as_ref(), &name, &place, &live).await;
-    drop(turn);
+    drop(claude);
     let next = joined(next);
     if next.is_some() || !queued.is_empty() {
         tokio::spawn(async move {
@@ -3091,6 +3309,113 @@ async fn keep_claude<M: Machine>(
             }
         });
     }
+}
+
+/// Sends a turn the thread is marked busy with to Claude: its mode, the prompt
+/// the browser draws, and the prompt. A keeper whose stdin has gone holds the
+/// turn for the next one.
+async fn send_turn<M: Machine>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    live: &Live,
+    claude: &mut ClaudeKeeper,
+    turn: Next,
+) {
+    if let Err(said) = machine.write_mode(place, turn.mode).await {
+        tracing::warn!("chat {name}: the mode was not written: {said}");
+    }
+    claude.mode = turn.mode;
+    let n = {
+        let mut state = live.lock();
+        state.prompts += 1;
+        state.prompts
+    };
+    if let Err(error) = claude.session.send_turn(&turn.prompt()) {
+        tracing::warn!("chat {name}: the turn was not sent: {error}");
+        live.lock().closing = true;
+        if machine.registry().hold(live, turn).is_err() {
+            live.set_busy(false);
+        }
+        return;
+    }
+    live.event(&claude::prompted(
+        thread::name(place),
+        &live.run,
+        n,
+        turn.text,
+    ));
+}
+
+/// Keeps the session id of the turn that started, when it is new.
+async fn remember<M: Machine>(machine: &M, name: &str, place: &Place, claude: &mut ClaudeKeeper) {
+    let Some(session) = claude.session.session_id() else {
+        return;
+    };
+    if claude.remembered.as_ref() == Some(&session) {
+        return;
+    }
+    match machine.remember_claude(place, &session).await {
+        Ok(()) => claude.remembered = Some(session),
+        Err(said) => tracing::warn!("chat {name}: the session id was not kept: {said}"),
+    }
+}
+
+/// A Claude turn ended, a wake turn too: the thread is free, the tree is kept,
+/// and nobody attached is told (ADR-0041 decision 3).
+async fn claude_turn_ended<M: Machine>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    live: &Live,
+    failed: bool,
+) {
+    checkpointed(machine, name, place, failed, live).await;
+    if !live.watched() {
+        machine
+            .registry()
+            .wait(name, thread::name(place), Phase::Completed);
+    }
+}
+
+/// Sends what waits for the thread's next turn, unless the keeper closes: the
+/// person's turns first, then a room's prompts (ADR-0041 decision 7).
+async fn claude_next<M: Machine>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+    live: &Live,
+    claude: &mut ClaudeKeeper,
+) {
+    if let Some(turn) = joined(machine.registry().take_next(live)) {
+        machine.registry().remember_mode(&live.id, turn.mode);
+        send_turn(machine, name, place, live, claude, turn).await;
+        return;
+    }
+    let queued = machine.registry().take_queued(live);
+    if queued.is_empty() {
+        return;
+    }
+    let (prompts, told): (Vec<String>, Vec<_>) = queued.into_iter().unzip();
+    let turn = Next {
+        text: prompts.join("\n\n"),
+        mode: room::cap(machine.registry().mode(&live.id).unwrap_or_default()),
+        interaction: Interaction::Build,
+    };
+    send_turn(machine, name, place, live, claude, turn).await;
+    tracing::info!(
+        "chat {name}: a room message woke thread {}",
+        thread::name(place)
+    );
+    for tell in told {
+        let _ = tell.send(Woke::Started);
+    }
+}
+
+/// Closes Claude's stdin, and kills it at `kill_at` if it ignores that.
+fn close_claude(claude: &ClaudeKeeper, kill_at: &mut Option<tokio::time::Instant>) {
+    claude.session.close();
+    kill_at.get_or_insert(tokio::time::Instant::now() + STOP_GRACE);
 }
 
 async fn until(at: Option<tokio::time::Instant>) {
@@ -3217,7 +3542,7 @@ async fn keep_acp<M: Machine>(
             _ = idle.tick() => Step::Idle,
         };
         match step {
-            Step::Command(Some(Command::Turn { text, mode })) => {
+            Step::Command(Some(Command::Turn(Next { text, mode, .. }))) => {
                 prompt(machine.as_ref(), &name, &place, &live, &mut acp, text, mode).await;
             }
             Step::Command(Some(Command::Answer {
@@ -3227,12 +3552,19 @@ async fn keep_acp<M: Machine>(
             })) => {
                 let _ = reply.send(answer(&acp, &request, decision));
             }
-            Step::Command(Some(Command::Cancel)) => {
+            // An ACP agent has no background task Yantra knows of, so stopping all stops the turn.
+            Step::Command(Some(Command::Cancel | Command::StopAll)) => {
                 if live.busy() {
                     // An agent that is gone has no turn left to stop.
                     let _ = acp.agent.cancel(&acp.session);
                     kill_at.get_or_insert(tokio::time::Instant::now() + STOP_GRACE);
                 }
+            }
+            Step::Command(Some(Command::StopTask { reply, .. })) => {
+                let _ = reply.send(Err(format!(
+                    "{} runs no background task Yantra can stop",
+                    acp.harness.name()
+                )));
             }
             Step::Command(None) => {}
             Step::Event(None) => break,
@@ -3256,7 +3588,9 @@ async fn keep_acp<M: Machine>(
                             }
                         }
                         if !live.watched() {
-                            machine.registry().wait(&name, &thread);
+                            machine
+                                .registry()
+                                .wait(&name, &thread, Phase::WaitingForApproval);
                         }
                     }
                     Event::RequestResolved(resolved) => {
@@ -3523,13 +3857,12 @@ fn wake_on<M: Machine>(
                 continue;
             }
             let mode = room::cap(machine.registry().mode(&place.id).unwrap_or_default());
-            let turn = Typed {
+            let turn = Next {
                 text: prompt.clone(),
-                images: None,
                 mode,
                 interaction: Interaction::Build,
             };
-            match claude_turn(&machine, &name, &place, turn).await {
+            match claude_turn(&machine, &name, &place, turn, false).await {
                 Ok(Turned::Started(_)) => {
                     tracing::info!("chat {name}: a room message woke thread {thread}");
                     return Woke::Started;
@@ -3641,28 +3974,36 @@ async fn adopt_claimed<M: Machine>(
     let thread = thread::name(&place).to_owned();
     match adopted {
         Adopted::Claude {
-            turn,
+            session,
             events,
             run,
             replayed,
             mode,
-            completed,
+            running,
+            prompts,
         } => {
-            let (live, commands) = Live::new(&place, run, !completed);
-            live.lock().last = last_cursor(&replayed);
+            // An idle keeper is adopted live too: its process waits for the next turn.
+            let (live, commands) = Live::new(&place, run, running);
+            {
+                let mut state = live.lock();
+                state.last = last_cursor(&replayed);
+                state.prompts = prompts;
+            }
             if !machine.registry().insert(&live) {
                 return Ok(());
             }
             tracing::info!("chat {name}: adopted the keeper of thread {thread}");
-            if !completed {
+            if running {
                 for (request, scope, _) in waiting(&replayed) {
                     match claude::answers(mode, scope) {
                         Some(decision) => {
-                            if let Err(error) = turn.answer(&request, decision) {
+                            if let Err(error) = session.answer(&request, decision) {
                                 tracing::warn!("chat {name}: {mode:?} could not answer: {error}");
                             }
                         }
-                        None => machine.registry().wait(name, &thread),
+                        None => machine
+                            .registry()
+                            .wait(name, &thread, Phase::WaitingForApproval),
                     }
                 }
             }
@@ -3672,11 +4013,11 @@ async fn adopt_claimed<M: Machine>(
                 place,
                 live,
                 commands,
-                ClaudeTurn {
-                    turn,
-                    events,
+                ClaudeKeeper {
+                    session,
+                    events: Some(events),
                     mode,
-                    completed,
+                    remembered: None,
                 },
             ));
         }
@@ -3720,7 +4061,9 @@ async fn adopt_claimed<M: Machine>(
                             tracing::warn!("chat {name}: {mode:?} could not answer: {said}");
                         }
                     }
-                    None => machine.registry().wait(name, &thread),
+                    None => machine
+                        .registry()
+                        .wait(name, &thread, Phase::WaitingForApproval),
                 }
             }
             tokio::spawn(keep_acp(
@@ -3740,8 +4083,8 @@ async fn adopt_claimed<M: Machine>(
 #[allow(clippy::expect_used)]
 pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
     use yantra_core::chat::{
-        Item, ItemStatus, ItemType, RequestOpened, RequestResolved, RequestType, Scope, TokenUsage,
-        TurnCompleted,
+        BackgroundTask, Item, ItemStatus, ItemType, RequestOpened, RequestResolved, RequestType,
+        Scope, TokenUsage, TurnCompleted,
     };
     use yantra_core::checkpoint::FileStat;
     let at = |cursor: Option<&str>, event| {
@@ -3820,6 +4163,17 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         hint: Some("<branch>".to_owned()),
                     }],
                 }),
+                at(
+                    Some("Y0123456789abcdef:1630:0"),
+                    Event::BackgroundUpdated {
+                        tasks: vec![BackgroundTask {
+                            task_id: "b561loltj".to_owned(),
+                            kind: "local_bash".to_owned(),
+                            description: "Background sleep then echo completion marker".to_owned(),
+                        }],
+                    },
+                ),
+                event(Event::BackgroundUpdated { tasks: vec![] }),
                 event(Event::TokenUsageUpdated(TokenUsage {
                     used_tokens: 29_149,
                     max_tokens: 200_000,
@@ -3862,6 +4216,15 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             serde_json::to_value(failure(
                 Kind::Checkpoint,
                 "git could not keep or restore a checkpoint: fatal: unable to write new index file",
+            ))
+            .expect("a failure serialises"),
+        ),
+        (
+            "chatStopTaskFailed",
+            "ChatFailure",
+            serde_json::to_value(failure(
+                Kind::StopTask,
+                "no background task `b561loltj` is running",
             ))
             .expect("a failure serialises"),
         ),
@@ -3937,7 +4300,6 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     text: "and the docs".to_owned(),
                     mode: PermissionMode::Supervised,
                     interaction: Interaction::Build,
-                    images: None,
                 }],
             ))
             .expect("a queue serialises"),
@@ -3972,6 +4334,10 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     decision: Decision::AcceptAlways,
                 }),
                 frame(Frame::Cancel),
+                frame(Frame::StopTask {
+                    task_id: "b561loltj".to_owned(),
+                }),
+                frame(Frame::StopAll),
                 frame(Frame::Revert { turn: 0 }),
                 frame(Frame::Diff),
                 frame(Frame::Ping),
@@ -4241,9 +4607,9 @@ mod tests {
         /// The size of each image that reached the machine.
         put: Mutex<Vec<usize>>,
         cleared: Mutex<usize>,
-        /// The images directory each Claude turn was started with.
-        started_with: Mutex<Vec<Option<String>>>,
-        /// The permission mode each Claude turn was started with.
+        /// Each Claude session id the thread was told to keep.
+        claude_sessions: Mutex<Vec<String>>,
+        /// The permission mode each Claude keeper was started with.
         modes: Mutex<Vec<PermissionMode>>,
         /// The command each Claude turn would run.
         commands: Mutex<Vec<String>>,
@@ -4386,30 +4752,37 @@ mod tests {
         async fn start(
             &self,
             place: &Place,
-            text: &str,
-            images: Option<&str>,
-            mode: PermissionMode,
-            interaction: Interaction,
-        ) -> Result<Started<KeptTurn>, String> {
-            let Some((run, reader, writer, end)) = self.begin(Some(mode)) else {
+            first: &claude::Prompt<'_>,
+        ) -> Result<Started<KeptClaude>, String> {
+            let Some((run, reader, writer, end)) = self.begin(Some(first.mode)) else {
                 return Ok(Started::Busy);
             };
-            lock(&self.started_with).push(images.map(str::to_owned));
-            lock(&self.modes).push(mode);
+            lock(&self.modes).push(first.mode);
             lock(&self.commands).push(claude::command(
                 &place.worktree,
-                images,
-                mode,
-                interaction,
+                &keeper_of(place)?,
+                first.mode,
+                first.interaction,
+                None,
                 None,
             ));
             lock(&self.turns).push(Claude(end));
             if let Some(gate) = &self.start_gate {
                 gate.notified().await;
             }
-            let (turn, events) =
-                Turn::kept(reader, writer, thread::name(place), &run, text, said());
-            Ok(Started::Running(KeptTurn { turn, events, run }))
+            let (session, events) =
+                Session::kept(reader, writer, thread::name(place), &run, first, said());
+            Ok(Started::Running(KeptClaude {
+                session,
+                events,
+                run,
+                resumed: None,
+            }))
+        }
+
+        async fn remember_claude(&self, _: &Place, session: &str) -> Result<(), String> {
+            lock(&self.claude_sessions).push(session.to_owned());
+            Ok(())
         }
 
         async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error> {
@@ -4489,15 +4862,20 @@ mod tests {
                 None => {
                     lock(&self.turns).push(Claude(end));
                     let replayed = claude::replay(thread::name(place), &run, &out, &input);
-                    let (events, completed) = (replayed.events.clone(), replayed.completed());
-                    let (turn, live) = Turn::resume(reader, writer, replayed, said());
+                    let (events, running, prompts) = (
+                        replayed.events.clone(),
+                        replayed.running(),
+                        replayed.prompts.len(),
+                    );
+                    let (session, live) = Session::resume(reader, writer, replayed, said());
                     Adopted::Claude {
-                        turn,
+                        session,
                         events: live,
                         run,
                         replayed: events,
                         mode,
-                        completed,
+                        running,
+                        prompts,
                     }
                 }
                 Some(harness) => {
@@ -4821,7 +5199,7 @@ mod tests {
         assert_eq!(
             tab.next().await,
             json!({"threadId": THREAD, "type": "content.delta", "payload":
-                {"streamKind": "user_text", "delta": "run the tests", "itemId": "user:1"}})
+                {"streamKind": "user_text", "delta": "run the tests", "itemId": "user:1:1"}})
         );
         let mut claude = script.claude().await;
         assert_eq!(
@@ -4950,13 +5328,14 @@ mod tests {
         claude
             .say(json!({"type": "result", "subtype": "success", "is_error": false}))
             .await;
-        assert_eq!(
-            claude.heard().await,
-            None,
-            "no interrupt: stdin closes after the result"
+        until_turn_over(&script).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), claude.heard())
+                .await
+                .is_err(),
+            "no interrupt, and stdin stays open for the next turn"
         );
-        until_script(&script, |script| !lock(&script.finished).is_empty()).await;
-        assert_eq!(*lock(&script.finished), [STOP_GRACE]);
+        assert!(lock(&script.finished).is_empty(), "the keeper stays");
         assert_eq!(*lock(&script.checkpoints), 2, "0 and 1");
     }
 
@@ -5775,6 +6154,7 @@ mod tests {
         assert_eq!(tab.next().await["path"], format!("{IMAGES}/2.png"));
     }
 
+    /// ADR-0041: the live process reads the images directory from its start.
     #[tokio::test]
     async fn a_claude_turn_after_an_image_may_read_its_directory() {
         let script = Arc::new(Script::default());
@@ -5793,10 +6173,18 @@ mod tests {
         tab.send_image(png(64));
         assert_eq!(tab.next().await["type"], "attached");
         tab.send(json!({"type": "turn", "text": format!("what is in {IMAGES}/1.png?")}));
-        tab.next().await;
         assert_eq!(
-            *script.started_with.lock().expect("a lock"),
-            [None, Some(IMAGES.to_owned())]
+            prompt_of(&claude.heard().await.expect("a line")),
+            format!("what is in {IMAGES}/1.png?")
+        );
+        let commands = lock(&script.commands);
+        assert_eq!(commands.len(), 1, "one process for both turns");
+        assert!(
+            commands[0].contains(&format!(
+                "--add-dir \"$HOME\"/.yantra/keep/'web'/'{THREAD}'/images"
+            )),
+            "{}",
+            commands[0]
         );
     }
 
@@ -5909,7 +6297,7 @@ mod tests {
         let (mut tab, _served) = connect(Arc::clone(script), None);
         tab.send(json!({"type": "turn", "text": "fix the test"}));
         assert_eq!(tab.next().await["type"], "thread.started");
-        assert_eq!(tab.next().await["payload"]["itemId"], "user:1");
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:1:1");
         let mut claude = script.claude().await;
         claude.heard().await;
         claude
@@ -6066,7 +6454,7 @@ mod tests {
         assert_eq!(second.next().await["type"], "thread.started");
         assert_eq!(
             second.next().await["payload"],
-            json!({"streamKind": "user_text", "delta": "fix the test", "itemId": "user:1"}),
+            json!({"streamKind": "user_text", "delta": "fix the test", "itemId": "user:1:1"}),
             "the running turn's prompt"
         );
         no_queue(&mut second).await;
@@ -6093,9 +6481,8 @@ mod tests {
         assert_eq!(first.next().await["type"], "turn.completed");
         assert_eq!(first.next().await["type"], "turn.diff.updated");
         through(&mut second, "turn.diff.updated").await;
-        let mut queued = script.claude().await;
-        queued.heard().await;
-        queued
+        claude.heard().await;
+        claude
             .say(json!({"type": "result", "subtype": "success", "is_error": false}))
             .await;
         through(&mut second, "turn.diff.updated").await;
@@ -6310,7 +6697,7 @@ mod tests {
         let (mut tab, _served) = connect(Arc::clone(script), None);
         tab.send(turn);
         assert_eq!(tab.next().await["type"], "thread.started");
-        assert_eq!(tab.next().await["payload"]["itemId"], "user:1");
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:1:1");
         let mut claude = script.claude().await;
         claude.heard().await.expect("the prompt");
         (tab, claude)
@@ -6610,7 +6997,7 @@ mod tests {
         let (mut first, _a) = connect(Arc::clone(&script), None);
         first.send(json!({"type": "turn", "text": "Run touch made.txt"}));
         assert_eq!(first.next().await["type"], "thread.started");
-        assert_eq!(first.next().await["payload"]["itemId"], "user:1");
+        assert_eq!(first.next().await["payload"]["itemId"], "user:1:1");
         let mut claude = script.claude().await;
         claude.heard().await;
         let (head, tail) = recorded();
@@ -6720,6 +7107,8 @@ mod tests {
             claude.say(line).await;
         }
         let ended = through(&mut answering, "turn.diff.updated").await;
+        // The keeper ends, so the tab back reads the journals.
+        drop(claude);
         until_script(&script, |script| {
             script.registry.live(&place().id).is_none()
         })
@@ -6801,7 +7190,7 @@ mod tests {
             "the starting keeper is not adopted"
         );
         gate.notify_one();
-        assert_eq!(first.next().await["payload"]["itemId"], "user:1");
+        assert_eq!(first.next().await["payload"]["itemId"], "user:1:1");
         assert_eq!(second.next().await["type"], "thread.started");
         assert_eq!(
             second.next().await["payload"]["delta"],
@@ -6951,7 +7340,12 @@ mod tests {
         claude
             .say(json!({"type": "result", "subtype": "success", "is_error": false}))
             .await;
-        assert_eq!(claude.heard().await, None, "and no other");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), claude.heard())
+                .await
+                .is_err(),
+            "and no other"
+        );
         let answered = String::from_utf8_lossy(&script.journal().input)
             .matches("\"r1\"")
             .count();
@@ -6985,6 +7379,7 @@ mod tests {
         let wait = Wait {
             workspace: "web".to_owned(),
             thread: THREAD.to_owned(),
+            phase: Phase::WaitingForApproval,
         };
         assert_eq!(heard.recv().await, Some(wait.clone()));
         assert_eq!(
@@ -7008,8 +7403,8 @@ mod tests {
         );
     }
 
-    /// Only `cancel` stops a turn: it interrupts, and a turn that does not
-    /// end within 10 s has its keeper killed.
+    /// Only `cancel` stops a turn: it interrupts and leaves stdin open, and a
+    /// turn that does not end within 10 s has its keeper killed.
     #[tokio::test(start_paused = true)]
     async fn a_cancelled_turn_that_does_not_end_is_killed_after_the_grace() {
         let script = Arc::new(Script::default());
@@ -7024,11 +7419,366 @@ mod tests {
             claude.heard().await.expect("an interrupt")["request"]["subtype"],
             "interrupt"
         );
-        assert_eq!(claude.heard().await, None, "stdin closes");
         tokio::time::sleep(STOP_GRACE + Duration::from_secs(1)).await;
         let ended = tab.next().await;
         assert_eq!(ended["payload"]["state"], "cancelled", "{ended}");
         assert_eq!(*lock(&script.finished), [Duration::ZERO, STOP_GRACE]);
+    }
+
+    const WAKE: &str =
+        include_str!("../../yantra-core/tests/recordings/claude-2.1.319-background-wake.jsonl");
+
+    /// The wake recording's lines `from..to`: 0..7 is the turn that starts the
+    /// task, 7..10 its end, and 10..13 the wake turn.
+    fn woken(from: usize, to: usize) -> Vec<Value> {
+        WAKE.lines()
+            .skip(from)
+            .take(to - from)
+            .map(|line| serde_json::from_str(line).expect("a JSON line"))
+            .collect()
+    }
+
+    /// A thread whose first turn left a background task running.
+    async fn a_turn_that_leaves_a_task(script: &Arc<Script>) -> (Tab, Claude, Vec<Value>) {
+        let (mut tab, _served) = connect(Arc::clone(script), None);
+        tab.send(json!({"type": "turn", "text": "sleep in the background"}));
+        assert_eq!(tab.next().await["type"], "thread.started");
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        for line in woken(0, 7) {
+            claude.say(line).await;
+        }
+        let frames = through(&mut tab, "turn.diff.updated").await;
+        (tab, claude, frames)
+    }
+
+    fn rosters(frames: &[Value]) -> Vec<usize> {
+        frames
+            .iter()
+            .filter(|frame| frame["type"] == "thread.background.updated")
+            .map(|frame| frame["payload"]["tasks"].as_array().map_or(0, Vec::len))
+            .collect()
+    }
+
+    /// ADR-0041 decisions 1 to 3: the keeper outlives its turn, and the turn
+    /// Claude starts when the task ends is turn 2, with its checkpoint and diff.
+    #[tokio::test]
+    async fn a_background_task_keeps_the_keeper_and_its_wake_is_the_next_turn() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude, first) = a_turn_that_leaves_a_task(&script).await;
+        assert_eq!(rosters(&first), [1], "{first:?}");
+        let task = first
+            .iter()
+            .find(|frame| frame["type"] == "thread.background.updated")
+            .map(|frame| frame["payload"]["tasks"][0].clone());
+        assert_eq!(
+            task,
+            Some(json!({"taskId": "b561loltj", "kind": "local_bash",
+                        "description": "Background sleep then echo completion marker"}))
+        );
+        assert_eq!(first[first.len() - 1]["payload"]["turn"], 1);
+        assert!(
+            script.registry.live(&place().id).is_some(),
+            "the keeper stays"
+        );
+        assert!(lock(&script.finished).is_empty());
+
+        for line in woken(7, 13) {
+            claude.say(line).await;
+        }
+        let wake = through(&mut tab, "turn.diff.updated").await;
+        let kinds: Vec<&str> = wake
+            .iter()
+            .filter_map(|frame| frame["type"].as_str())
+            .collect();
+        assert!(kinds.contains(&"turn.started"), "{kinds:?}");
+        assert!(kinds.contains(&"turn.completed"), "{kinds:?}");
+        assert_eq!(rosters(&wake), [0]);
+        assert_eq!(wake[wake.len() - 1]["payload"]["turn"], 2);
+        assert_eq!(*lock(&script.checkpoints), 3, "0, 1 and the wake's 2");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), claude.heard())
+                .await
+                .is_err(),
+            "no prompt is written for a wake"
+        );
+    }
+
+    /// ADR-0041 decision 3 and Q5: a turn end nobody sees sends one
+    /// notification that names only the workspace and the thread.
+    #[tokio::test]
+    async fn a_turn_end_nobody_sees_is_notified_once() {
+        let (waits, mut heard) = mpsc::unbounded_channel();
+        let script = Arc::new(Script {
+            registry: Registry::telling(waits),
+            ..Script::default()
+        });
+        let (mut tab, served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        tab.close();
+        served.await.expect("the socket's task ends");
+        claude.say(ended()).await;
+        let wait = Wait {
+            workspace: "web".to_owned(),
+            thread: THREAD.to_owned(),
+            phase: Phase::Completed,
+        };
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), heard.recv()).await,
+            Ok(Some(wait.clone()))
+        );
+        assert_eq!(
+            wait.message().body,
+            "web: chat thread 1a2b3c4d finished a turn"
+        );
+        until_turn_over(&script).await;
+        assert!(heard.try_recv().is_err(), "one notification");
+    }
+
+    /// A keeper is closed, then its agent ends or is killed.
+    async fn until_closed(script: &Script, claude: Claude) {
+        until_script(script, closing).await;
+        drop(claude);
+        until_script(script, |script| script.registry.live(&place().id).is_none()).await;
+    }
+
+    fn closing(script: &Script) -> bool {
+        script
+            .registry
+            .live(&place().id)
+            .is_none_or(|live| live.lock().closing)
+    }
+
+    /// ADR-0041 decision 4: a keeper with no turn and no task closes after
+    /// 30 minutes, a tab attached or not.
+    #[tokio::test(start_paused = true)]
+    async fn an_idle_claude_keeper_closes_after_thirty_minutes() {
+        let script = Arc::new(Script::default());
+        let (_tab, mut claude) = a_claude_turn_that_ends(&script).await;
+        until_turn_over(&script).await;
+        tokio::time::sleep(CLAUDE_IDLE - Duration::from_secs(60)).await;
+        assert!(!closing(&script), "not yet");
+        tokio::time::sleep(Duration::from_secs(120)).await;
+        assert!(closing(&script));
+        assert_eq!(claude.heard().await, None, "its stdin closed");
+        until_closed(&script, claude).await;
+    }
+
+    /// ADR-0041 decision 4: a task pins the keeper, every line Claude writes
+    /// restarts the pin, and 4 hours of silence close it.
+    #[tokio::test(start_paused = true)]
+    async fn a_task_pins_the_keeper_until_four_silent_hours() {
+        let script = Arc::new(Script::default());
+        let (_tab, mut claude, _) = a_turn_that_leaves_a_task(&script).await;
+        tokio::time::sleep(CLAUDE_IDLE * 2).await;
+        assert!(!closing(&script), "a task pins it past the idle close");
+        tokio::time::sleep(PIN - CLAUDE_IDLE * 3).await;
+        // A line that makes no event still restarts the pin.
+        claude
+            .say(json!({"type": "system", "subtype": "thinking_tokens", "estimated_tokens": 5}))
+            .await;
+        tokio::time::sleep(PIN - Duration::from_secs(60)).await;
+        assert!(!closing(&script), "the pin restarted");
+        tokio::time::sleep(Duration::from_secs(120)).await;
+        assert!(closing(&script));
+        assert_eq!(claude.heard().await, None, "its stdin closed");
+        until_closed(&script, claude).await;
+    }
+
+    /// ADR-0041 decision 9: past half its cap, a keeper is replaced between
+    /// turns, unless background work runs.
+    #[tokio::test]
+    async fn a_keeper_past_half_its_cap_closes_only_with_no_task() {
+        let big = || Script {
+            out_bytes: Some(Limits::default().cap / 2 + 1),
+            ..Script::default()
+        };
+        let script = Arc::new(big());
+        let (_tab, mut claude) = a_claude_turn_that_ends(&script).await;
+        assert_eq!(claude.heard().await, None, "its stdin closed");
+        until_closed(&script, claude).await;
+
+        let script = Arc::new(big());
+        let (_tab, _claude, _) = a_turn_that_leaves_a_task(&script).await;
+        until_turn_over(&script).await;
+        assert!(!closing(&script), "the task holds it");
+    }
+
+    /// ADR-0041: a restart adopts a keeper whose turn ended as live, and the
+    /// next turn goes to its process.
+    #[tokio::test]
+    async fn an_idle_claude_keeper_is_adopted_and_takes_the_next_turn() {
+        let script = Arc::new(
+            Script {
+                threads: vec![place()],
+                ..Script::default()
+            }
+            .keeping(Journal {
+                run: "7".to_owned(),
+                input: prompted("fix it").into_bytes(),
+                out: lines(&[
+                    json!({"type": "system", "subtype": "init", "permissionMode": "default"}),
+                    ended(),
+                ]),
+                ..Journal::default()
+            }),
+        );
+        adopt_place(&script, "web", place())
+            .await
+            .expect("the keeper is read back");
+        let live = script.registry.live(&place().id).expect("adopted live");
+        assert!(!live.busy());
+        let (mut tab, _served) = connect(Arc::clone(&script), Some(THREAD));
+        through(&mut tab, "queue").await;
+        tab.send(json!({"type": "turn", "text": "and the docs"}));
+        let mut claude = script.claude().await;
+        assert_eq!(
+            prompt_of(&claude.heard().await.expect("a line")),
+            "and the docs"
+        );
+        assert!(lock(&script.modes).is_empty(), "no new process");
+        let frames = through(&mut tab, "content.delta").await;
+        assert_eq!(frames[frames.len() - 1]["payload"]["itemId"], "user:7:2");
+    }
+
+    /// ADR-0041 decision 6: Stop sends `stop_task` for a task that runs, and
+    /// a task that does not run is a `stopTask` failure.
+    #[tokio::test]
+    async fn stop_task_reaches_claude_and_an_unknown_task_is_refused() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude, _) = a_turn_that_leaves_a_task(&script).await;
+        tab.send(json!({"type": "stopTask", "taskId": "b561loltj"}));
+        let stop = claude.heard().await.expect("a stop");
+        assert_eq!(
+            stop["request"],
+            json!({"subtype": "stop_task", "task_id": "b561loltj"})
+        );
+        let said = tab
+            .next_after(json!({"type": "stopTask", "taskId": "b0000000"}))
+            .await;
+        assert_eq!(said["kind"], "stopTask", "{said}");
+        assert!(
+            said["said"]
+                .as_str()
+                .is_some_and(|said| said.contains("b0000000"))
+        );
+        assert!(!closing(&script), "one task's stop keeps the keeper");
+    }
+
+    /// ADR-0041 decision 6: Stop all stops every task, then closes the
+    /// keeper, and the tab's roster empties though Claude never said so.
+    #[tokio::test]
+    async fn stop_all_stops_every_task_and_closes_the_keeper() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude, _) = a_turn_that_leaves_a_task(&script).await;
+        tab.send(json!({"type": "stopAll"}));
+        assert_eq!(
+            claude.heard().await.expect("a stop")["request"]["subtype"],
+            "stop_task"
+        );
+        assert_eq!(claude.heard().await, None, "then stdin closes");
+        until_closed(&script, claude).await;
+        let frames = through(&mut tab, "thread.background.updated").await;
+        assert_eq!(rosters(&frames), [0]);
+    }
+
+    /// Stop all during a turn: the cancelled turn's end keeps the kill
+    /// deadline, so a Claude that ignores its closed stdin is killed.
+    #[tokio::test(start_paused = true)]
+    async fn stop_all_kills_a_claude_that_ignores_its_closed_stdin() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        tab.send(json!({"type": "stopAll"}));
+        assert_eq!(
+            claude.heard().await.expect("an interrupt")["request"]["subtype"],
+            "interrupt"
+        );
+        assert_eq!(claude.heard().await, None, "then stdin closes");
+        claude
+            .say(
+                json!({"type": "result", "subtype": "success", "is_error": false,
+                        "terminal_reason": "aborted_streaming"}),
+            )
+            .await;
+        assert_eq!(tab.next().await["payload"]["state"], "cancelled");
+        tokio::time::sleep(STOP_GRACE + Duration::from_secs(1)).await;
+        until_script(&script, |script| !lock(&script.finished).is_empty()).await;
+        assert_eq!(lock(&script.finished)[0], Duration::ZERO, "it was killed");
+    }
+
+    /// ADR-0041 decision 6: a cancel ends the turn and leaves its tasks running.
+    #[tokio::test]
+    async fn a_cancel_leaves_the_background_tasks_running() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "sleep in the background"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        for line in woken(0, 4) {
+            claude.say(line).await;
+        }
+        through(&mut tab, "thread.background.updated").await;
+        tab.send(json!({"type": "cancel"}));
+        assert_eq!(
+            claude.heard().await.expect("an interrupt")["request"]["subtype"],
+            "interrupt"
+        );
+        claude
+            .say(
+                json!({"type": "result", "subtype": "success", "is_error": false,
+                        "terminal_reason": "aborted_streaming"}),
+            )
+            .await;
+        let ended = through(&mut tab, "turn.diff.updated").await;
+        assert!(rosters(&ended).is_empty(), "the task still runs: {ended:?}");
+        assert!(!closing(&script), "and so does the keeper");
+        tab.send(json!({"type": "stopTask", "taskId": "b561loltj"}));
+        assert_eq!(
+            claude.heard().await.expect("a stop")["request"]["subtype"],
+            "stop_task",
+            "the task can still be stopped"
+        );
+    }
+
+    /// ADR-0041 decision 7: a prompt sent while a wake turn runs waits for
+    /// the wake's `result`, then goes to the same process.
+    #[tokio::test]
+    async fn a_prompt_sent_during_a_wake_waits_for_its_result() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude, _) = a_turn_that_leaves_a_task(&script).await;
+        for line in woken(7, 11) {
+            claude.say(line).await;
+        }
+        through(&mut tab, "turn.started").await;
+        assert_eq!(
+            tab.next_after(json!({"type": "turn", "text": "and then"}))
+                .await,
+            queue(&["and then"])
+        );
+        for line in woken(11, 13) {
+            claude.say(line).await;
+        }
+        let frames = through(&mut tab, "content.delta").await;
+        let prompt = &frames[frames.len() - 1]["payload"];
+        assert_eq!(prompt["delta"], "and then", "{frames:?}");
+        assert_eq!(prompt["itemId"], "user:1:2");
+        assert_eq!(
+            prompt_of(&claude.heard().await.expect("a line")),
+            "and then"
+        );
+        assert_eq!(lock(&script.modes).len(), 1, "one process");
     }
 
     /// ADR-0035 decision 7: an ACP keeper with no turn and no tab stops.
@@ -7130,7 +7880,6 @@ mod tests {
                 ROOM_PROMPT
             );
             assert_eq!(*lock(&script.modes), [capped], "{last:?}");
-            assert_eq!(*lock(&script.started_with), [None], "no images");
         }
     }
 
@@ -7175,9 +7924,11 @@ mod tests {
         first
             .say(json!({"type": "result", "subtype": "success", "is_error": false}))
             .await;
-        let mut second = script.claude().await;
+        let mode = first.heard().await.expect("a line");
+        assert_eq!(mode["request"]["subtype"], "set_permission_mode");
+        assert_eq!(mode["request"]["mode"], "acceptEdits", "a room's cap");
         assert_eq!(
-            prompt_of(&second.heard().await.expect("a line")),
+            prompt_of(&first.heard().await.expect("a line")),
             "one\n\ntwo"
         );
         for wake in waking {
@@ -7185,14 +7936,15 @@ mod tests {
         }
         assert_eq!(
             *lock(&script.modes),
-            [PermissionMode::FullAccess, PermissionMode::AutoAcceptEdits]
+            [PermissionMode::FullAccess],
+            "one process"
         );
-        second
+        first
             .say(json!({"type": "result", "subtype": "success", "is_error": false}))
             .await;
-        until_script(&script, |script| lock(&script.finished).len() == 2).await;
+        until_turn_over(&script).await;
         assert!(
-            tokio::time::timeout(Duration::from_millis(300), script.claude())
+            tokio::time::timeout(Duration::from_millis(300), first.heard())
                 .await
                 .is_err(),
             "the queue was sent once"
@@ -7220,8 +7972,8 @@ mod tests {
         frames[frames.len() - 1]["payload"].clone()
     }
 
-    /// Y-561: a second turn is queued, and the turn's end starts it in a new
-    /// keeper that the tab which sent it and a second tab both follow.
+    /// Y-561, ADR-0041: a second turn is queued, and the turn's end sends it
+    /// to the same keeper, which the tab that sent it and a second tab follow.
     #[tokio::test]
     async fn queue_a_second_claude_turn_starts_when_the_turn_ends() {
         let script = Arc::new(Script {
@@ -7257,15 +8009,16 @@ mod tests {
 
         claude.say(ended()).await;
         let prompt =
-            json!({"streamKind": "user_text", "delta": "and the docs", "itemId": "user:2"});
+            json!({"streamKind": "user_text", "delta": "and the docs", "itemId": "user:1:2"});
         assert_eq!(until_prompt(&mut first).await, prompt);
         assert_eq!(until_prompt(&mut second).await, prompt);
-        let mut next = script.claude().await;
         assert_eq!(
-            prompt_of(&next.heard().await.expect("a line")),
+            prompt_of(&claude.heard().await.expect("a line")),
             "and the docs"
         );
-        next.say(json!({"type": "system", "subtype": "init"})).await;
+        claude
+            .say(json!({"type": "system", "subtype": "init"}))
+            .await;
         assert_eq!(first.next().await["type"], "turn.started");
         assert_eq!(second.next().await["type"], "turn.started");
     }
@@ -7286,14 +8039,15 @@ mod tests {
 
         claude.say(ended()).await;
         assert_eq!(until_prompt(&mut tab).await["delta"], "one\n\ntwo");
-        let mut next = script.claude().await;
+        // Full access asks Claude as Supervised does, so the process keeps its mode.
         assert_eq!(
-            prompt_of(&next.heard().await.expect("a line")),
+            prompt_of(&claude.heard().await.expect("a line")),
             "one\n\ntwo"
         );
+        assert_eq!(*lock(&script.modes), [PermissionMode::Supervised]);
         assert_eq!(
-            *lock(&script.modes),
-            [PermissionMode::Supervised, PermissionMode::FullAccess]
+            script.registry.mode(&place().id),
+            Some(PermissionMode::FullAccess)
         );
     }
 
@@ -7310,21 +8064,24 @@ mod tests {
 
         claude.say(ended()).await;
         until_prompt(&mut tab).await;
-        script.claude().await.heard().await.expect("a line");
+        let mode = claude.heard().await.expect("a line");
+        assert_eq!(mode["request"]["subtype"], "set_permission_mode");
+        assert_eq!(mode["request"]["mode"], "plan");
+        assert_eq!(
+            prompt_of(&claude.heard().await.expect("a line")),
+            "then plan"
+        );
         let commands = lock(&script.commands);
+        assert_eq!(commands.len(), 1, "one process");
         assert!(
             commands[0].contains("--permission-mode default -p"),
             "{}",
             commands[0]
         );
-        assert!(
-            commands[1].contains("--permission-mode plan -p"),
-            "{}",
-            commands[1]
-        );
         assert_eq!(
-            *lock(&script.modes),
-            [PermissionMode::FullAccess, PermissionMode::Supervised]
+            script.registry.mode(&place().id),
+            Some(PermissionMode::Supervised),
+            "plan relays every request"
         );
     }
 
@@ -7341,13 +8098,14 @@ mod tests {
         assert_eq!(tab.next().await, queue(&["and the docs"]));
 
         assert_eq!(tab.next_after(json!({"type": "cancel"})).await, queue(&[]));
+        assert_eq!(
+            claude.heard().await.expect("an interrupt")["request"]["subtype"],
+            "interrupt"
+        );
         claude.say(ended()).await;
-        until_script(&script, |script| {
-            script.registry.live(&place().id).is_none()
-        })
-        .await;
+        until_turn_over(&script).await;
         assert!(
-            tokio::time::timeout(Duration::from_millis(300), script.claude())
+            tokio::time::timeout(Duration::from_millis(300), claude.heard())
                 .await
                 .is_err(),
             "no turn started"
@@ -7422,14 +8180,12 @@ mod tests {
         until_script(&script, |script| queued(script) == 1).await;
 
         first.say(ended()).await;
-        let mut second = script.claude().await;
-        assert_eq!(prompt_of(&second.heard().await.expect("a line")), "mine");
+        assert_eq!(prompt_of(&first.heard().await.expect("a line")), "mine");
         until_script(&script, |script| queued(script) == 1).await;
         assert!(!wake.is_finished(), "the room waits behind the person");
-        second.say(ended()).await;
-        let mut third = script.claude().await;
+        first.say(ended()).await;
         assert_eq!(
-            prompt_of(&third.heard().await.expect("a line")),
+            prompt_of(&first.heard().await.expect("a line")),
             ROOM_PROMPT
         );
         assert_eq!(wake.await.expect("no panic"), Woke::Started);
@@ -7569,7 +8325,7 @@ mod tests {
             capture_gate: Some(Arc::clone(&gate)),
             ..Script::default()
         });
-        let (mut tab, _claude) = a_claude_turn_that_ends(&script).await;
+        let (mut tab, mut claude) = a_claude_turn_that_ends(&script).await;
         until_turn_over(&script).await;
         assert_eq!(
             tab.next_after(json!({"type": "turn", "text": "and the docs"}))
@@ -7581,9 +8337,9 @@ mod tests {
         assert_eq!(diff["type"], "turn.diff.updated", "{diff}");
         assert_eq!(diff["payload"]["turn"], 1);
         assert_eq!(tab.next().await, queue(&[]));
-        assert_eq!(tab.next().await["payload"]["itemId"], "user:2");
+        assert_eq!(tab.next().await["payload"]["itemId"], "user:1:2");
         assert_eq!(
-            prompt_of(&script.claude().await.heard().await.expect("a line")),
+            prompt_of(&claude.heard().await.expect("a line")),
             "and the docs"
         );
     }
@@ -7804,7 +8560,6 @@ mod tests {
     fn typed(text: &str) -> Next {
         Next {
             text: text.to_owned(),
-            images: None,
             mode: PermissionMode::default(),
             interaction: Interaction::default(),
         }
