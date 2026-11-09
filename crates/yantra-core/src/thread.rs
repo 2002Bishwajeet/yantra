@@ -188,7 +188,7 @@ pub struct Listed {
     pub place: Place,
     /// What [`remember_title`] or [`open_for_issue`] kept.
     pub title: Option<String>,
-    /// The repository branch the thread left: the repo's `HEAD` branch.
+    /// The repository branch the thread left, kept when it opened.
     pub from: Option<String>,
     /// `owner/repo#n`, as [`open_for_issue`] kept it.
     pub issue: Option<String>,
@@ -204,13 +204,12 @@ pub async fn listed<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<List
     let Some(first) = places.first() else {
         return Ok(Vec::new());
     };
-    let repo = sq(&first.repo);
     let out = exec
         .exec(&format!(
-            "printf '%s\\n' \"$(git -C {repo} symbolic-ref --short -q HEAD)\"\n\
-             git -C {repo} config -z --get-regexp {}",
+            "git -C {} config -z --get-regexp {}",
+            sq(&first.repo),
             sq(&format!(
-                "^branch\\.yantra/chat/{}/.*\\.(yantratitle|yantraissue|remote|merge)$|^remote\\..*\\.url$",
+                "^branch\\.yantra/chat/{}/.*\\.(yantratitle|yantrafrom|yantraissue|remote|merge)$|^remote\\..*\\.url$",
                 workspace.name
             ))
         ))
@@ -221,21 +220,12 @@ pub async fn listed<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<List
             stderr: said(&out.stderr),
         });
     }
-    let split = out
-        .stdout
-        .iter()
-        .position(|&byte| byte == b'\n')
-        .map_or(0, |newline| newline + 1);
-    let from = String::from_utf8_lossy(&out.stdout[..split])
-        .trim()
-        .to_owned();
-    let from = Some(from).filter(|from| !from.is_empty());
-    let config = Config::parse(&out.stdout[split..]);
+    let config = Config::parse(&out.stdout);
     Ok(places
         .into_iter()
         .map(|place| Listed {
             title: config.get(&place.branch, "yantratitle").map(str::to_owned),
-            from: from.clone(),
+            from: config.get(&place.branch, "yantrafrom").map(str::to_owned),
             issue: config.get(&place.branch, "yantraissue").map(str::to_owned),
             upstream: config.upstream(&place.branch),
             place,
@@ -759,6 +749,8 @@ mod tests {
                  wt=\"$HOME\"/.yantra/worktrees/'chat/web/{id}'\n\
                  mkdir -p \"$HOME/.yantra/worktrees\" \
                  && git -C \"$top\" worktree add -q --no-track -b 'yantra/chat/web/{id}' \"$wt\" HEAD >&2 \
+                 && {{ from=$(git -C \"$top\" symbolic-ref --short -q HEAD) \
+                 && git -C \"$top\" config 'branch.yantra/chat/web/{id}.yantraFrom' \"$from\" || :; }} \
                  && printf '%s\\n%s\\n' \"$top\" \"$wt\" && git -C \"$wt\" rev-parse HEAD"
             )
         );
@@ -1192,7 +1184,8 @@ mod tests {
         assert!(asked[2].contains("branch -D"), "{}", asked[2]);
     }
 
-    const CONFIG: &[u8] = b"main\nbranch.yantra/chat/a/11111111.yantratitle\nFix the login\0\
+    const CONFIG: &[u8] = b"branch.yantra/chat/a/11111111.yantratitle\nFix the login\0\
+        branch.yantra/chat/a/11111111.yantrafrom\nmain\0\
         branch.yantra/chat/a/11111111.yantraissue\no/r#7\0\
         branch.yantra/chat/a/11111111.remote\norigin\0\
         branch.yantra/chat/a/11111111.merge\nrefs/heads/fix-7\0\
@@ -1211,9 +1204,8 @@ mod tests {
         assert_eq!(
             machine.asked()[2],
             format!(
-                "printf '%s\\n' \"$(git -C '{REPO}' symbolic-ref --short -q HEAD)\"\n\
-                 git -C '{REPO}' config -z --get-regexp \
-                 '^branch\\.yantra/chat/a/.*\\.(yantratitle|yantraissue|remote|merge)$|^remote\\..*\\.url$'"
+                "git -C '{REPO}' config -z --get-regexp \
+                 '^branch\\.yantra/chat/a/.*\\.(yantratitle|yantrafrom|yantraissue|remote|merge)$|^remote\\..*\\.url$'"
             )
         );
         let read: Vec<_> = found
@@ -1222,7 +1214,8 @@ mod tests {
             .collect();
         assert_eq!(found[0].title.as_deref(), Some("Fix the login"));
         assert_eq!(found[1].title, None);
-        assert!(found.iter().all(|l| l.from.as_deref() == Some("main")));
+        assert_eq!(found[0].from.as_deref(), Some("main"));
+        assert_eq!(found[1].from, None);
         assert_eq!(
             read,
             [
@@ -1242,7 +1235,7 @@ mod tests {
         let none = Machine::answering(vec![
             out(0, PORCELAIN, ""),
             out(0, b"aaaa\nbbbb\n", ""),
-            out(1, b"\n", ""),
+            out(1, b"", ""),
         ]);
         let found = listed(&none, &workspace("a")).await.expect("listed");
         assert!(
