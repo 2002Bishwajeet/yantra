@@ -55,11 +55,14 @@ test.describe('the dashboard on a busy fleet', () => {
     await expect(region(page, 'Finish setup')).toBeVisible()
     const words = page.locator('.dash__hero-words')
     await expect(words).toBeVisible()
-    // Scroll until the headline's line is level with the FAB, then measure the text and not the box.
+    // Y-670: .shell__main scrolls and this fixture is not tall enough to scroll the line to the FAB.
+    // A spacer above the dashboard puts the line level with the FAB, then the test measures the text and not the box.
     await words.evaluate((el) => {
       const text = el.getBoundingClientRect()
       const fab = document.querySelector('.shell__fab')!.getBoundingClientRect()
-      window.scrollBy(0, text.top + text.height / 2 - (fab.top + fab.height / 2))
+      const spacer = document.createElement('div')
+      spacer.style.height = `${Math.max(0, fab.top + fab.height / 2 - (text.top + text.height / 2))}px`
+      document.querySelector('.dash')!.before(spacer)
     })
     const gap = await page.evaluate(() => {
       const fab = document.querySelector('.shell__fab')!.getBoundingClientRect()
