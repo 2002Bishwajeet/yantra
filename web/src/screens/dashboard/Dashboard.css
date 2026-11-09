@@ -523,8 +523,10 @@
   text-decoration: none;
 }
 
-.dash__setup-link:hover {
-  text-decoration: underline;
+@media (hover: hover) and (pointer: fine) {
+  .dash__setup-link:hover {
+    text-decoration: underline;
+  }
 }
 
 .dash__setup-track {
