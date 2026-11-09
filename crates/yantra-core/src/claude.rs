@@ -946,7 +946,7 @@ impl Shared {
                 max_tokens,
             }));
         }
-        let completed = if cancelled {
+        let mut completed = if cancelled {
             cancelled_turn()
         } else if outcome.is_error {
             let said = outcome
@@ -954,12 +954,14 @@ impl Shared {
                 .filter(|result| !result.is_empty())
                 .unwrap_or_else(|| outcome.errors.join("\n"));
             chat::TurnCompleted {
+                duration_ms: None,
                 state: chat::TurnState::Failed,
                 stop_reason: None,
                 message: Some(said),
             }
         } else {
             chat::TurnCompleted {
+                duration_ms: None,
                 state: chat::TurnState::Completed,
                 stop_reason: Some(match outcome.stop_reason.as_deref() {
                     Some("max_tokens") => chat::StopReason::MaxTokens,
@@ -969,6 +971,7 @@ impl Shared {
                 message: None,
             }
         };
+        completed.duration_ms = outcome.duration_ms;
         self.emit(Event::TurnCompleted(completed));
     }
 
@@ -1004,6 +1007,7 @@ fn unfinished(cancelled: bool, said: String) -> chat::TurnCompleted {
         return cancelled_turn();
     }
     chat::TurnCompleted {
+        duration_ms: None,
         state: chat::TurnState::Failed,
         stop_reason: None,
         message: Some(if said.is_empty() {
@@ -1016,6 +1020,7 @@ fn unfinished(cancelled: bool, said: String) -> chat::TurnCompleted {
 
 fn cancelled_turn() -> chat::TurnCompleted {
     chat::TurnCompleted {
+        duration_ms: None,
         state: chat::TurnState::Cancelled,
         stop_reason: Some(chat::StopReason::Cancelled),
         message: None,
@@ -1542,6 +1547,7 @@ struct Outcome {
     terminal_reason: String,
     /// Who started the turn; a wake turn's is `task-notification`.
     origin: Option<Origin>,
+    duration_ms: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -1751,6 +1757,7 @@ mod tests {
         assert_eq!(
             seen[n - 1],
             Event::TurnCompleted(TurnCompleted {
+                duration_ms: Some(3580),
                 state: TurnState::Completed,
                 stop_reason: Some(StopReason::EndTurn),
                 message: None,
@@ -1845,6 +1852,7 @@ mod tests {
         assert_eq!(
             seen.last(),
             Some(&Event::TurnCompleted(TurnCompleted {
+                duration_ms: None,
                 state: TurnState::Completed,
                 stop_reason: Some(StopReason::EndTurn),
                 message: None,
@@ -1984,6 +1992,7 @@ mod tests {
         assert_eq!(
             until_completed(&mut events).await.last(),
             Some(&Event::TurnCompleted(TurnCompleted {
+                duration_ms: Some(1853),
                 state: TurnState::Cancelled,
                 stop_reason: Some(StopReason::Cancelled),
                 message: None,
@@ -2015,6 +2024,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_result_carries_how_long_the_turn_ran() {
+        let (_turn, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        let mut done = result(None);
+        done["duration_ms"] = json!(3580);
+        fake.play(&format!("{}{}", line(&init()), line(&done)))
+            .await;
+        assert_eq!(
+            until_completed(&mut events).await.last(),
+            Some(&Event::TurnCompleted(TurnCompleted {
+                duration_ms: Some(3580),
+                state: TurnState::Completed,
+                stop_reason: Some(StopReason::EndTurn),
+                message: None,
+            }))
+        );
+    }
+
+    #[tokio::test]
     async fn a_result_that_is_an_error_fails_the_turn_in_claudes_words() {
         let (_turn, mut events, mut fake) = pair(None);
         fake.receive().await;
@@ -2022,6 +2050,7 @@ mod tests {
         assert_eq!(
             until_completed(&mut events).await.last(),
             Some(&Event::TurnCompleted(TurnCompleted {
+                duration_ms: Some(111),
                 state: TurnState::Failed,
                 stop_reason: None,
                 message: Some("Not logged in · Please run /login".to_owned()),
@@ -2044,6 +2073,7 @@ mod tests {
             [
                 Event::TurnStarted,
                 Event::TurnCompleted(TurnCompleted {
+                    duration_ms: None,
                     state: TurnState::Failed,
                     stop_reason: None,
                     message: Some("sh: claude: not found".to_owned()),
@@ -2812,6 +2842,7 @@ mod tests {
         assert!(matches!(
             events.recv().await.expect("an event").event,
             Event::TurnCompleted(TurnCompleted {
+                duration_ms: None,
                 state: TurnState::Failed,
                 ..
             })
