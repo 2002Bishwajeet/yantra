@@ -5249,6 +5249,8 @@ mod tests {
             branch: format!("yantra/chat/site/{id}"),
             worktree: format!("/w/{id}"),
             issue: issue.map(str::to_owned),
+            title: None,
+            from: None,
             pr,
         };
         let url = || "https://github.com/o/r/pull/1".to_owned();

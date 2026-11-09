@@ -21,6 +21,7 @@ export const keys = {
   /** `null` is the workspace's repository, before a thread opens. */
   mentions: (name: string, thread: string | null, harness: string) =>
     ['workspaces', name, 'mentions', thread, harness] as const,
+  threadStates: (name: string) => ['workspaces', name, 'thread-states'] as const,
   commands: (name: string, thread: string | null, harness: string) =>
     ['workspaces', name, 'commands', thread, harness] as const,
   sessions: () => ['sessions'] as const,

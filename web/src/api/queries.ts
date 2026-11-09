@@ -17,6 +17,7 @@ import type {
   Room,
   RoomSummary,
   Spend,
+  ThreadState,
   Transcript,
   WorkspaceStatus,
 } from '@/api'
@@ -33,7 +34,7 @@ import {
   SWEEP_MS,
   type Shape,
 } from '@/api/client'
-import { isApiError } from '@/api/errors'
+import { type ApiError, isApiError } from '@/api/errors'
 import { keys, type Window } from '@/api/keys'
 import type { Here } from '@/api'
 import type { About, Notification, SshIdentity } from '@/api/types/daemon'
@@ -250,6 +251,18 @@ export const mentionsQuery = (name: string, thread: string | null, harness: stri
 
 export const useMentions = (name: string, thread: string | null, harness: string, enabled: boolean) =>
   useQuery({ ...mentionsQuery(name, thread, harness), enabled })
+
+/** Y-649. What each thread is doing, read from the daemon's memory: no ssh and no GitHub,
+ *  so it may poll (ADR-0019). It polls only while `on`, which is while the thread menu is open. */
+export const useThreadStates = (name: string, on: boolean) =>
+  useQuery<ThreadState[], ApiError>({
+    queryKey: keys.threadStates(name),
+    queryFn: ({ signal }) => fetchJson<ThreadState[]>(workspace(name, 'threads'), { signal }),
+    enabled: on,
+    refetchInterval: on ? 5_000 : false,
+    staleTime: 0,
+    retry: false,
+  })
 
 /** Y-563. Claude's slash commands for the composer's `/` menu, asked as
  *  {@link mentionsQuery} is: once when the trigger opens, held for a few minutes. */

@@ -517,6 +517,15 @@ const routes = [
           )]
         : [404, notFound(name)],
   ],
+  // Y-649: what each thread is doing, which the thread menu polls while it is open.
+  [
+    'GET',
+    /^\/api\/workspaces\/([^/]+)\/threads$/,
+    (s, [name]) =>
+      findWorkspace(s, name)
+        ? [200, contract.threadStates.map((one, at) => (at === 0 ? { ...one, id: THREAD } : one))]
+        : [404, notFound(name)],
+  ],
   // Y-493: Y-492's and Y-449's git routes. The scenario `gitfails` refuses each as the daemon does.
   ...[
     ['message', [200, contract.threadMessage], [502, 'claude exited with status 1: could not reach the model']],
