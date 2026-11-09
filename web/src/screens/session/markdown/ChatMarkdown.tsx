@@ -1,3 +1,9 @@
+/*
+ * The pre, code and a renderers follow T3 Code's chat markdown:
+ * https://github.com/pingdotgg/t3code/blob/67eebaca/apps/web/src/components/ChatMarkdown.tsx
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ */
 import { memo, type ComponentProps, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
