@@ -79,6 +79,8 @@ function defaults() {
     // Y-349: the swept repository list New session filters in the browser.
     repos: contract.repos,
     notifications: contract.notifications,
+    // Y-495: the PR watch's memory. Its one PR is no thread's, so no Chat draws Checks; `checks` names one.
+    pulls: contract.pulls,
     about: contract.about,
     // Y-589: the device in use; null names none, so no note shifts a baseline.
     here: { machine: null },
@@ -330,6 +332,7 @@ const routes = [
   ['GET', /^\/api\/attention$/, (s) => [200, s.attention]],
   ['GET', /^\/api\/readiness\/github$/, (s) => [200, s.github]],
   ['GET', /^\/api\/notifications$/, (s) => [200, s.notifications]],
+  ['GET', /^\/api\/pulls$/, (s) => [200, s.pulls]],
   ['GET', /^\/api\/about$/, (s) => [200, s.about]],
   ['GET', /^\/api\/here$/, (s) => [200, s.here]],
   [

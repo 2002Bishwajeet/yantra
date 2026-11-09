@@ -22,6 +22,8 @@ function daemon(...replies: [number, unknown][]) {
   let at = 0
   reads = []
   live = [200, []]
+  // A thread with an open PR draws Checks, which reads the form factor; jsdom has no `matchMedia`.
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
@@ -52,6 +54,7 @@ async function show(over: Over = {}, url = '/w/site?view=chat') {
     diff: { open: false, onToggle: () => {}, onRefresh: () => {} },
     diffRef: idle,
     added: false,
+    onFix: () => {},
     ...over,
   }
   const root = createRootRoute()
@@ -198,7 +201,7 @@ describe('the thread menu', () => {
       useEffect(() => {
         control.pick = set.current
       }, [])
-      return <ChatHeader busy={false} diff={{ open: false, onToggle: () => {}, onRefresh: () => {} }} diffRef={idle} diffs={0} added={false} thread={thread} workspace="site" />
+      return <ChatHeader busy={false} diff={{ open: false, onToggle: () => {}, onRefresh: () => {} }} diffRef={idle} diffs={0} added={false} onFix={() => {}} thread={thread} workspace="site" />
     }
     const root = createRootRoute({ component: Switch })
     const router = createRouter({ routeTree: root, history: createMemoryHistory() })

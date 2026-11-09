@@ -33,6 +33,7 @@ import type {
   Mentions,
   Opened,
   Placement,
+  Pull,
   Readiness,
   Repo,
   Resumed,
@@ -568,6 +569,57 @@ export const notifications = {
   ],
   "looked": "ok"
 } satisfies Looked<Event[]>
+
+export const pulls = {
+  "age_seconds": 0,
+  "data": [
+    {
+      "checks": [
+        {
+          "conclusion": "failure",
+          "name": "test",
+          "output": {
+            "summary": "`watch::look` panicked",
+            "title": "1 failed"
+          },
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "lint",
+          "output": {
+            "summary": "",
+            "title": "Clean"
+          },
+          "status": "completed"
+        }
+      ],
+      "comments": [
+        {
+          "author": "friend",
+          "body": "This drops the etag.",
+          "id": 31,
+          "line": 12,
+          "path": "src/watch.rs"
+        }
+      ],
+      "head_sha": "aaa111",
+      "number": 21,
+      "reviews": [
+        {
+          "author": "friend",
+          "body": "Please add a test.",
+          "id": 7,
+          "state": "CHANGES_REQUESTED"
+        }
+      ],
+      "summary": "failed",
+      "url": "https://github.com/o/r/pull/21",
+      "workspace": "api"
+    }
+  ],
+  "looked": "ok"
+} satisfies Looked<Pull[]>
 
 export const notLooked = {
   "looked": "never"

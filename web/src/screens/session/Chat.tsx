@@ -481,6 +481,11 @@ export function Chat(props: ChatProps) {
     setDraft((now) => appendToDraft(now, block))
     setAdded(true)
   }
+  // Y-495: Fix with agent fills the composer and hands it the caret. The owner sends.
+  const fixWithAgent = (block: string) => {
+    addComment(block)
+    box.current?.focus()
+  }
 
   const asks = timeline.requests.map((request) => (
     <Asking
@@ -511,6 +516,7 @@ export function Chat(props: ChatProps) {
         diffRef={diffButton}
         diffs={diffs}
         into={slot}
+        onFix={fixWithAgent}
         thread={timeline.thread}
         urlThread={thread}
         workspace={workspace.name}

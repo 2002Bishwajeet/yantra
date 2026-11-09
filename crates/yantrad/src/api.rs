@@ -54,6 +54,7 @@ pub fn router() -> Router<Fleet> {
         .route("/about", get(about))
         .route("/ssh-identity", get(ssh_identity))
         .route("/notifications", get(notifications))
+        .route("/pulls", get(pulls))
         .route("/github", get(connection))
         .route("/repos", get(repos))
         .fallback(no_such_route)
@@ -158,6 +159,109 @@ async fn notifications(State(fleet): State<Fleet>) -> Json<Answer<Vec<Event>>> {
         age_seconds: 0,
         data: events::newest_first(&fleet.events).await,
     })
+}
+
+/// Y-512: the PRs the watch holds, as its last look left them. Memory only,
+/// so no GitHub or ssh call, and the age is 0 for the reason above.
+async fn pulls(State(fleet): State<Fleet>) -> Json<Answer<Vec<Pull>>> {
+    let held = fleet.pulls.read().await;
+    Json(Answer::Ok {
+        age_seconds: 0,
+        data: held
+            .iter()
+            .map(|((_, _, number), tracked)| Pull::of(*number, tracked))
+            .collect(),
+    })
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Pull {
+    workspace: String,
+    url: String,
+    number: u64,
+    /// `None` until the watch's first look lands.
+    head_sha: Option<String>,
+    summary: crate::watch::Summary,
+    checks: Vec<PullCheck>,
+    reviews: Vec<PullReview>,
+    comments: Vec<PullComment>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct PullCheck {
+    name: String,
+    status: String,
+    conclusion: Option<String>,
+    output: Option<PullCheckOutput>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct PullCheckOutput {
+    title: String,
+    summary: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct PullReview {
+    id: u64,
+    author: String,
+    state: String,
+    body: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct PullComment {
+    id: u64,
+    author: String,
+    path: String,
+    line: Option<u64>,
+    body: String,
+}
+
+impl Pull {
+    fn of(number: u64, tracked: &crate::watch::Tracked) -> Self {
+        Self {
+            workspace: tracked.workspace.clone(),
+            url: tracked.url.clone(),
+            number,
+            head_sha: tracked.head.as_ref().map(|head| head.head_sha.clone()),
+            summary: crate::watch::summary(&tracked.checks),
+            checks: tracked
+                .checks
+                .iter()
+                .map(|check| PullCheck {
+                    name: check.name.clone(),
+                    status: check.status.clone(),
+                    conclusion: check.conclusion.clone(),
+                    output: check.output.as_ref().map(|output| PullCheckOutput {
+                        title: output.title.0.clone(),
+                        summary: output.summary.0.clone(),
+                    }),
+                })
+                .collect(),
+            reviews: tracked
+                .reviews
+                .iter()
+                .map(|review| PullReview {
+                    id: review.id,
+                    author: review.author.clone(),
+                    state: review.state.clone(),
+                    body: review.body.0.clone(),
+                })
+                .collect(),
+            comments: tracked
+                .comments
+                .iter()
+                .map(|comment| PullComment {
+                    id: comment.id,
+                    author: comment.author.clone(),
+                    path: comment.path.clone(),
+                    line: comment.line,
+                    body: comment.body.0.clone(),
+                })
+                .collect(),
+        }
+    }
 }
 
 /// The `/api` nest answers its own misses (Y-169). Without this the miss falls
@@ -2445,6 +2549,44 @@ pub(crate) mod tests {
         assert!(body["data"][1]["said"].as_str().is_some());
     }
 
+    /// Y-512: the watch's memory on the wire, with what each check and
+    /// reviewer wrote, and an empty list when nothing is watched.
+    #[tokio::test]
+    async fn pulls_serve_what_the_watch_holds() {
+        let body = get_json(Fleet::default(), "/pulls").await;
+        assert_eq!(body, json!({"looked": "ok", "age_seconds": 0, "data": []}));
+
+        let fleet = Fleet {
+            pulls: crate::watch::tests::watching_one().await,
+            ..Fleet::default()
+        };
+        let body = get_json(fleet, "/pulls").await;
+        assert_eq!(
+            body["data"][0],
+            json!({
+                "workspace": "api",
+                "url": "https://github.com/o/r/pull/21",
+                "number": 21,
+                "head_sha": "aaa111",
+                "summary": "failed",
+                "checks": [
+                    {"name": "test", "status": "completed", "conclusion": "failure",
+                     "output": {"title": "1 failed", "summary": "`watch::look` panicked"}},
+                    {"name": "lint", "status": "completed", "conclusion": "success",
+                     "output": {"title": "Clean", "summary": ""}},
+                ],
+                "reviews": [
+                    {"id": 7, "author": "friend", "state": "CHANGES_REQUESTED",
+                     "body": "Please add a test."},
+                ],
+                "comments": [
+                    {"id": 31, "author": "friend", "path": "src/watch.rs", "line": 12,
+                     "body": "This drops the etag."},
+                ],
+            })
+        );
+    }
+
     /// M4 reads and nothing else. A write route is where Q6's absent auth stops
     /// being free (R-22), so the refusal is the thing worth asserting.
     #[tokio::test]
@@ -2454,6 +2596,7 @@ pub(crate) mod tests {
             "/workspaces/api/status",
             "/about",
             "/notifications",
+            "/pulls",
         ] {
             for method in ["POST", "PUT", "DELETE", "PATCH"] {
                 let response = router()

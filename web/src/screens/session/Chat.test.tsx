@@ -22,6 +22,7 @@ import {
   chatNotLoggedIn,
   chatQueue,
   chatStopTaskFailed,
+  pulls,
   threads,
 } from '@/contract.gen'
 import { aMentions, commands as claudeCommands } from '@/api/fixtures'
@@ -1062,6 +1063,36 @@ describe('the git actions', () => {
     say(started())
     say(chatCheckpoints[0])
     await settled(() => expect((header().getByRole('button', { name: 'Commit' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+})
+
+describe('Checks and Fix with agent (Y-495)', () => {
+  it('fills the composer with the failed checks and the comments, focuses it, and sends nothing', async () => {
+    const url = 'https://github.com/2002Bishwajeet/yantra/pull/497'
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).endsWith('/threads')
+          ? Response.json([{ ...threads[0], id: '1a2b3c4d', pr: { state: 'open', number: 497, url } }])
+          : String(input) === '/api/pulls'
+            ? Response.json({ ...pulls, data: [{ ...pulls.data[0], url, number: 497 }] })
+            : new Response('no', { status: 404 }),
+      ),
+    )
+    await open()
+    say(started())
+    const header = within(document.querySelector('.chat__header') as HTMLElement)
+    fireEvent.click(await settled(() => header.getByRole('button', { name: 'Checks' })))
+    const surface = await screen.findByRole('dialog', { name: 'Checks on PR #497' })
+    const sent = server.heard.length
+    fireEvent.click(await within(surface).findByRole('button', { name: 'Fix with agent' }))
+
+    const composer = screen.getByLabelText('Message Claude in yantra-web') as HTMLTextAreaElement
+    await settled(() => expect(composer.value).toMatch(/^Fix PR #497:\n\nCheck test failed \(failure\)\./))
+    expect(composer.value).toContain('> src/watch.rs:L12\nThis drops the etag.')
+    await settled(() => expect(document.activeElement).toBe(composer))
+    expect(server.heard).toHaveLength(sent)
   })
 })
 
