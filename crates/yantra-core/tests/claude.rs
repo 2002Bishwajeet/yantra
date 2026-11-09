@@ -1,7 +1,7 @@
 //! Y-356 against a real `claude` in the podman fixture, per §B3: a chat turn
 //! streams, resumes, asks before a tool and stops when it is cancelled, and
-//! (Y-424) reads an image pasted into the chat, and (Y-565) writes nothing in
-//! plan mode.
+//! (Y-424) reads an image pasted into the chat, (Y-565) writes nothing in
+//! plan mode, and (Y-658) keeps a background task alive after its turn.
 //!
 //! It logs in with the owner's own credentials, copied in read-only
 //! (docs/development.md#testing). Without them it skips, and
@@ -19,7 +19,7 @@ use common::{SshFixture, USER};
 use yantra_core::chat::{
     Decision, Event, Interaction, PermissionMode, StreamKind, TurnCompleted, TurnState,
 };
-use yantra_core::claude::{Events, Turn};
+use yantra_core::claude::{Events, Prompt, Session};
 use yantra_core::image::Images;
 use yantra_core::keep::Keeper;
 use yantra_core::ssh::{Machine, Ssh};
@@ -61,18 +61,11 @@ fn state_dir(label: &str) -> Result<PathBuf> {
 }
 
 /// Every event of one turn, answering each permission request with `answer`.
-async fn run(
-    ssh: &Ssh,
-    place: &Place,
-    text: &str,
-    images: Option<&str>,
-    answer: Option<Decision>,
-) -> Result<Vec<Event>> {
+async fn run(ssh: &Ssh, place: &Place, text: &str, answer: Option<Decision>) -> Result<Vec<Event>> {
     run_in(
         ssh,
         place,
         text,
-        images,
         answer,
         PermissionMode::Supervised,
         Interaction::Build,
@@ -84,12 +77,19 @@ async fn run_in(
     ssh: &Ssh,
     place: &Place,
     text: &str,
-    images: Option<&str>,
     answer: Option<Decision>,
     mode: PermissionMode,
     interaction: Interaction,
 ) -> Result<Vec<Event>> {
-    let (turn, mut events) = Turn::start(ssh, place, text, images, mode, interaction)?;
+    let (turn, mut events) = Session::start(
+        ssh,
+        place,
+        &Prompt {
+            text,
+            mode,
+            interaction,
+        },
+    )?;
     let mut seen = Vec::new();
     tokio::time::timeout(PATIENCE, async {
         while let Some(next) = events.recv().await {
@@ -106,6 +106,7 @@ async fn run_in(
     })
     .await
     .with_context(|| format!("a turn took longer than {PATIENCE:?}"))??;
+    turn.close();
     Ok(seen)
 }
 
@@ -196,7 +197,6 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &place,
         "Write three short sentences about the sea. One of them must contain the word periwinkle.",
         None,
-        None,
     )
     .await?;
     let deltas = first
@@ -220,7 +220,6 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &place,
         "Which unusual flower word did your sentences contain? Answer with that one word.",
         None,
-        None,
     )
     .await?;
     assert!(
@@ -233,7 +232,6 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &ssh,
         &place,
         "Use the Bash tool to run exactly this command: touch accepted.txt",
-        None,
         Some(Decision::Accept),
     )
     .await?;
@@ -253,7 +251,6 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         &ssh,
         &place,
         "Use the Bash tool to run exactly this command: touch declined.txt. If it is refused, say so and stop.",
-        None,
         Some(Decision::Decline),
     )
     .await?;
@@ -269,14 +266,15 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         place.worktree
     ))?;
 
-    // Cancel stops the turn, and no claude is left on the machine.
-    let (turn, mut events) = Turn::start(
+    // Cancel stops the turn, and closing stdin leaves no claude on the machine.
+    let (turn, mut events) = Session::start(
         &ssh,
         &place,
-        "Count from 1 to 400, one number per line, with no tools.",
-        None,
-        PermissionMode::Supervised,
-        Interaction::Build,
+        &Prompt {
+            text: "Count from 1 to 400, one number per line, with no tools.",
+            mode: PermissionMode::Supervised,
+            interaction: Interaction::Build,
+        },
     )?;
     next_delta(&mut events).await?;
     turn.cancel();
@@ -297,6 +295,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
         Some(TurnState::Cancelled),
         "{ended:?}"
     );
+    turn.close();
     drop(turn);
     let start = Instant::now();
     loop {
@@ -315,6 +314,7 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
 
 /// Y-424: a pasted image lands over ssh, and Claude reads it. Every request is
 /// declined, so a pass proves `--add-dir` let the read go without a prompt.
+/// Every session adds the directory, so the turn names none (ADR-0041).
 #[tokio::test]
 async fn a_real_claude_reads_a_pasted_image() -> Result<()> {
     let Some((_fixture, ssh, place)) = signed_in("img").await? else {
@@ -331,7 +331,6 @@ async fn a_real_claude_reads_a_pasted_image() -> Result<()> {
         &ssh,
         &place,
         &format!("What colour fills the image at {path}? Answer in one word."),
-        images.dir(),
         Some(Decision::Decline),
     )
     .await?;
@@ -358,7 +357,6 @@ async fn a_real_claude_in_plan_mode_writes_no_file() -> Result<()> {
         &place,
         "Create a file named plan-proof.txt that holds the word proof. \
          Use the Bash tool: echo proof > plan-proof.txt",
-        None,
         Some(Decision::Accept),
         PermissionMode::FullAccess,
         Interaction::Plan,
@@ -390,5 +388,77 @@ async fn a_real_claude_in_plan_mode_writes_no_file() -> Result<()> {
     ))?;
     assert!(status.trim().is_empty(), "{status}: {seen:?}");
     fixture.run(&format!("test ! -e '{}/plan-proof.txt'", place.worktree))?;
+    Ok(())
+}
+
+/*
+ * The prompt is T3 Code's, at commit 67eebaca:
+ * https://github.com/pingdotgg/t3code/blob/67eebaca/apps/server/src/orchestration-v2/testkit/fixtures/claude_background_task_wake/input.ts
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ */
+const BACKGROUND_WAKE: &str = "Live-test a background Bash wake. You must call the Bash tool before replying. \
+    Do exactly this, with no extra steps.\n\n\
+    1) Call the Bash tool with run_in_background set to true and this exact command:\n   \
+    sleep 8 && echo BG_DONE\n\
+    2) After that tool call returns, reply with exactly STARTED and stop. \
+    Do not poll, read its output, or wait for it.\n\
+    3) When its completion is reported later, reply with exactly WAKE_DONE and stop.";
+
+/// Y-658, ADR-0041: the turn that starts a background Bash task ends, the
+/// task runs on in the same process, and its end opens a wake turn.
+#[tokio::test]
+async fn a_real_claude_background_task_outlives_its_turn() -> Result<()> {
+    let Some((_fixture, ssh, place)) = signed_in("bg").await? else {
+        return Ok(());
+    };
+    let (session, mut events) = Session::start(
+        &ssh,
+        &place,
+        &Prompt {
+            text: BACKGROUND_WAKE,
+            mode: PermissionMode::FullAccess,
+            interaction: Interaction::Build,
+        },
+    )?;
+    let mut seen = Vec::new();
+    let mut ended = 0;
+    tokio::time::timeout(PATIENCE, async {
+        while let Some(next) = events.recv().await {
+            if let Event::RequestOpened(opened) = &next.event {
+                session.answer(&opened.request_id, Decision::Accept)?;
+            }
+            if matches!(next.event, Event::TurnCompleted(_)) {
+                ended += 1;
+            }
+            seen.push(next.event);
+            if ended == 2 {
+                return Ok::<_, anyhow::Error>(());
+            }
+        }
+        bail!("the events ended before the wake turn: {seen:?}")
+    })
+    .await
+    .with_context(|| format!("no wake turn within {PATIENCE:?}: {seen:?}"))??;
+    session.close();
+
+    let rosters: Vec<usize> = seen
+        .iter()
+        .filter_map(|event| match event {
+            Event::BackgroundUpdated { tasks } => Some(tasks.len()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rosters.first(), Some(&1), "{seen:?}");
+    assert_eq!(rosters.last(), Some(&0), "{seen:?}");
+    let first_end = seen
+        .iter()
+        .position(|event| matches!(event, Event::TurnCompleted(_)))
+        .context("a first turn.completed")?;
+    assert!(
+        seen[first_end + 1..].contains(&Event::TurnStarted),
+        "a wake turn opens after the first ends: {seen:?}"
+    );
+    assert!(text(&seen).contains("WAKE_DONE"), "{seen:?}");
     Ok(())
 }

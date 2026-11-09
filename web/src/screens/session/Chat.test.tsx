@@ -21,6 +21,7 @@ import {
   chatNotAttached,
   chatNotLoggedIn,
   chatQueue,
+  chatStopTaskFailed,
 } from '@/contract.gen'
 import { aMentions, commands as claudeCommands } from '@/api/fixtures'
 import { writePrefs } from '@/shell/prefs'
@@ -471,6 +472,33 @@ describe('the chat', () => {
     say({ threadId: 't', type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } })
     await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude stopped.'))
     expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy()
+  })
+
+  it('draws the background tasks after the turn ends, stops one, stops all, and drops the list when none run', async () => {
+    await open()
+    type('sleep in the background')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    const [running, none] = chatEvents.filter((event) => event.type === 'thread.background.updated')
+    say(of('turn.started'))
+    say(running)
+    say(of('turn.completed'))
+    const region = await settled(() => screen.getByRole('region', { name: 'Waiting on a background task' }))
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+
+    fireEvent.click(within(region).getByRole('button', { name: 'Stop Background sleep then echo completion marker' }))
+    await settled(() => expect(frames()).toContainEqual({ type: 'stopTask', taskId: 'b561loltj' }))
+    fireEvent.click(within(region).getByRole('button', { name: 'Stop all' }))
+    await settled(() => expect(frames()).toContainEqual({ type: 'stopAll' }))
+    say(none)
+    await settled(() => expect(screen.queryByRole('region', { name: /background task/ })).toBeNull())
+  })
+
+  it('draws a stop the agent refused under its own heading, in its own words', async () => {
+    await open()
+    say(chatStopTaskFailed)
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(within(alert).getByRole('heading').textContent).toBe('The background task could not be stopped')
+    expect(alert.textContent).toContain(chatStopTaskFailed.said)
   })
 
   it('shows the context the last turn used', async () => {

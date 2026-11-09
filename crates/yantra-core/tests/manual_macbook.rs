@@ -747,7 +747,7 @@ fn fresh_session_id() -> anyhow::Result<String> {
 #[ignore = "needs the real MacBook with claude signed in; set YANTRA_MAC=user@host"]
 async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
     use yantra_core::chat::{Event, Interaction, PermissionMode, StreamKind, TurnState};
-    use yantra_core::claude::{self, Turn};
+    use yantra_core::claude::{self, Prompt, Session};
     use yantra_core::keep::{self, File, Keeper, Limits, Started};
     use yantra_core::thread;
 
@@ -790,9 +790,10 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
     let keeper = Keeper::of(&place).ok_or_else(|| anyhow::anyhow!("a chat place has a keeper"))?;
     let agent = claude::command(
         &place.worktree,
-        None,
+        &keeper,
         PermissionMode::Supervised,
         Interaction::Build,
+        None,
         None,
     );
     let run = keep::run_id()?;
@@ -810,12 +811,16 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
             .unwrap_or_default();
         String::from_utf8_lossy(&err).into_owned()
     });
-    let (_turn, mut events) = Turn::kept(
+    let (_session, mut events) = Session::kept(
         reader,
         writer,
         thread::name(&place),
         &run,
-        "Reply with just the word pong.",
+        &Prompt {
+            text: "Reply with just the word pong.",
+            mode: PermissionMode::Supervised,
+            interaction: Interaction::Build,
+        },
         said,
     );
 

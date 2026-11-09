@@ -1,20 +1,26 @@
-//! A chat turn with Claude Code over its `stream-json` (ADR-0026 decision 2),
+//! A chat thread's Claude Code over its `stream-json` (ADR-0026 decision 2),
 //! as [`chat`] events.
 //!
 //! **This is the one module that knows stream-json's shapes**, as
-//! [`crate::acp`] is for ACP v1. A turn is one `claude -p` over `ssh`, in a
-//! thread's worktree ([`crate::thread`]). `--resume` continues the conversation
-//! that the newest transcript there holds, so the daemon remembers nothing
-//! between turns.
+//! [`crate::acp`] is for ACP v1. A [`Session`] is one `claude -p` in a
+//! thread's worktree ([`crate::thread`]), held by a keeper ([`keep`]), and it
+//! lives across turns (ADR-0041). Each turn is one user line on stdin, and
+//! nothing closes stdin after its `result`. Claude opens every turn with
+//! `system/init`, so an `init` that follows a `result` opens the next one. An
+//! `init` with no user line waiting is a wake turn: Claude starts it when a
+//! background task ends.
 //!
-//! Measured on claude 2.1.291 (R20): with `--permission-prompt-tool stdio` a
-//! permission arrives on stdout as a `control_request`, and the answer on stdin
-//! runs or refuses the tool. The process exits once stdin closes after
-//! `result`. No prompt, output or file content is ever logged.
+//! Measured on claude 2.1.291 (R20) and 2.1.319 (ADR-0041): with
+//! `--permission-prompt-tool stdio` a permission arrives on stdout as a
+//! `control_request`, and the answer on stdin runs or refuses the tool.
+//! `set_permission_mode` and `stop_task` are answered on stdin too. The
+//! process exits once stdin closes. No prompt, output or file content is ever
+//! logged.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -26,9 +32,10 @@ use tokio::task::JoinHandle;
 
 use crate::chat::{self, Event, ThreadEvent};
 use crate::delegate::Place;
+use crate::keep::{self, Keeper};
 use crate::ssh::{self, Ssh};
 use crate::tmux::sq;
-use crate::{acp, agent, keep, logs, thread};
+use crate::{acp, agent, logs, thread};
 
 /// How long a closed stdout waits for stderr's last words.
 const STDERR_GRACE: Duration = Duration::from_secs(5);
@@ -40,31 +47,45 @@ pub enum Error {
     #[error(transparent)]
     Ssh(#[from] ssh::Error),
 
-    #[error("the turn has ended, so it takes no more answers")]
+    #[error("claude has ended, so it takes no more lines")]
     Ended,
 
     #[error("no permission request `{0}` is waiting for an answer")]
     NotPending(String),
+
+    #[error("no background task `{0}` is running")]
+    NoTask(String),
+
+    #[error("{0} is not a chat thread")]
+    NotAThread(String),
 }
 
-/// Every event of the turn, in order, ending with `turn.completed`.
+/// Every event of the session, in order. It ends once Claude's stdout has.
 pub type Events = mpsc::UnboundedReceiver<ThreadEvent>;
 
 /// What the agent said on stderr, read once its stdout has ended.
 pub type Said = Pin<Box<dyn Future<Output = String> + Send>>;
 
+/// One turn the person sent, and the modes it runs in.
+#[derive(Debug, Clone, Copy)]
+pub struct Prompt<'a> {
+    pub text: &'a str,
+    pub mode: chat::PermissionMode,
+    pub interaction: chat::Interaction,
+}
+
 /// One running `claude -p`. Dropping it kills the local `ssh` and leaves the
-/// remote `claude` to end when its stdin closes (I-27); [`Turn::cancel`] is
+/// remote `claude` to end when its stdin closes (I-27); [`Session::close`] is
 /// what ends it on purpose.
 #[derive(Debug)]
-pub struct Turn {
+pub struct Session {
     shared: Arc<Shared>,
     tasks: [JoinHandle<()>; 2],
     // Held for `kill_on_drop`.
     _child: Option<tokio::process::Child>,
 }
 
-impl Drop for Turn {
+impl Drop for Session {
     fn drop(&mut self) {
         for task in &self.tasks {
             task.abort();
@@ -72,47 +93,48 @@ impl Drop for Turn {
     }
 }
 
-impl Turn {
-    /// Sends `text` to Claude in the thread's worktree on the machine `ssh`
-    /// reaches. `images` is the directory the chat's images landed in, which
-    /// Claude may then read without asking.
-    pub fn start(
-        ssh: &Ssh,
-        place: &Place,
-        text: &str,
-        images: Option<&str>,
-        mode: chat::PermissionMode,
-        interaction: chat::Interaction,
-    ) -> Result<(Self, Events), Error> {
+impl Session {
+    /// Starts Claude in the thread's worktree on the machine `ssh` reaches,
+    /// over the `ssh` pipe itself, and sends it `first`.
+    pub fn start(ssh: &Ssh, place: &Place, first: &Prompt) -> Result<(Self, Events), Error> {
+        let keeper = Keeper::of(place).ok_or_else(|| Error::NotAThread(place.id.clone()))?;
         let ssh::Piped {
             child,
             stdin,
             stdout,
             stderr,
             log,
-        } = ssh.stdio(&command(&place.worktree, images, mode, interaction, None))?;
+        } = ssh.stdio(&command(
+            &place.worktree,
+            &keeper,
+            first.mode,
+            first.interaction,
+            None,
+            None,
+        ))?;
         let diagnosis = acp::diagnosis(stderr, log);
         let said: Said = Box::pin(async move { diagnosis.await.unwrap_or_default() });
-        let (turn, events) = Self::wire(
+        let (session, events) = Self::wire(
             stdout,
             stdin,
             Parse::new(thread::name(place), None, State::default()),
             Some(said),
             Some(child),
         );
-        turn.shared.send(&prompt(text))?;
-        Ok((turn, events))
+        session.first(first)?;
+        Ok((session, events))
     }
 
-    /// A turn held by a keeper ([`keep`]): `reader` follows its `out` from
-    /// byte 0 and `writer` appends to its `in`. Each event read carries a
-    /// cursor in `run`, and `said` is what the keeper's `err` holds.
+    /// A session held by a keeper ([`keep`]) that [`command`] started with
+    /// `first`'s modes: `reader` follows its `out` from byte 0 and `writer`
+    /// appends to its `in`. Each event read carries a cursor in `run`, and
+    /// `said` is what the keeper's `err` holds.
     pub fn kept<R, W>(
         reader: R,
         writer: W,
         thread: &str,
         run: &str,
-        text: &str,
+        first: &Prompt,
         said: Said,
     ) -> (Self, Events)
     where
@@ -120,13 +142,13 @@ impl Turn {
         W: AsyncWrite + Unpin + Send + 'static,
     {
         let parse = Parse::new(thread, Some((run, 0)), State::default());
-        let (turn, events) = Self::wire(reader, writer, parse, Some(said), None);
+        let (session, events) = Self::wire(reader, writer, parse, Some(said), None);
         // The writer is fresh, so the line is queued.
-        let _ = turn.shared.send(&prompt(text));
-        (turn, events)
+        let _ = session.first(first);
+        (session, events)
     }
 
-    /// A kept turn this daemon did not start, continued where [`replay`]
+    /// A kept session this daemon did not start, continued where [`replay`]
     /// stopped: `reader` follows `out` from [`Replayed::offset`]. The events
     /// already replayed are not sent again.
     pub fn resume<R, W>(reader: R, writer: W, replayed: Replayed, said: Said) -> (Self, Events)
@@ -145,17 +167,17 @@ impl Turn {
         Self::wire(reader, writer, parse, Some(said), None)
     }
 
-    /// The generic half: a turn on any pair of streams.
+    /// The generic half: a session on any pair of streams.
     pub fn over<R, W>(reader: R, writer: W, thread: &str, text: &str) -> (Self, Events)
     where
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
         let parse = Parse::new(thread, None, State::default());
-        let (turn, events) = Self::wire(reader, writer, parse, None, None);
+        let (session, events) = Self::wire(reader, writer, parse, None, None);
         // The writer is fresh, so the line is queued.
-        let _ = turn.shared.send(&prompt(text));
-        (turn, events)
+        let _ = session.prompt(text);
+        (session, events)
     }
 
     fn wire<R, W>(
@@ -176,8 +198,9 @@ impl Turn {
             thread: parse.thread,
             run: parse.run,
             out: Mutex::new(Some(out)),
-            events,
+            events: Mutex::new(Some(events)),
             state: Mutex::new(parse.state),
+            requests: AtomicU64::new(0),
         });
         let tasks = [
             tokio::spawn(read(reader, from, stderr, Arc::clone(&shared))),
@@ -193,6 +216,36 @@ impl Turn {
         )
     }
 
+    /// The first prompt, in the mode the command line already set.
+    fn first(&self, first: &Prompt) -> Result<(), Error> {
+        self.shared.lock().flag = Some(flag(first.mode, first.interaction).to_owned());
+        self.prompt(first.text)
+    }
+
+    fn prompt(&self, text: &str) -> Result<(), Error> {
+        self.shared.lock().waiting += 1;
+        self.shared.send(&user(text))
+    }
+
+    /// Sends the next turn. A mode other than the one Claude runs in is set
+    /// first, on the live process (ADR-0041 decision 5).
+    pub fn send_turn(&self, prompt: &Prompt) -> Result<(), Error> {
+        let flag = flag(prompt.mode, prompt.interaction);
+        let changed = {
+            let mut state = self.shared.lock();
+            let changed = state.flag.as_deref() != Some(flag);
+            state.flag = Some(flag.to_owned());
+            changed
+        };
+        if changed {
+            self.shared.request(
+                "mode",
+                json!({"subtype": "set_permission_mode", "mode": flag}),
+            )?;
+        }
+        self.prompt(prompt.text)
+    }
+
     /// Answers the permission request `request` and runs or refuses its tool.
     pub fn answer(&self, request: &str, decision: chat::Decision) -> Result<(), Error> {
         let pending = self
@@ -204,8 +257,8 @@ impl Turn {
         self.shared.resolve(request, pending, decision)
     }
 
-    /// Refuses whatever is waiting, asks Claude to stop, and closes stdin so the
-    /// remote process ends by itself.
+    /// Refuses whatever is waiting and asks Claude to stop the turn. Stdin
+    /// stays open, so the background tasks run on (ADR-0041 decision 6).
     pub fn cancel(&self) {
         let waiting: Vec<(String, Pending)> = {
             let mut state = self.shared.lock();
@@ -222,14 +275,51 @@ impl Turn {
             "request_id": "yantra-interrupt",
             "request": {"subtype": "interrupt"},
         }));
+    }
+
+    /// Asks Claude to stop the background task `task`.
+    pub fn stop_task(&self, task: &str) -> Result<(), Error> {
+        if !self
+            .shared
+            .lock()
+            .background
+            .iter()
+            .any(|running| running.task_id == task)
+        {
+            return Err(Error::NoTask(task.to_owned()));
+        }
+        self.shared
+            .request("stop", json!({"subtype": "stop_task", "task_id": task}))
+    }
+
+    /// Closes stdin once every line before it is written, which ends Claude.
+    pub fn close(&self) {
         self.shared.close();
+    }
+
+    /// The ids of the background tasks that still run.
+    pub fn background(&self) -> Vec<String> {
+        background_ids(&self.shared.lock())
+    }
+
+    /// Claude's own id of the conversation, from the last `init`.
+    pub fn session_id(&self) -> Option<String> {
+        self.shared.lock().session.clone()
+    }
+
+    /// When Claude last wrote any line, an event or not.
+    pub fn heard(&self) -> Option<tokio::time::Instant> {
+        self.shared.lock().heard
     }
 }
 
 /// `cd` because `claude` has no cwd flag, and the transcript directory is
 /// derived from the cwd. `claude` is searched for as I-34 requires, and a musl
 /// machine gets the ripgrep variable `agent::launch_command` gives the TUI.
-/// `--add-dir` lets Claude read the chat's images without a prompt (Y-424).
+/// `--add-dir` names the thread's images directory, made here, so Claude reads
+/// an image pasted in any later turn without a prompt or a new process
+/// (Y-424, ADR-0041 decision 5). `--resume` names `session`, and a thread
+/// older than its id resumes the newest transcript in the worktree.
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
 /// cannot turn approval off. `Plan` is Claude's own `plan` whatever the mode
@@ -238,22 +328,30 @@ impl Turn {
 /// Claude's plan, and `-p` has them only when asked for (`Tasks`).
 pub fn command(
     worktree: &str,
-    images: Option<&str>,
+    keeper: &Keeper,
     mode: chat::PermissionMode,
     interaction: chat::Interaction,
     mcp: Option<&Mcp>,
+    session: Option<&str>,
 ) -> String {
+    let resume = match session {
+        Some(session) => format!("set -- --resume {}\n", sq(session)),
+        None => format!(
+            "{}[ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n",
+            logs::newest(worktree)
+        ),
+    };
     format!(
         "cd {worktree} || exit 1\n\
          c=$({probe}) || {{ echo 'claude was not found on PATH or in any of: {searched}' >&2; exit 127; }}\n\
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
          export CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n\
-         {newest}\
-         [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n\
-         exec \"$c\" {add}{rooms}--permission-mode {mode} -p --input-format stream-json --output-format stream-json --verbose \
+         mkdir -p -m 700 {images} || exit 1\n\
+         {resume}\
+         exec \"$c\" --add-dir {images} {rooms}--permission-mode {mode} -p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
-        add = images.map_or_else(String::new, |dir| format!("--add-dir {} ", sq(dir))),
+        images = keeper.images(),
         rooms = mcp.map_or_else(String::new, |mcp| format!(
             "--mcp-config {} --allowedTools {ROOM_TOOLS} ",
             sq(&mcp.config())
@@ -261,8 +359,21 @@ pub fn command(
         mode = flag(mode, interaction),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
-        newest = logs::newest(worktree),
     )
+}
+
+/// The prompt of turn `n` of keeper run `run`, as the browser draws it. The
+/// daemon sends it as it writes the line, and [`replay`] makes it again.
+pub fn prompted(thread: &str, run: &str, n: usize, text: String) -> ThreadEvent {
+    ThreadEvent {
+        thread_id: thread.to_owned(),
+        cursor: None,
+        event: Event::ContentDelta(chat::ContentDelta {
+            stream_kind: chat::StreamKind::UserText,
+            delta: text,
+            item_id: Some(format!("user:{run}:{n}")),
+        }),
+    }
 }
 
 const EXIT_PLAN_MODE: &str = "ExitPlanMode";
@@ -322,11 +433,19 @@ pub fn answers(mode: chat::PermissionMode, scope: chat::Scope) -> Option<chat::D
     }
 }
 
-fn prompt(text: &str) -> Value {
+fn user(text: &str) -> Value {
     json!({
         "type": "user",
         "message": {"role": "user", "content": [{"type": "text", "text": text}]},
     })
+}
+
+fn background_ids(state: &State) -> Vec<String> {
+    state
+        .background
+        .iter()
+        .map(|running| running.task_id.clone())
+        .collect()
 }
 
 #[derive(Debug, Default)]
@@ -336,8 +455,16 @@ struct State {
     message: Option<String>,
     /// The context the last assistant message was sent with, in tokens.
     used: Option<u64>,
+    /// The person cancelled the open turn.
     cancelled: bool,
-    completed: bool,
+    /// A turn's `init` came and its `result` has not.
+    open: bool,
+    /// The user lines written whose turn has not opened yet.
+    waiting: usize,
+    /// One for each turn opened, `true` for a wake turn. A turn opened while a
+    /// line waits is taken for that line's, until a `result` from another
+    /// origin says Claude started it (ADR-0041 decision 7).
+    wakes: Vec<bool>,
     /// What a keeper's `in` already answered, so a replay or an adopted turn
     /// never answers it again (ADR-0035 decision 9).
     answered: HashMap<String, chat::Decision>,
@@ -346,6 +473,14 @@ struct State {
     tasks: Tasks,
     /// The `ExitPlanMode` calls, whose item shows the plan.
     plans: HashSet<String>,
+    /// Claude's id of the conversation, from `init`.
+    session: Option<String>,
+    /// The `--permission-mode` Claude runs in now.
+    flag: Option<String>,
+    /// The background tasks that still run, in the order they started.
+    background: Vec<chat::BackgroundTask>,
+    /// When Claude last wrote a line, which pins a keeper with background work.
+    heard: Option<tokio::time::Instant>,
 }
 
 /// A `can_use_tool` request Claude is waiting on.
@@ -356,7 +491,7 @@ struct Pending {
     request_type: chat::RequestType,
 }
 
-/// How a turn's events are made: for which thread, from which offset of a
+/// How a session's events are made: for which thread, from which offset of a
 /// keeper's `out` in which run, and from what state.
 struct Parse {
     thread: String,
@@ -379,12 +514,15 @@ impl Parse {
 #[derive(Debug)]
 struct Shared {
     thread: String,
-    /// The keeper's run, when the turn is read from one.
+    /// The keeper's run, when the session is read from one.
     run: Option<String>,
     /// `None` once stdin is closed.
     out: Mutex<Option<mpsc::UnboundedSender<String>>>,
-    events: mpsc::UnboundedSender<ThreadEvent>,
+    /// `None` once stdout has ended, which ends [`Events`].
+    events: Mutex<Option<mpsc::UnboundedSender<ThreadEvent>>>,
     state: Mutex<State>,
+    /// Numbers the control requests the daemon sends.
+    requests: AtomicU64,
 }
 
 impl Shared {
@@ -392,8 +530,8 @@ impl Shared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// An event read from the line being read, with its cursor when the turn
-    /// is kept.
+    /// An event read from the line being read, with its cursor when the
+    /// session is kept.
     fn emit(&self, event: Event) {
         let cursor = self.run.as_ref().and_then(|run| {
             let mut state = self.lock();
@@ -415,12 +553,19 @@ impl Shared {
     }
 
     fn send_event(&self, cursor: Option<String>, event: Event) {
-        // Nobody listening is not this turn's failure.
-        let _ = self.events.send(ThreadEvent {
-            thread_id: self.thread.clone(),
-            cursor,
-            event,
-        });
+        if let Some(events) = self
+            .events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            // Nobody listening is not this session's failure.
+            let _ = events.send(ThreadEvent {
+                thread_id: self.thread.clone(),
+                cursor,
+                event,
+            });
+        }
     }
 
     fn send(&self, line: &Value) -> Result<(), Error> {
@@ -431,6 +576,16 @@ impl Shared {
             .ok_or(Error::Ended)?
             .send(line.to_string())
             .map_err(|_| Error::Ended)
+    }
+
+    /// A control request of the daemon's own, numbered so no two share an id.
+    fn request(&self, kind: &str, request: Value) -> Result<(), Error> {
+        let n = self.requests.fetch_add(1, Ordering::Relaxed) + 1;
+        self.send(&json!({
+            "type": "control_request",
+            "request_id": format!("yantra-{kind}-{n}"),
+            "request": request,
+        }))
     }
 
     fn close(&self) {
@@ -471,7 +626,11 @@ impl Shared {
 
     /// One line of stdout. `end` is where it ends in a keeper's `out`.
     fn dispatch(&self, line: &[u8], end: Option<u64>) {
-        self.lock().line = end.map(|end| (end, 0));
+        {
+            let mut state = self.lock();
+            state.line = end.map(|end| (end, 0));
+            state.heard = Some(tokio::time::Instant::now());
+        }
         self.dispatch_line(line);
         self.lock().line = None;
     }
@@ -482,7 +641,7 @@ impl Shared {
             return;
         };
         match line {
-            Line::System { subtype } if subtype == "init" => self.emit(Event::TurnStarted),
+            Line::System(system) => self.system(system),
             Line::StreamEvent { event } => self.stream(event),
             Line::Assistant { message } => {
                 if let Some(usage) = &message.usage {
@@ -551,7 +710,79 @@ impl Shared {
                 request,
             } => self.ask(request_id, request),
             Line::Result(outcome) => self.finish(*outcome),
-            Line::System { .. } | Line::Other => {}
+            Line::Other => {}
+        }
+    }
+
+    fn system(&self, system: System) {
+        match system.subtype.as_str() {
+            "init" => {
+                let opened = {
+                    let mut state = self.lock();
+                    if system.session_id.is_some() {
+                        state.session = system.session_id;
+                    }
+                    if system.permission_mode.is_some() {
+                        state.flag = system.permission_mode;
+                    }
+                    let opened = !state.open;
+                    if opened {
+                        state.open = true;
+                        state.message = None;
+                        let wake = state.waiting == 0;
+                        state.waiting = state.waiting.saturating_sub(1);
+                        state.wakes.push(wake);
+                    }
+                    opened
+                };
+                if opened {
+                    self.emit(Event::TurnStarted);
+                }
+            }
+            "status" => {
+                if system.permission_mode.is_some() {
+                    self.lock().flag = system.permission_mode;
+                }
+            }
+            // The roster as Claude has it now, in whatever order the start and
+            // end events come (2.1.281 sends it before the notification).
+            "background_tasks_changed" => {
+                let tasks = system.tasks.unwrap_or_default();
+                self.roster(|roster| *roster = tasks.into_iter().map(Running::task).collect());
+            }
+            "task_started" if system.is_backgrounded != Some(false) => {
+                let Some(task_id) = system.task_id else {
+                    return;
+                };
+                self.roster(|roster| {
+                    if !roster.iter().any(|running| running.task_id == task_id) {
+                        roster.push(chat::BackgroundTask {
+                            task_id,
+                            kind: system.task_type.unwrap_or_default(),
+                            description: system.description.unwrap_or_default(),
+                        });
+                    }
+                });
+            }
+            "task_notification" => {
+                if let Some(task_id) = system.task_id {
+                    self.roster(|roster| roster.retain(|running| running.task_id != task_id));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Changes the roster and sends it when it changed.
+    fn roster(&self, change: impl FnOnce(&mut Vec<chat::BackgroundTask>)) {
+        let changed = {
+            let mut state = self.lock();
+            let before = state.background.clone();
+            change(&mut state.background);
+            (state.background != before).then(|| state.background.clone())
+        };
+        if let Some(tasks) = changed {
+            self.emit(Event::BackgroundUpdated { tasks });
         }
     }
 
@@ -641,12 +872,30 @@ impl Shared {
         }
     }
 
+    /// The turn's `result`. Stdin stays open for the next turn.
     fn finish(&self, outcome: Outcome) {
         let (cancelled, used) = {
             let mut state = self.lock();
-            state.completed = true;
+            if state.open {
+                // A wake turn that opened while a line waited leaves it waiting.
+                if outcome
+                    .origin
+                    .as_ref()
+                    .is_some_and(|origin| origin.kind != "human")
+                    && let Some(wake @ false) = state.wakes.last_mut()
+                {
+                    *wake = true;
+                    state.waiting += 1;
+                }
+            } else {
+                // A turn that failed before its `init`.
+                state.waiting = state.waiting.saturating_sub(1);
+            }
+            let cancelled = state.cancelled || outcome.terminal_reason.starts_with("aborted");
+            state.open = false;
+            state.cancelled = false;
             state.pending.clear();
-            (state.cancelled, state.used)
+            (cancelled, state.used)
         };
         let max = outcome
             .model_usage
@@ -683,21 +932,23 @@ impl Shared {
             }
         };
         self.emit(Event::TurnCompleted(completed));
-        self.close();
     }
 
-    /// stdout ended. A turn with no `result` failed, and what `claude` and
-    /// `ssh` said last is why.
+    /// stdout ended. A turn that is open or still waits to open failed, and
+    /// what `claude` and `ssh` said last is why. The events end here.
     fn ended(&self, said: String) {
-        let (completed, cancelled) = {
+        let unfinished_turn = {
             let state = self.lock();
-            (state.completed, state.cancelled)
+            (state.open || state.waiting > 0).then_some(state.cancelled)
         };
         self.close();
-        if completed {
-            return;
+        if let Some(cancelled) = unfinished_turn {
+            self.emit_made(Event::TurnCompleted(unfinished(cancelled, said)));
         }
-        self.emit_made(Event::TurnCompleted(unfinished(cancelled, said)));
+        self.events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
     }
 }
 
@@ -809,33 +1060,40 @@ async fn read<R: AsyncRead + Unpin>(
     shared.ended(said);
 }
 
-/// A kept turn's events so far, parsed again from its journals: `out` from
-/// byte 0, and `input`, the `in` the daemon wrote, for what was answered.
-/// The same bytes always give the same events with the same cursors.
+/// A kept session's events so far, parsed again from its journals: `out` from
+/// byte 0, and `input`, the `in` the daemon wrote, for the prompts and what
+/// was answered. The same bytes always give the same events with the same
+/// cursors.
 #[derive(Debug)]
 pub struct Replayed {
     thread: String,
     run: String,
-    /// Every event `out`'s whole lines make, in order.
+    /// Every event `out`'s whole lines make, in order, with each prompt the
+    /// daemon sent made again before the turn it opened.
     pub events: Vec<ThreadEvent>,
     /// The offset after the last whole line, where a reader carries on.
     pub offset: u64,
-    /// The prompt the turn was started with.
-    pub prompt: Option<String>,
+    /// The prompts written to `in`, in order.
+    pub prompts: Vec<String>,
     state: State,
 }
 
 impl Replayed {
-    /// Whether `out` holds the turn's `result`.
-    pub fn completed(&self) -> bool {
-        self.state.completed
+    /// Whether a turn is open, or a prompt waits for its turn to open.
+    pub fn running(&self) -> bool {
+        self.state.open || self.state.waiting > 0
+    }
+
+    /// The ids of the background tasks that still ran when `out` was read.
+    pub fn background(&self) -> Vec<String> {
+        background_ids(&self.state)
     }
 
     /// The `turn.completed` the daemon made when this ended keeper's `out`
-    /// stopped with no `result`, made again for a replay (ADR-0035 decision
-    /// 8). `said` is what the keeper's `err` says.
+    /// stopped inside a turn, made again for a replay (ADR-0035 decision 8).
+    /// `said` is what the keeper's `err` says.
     pub fn end(&self, said: String) -> Option<ThreadEvent> {
-        (!self.state.completed).then(|| ThreadEvent {
+        self.running().then(|| ThreadEvent {
             thread_id: self.thread.clone(),
             cursor: None,
             event: Event::TurnCompleted(unfinished(self.state.cancelled, said)),
@@ -846,16 +1104,17 @@ impl Replayed {
 pub fn replay(thread: &str, run: &str, out: &[u8], input: &[u8]) -> Replayed {
     let (sent, _) = keep::lines(input);
     let mut state = State::default();
-    let mut prompt = None;
+    let mut prompts = Vec::new();
+    // An interrupt after the last prompt is the last turn's.
+    let mut interrupted = false;
     for (line, _) in sent {
         match serde_json::from_slice::<Sent>(line) {
             Ok(Sent::User { message }) => {
-                if prompt.is_none() {
-                    prompt = message.content.text();
-                }
+                prompts.push(message.content.text().unwrap_or_default());
+                interrupted = false;
             }
             Ok(Sent::ControlRequest { request }) if request.subtype == "interrupt" => {
-                state.cancelled = true;
+                interrupted = true;
             }
             Ok(Sent::ControlResponse { response }) => {
                 if let Some(answer) = response.response {
@@ -867,14 +1126,16 @@ pub fn replay(thread: &str, run: &str, out: &[u8], input: &[u8]) -> Replayed {
             _ => {}
         }
     }
+    state.waiting = prompts.len();
     let (out_tx, _) = mpsc::unbounded_channel();
     let (events, mut received) = mpsc::unbounded_channel();
     let shared = Shared {
         thread: thread.to_owned(),
         run: Some(run.to_owned()),
         out: Mutex::new(Some(out_tx)),
-        events,
+        events: Mutex::new(Some(events)),
         state: Mutex::new(state),
+        requests: AtomicU64::new(0),
     };
     // A replay answers nothing: what it would send was sent when it was read.
     shared.close();
@@ -882,17 +1143,28 @@ pub fn replay(thread: &str, run: &str, out: &[u8], input: &[u8]) -> Replayed {
     for (line, end) in found {
         shared.dispatch(line, Some(end));
     }
+    let mut state = std::mem::take(&mut *shared.lock());
+    state.cancelled = (state.open || state.waiting > 0) && interrupted;
     let mut replayed = Vec::new();
+    let mut unsent = prompts.iter().cloned().enumerate();
+    let mut turn = 0;
     while let Ok(event) = received.try_recv() {
+        if event.event == Event::TurnStarted {
+            let wake = state.wakes.get(turn).copied().unwrap_or(true);
+            turn += 1;
+            if !wake && let Some((n, text)) = unsent.next() {
+                replayed.push(prompted(thread, run, n + 1, text));
+            }
+        }
         replayed.push(event);
     }
-    let state = std::mem::take(&mut *shared.lock());
+    replayed.extend(unsent.map(|(n, text)| prompted(thread, run, n + 1, text)));
     Replayed {
         thread: thread.to_owned(),
         run: run.to_owned(),
         events: replayed,
         offset,
-        prompt,
+        prompts,
         state,
     }
 }
@@ -914,10 +1186,7 @@ async fn write<W: AsyncWrite + Unpin>(mut writer: W, mut lines: mpsc::UnboundedR
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Line {
-    System {
-        #[serde(default)]
-        subtype: String,
-    },
+    System(System),
     StreamEvent {
         event: StreamEvent,
     },
@@ -937,6 +1206,47 @@ enum Line {
     Result(Box<Outcome>),
     #[serde(other)]
     Other,
+}
+
+/// A `system` line: a turn's `init`, a mode change, or a background task's
+/// start, end or roster.
+#[derive(Deserialize)]
+struct System {
+    #[serde(default)]
+    subtype: String,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default, rename = "permissionMode")]
+    permission_mode: Option<String>,
+    #[serde(default)]
+    tasks: Option<Vec<Running>>,
+    #[serde(default)]
+    task_id: Option<String>,
+    #[serde(default)]
+    task_type: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    is_backgrounded: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct Running {
+    task_id: String,
+    #[serde(default)]
+    task_type: String,
+    #[serde(default)]
+    description: String,
+}
+
+impl Running {
+    fn task(self) -> chat::BackgroundTask {
+        chat::BackgroundTask {
+            task_id: self.task_id,
+            kind: self.task_type,
+            description: self.description,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1174,6 +1484,16 @@ struct Outcome {
     errors: Vec<String>,
     #[serde(rename = "modelUsage", default)]
     model_usage: HashMap<String, ModelUsage>,
+    /// `aborted_streaming` and the like for an interrupted turn.
+    #[serde(default)]
+    terminal_reason: String,
+    /// Who started the turn; a wake turn's is `task-notification`.
+    origin: Option<Origin>,
+}
+
+#[derive(Deserialize)]
+struct Origin {
+    kind: String,
 }
 
 #[derive(Deserialize)]
@@ -1238,6 +1558,9 @@ mod tests {
     };
     use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
+    const WAKE: &str = include_str!("../tests/recordings/claude-2.1.319-background-wake.jsonl");
+    const STOP: &str = include_str!("../tests/recordings/claude-2.1.319-stop-task.jsonl");
+
     const ACCEPT: &str = include_str!("../tests/recordings/claude-2.1.291-accept.jsonl");
     const DECLINE: &str = include_str!("../tests/recordings/claude-2.1.291-decline.jsonl");
     const INTERRUPT: &str = include_str!("../tests/recordings/claude-2.1.291-interrupt.jsonl");
@@ -1266,6 +1589,17 @@ mod tests {
             (read > 0).then(|| serde_json::from_str(&line).expect("one JSON value per line"))
         }
 
+        /// Whether nothing reaches Claude, and stdin stays open, for a moment.
+        async fn silent(&mut self) -> bool {
+            let mut line = String::new();
+            tokio::time::timeout(
+                Duration::from_millis(200),
+                self.from_turn.read_line(&mut line),
+            )
+            .await
+            .is_err()
+        }
+
         async fn play(&mut self, recording: &str) {
             self.to_turn
                 .write_all(recording.as_bytes())
@@ -1274,13 +1608,14 @@ mod tests {
         }
     }
 
-    fn pair(stderr: Option<Said>) -> (Turn, Events, Fake) {
+    fn pair(stderr: Option<Said>) -> (Session, Events, Fake) {
         let (ours, theirs) = tokio::io::duplex(1 << 20);
         let (our_read, our_write) = tokio::io::split(ours);
         let (their_read, their_write) = tokio::io::split(theirs);
         let parse = Parse::new(THREAD, None, State::default());
-        let (turn, events) = Turn::wire(our_read, our_write, parse, stderr, None);
-        let _ = turn.shared.send(&prompt("Run touch made.txt"));
+        let (turn, events) = Session::wire(our_read, our_write, parse, stderr, None);
+        turn.first(&build("Run touch made.txt"))
+            .expect("the writer is fresh");
         let fake = Fake {
             from_turn: BufReader::new(their_read),
             to_turn: their_write,
@@ -1366,8 +1701,8 @@ mod tests {
                 message: None,
             })
         );
-        // `result` closes stdin, which is what lets claude exit.
-        assert_eq!(fake.receive().await, None);
+        // Stdin stays open after `result`, for the next turn (ADR-0041).
+        assert!(fake.silent().await);
         assert!(matches!(
             turn.answer(REQUEST, Decision::Accept),
             Err(Error::NotPending(_))
@@ -1589,11 +1924,7 @@ mod tests {
                         "request": {"subtype": "interrupt"}})
             )
         );
-        assert_eq!(
-            fake.receive().await,
-            None,
-            "stdin closes after the interrupt"
-        );
+        assert!(fake.silent().await, "stdin stays open after the interrupt");
         fake.play(&format!("{}\n", after.join("\n"))).await;
         assert_eq!(
             until_completed(&mut events).await.last(),
@@ -1705,15 +2036,23 @@ mod tests {
         );
     }
 
+    const IMAGES: &str = "\"$HOME\"/.yantra/keep/'w'/'11111111'/images";
+
+    fn keeper() -> Keeper {
+        Keeper::new("w", "11111111")
+    }
+
     /// The worktree reaches the shell quoted, and the transcript directory is
-    /// the slug, which holds nothing a shell acts on.
+    /// the slug, which holds nothing a shell acts on. A thread with no session
+    /// id resumes the newest transcript there.
     #[test]
     fn the_command_cds_into_the_worktree_and_resumes_the_newest_transcript() {
         let script = command(
             "/home/u/.yantra/worktrees/chat/w/11111111",
-            None,
+            &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
+            None,
             None,
         );
         assert!(
@@ -1726,48 +2065,75 @@ mod tests {
              [ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n"
         ));
         assert!(script.contains("\nexport CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n"));
-        assert!(script.ends_with(
-            "exec \"$c\" --permission-mode default -p --input-format stream-json \
+        assert!(script.ends_with(&format!(
+            "exec \"$c\" --add-dir {IMAGES} --permission-mode default -p --input-format stream-json \
              --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio \"$@\"\n"
-        ));
+        )));
 
         let hostile = command(
             "/tmp/x'; touch /tmp/pwned; '",
-            None,
+            &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
+            None,
             None,
         );
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
     }
 
-    /// Y-424: Claude reads the chat's images without asking, and the
-    /// directory reaches the shell quoted.
+    /// ADR-0041 decision 8: a thread that keeps its session id resumes that
+    /// one, never the newest transcript, and the id reaches the shell quoted.
     #[test]
-    fn the_images_directory_is_added_before_the_other_flags() {
+    fn a_kept_session_id_is_resumed_by_name() {
         let script = command(
             "/w",
-            Some("/tmp/yantra-chat-Y01"),
+            &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
             None,
+            Some("9a11f727-ba24"),
         );
         assert!(
-            script.contains(
-                "exec \"$c\" --add-dir '/tmp/yantra-chat-Y01' --permission-mode default -p"
-            ),
+            script.contains("\nset -- --resume '9a11f727-ba24'\nexec "),
             "{script}"
         );
+        assert!(!script.contains("ls -t"), "{script}");
         let hostile = command(
             "/w",
-            Some("/tmp/a'; touch /tmp/pwned; '"),
+            &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
             None,
+            Some("x'; touch /tmp/pwned; '"),
         );
         assert!(
-            hostile.contains(r"--add-dir '/tmp/a'\''; touch /tmp/pwned; '\''' --permission-mode "),
+            hostile.contains(r"set -- --resume 'x'\''; touch /tmp/pwned; '\'''"),
             "{hostile}"
+        );
+    }
+
+    /// Y-424, ADR-0041 decision 5: every session may read the thread's images
+    /// directory, made before Claude starts, so an image pasted in a later
+    /// turn needs no new process.
+    #[test]
+    fn the_images_directory_is_made_and_added_before_the_other_flags() {
+        let script = command(
+            "/w",
+            &keeper(),
+            PermissionMode::Supervised,
+            Interaction::Build,
+            None,
+            None,
+        );
+        assert!(
+            script.contains(&format!("\nmkdir -p -m 700 {IMAGES} || exit 1\n")),
+            "{script}"
+        );
+        assert!(
+            script.contains(&format!(
+                "exec \"$c\" --add-dir {IMAGES} --permission-mode default -p"
+            )),
+            "{script}"
         );
     }
 
@@ -1782,10 +2148,10 @@ mod tests {
             (PermissionMode::Supervised, "default"),
             (PermissionMode::FullAccess, "default"),
         ] {
-            let script = command("/w", Some("/tmp/i"), mode, Interaction::Build, None);
+            let script = command("/w", &keeper(), mode, Interaction::Build, None, None);
             assert!(
                 script.contains(&format!(
-                    "exec \"$c\" --add-dir '/tmp/i' --permission-mode {flag} -p --input-format"
+                    "exec \"$c\" --add-dir {IMAGES} --permission-mode {flag} -p --input-format"
                 )),
                 "{script}"
             );
@@ -1803,9 +2169,11 @@ mod tests {
             PermissionMode::Auto,
             PermissionMode::FullAccess,
         ] {
-            let script = command("/w", None, mode, Interaction::Plan, None);
+            let script = command("/w", &keeper(), mode, Interaction::Plan, None, None);
             assert!(
-                script.contains("exec \"$c\" --permission-mode plan -p"),
+                script.contains(&format!(
+                    "exec \"$c\" --add-dir {IMAGES} --permission-mode plan -p"
+                )),
                 "{script}"
             );
             assert_eq!(script.matches("--permission-mode").count(), 1, "{script}");
@@ -1822,19 +2190,20 @@ mod tests {
         };
         let script = command(
             "/w",
-            Some("/tmp/i"),
+            &keeper(),
             PermissionMode::FullAccess,
             Interaction::Build,
             Some(&mcp),
+            None,
         );
         assert!(
-            script.contains(
-                "exec \"$c\" --add-dir '/tmp/i' --mcp-config '{\"mcpServers\":{\"yantra-room\":\
-                 {\"headers\":{\"X-Yantra-Thread\":\"web/1a2b3c4d\"},\"type\":\"http\",\
-                 \"url\":\"http://100.64.0.1:7717/api/mcp\"}}}' \
+            script.contains(&format!(
+                "exec \"$c\" --add-dir {IMAGES} --mcp-config '{{\"mcpServers\":{{\"yantra-room\":\
+                 {{\"headers\":{{\"X-Yantra-Thread\":\"web/1a2b3c4d\"}},\"type\":\"http\",\
+                 \"url\":\"http://100.64.0.1:7717/api/mcp\"}}}}}}' \
                  --allowedTools mcp__yantra-room__room_send,mcp__yantra-room__room_read \
                  --permission-mode default -p"
-            ),
+            )),
             "{script}"
         );
 
@@ -1844,10 +2213,11 @@ mod tests {
         };
         let script = command(
             "/w",
-            None,
+            &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
             Some(&hostile),
+            None,
         );
         assert!(
             script.contains(
@@ -1880,7 +2250,7 @@ mod tests {
     /// What a daemon writes to `in` for the accept recording: the prompt,
     /// then, when `answered`, the answer.
     fn sent(answered: bool) -> String {
-        let mut lines = format!("{}\n", prompt("Run touch made.txt"));
+        let mut lines = format!("{}\n", user("Run touch made.txt"));
         if answered {
             lines.push_str(&format!(
                 "{}\n",
@@ -1894,13 +2264,19 @@ mod tests {
 
     /// A kept turn over pipes: Claude's stdout is `out` and the line the turn
     /// writes is what `in` would get.
-    fn kept() -> (Turn, Events, Fake) {
+    fn kept() -> (Session, Events, Fake) {
         let (ours, theirs) = tokio::io::duplex(1 << 20);
         let (our_read, our_write) = tokio::io::split(ours);
         let (their_read, their_write) = tokio::io::split(theirs);
         let said: Said = Box::pin(async { String::new() });
-        let (turn, events) =
-            Turn::kept(our_read, our_write, THREAD, RUN, "Run touch made.txt", said);
+        let (turn, events) = Session::kept(
+            our_read,
+            our_write,
+            THREAD,
+            RUN,
+            &build("Run touch made.txt"),
+            said,
+        );
         let fake = Fake {
             from_turn: BufReader::new(their_read),
             to_turn: their_write,
@@ -1952,8 +2328,8 @@ mod tests {
 
         let replayed = replay(THREAD, RUN, ACCEPT.as_bytes(), sent(true).as_bytes());
         assert_eq!(replayed.offset, ACCEPT.len() as u64);
-        assert!(replayed.completed());
-        assert_eq!(replayed.prompt.as_deref(), Some("Run touch made.txt"));
+        assert!(!replayed.running());
+        assert_eq!(replayed.prompts, ["Run touch made.txt"]);
         let cursored = |events: &[ThreadEvent]| -> Vec<ThreadEvent> {
             events
                 .iter()
@@ -1996,7 +2372,7 @@ mod tests {
     async fn an_adopted_turn_waits_on_an_open_request_and_answers_it_once() {
         let head = up_to_the_request(ACCEPT);
         let replayed = replay(THREAD, RUN, head.as_bytes(), sent(false).as_bytes());
-        assert!(!replayed.completed());
+        assert!(replayed.running());
         assert!(matches!(
             replayed.events.last().map(|event| &event.event),
             Some(Event::RequestOpened(_))
@@ -2008,7 +2384,7 @@ mod tests {
         let (our_read, our_write) = tokio::io::split(ours);
         let (their_read, mut their_write) = tokio::io::split(theirs);
         let said: Said = Box::pin(async { String::new() });
-        let (turn, mut events) = Turn::resume(our_read, our_write, replayed, said);
+        let (turn, mut events) = Session::resume(our_read, our_write, replayed, said);
         turn.answer(REQUEST, Decision::Accept)
             .expect("the open request is still open");
         assert!(matches!(
@@ -2145,6 +2521,308 @@ mod tests {
         );
     }
 
+    fn build(text: &str) -> Prompt<'_> {
+        Prompt {
+            text,
+            mode: PermissionMode::Supervised,
+            interaction: Interaction::Build,
+        }
+    }
+
+    fn line(value: &Value) -> String {
+        format!("{value}\n")
+    }
+
+    fn init() -> Value {
+        json!({"type": "system", "subtype": "init", "session_id": "s-1", "permissionMode": "default"})
+    }
+
+    /// A turn's `result`; `origin` names who started a turn the person did not.
+    fn result(origin: Option<&str>) -> Value {
+        let mut done = json!({"type": "result", "subtype": "success", "is_error": false,
+            "stop_reason": "end_turn", "modelUsage": {}});
+        if let Some(kind) = origin {
+            done["origin"] = json!({"kind": kind});
+        }
+        done
+    }
+
+    fn rosters(seen: &[Event]) -> Vec<Vec<String>> {
+        seen.iter()
+            .filter_map(|event| match event {
+                Event::BackgroundUpdated { tasks } => {
+                    Some(tasks.iter().map(|task| task.task_id.clone()).collect())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The shape of a replay: each prompt, turn start and turn end, in order.
+    fn shape(events: &[ThreadEvent]) -> Vec<&'static str> {
+        events
+            .iter()
+            .filter_map(|event| match &event.event {
+                Event::ContentDelta(delta) if delta.stream_kind == StreamKind::UserText => {
+                    Some("prompt")
+                }
+                Event::TurnStarted => Some("turn"),
+                Event::TurnCompleted(_) => Some("end"),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// ADR-0041 decision 1: one process runs turn after turn, each one user
+    /// line, and only `close` ends its stdin.
+    #[tokio::test]
+    async fn one_session_runs_turn_after_turn_on_one_stdin() {
+        let (session, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        fake.play(&(line(&init()) + &line(&result(None)))).await;
+        assert_eq!(until_completed(&mut events).await[0], Event::TurnStarted);
+        assert!(fake.silent().await);
+
+        session
+            .send_turn(&build("and again"))
+            .expect("stdin is open");
+        assert_eq!(fake.receive().await, Some(user("and again")));
+        fake.play(&(line(&init()) + &line(&result(None)))).await;
+        let second = until_completed(&mut events).await;
+        assert_eq!(second[0], Event::TurnStarted);
+        assert_eq!(session.session_id().as_deref(), Some("s-1"));
+
+        session.close();
+        assert_eq!(fake.receive().await, None, "close ends stdin");
+    }
+
+    /// The recorded 2.1.319 run: a background Bash task outlives the turn that
+    /// started it, and its end opens a wake turn that nothing was written for.
+    #[tokio::test]
+    async fn a_background_task_outlives_its_turn_and_wakes_a_turn_of_its_own() {
+        let (session, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        fake.play(WAKE).await;
+        let first = until_completed(&mut events).await;
+        assert!(first.contains(&Event::BackgroundUpdated {
+            tasks: vec![chat::BackgroundTask {
+                task_id: "b561loltj".to_owned(),
+                kind: "local_bash".to_owned(),
+                description: "Background sleep then echo completion marker".to_owned(),
+            }],
+        }));
+        assert_eq!(rosters(&first), [vec!["b561loltj".to_owned()]]);
+
+        let wake = until_completed(&mut events).await;
+        assert_eq!(rosters(&wake), [Vec::<String>::new()]);
+        assert_eq!(
+            wake.iter()
+                .filter(|event| **event == Event::TurnStarted)
+                .count(),
+            1
+        );
+        assert!(matches!(
+            wake.last(),
+            Some(Event::TurnCompleted(TurnCompleted {
+                state: TurnState::Completed,
+                ..
+            }))
+        ));
+        assert!(session.background().is_empty());
+        assert!(fake.silent().await, "nothing is written for a wake turn");
+    }
+
+    /// T3 Code's `claude_background_wake_before_queued_prompt`: Claude runs a
+    /// wake it already had before the line written after the last `result`.
+    /// That line keeps its own turn, live and in a replay.
+    #[tokio::test]
+    async fn a_wake_that_opens_before_a_written_prompt_leaves_the_prompt_its_own_turn() {
+        let (session, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        fake.play(&(line(&init()) + &line(&result(None)))).await;
+        until_completed(&mut events).await;
+        session.send_turn(&build("next")).expect("stdin is open");
+        fake.receive().await;
+        fake.play(&(line(&init()) + &line(&result(Some("task-notification")))))
+            .await;
+        until_completed(&mut events).await;
+        fake.play(&line(&init())).await;
+        assert_eq!(
+            events.recv().await.expect("an event").event,
+            Event::TurnStarted,
+            "the prompt's own turn opens"
+        );
+        drop(fake);
+        assert!(matches!(
+            events.recv().await.expect("an event").event,
+            Event::TurnCompleted(TurnCompleted {
+                state: TurnState::Failed,
+                ..
+            })
+        ));
+        assert!(events.recv().await.is_none(), "the events end with stdout");
+
+        let out = [
+            init(),
+            result(None),
+            init(),
+            result(Some("task-notification")),
+            init(),
+        ]
+        .iter()
+        .map(line)
+        .collect::<String>();
+        let input = line(&user("first")) + &line(&user("next"));
+        let replayed = replay(THREAD, RUN, out.as_bytes(), input.as_bytes());
+        assert!(replayed.running());
+        assert_eq!(
+            shape(&replayed.events),
+            ["prompt", "turn", "end", "turn", "end", "prompt", "turn"]
+        );
+        assert_eq!(
+            replayed.events[5].event,
+            Event::ContentDelta(chat::ContentDelta {
+                stream_kind: StreamKind::UserText,
+                delta: "next".to_owned(),
+                item_id: Some(format!("user:{RUN}:2")),
+            })
+        );
+    }
+
+    /// The roster is Claude's own list. A task's start adds it when no list
+    /// came first, its end removes it, and a foreground task is not one.
+    #[test]
+    fn the_roster_follows_claudes_list_and_each_task_start_and_end() {
+        let task = |id: &str| json!({"task_id": id, "task_type": "local_bash", "description": id});
+        let lines = [
+            init(),
+            json!({"type": "system", "subtype": "task_started", "task_id": "a",
+                   "task_type": "local_agent", "description": "Agent A"}),
+            json!({"type": "system", "subtype": "background_tasks_changed",
+                   "tasks": [task("a"), task("b")]}),
+            // 2.1.281 sends the list before the notification.
+            json!({"type": "system", "subtype": "background_tasks_changed", "tasks": [task("b")]}),
+            json!({"type": "system", "subtype": "task_notification", "task_id": "a",
+                   "status": "completed"}),
+            json!({"type": "system", "subtype": "task_started", "task_id": "f",
+                   "is_backgrounded": false}),
+        ];
+        let out: String = lines.iter().map(line).collect();
+        let replayed = replay(THREAD, RUN, out.as_bytes(), b"");
+        let seen: Vec<Event> = replayed.events.into_iter().map(|e| e.event).collect();
+        assert_eq!(
+            rosters(&seen),
+            [
+                vec!["a".to_owned()],
+                vec!["a".to_owned(), "b".to_owned()],
+                vec!["b".to_owned()]
+            ]
+        );
+        assert_eq!(replayed.state.background.len(), 1);
+    }
+
+    /// ADR-0041 decision 5: a turn in another mode sets it on the live
+    /// process first, and only when it changed.
+    #[tokio::test]
+    async fn a_new_mode_is_set_on_the_live_process_once() {
+        let (session, _events, mut fake) = pair(None);
+        fake.receive().await;
+        let edits = |text| Prompt {
+            text,
+            mode: PermissionMode::AutoAcceptEdits,
+            interaction: Interaction::Build,
+        };
+        session.send_turn(&edits("edit")).expect("stdin is open");
+        assert_eq!(
+            fake.receive().await,
+            Some(
+                json!({"type": "control_request", "request_id": "yantra-mode-1",
+                "request": {"subtype": "set_permission_mode", "mode": "acceptEdits"}})
+            )
+        );
+        assert_eq!(fake.receive().await, Some(user("edit")));
+        session.send_turn(&edits("again")).expect("stdin is open");
+        assert_eq!(fake.receive().await, Some(user("again")));
+        session
+            .send_turn(&Prompt {
+                text: "plan it",
+                mode: PermissionMode::Supervised,
+                interaction: Interaction::Plan,
+            })
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await.expect("a line")["request"],
+            json!({"subtype": "set_permission_mode", "mode": "plan"})
+        );
+        assert_eq!(fake.receive().await, Some(user("plan it")));
+    }
+
+    /// ADR-0041 decision 6, recorded on 2.1.319: `stop_task` stops a task
+    /// that runs, the roster empties, and no wake turn opens.
+    #[tokio::test]
+    async fn stop_task_stops_a_running_task_and_refuses_one_that_does_not_run() {
+        let (session, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        let at = STOP
+            .lines()
+            .position(|line| line.contains("\"type\":\"result\""))
+            .expect("a result");
+        let lines: Vec<&str> = STOP.lines().collect();
+        fake.play(&(lines[..=at].join("\n") + "\n")).await;
+        until_completed(&mut events).await;
+        assert_eq!(session.background(), ["b5cnjn3f7"]);
+
+        assert!(matches!(
+            session.stop_task("b0000000"),
+            Err(Error::NoTask(task)) if task == "b0000000"
+        ));
+        session.stop_task("b5cnjn3f7").expect("it runs");
+        assert_eq!(
+            fake.receive().await,
+            Some(
+                json!({"type": "control_request", "request_id": "yantra-stop-1",
+                "request": {"subtype": "stop_task", "task_id": "b5cnjn3f7"}})
+            )
+        );
+        fake.play(&(lines[at + 1..].join("\n") + "\n")).await;
+        assert_eq!(
+            events.recv().await.expect("an event").event,
+            Event::BackgroundUpdated { tasks: vec![] }
+        );
+        assert!(session.background().is_empty());
+        drop(fake);
+        assert!(events.recv().await.is_none(), "no turn opened");
+    }
+
+    /// A replay of many turns draws each prompt before its turn, none before
+    /// a wake, and says what still runs at the point `out` was cut.
+    #[test]
+    fn a_replay_across_turns_places_each_prompt_and_knows_the_tasks() {
+        let input = line(&user("Run it"));
+        let all = replay(THREAD, RUN, WAKE.as_bytes(), input.as_bytes());
+        assert!(!all.running());
+        assert!(all.background().is_empty());
+        assert_eq!(shape(&all.events), ["prompt", "turn", "end", "turn", "end"]);
+        assert_eq!(all.events[0], prompted(THREAD, RUN, 1, "Run it".to_owned()));
+
+        let cut = |lines: usize| -> String {
+            WAKE.lines()
+                .take(lines)
+                .map(|line| format!("{line}\n"))
+                .collect()
+        };
+        let after_the_turn = replay(THREAD, RUN, cut(7).as_bytes(), input.as_bytes());
+        assert!(!after_the_turn.running());
+        assert_eq!(after_the_turn.background(), ["b561loltj"]);
+        let in_the_wake = replay(THREAD, RUN, cut(12).as_bytes(), input.as_bytes());
+        assert!(in_the_wake.running());
+        assert!(in_the_wake.end(String::new()).is_some());
+        assert_eq!(
+            shape(&in_the_wake.events),
+            ["prompt", "turn", "end", "turn"]
+        );
+    }
+
     /// A line cut off mid-way is not read, so the reader that carries on
     /// starts at that line and no event is made twice.
     #[test]
@@ -2153,6 +2831,6 @@ mod tests {
         let replayed = replay(THREAD, RUN, cut.as_bytes(), sent(true).as_bytes());
         let last_line = ACCEPT.lines().last().map_or(0, str::len) + 1;
         assert_eq!(replayed.offset, (ACCEPT.len() - last_line) as u64);
-        assert!(!replayed.completed());
+        assert!(replayed.running());
     }
 }

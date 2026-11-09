@@ -728,12 +728,12 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
 - **One turn at a time in a thread, across every tab and every restart.** A second `turn` while
   one runs is queued (Y-561), and every socket of the thread gets
   `{"type":"queue","threadId","texts"}`, the list as it is now. A tab that attaches gets it too,
-  an empty list included, so a tab that was away while the queue drained clears it. A Claude
-  keeper holds a turn from its turn's start until it is forgotten, its checkpoint and close
-  included. When the turn ends, the queue goes as one prompt, the texts joined with a blank line,
-  in the last one's mode. A Claude thread starts a new keeper for it before any room prompt. An
-  ACP thread prompts the same agent, or the next keeper when this one closes. `cancel` empties
-  the queue. A socket follows its thread's next keeper, so a tab sees a queued or a room-woken
+  an empty list included, so a tab that was away while the queue drained clears it. A turn holds
+  the thread from its start until its checkpoint is kept. When the turn ends, the queue goes as
+  one prompt, the texts joined with a blank line, in the last one's mode, before any room prompt.
+  It goes to the same agent, Claude's or ACP's, or to the next keeper when this one closes. A
+  turn that Claude opens with no prompt, a wake, holds the thread too, so a prompt sent during it
+  waits for its `result` (ADR-0041 decision 7). `cancel` empties the queue. A socket follows its thread's next keeper, so a tab sees a queued or a room-woken
   turn. A turn that loses a start race is queued behind the winner; it tries again for up to
   60 s and only then is `busy`. A keeper that already runs on the machine is adopted, not
   started again.
@@ -748,20 +748,34 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   once its agent has ended. The session
   listing hides them, and `validate_name` refuses the prefix to a workspace.
 - **A request nobody is attached to see sends one notification** (Y-451), titled with
-  `Phase::WaitingForApproval`'s headline. The body names the workspace and the thread, and nothing
-  of the request.
-- **A Claude keeper ends with its turn.** The task keeps the checkpoint and kills the session.
-  **An ACP keeper stays for the next turn** and stops after 15 minutes with no turn, or once `out`
-  passes half the journal cap. While its agent ends, it takes no turn, and the next turn waits
-  for a new keeper, which calls `session/load`. An agent that has not ended 10 s after its stdin
-  closed is killed (Y-542).
+  `Phase::WaitingForApproval`'s headline. A Claude turn that ends with nobody attached, a wake
+  included, sends one in `Phase::Completed` (ADR-0041 decision 3). The body names the workspace
+  and the thread, and nothing of the request or the turn.
+- **A Claude keeper holds the thread's `claude` across turns**
+  ([ADR-0041](../../docs/adr/0041-a-claude-keeper-holds-the-thread.md), Y-658). Each turn is a
+  user line on the same stdin, and a new mode is a `set_permission_mode` request on it. A turn
+  Claude opens itself when a background task ends is the next turn, with its checkpoint and diff.
+  The keeper closes stdin after 30 minutes with no turn and no background task. A task pins it,
+  and every line Claude writes restarts the pin; 4 silent hours close it. Past half the journal
+  cap it is replaced between turns, unless a task runs. The thread keeps Claude's `session_id`
+  under `branch.<branch>.yantraClaudeSession`, and a new keeper resumes that id. A debug build
+  reads `YANTRA_CHAT_IDLE`, in seconds, in place of the 30 minutes, for `tests/chat_keeper.rs`.
+- **An ACP keeper stays for the next turn** and stops after 15 minutes with no turn and no tab, or
+  once `out` passes half the journal cap. While its agent ends, it takes no turn, and the next
+  turn waits for a new keeper, which calls `session/load`. An agent that has not ended 10 s after
+  its stdin closed is killed (Y-542).
+- **`cancel` stops the turn and leaves background tasks running.** `stopTask{taskId}` sends Claude
+  `stop_task` for one task, and a task that does not run is a `stopTask` failure. `stopAll` stops
+  every task and the turn, then closes the keeper. On an ACP thread `stopAll` is a `cancel`.
+  Claude's task list reaches the browser as `thread.background.updated{tasks}`, each
+  `{taskId, kind, description}`, which is not T3 Code's event. An attach replays it from `out`.
 
 The rules from before the keeper still hold:
 
-- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`, `revert`,
-  `diff` and `ping`; the daemon answers a `ping` with `{"type":"pong"}`, sends protocol pings itself and
+- **The text frames are JSON both ways.** The browser sends `turn`, `answer`, `cancel`,
+  `stopTask`, `stopAll`, `revert`, `diff` and `ping`; the daemon answers a `ping` with `{"type":"pong"}`, sends protocol pings itself and
   ends a chat socket after two misses (Y-668). The daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
-  `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn`, `checkpoint` and `diff`. `notLoggedIn`
+  `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn`, `checkpoint`, `diff` and `stopTask`. `notLoggedIn`
   adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
   `chatQuery`.
 - **Each turn ends in a checkpoint** (Y-448, [`checkpoint`](../yantra-core/src/checkpoint.rs)).
@@ -792,8 +806,8 @@ The rules from before the keeper still hold:
   outside every repository and worktree, under a name the daemon generates. It writes nothing on
   the appliance. Each frame is awaited inline for up to 60 s and gets exactly one reply, in order:
   `{"type":"attached","path"}` or `{"type":"notAttached","kind","said"}`, whose kinds are
-  `notAnImage` and `unreachable`. Every Claude turn after the first image gets `--add-dir` on the
-  directory. A new keeper keeps `images/`, and `thread::remove` deletes it with the thread. The log
+  `notAnImage` and `unreachable`. Every Claude keeper makes the directory and gets `--add-dir` on
+  it at its start, since its process outlives the turn. A new keeper keeps `images/`, and `thread::remove` deletes it with the thread. The log
   says `image attached` and never a byte or a size.
 - **A thread keeps its harness.** An unknown name, or a name that differs from the thread's, is
   `badFrame`. An ACP event is relayed under the worktree's thread id, and ACP's own
@@ -811,7 +825,9 @@ The rules from before the keeper still hold:
   the registry against scripted keepers, and the real things run in `yantra-core/tests/keep.rs`,
   `tests/claude.rs`, `tests/acp.rs`, `tests/thread.rs` and `tests/image.rs`.
   [`tests/chat_keeper.rs`](tests/chat_keeper.rs) is ADR-0035's done test: a real `yantrad` against
-  the podman fixture, through a cut pipe, a closed socket and a killed daemon.
+  the podman fixture, through a cut pipe, a closed socket and a killed daemon. Its ADR-0041 cases
+  prove that a background task outlives its turn and wakes the thread, and that an idle keeper
+  closes.
 
 ## The route that holds rooms
 

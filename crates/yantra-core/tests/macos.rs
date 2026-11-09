@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, Lines};
 use yantra_core::chat::{Event, Interaction, PermissionMode, StreamKind, TurnState};
-use yantra_core::claude::{self, Turn};
+use yantra_core::claude::{self, Prompt, Session};
 use yantra_core::keep::{self, File, Keeper, Limits, Started};
 use yantra_core::ssh::{self, Exec as _, Machine, Os, Ssh};
 use yantra_core::tmux::Tmux;
@@ -297,9 +297,10 @@ async fn a_chat_turn_runs_through_the_keeper_on_the_mac() -> Result<()> {
     let keeper = Keeper::of(&place).context("a chat place has a keeper")?;
     let agent = claude::command(
         &place.worktree,
-        None,
+        &keeper,
         PermissionMode::Supervised,
         Interaction::Build,
+        None,
         None,
     );
     let run = keep::run_id()?;
@@ -324,12 +325,16 @@ async fn a_chat_turn_runs_through_the_keeper_on_the_mac() -> Result<()> {
             .unwrap_or_default();
         String::from_utf8_lossy(&err).into_owned()
     });
-    let (_turn, mut events) = Turn::kept(
+    let (_session, mut events) = Session::kept(
         reader,
         writer,
         thread::name(&place),
         &run,
-        "Say pong.",
+        &Prompt {
+            text: "Say pong.",
+            mode: PermissionMode::Supervised,
+            interaction: Interaction::Build,
+        },
         said,
     );
 

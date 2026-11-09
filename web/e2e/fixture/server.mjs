@@ -923,8 +923,11 @@ function converse(state, request, socket, head, name, thread, after) {
     },
   }
   const usage = contract.chatEvents.find((one) => one.type === 'thread.token-usage.updated')
+  // The `background` scenario (ADR-0041): the turn's background task runs on after its end.
+  const settled = (one) => one.type === 'thread.background.updated' && one.payload.tasks.length === 0
   const stream = contract.chatEvents
     .filter((one) => one.type !== 'thread.started' && !(one.type === 'turn.completed' && one.payload.state === 'failed'))
+    .filter((one) => !(state.background && settled(one)))
     .flatMap((one) => {
       if (!state.composer) return [one]
       // The usage arrives with the turn rather than after it, so a running turn draws the ring.
@@ -970,6 +973,7 @@ function converse(state, request, socket, head, name, thread, after) {
     let known = thread
     let images = 0
     const emit = (one) => {
+      if (one.type === 'thread.background.updated') keeper.tasks = one.payload.tasks
       const cursor = `F${keeper.seq++}:0:0`
       const framed = { ...one, cursor }
       keeper.log.push(framed)
@@ -1037,6 +1041,14 @@ function converse(state, request, socket, head, name, thread, after) {
         say({ threadId: THREAD, type: 'request.resolved', payload: { requestId: 'r1', requestType: 'exec_command_approval', decision: 'cancel' } })
         say({ threadId: THREAD, type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } })
         release()
+      } else if (frame?.type === 'stopTask' && typeof frame.taskId === 'string') {
+        const tasks = keeper.tasks ?? []
+        if (!tasks.some((one) => one.taskId === frame.taskId)) {
+          return fail('stopTask', `no background task \`${frame.taskId}\` is running`)
+        }
+        emit({ threadId: THREAD, type: 'thread.background.updated', payload: { tasks: tasks.filter((one) => one.taskId !== frame.taskId) } })
+      } else if (frame?.type === 'stopAll') {
+        emit({ threadId: THREAD, type: 'thread.background.updated', payload: { tasks: [] } })
       } else if (frame?.type === 'revert' && typeof frame.turn === 'number') {
         if (running.has(THREAD)) return fail('busy', elsewhere)
         say({ threadId: THREAD, type: 'thread.reverted', payload: { turn: frame.turn } })
@@ -1047,7 +1059,7 @@ function converse(state, request, socket, head, name, thread, after) {
       } else if (frame?.type === 'answer') {
         fail('badFrame', 'no turn is running, so nothing is waiting')
       } else {
-        fail('badFrame', 'a frame is a turn, an answer, a cancel, a revert or a diff')
+        fail('badFrame', 'a frame is a turn, an answer, a cancel, a revert, a diff or a stop')
       }
     })
   })
