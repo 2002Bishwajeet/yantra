@@ -1,0 +1,4 @@
+{"type":"control_response","response":{"subtype":"success","request_id":"yantra-effort-2"}}
+{"type":"control_response","response":{"subtype":"success","request_id":"yantra-model-1","response":{"model":"claude-haiku-5-5"}}}
+{"type":"control_response","response":{"subtype":"success","request_id":"yantra-effort-4"}}
+{"type":"control_response","response":{"subtype":"success","request_id":"yantra-model-3","response":{"model":"claude-opus-5-5"}}}

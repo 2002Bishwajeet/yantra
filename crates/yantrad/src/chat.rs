@@ -53,8 +53,10 @@
 //! and the turn runs as `supervised` whatever its mode, so the daemon accepts
 //! nothing for it and the keeper's `mode` file says `supervised`. A room wake
 //! is never a plan turn.
-//! **A `turn` may name a [`Model`] and an [`Effort`]** (Y-564). A Claude turn
-//! starts with them as `--model` and `--effort`; an ACP turn ignores them.
+//! **A `turn` may name a [`Model`] and an [`Effort`]** (Y-564). A Claude
+//! keeper starts with them as `--model` and `--effort`, and a later turn that
+//! changes one sets it on the live process (ADR-0041 decision 5). An ACP turn
+//! ignores them.
 //!
 //! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
@@ -8164,6 +8166,70 @@ mod tests {
         let commands = lock(&script.commands);
         assert!(
             commands[0].contains("--permission-mode default --model 'opus' --effort max -p"),
+            "{}",
+            commands[0]
+        );
+    }
+
+    /// Y-564, ADR-0041 decision 5: a later turn in another model or effort
+    /// sets it on the live process before its line, and starts no other.
+    #[tokio::test]
+    async fn a_new_model_goes_to_the_live_keeper() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test", "model": "opus"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        claude.say(ended()).await;
+        through(&mut tab, "turn.completed").await;
+
+        tab.send(json!({"type": "turn", "text": "and the docs", "model": "haiku"}));
+        let model = claude.heard().await.expect("a line");
+        assert_eq!(
+            model["request"],
+            json!({"subtype": "set_model", "model": "haiku"})
+        );
+        assert_eq!(
+            prompt_of(&claude.heard().await.expect("a line")),
+            "and the docs"
+        );
+        assert_eq!(lock(&script.commands).len(), 1, "one process");
+    }
+
+    #[tokio::test]
+    async fn queue_two_turns_run_in_the_last_ones_model_and_effort() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        tab.send(json!({"type": "turn", "text": "one", "model": "haiku", "effort": "low"}));
+        assert_eq!(tab.next().await, queue(&["one"]));
+        tab.send(json!({"type": "turn", "text": "two", "model": "sonnet", "effort": "high"}));
+        assert_eq!(tab.next().await, queue(&["one", "two"]));
+
+        claude.say(ended()).await;
+        assert_eq!(until_prompt(&mut tab).await["delta"], "one\n\ntwo");
+        assert_eq!(
+            claude.heard().await.expect("a line")["request"],
+            json!({"subtype": "set_model", "model": "sonnet"})
+        );
+        assert_eq!(
+            claude.heard().await.expect("a line")["request"],
+            json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": "high"}})
+        );
+        assert_eq!(
+            prompt_of(&claude.heard().await.expect("a line")),
+            "one\n\ntwo"
+        );
+        let commands = lock(&script.commands);
+        assert_eq!(commands.len(), 1, "one process");
+        assert!(
+            commands[0].contains("--permission-mode default -p"),
             "{}",
             commands[0]
         );

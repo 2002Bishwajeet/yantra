@@ -13,9 +13,9 @@
 //! Measured on claude 2.1.291 (R20) and 2.1.319 (ADR-0041): with
 //! `--permission-prompt-tool stdio` a permission arrives on stdout as a
 //! `control_request`, and the answer on stdin runs or refuses the tool.
-//! `set_permission_mode` and `stop_task` are answered on stdin too. The
-//! process exits once stdin closes. No prompt, output or file content is ever
-//! logged.
+//! `set_permission_mode`, `set_model`, `apply_flag_settings` and `stop_task`
+//! are answered on stdin too. The process exits once stdin closes. No prompt,
+//! output or file content is ever logged.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -222,7 +222,10 @@ impl Session {
 
     /// The first prompt, in the mode the command line already set.
     fn first(&self, first: &Prompt) -> Result<(), Error> {
-        self.shared.lock().flag = Some(flag(first.mode, first.interaction).to_owned());
+        let mut state = self.shared.lock();
+        state.flag = Some(flag(first.mode, first.interaction).to_owned());
+        state.picked = (first.model.cloned(), first.effort);
+        drop(state);
         self.prompt(first.text)
     }
 
@@ -231,20 +234,34 @@ impl Session {
         self.shared.send(&user(text))
     }
 
-    /// Sends the next turn. A mode other than the one Claude runs in is set
-    /// first, on the live process (ADR-0041 decision 5).
+    /// Sends the next turn. A mode, model or effort other than the one Claude
+    /// runs with is set first, on the live process (ADR-0041 decision 5,
+    /// Y-564); `null` is Claude's default.
     pub fn send_turn(&self, prompt: &Prompt) -> Result<(), Error> {
         let flag = flag(prompt.mode, prompt.interaction);
-        let changed = {
+        let (model, effort) = (prompt.model.cloned(), prompt.effort);
+        let (mode_changed, (was_model, was_effort)) = {
             let mut state = self.shared.lock();
-            let changed = state.flag.as_deref() != Some(flag);
+            let mode_changed = state.flag.as_deref() != Some(flag);
             state.flag = Some(flag.to_owned());
-            changed
+            let was = std::mem::replace(&mut state.picked, (model.clone(), effort));
+            (mode_changed, was)
         };
-        if changed {
+        if mode_changed {
             self.shared.request(
                 "mode",
                 json!({"subtype": "set_permission_mode", "mode": flag}),
+            )?;
+        }
+        if was_model != model {
+            self.shared
+                .request("model", json!({"subtype": "set_model", "model": model}))?;
+        }
+        if was_effort != effort {
+            self.shared.request(
+                "effort",
+                json!({"subtype": "apply_flag_settings",
+                    "settings": {"effortLevel": effort}}),
             )?;
         }
         self.prompt(prompt.text)
@@ -331,6 +348,7 @@ impl Session {
 /// (Y-564). `mcp` adds the room server and lets a woken turn
 /// use its tools without a prompt (ADR-0038 decision 2). The task tools are
 /// Claude's plan, and `-p` has them only when asked for (`Tasks`).
+#[allow(clippy::too_many_arguments)]
 pub fn command(
     worktree: &str,
     keeper: &Keeper,
@@ -489,6 +507,9 @@ struct State {
     session: Option<String>,
     /// The `--permission-mode` Claude runs in now.
     flag: Option<String>,
+    /// The `--model` and `--effort` Claude runs with now. A session this
+    /// daemon did not start is taken to run with neither.
+    picked: (Option<chat::Model>, Option<chat::Effort>),
     /// The background tasks that still run, in the order they started.
     background: Vec<chat::BackgroundTask>,
     /// When Claude last wrote a line, which pins a keeper with background work.
@@ -1587,6 +1608,8 @@ mod tests {
 
     const WAKE: &str = include_str!("../tests/recordings/claude-2.1.319-background-wake.jsonl");
     const STOP: &str = include_str!("../tests/recordings/claude-2.1.319-stop-task.jsonl");
+    const MODEL_EFFORT: &str =
+        include_str!("../tests/recordings/claude-2.1.319-set-model-effort.jsonl");
 
     const ACCEPT: &str = include_str!("../tests/recordings/claude-2.1.291-accept.jsonl");
     const DECLINE: &str = include_str!("../tests/recordings/claude-2.1.291-decline.jsonl");
@@ -2887,6 +2910,79 @@ mod tests {
             json!({"subtype": "set_permission_mode", "mode": "plan"})
         );
         assert_eq!(fake.receive().await, Some(user("plan it")));
+    }
+
+    /// Y-564, ADR-0041 decision 5: a turn with another model or effort sets
+    /// it on the live process before its line, and an unchanged pair sends
+    /// nothing. `None` goes back to Claude's default.
+    #[tokio::test]
+    async fn a_new_model_or_effort_is_set_on_the_live_process_once() {
+        let (session, _events, mut fake) = pair(None);
+        fake.receive().await;
+        let opus = Model::try_from("opus".to_owned()).expect("a model");
+        let turn = |text, model, effort| Prompt {
+            model,
+            effort,
+            ..build(text)
+        };
+        session
+            .send_turn(&turn("same", None, None))
+            .expect("stdin is open");
+        assert_eq!(fake.receive().await, Some(user("same")));
+
+        session
+            .send_turn(&turn("opus", Some(&opus), None))
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await,
+            Some(
+                json!({"type": "control_request", "request_id": "yantra-model-1",
+                "request": {"subtype": "set_model", "model": "opus"}})
+            )
+        );
+        assert_eq!(fake.receive().await, Some(user("opus")));
+
+        session
+            .send_turn(&turn("think", Some(&opus), Some(Effort::Max)))
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await.expect("a line")["request"],
+            json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": "max"}})
+        );
+        assert_eq!(fake.receive().await, Some(user("think")));
+
+        session
+            .send_turn(&turn("again", Some(&opus), Some(Effort::Max)))
+            .expect("stdin is open");
+        assert_eq!(fake.receive().await, Some(user("again")));
+
+        session
+            .send_turn(&turn("default", None, None))
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await.expect("a line")["request"],
+            json!({"subtype": "set_model", "model": null})
+        );
+        assert_eq!(
+            fake.receive().await.expect("a line")["request"],
+            json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": null}})
+        );
+        assert_eq!(fake.receive().await, Some(user("default")));
+    }
+
+    /// Recorded on 2.1.319 with no user turn: Claude answers `set_model` and
+    /// `apply_flag_settings` with success, `null` included, and the session
+    /// reads those answers as no event.
+    #[tokio::test]
+    async fn claudes_answers_to_a_model_or_effort_change_make_no_event() {
+        assert_eq!(MODEL_EFFORT.matches("\"subtype\":\"success\"").count(), 4);
+        assert!(!MODEL_EFFORT.contains("not supported"));
+        let (_session, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        fake.play(MODEL_EFFORT).await;
+        fake.play(&(line(&init()) + &line(&result(None)))).await;
+        let seen = until_completed(&mut events).await;
+        assert!(matches!(seen.first(), Some(Event::TurnStarted)), "{seen:?}");
     }
 
     /// ADR-0041 decision 6, recorded on 2.1.319: `stop_task` stops a task

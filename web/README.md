@@ -342,7 +342,8 @@ turn that writes nothing (Y-565); this browser keeps it per thread too, and it i
 off for any other harness. On a Claude thread,
 [`ModelPicker.tsx`](src/screens/session/ModelPicker.tsx) and
 [`EffortPicker.tsx`](src/screens/session/EffortPicker.tsx) pick Claude's model
-and effort, and each is kept per thread the same way (Y-564). Each turn runs
+and effort, and each is kept per thread the same way (Y-564). A change
+reaches the running Claude process before the next turn. Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
 harness. The composer under it is [`src/composer/`](src/composer/Composer.tsx),
