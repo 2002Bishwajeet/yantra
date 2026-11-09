@@ -118,6 +118,15 @@ export type RequestOpened = {
   title?: string
   detail?: string
   options: RequestOption[]
+  /** What Claude's `AskUserQuestion` asks (Y-654); absent for a permission request. */
+  questions?: RequestQuestion[]
+}
+
+export type RequestQuestion = {
+  question: string
+  header: string
+  options: { label: string; description: string }[]
+  multiSelect: boolean
 }
 
 export type TurnCompleted = {
@@ -186,7 +195,7 @@ export type ChatFrame =
       model?: string
       effort?: Effort
     }
-  | { type: 'answer'; requestId: string; decision: Decision }
+  | { type: 'answer'; requestId: string; decision: Decision; answers?: Record<string, string[]> }
   /** Stops the turn; background tasks run on. */
   | { type: 'cancel' }
   /** Stops one background task; a failure is `stopTask`. */

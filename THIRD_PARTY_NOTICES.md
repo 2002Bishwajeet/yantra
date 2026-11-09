@@ -24,6 +24,13 @@ and the failed-run redaction of
 [`apps/server/src/relay/AgentAwarenessRelay.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/relay/AgentAwarenessRelay.ts)
 at commit `72d5c32`, without the `stale` phase. Its name, wordmark and icon are not used.
 
+[`web/src/screens/session/PendingApproval.tsx`](web/src/screens/session/PendingApproval.tsx) and
+[`PendingQuestion.tsx`](web/src/screens/session/PendingQuestion.tsx) copy the shape of
+[`apps/web/src/components/chat/ComposerPendingApprovalActions.tsx`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/ComposerPendingApprovalActions.tsx)
+and
+[`ComposerPendingUserInputPanel.tsx`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx)
+onto Yantra's own buttons and menu.
+
 [`web/src/screens/session/BackgroundWork.tsx`](web/src/screens/session/BackgroundWork.tsx) copies the
 shape of `backgroundWorkNowItem` in
 [`apps/web/src/components/chat/ThreadActivityBanners.tsx`](https://github.com/pingdotgg/t3code/blob/67eebaca/apps/web/src/components/chat/ThreadActivityBanners.tsx)

@@ -111,7 +111,7 @@ test.describe('a turn’s diff', () => {
     await page.goto(`/w/${NAME}`)
     await composer(page).fill('run the core tests')
     await page.getByRole('button', { name: 'Send' }).click()
-    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
 
     const card = page.getByRole('article', { name: 'What turn 1 changed' })
@@ -130,7 +130,7 @@ test.describe('a request the agent is waiting on', () => {
     await page.goto(`/w/${NAME}`)
     await composer(page).fill('run the core tests')
     await page.getByRole('button', { name: 'Send' }).click()
-    const accept = page.getByRole('button', { name: 'Accept', exact: true })
+    const accept = page.getByRole('button', { name: 'Approve', exact: true })
     await expect(accept).toBeVisible()
     await diffButton(page).click()
     await expect(page.getByRole('region', { name: 'Waiting for your answer' })).toBeVisible()

@@ -17,7 +17,7 @@
 //! are answered on stdin too. The process exits once stdin closes. No prompt,
 //! output or file content is ever logged.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -52,6 +52,9 @@ pub enum Error {
 
     #[error("no permission request `{0}` is waiting for an answer")]
     NotPending(String),
+
+    #[error("question `{0}` needs an answer to accept it")]
+    Unanswered(String),
 
     #[error("no background task `{0}` is running")]
     NoTask(String),
@@ -268,14 +271,28 @@ impl Session {
     }
 
     /// Answers the permission request `request` and runs or refuses its tool.
-    pub fn answer(&self, request: &str, decision: chat::Decision) -> Result<(), Error> {
-        let pending = self
-            .shared
-            .lock()
-            .pending
-            .remove(request)
-            .ok_or_else(|| Error::NotPending(request.to_owned()))?;
-        self.shared.resolve(request, pending, decision)
+    /// A question takes `answers`, the labels chosen for each question text.
+    pub fn answer(
+        &self,
+        request: &str,
+        decision: chat::Decision,
+        answers: Option<BTreeMap<String, Vec<String>>>,
+    ) -> Result<(), Error> {
+        let pending = {
+            let mut state = self.shared.lock();
+            let accepts = !matches!(decision, chat::Decision::Decline | chat::Decision::Cancel);
+            let unanswered = answers.as_ref().is_none_or(BTreeMap::is_empty);
+            match state.pending.get(request) {
+                None => return Err(Error::NotPending(request.to_owned())),
+                Some(pending) if pending.question && accepts && unanswered => {
+                    return Err(Error::Unanswered(request.to_owned()));
+                }
+                Some(_) => {}
+            }
+            state.pending.remove(request)
+        }
+        .ok_or_else(|| Error::NotPending(request.to_owned()))?;
+        self.shared.resolve(request, pending, decision, answers)
     }
 
     /// Refuses whatever is waiting and asks Claude to stop the turn. Stdin
@@ -289,7 +306,7 @@ impl Session {
         for (request, pending) in waiting {
             let _ = self
                 .shared
-                .resolve(&request, pending, chat::Decision::Cancel);
+                .resolve(&request, pending, chat::Decision::Cancel, None);
         }
         let _ = self.shared.send(&json!({
             "type": "control_request",
@@ -412,6 +429,7 @@ pub fn prompted(thread: &str, run: &str, n: usize, text: String) -> ThreadEvent 
 }
 
 const EXIT_PLAN_MODE: &str = "ExitPlanMode";
+const ASK_USER_QUESTION: &str = "AskUserQuestion";
 
 /*
  * T3 Code's answer to `ExitPlanMode`, at commit 72d5c32:
@@ -527,6 +545,7 @@ struct Pending {
     input: Value,
     suggestions: Vec<Value>,
     request_type: chat::RequestType,
+    question: bool,
 }
 
 /// How a session's events are made: for which thread, from which offset of a
@@ -638,8 +657,18 @@ impl Shared {
         request: &str,
         pending: Pending,
         decision: chat::Decision,
+        answers: Option<BTreeMap<String, Vec<String>>>,
     ) -> Result<(), Error> {
         let response = match decision {
+            chat::Decision::Accept | chat::Decision::AcceptAlways if pending.question => {
+                let mut input = pending.input;
+                input["answers"] = answers
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(question, labels)| (question, Value::String(labels.join(", "))))
+                    .collect();
+                json!({"behavior": "allow", "updatedInput": input})
+            }
             chat::Decision::Accept => json!({"behavior": "allow", "updatedInput": pending.input}),
             chat::Decision::AcceptAlways => json!({
                 "behavior": "allow",
@@ -873,6 +902,12 @@ impl Shared {
         }
         let request_type = request_type(&tool);
         let title = logs::target_in(&request.input);
+        let question = tool == ASK_USER_QUESTION;
+        let questions = if question {
+            questions(&request.input)
+        } else {
+            Vec::new()
+        };
         let answered = {
             let mut state = self.lock();
             let answered = state.answered.remove(&request_id);
@@ -883,6 +918,7 @@ impl Shared {
                         input: request.input,
                         suggestions: request.permission_suggestions,
                         request_type,
+                        question,
                     },
                 );
             }
@@ -894,8 +930,9 @@ impl Shared {
             item_id: request.tool_use_id,
             title,
             detail: request.description,
-            options: options(),
-            scope: if tool == "AskUserQuestion" {
+            options: if question { decline_only() } else { options() },
+            questions,
+            scope: if question {
                 chat::Scope::Question
             } else {
                 chat::Scope::Other
@@ -1039,6 +1076,47 @@ fn options() -> Vec<chat::RequestOption> {
         decision,
     })
     .collect()
+}
+
+fn decline_only() -> Vec<chat::RequestOption> {
+    options()
+        .into_iter()
+        .filter(|option| option.decision == chat::Decision::Decline)
+        .collect()
+}
+
+/// The questions of an `AskUserQuestion` input, as T3 Code reads them: text
+/// and labels are trimmed, a question with no text is skipped.
+fn questions(input: &Value) -> Vec<chat::Question> {
+    let trimmed = |value: &Value| value.as_str().map(str::trim).unwrap_or_default().to_owned();
+    let list = input["questions"].as_array().map_or(&[][..], Vec::as_slice);
+    let mut found = Vec::new();
+    for (index, raw) in list.iter().enumerate() {
+        let question = trimmed(&raw["question"]);
+        if question.is_empty() {
+            continue;
+        }
+        let header = Some(trimmed(&raw["header"]))
+            .filter(|header| !header.is_empty())
+            .unwrap_or_else(|| format!("Question {}", index + 1));
+        let options = raw["options"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .map(|option| chat::QuestionOption {
+                label: trimmed(&option["label"]),
+                description: trimmed(&option["description"]),
+            })
+            .filter(|option| !option.label.is_empty())
+            .collect();
+        found.push(chat::Question {
+            question,
+            header,
+            options,
+            multi_select: raw["multiSelect"].as_bool().unwrap_or(false),
+        });
+    }
+    found
 }
 
 /// Claude's own suggestions, kept for this session only. `setMode` is left
@@ -1722,6 +1800,7 @@ mod tests {
             title: Some("touch made.txt".to_owned()),
             detail: Some("Create a file named made.txt".to_owned()),
             options: options(),
+            questions: vec![],
             scope: Scope::Other,
         })));
         assert!(seen.contains(&Event::ItemCompleted(Item {
@@ -1759,7 +1838,7 @@ mod tests {
         // Stdin stays open after `result`, for the next turn (ADR-0041).
         assert!(fake.silent().await);
         assert!(matches!(
-            turn.answer(REQUEST, Decision::Accept),
+            turn.answer(REQUEST, Decision::Accept, None),
             Err(Error::NotPending(_))
         ));
     }
@@ -1788,6 +1867,114 @@ mod tests {
                 return opened;
             }
         }
+    }
+
+    fn ask_input() -> Value {
+        json!({"questions": [
+            {"question": " Which db? ", "header": "", "multiSelect": false,
+             "options": [{"label": " pg ", "description": "Postgres"}, {"label": "", "description": "x"}]},
+            {"question": "  ", "header": "skipped"},
+            {"question": "Which parts?", "header": "Parts", "multiSelect": true,
+             "options": [{"label": "A", "description": "a"}, {"label": "B", "description": "b"}]}]})
+    }
+
+    async fn asked_question() -> (Session, Events, Fake, RequestOpened) {
+        let (turn, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        let request = json!({"type": "control_request", "request_id": "r-ask", "request": {
+            "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": ask_input(),
+            "tool_use_id": "toolu_ask"}});
+        fake.play(&format!(
+            "{}\n{request}\n",
+            json!({"type": "system", "subtype": "init"})
+        ))
+        .await;
+        let asked = opened(&mut events).await;
+        (turn, events, fake, asked)
+    }
+
+    #[tokio::test]
+    async fn a_question_opens_with_its_questions_and_only_decline() {
+        let (_turn, _events, _fake, asked) = asked_question().await;
+
+        assert_eq!(asked.scope, Scope::Question);
+        assert_eq!(
+            asked
+                .options
+                .iter()
+                .map(|option| option.decision)
+                .collect::<Vec<_>>(),
+            [Decision::Decline]
+        );
+        assert_eq!(
+            asked.questions,
+            vec![
+                chat::Question {
+                    question: "Which db?".to_owned(),
+                    header: "Question 1".to_owned(),
+                    options: vec![chat::QuestionOption {
+                        label: "pg".to_owned(),
+                        description: "Postgres".to_owned(),
+                    }],
+                    multi_select: false,
+                },
+                chat::Question {
+                    question: "Which parts?".to_owned(),
+                    header: "Parts".to_owned(),
+                    options: vec![
+                        chat::QuestionOption {
+                            label: "A".to_owned(),
+                            description: "a".to_owned(),
+                        },
+                        chat::QuestionOption {
+                            label: "B".to_owned(),
+                            description: "b".to_owned(),
+                        },
+                    ],
+                    multi_select: true,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_answer_to_a_question_writes_the_chosen_labels_joined() {
+        let (turn, _events, mut fake, asked) = asked_question().await;
+        let answers = BTreeMap::from([
+            ("Which db?".to_owned(), vec!["pg".to_owned()]),
+            (
+                "Which parts?".to_owned(),
+                vec!["A".to_owned(), "B".to_owned()],
+            ),
+        ]);
+
+        turn.answer(&asked.request_id, Decision::Accept, Some(answers))
+            .expect("the question is pending");
+
+        let mut updated = ask_input();
+        updated["answers"] = json!({"Which db?": "pg", "Which parts?": "A, B"});
+        assert_eq!(
+            fake.receive().await,
+            Some(json!({"type": "control_response", "response": {
+                "subtype": "success", "request_id": "r-ask",
+                "response": {"behavior": "allow", "updatedInput": updated}}}))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_question_accepted_with_no_answers_is_refused_and_stays_pending() {
+        let (turn, _events, mut fake, asked) = asked_question().await;
+
+        for answers in [None, Some(BTreeMap::new())] {
+            assert!(matches!(
+                turn.answer(&asked.request_id, Decision::Accept, answers),
+                Err(Error::Unanswered(_))
+            ));
+        }
+        turn.answer(&asked.request_id, Decision::Decline, None)
+            .expect("still pending");
+        let sent = fake.receive().await.expect("a refusal");
+        assert_eq!(sent["response"]["response"]["behavior"], "deny");
     }
 
     /// Y-565: Claude proposes a plan with `ExitPlanMode`. The daemon denies it
@@ -1859,7 +2046,7 @@ mod tests {
         fake.play(&up_to_the_request(ACCEPT)).await;
         let asked = opened(&mut events).await;
 
-        turn.answer(&asked.request_id, Decision::Accept)
+        turn.answer(&asked.request_id, Decision::Accept, None)
             .expect("the request is pending");
         assert_eq!(
             fake.receive().await,
@@ -1877,7 +2064,7 @@ mod tests {
             })
         );
         assert!(matches!(
-            turn.answer(REQUEST, Decision::Accept),
+            turn.answer(REQUEST, Decision::Accept, None),
             Err(Error::NotPending(_))
         ));
     }
@@ -1904,7 +2091,7 @@ mod tests {
         fake.play(&up_to_the_request(ACCEPT)).await;
         let asked = opened(&mut events).await;
 
-        turn.answer(&asked.request_id, Decision::AcceptAlways)
+        turn.answer(&asked.request_id, Decision::AcceptAlways, None)
             .expect("the request is pending");
         let sent = fake.receive().await.expect("an answer");
         assert_eq!(
@@ -1927,7 +2114,7 @@ mod tests {
         fake.play(&up_to_the_request(DECLINE)).await;
         let asked = opened(&mut events).await;
 
-        turn.answer(&asked.request_id, Decision::Decline)
+        turn.answer(&asked.request_id, Decision::Decline, None)
             .expect("the request is pending");
         let sent = fake.receive().await.expect("an answer");
         assert_eq!(
@@ -2470,7 +2657,8 @@ mod tests {
             matches!(event, Event::RequestOpened(_))
         })
         .await;
-        turn.answer(REQUEST, Decision::Accept).expect("answered");
+        turn.answer(REQUEST, Decision::Accept, None)
+            .expect("answered");
         let rest: String = ACCEPT
             .lines()
             .skip_while(|line| !line.contains("\"type\":\"control_request\""))
@@ -2539,10 +2727,10 @@ mod tests {
         let (their_read, mut their_write) = tokio::io::split(theirs);
         let said: Said = Box::pin(async { String::new() });
         let (turn, mut events) = Session::resume(our_read, our_write, replayed, said);
-        turn.answer(REQUEST, Decision::Accept)
+        turn.answer(REQUEST, Decision::Accept, None)
             .expect("the open request is still open");
         assert!(matches!(
-            turn.answer(REQUEST, Decision::Accept),
+            turn.answer(REQUEST, Decision::Accept, None),
             Err(Error::NotPending(_))
         ));
         let mut from_turn = BufReader::new(their_read);

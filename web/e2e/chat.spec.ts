@@ -45,13 +45,13 @@ test.describe('the chat, across views, tabs and reloads', () => {
 
     await expect(asking(page)).toBeVisible()
     await expect(page.getByRole('status')).toHaveText('Claude is waiting for your answer.')
-    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
   })
 
   test('a second tab cannot revert during a turn', async ({ page }) => {
     await turn(page)
-    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
     const revert = page.getByRole('button', { name: 'Revert to before this turn' })
     await expect(revert).toBeVisible()
@@ -98,7 +98,7 @@ test.describe('the chat, across views, tabs and reloads', () => {
     await expect(asking(page)).toBeVisible()
 
     expect(decodeURIComponent(await reopened)).toMatch(/after=F\d+:0:0/)
-    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
     await expect(page.getByRole('alert')).toHaveCount(0)
   })
@@ -121,7 +121,7 @@ test.describe('the chat, across views, tabs and reloads', () => {
     await visibility('visible')
     await expect.poll(() => opened.length, { timeout: 2_000 }).toBe(1)
     expect(decodeURIComponent(opened[0]!)).toMatch(/after=F\d+:0:0/)
-    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
   })
 
@@ -130,7 +130,7 @@ test.describe('the chat, across views, tabs and reloads', () => {
     await send(page)
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
     await expect(asking(page)).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Accept', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0)
     await page.getByText('Output').click()
     await expect(page.getByText('test result: ok')).toBeVisible()
   })
@@ -458,8 +458,8 @@ test.describe('the composer, running a turn with a plan', () => {
     await page.getByRole('button', { name: /^Plan: / }).click()
     await expect(page.getByRole('list', { name: /^Plan\./ })).toBeVisible()
     // In the viewport is not enough: the dock must not be what sits over the button.
-    const accept = page.getByRole('button', { name: 'Accept', exact: true })
-    for (const name of ['Accept', 'Accept always', 'Decline']) {
+    const accept = page.getByRole('button', { name: 'Approve', exact: true })
+    for (const name of ['Approve', 'More answers', 'Decline']) {
       const button = page.getByRole('button', { name, exact: true })
       await expect(button).toBeInViewport({ ratio: 1 })
       await expect

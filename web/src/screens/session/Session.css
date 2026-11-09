@@ -268,7 +268,7 @@
 
 /* A command and a path are the agent's words and can be any length. */
 .chat__tool-title,
-.chat__asking-head h3 {
+.pending__head h3 {
   overflow-wrap: anywhere;
 }
 
@@ -305,30 +305,6 @@
   padding: 0;
   list-style: none;
   overflow-wrap: anywhere;
-}
-
-.chat__asking {
-  gap: 12px;
-  width: min(100%, var(--m3-turn-max));
-  padding: var(--m3-card-padding);
-  border-radius: var(--m3-card-radius);
-}
-
-.chat__asking-head {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.chat__asking-head h3,
-.chat__asking p {
-  margin: 0;
-}
-
-.chat__answers {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 /* A mode's description sits under its name, so the menu reads as T3 Code's. */
@@ -780,12 +756,6 @@
   }
 }
 
-.chat__asks {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 /* A sticky dock stays inside its parent, so the chat gives its children to the session's column and the dock
    pins against the whole page. The children keep the reading width the session gives its own. */
 
@@ -805,4 +775,98 @@
 /* The dock owns the page's bottom padding. */
 [data-shell] :is(.shell__main, .shell__body, .shell__column):has(.session__chat:not([hidden]) .composer-dock) {
   padding-bottom: 0;
+}
+
+/* An approval or a question sits in the composer's card, above the field. */
+.pending {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 12px 8px;
+  padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right));
+}
+
+.pending__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending__head h3,
+.pending__head p,
+.pending__question p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pending__question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.pending__question legend {
+  padding: 0;
+}
+
+.pending__options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 48px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--md-sys-color-surface-container-high);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.pending__option input {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--md-sys-color-primary);
+}
+
+.pending__option:has(input:focus-visible) {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+.pending__option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pending__option-text small {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.pending__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (pointer: coarse) {
+  .pending__actions .m3-button {
+    min-height: 48px;
+  }
 }
