@@ -4,8 +4,9 @@ import { useStore } from '@tanstack/react-form'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
 import { dirsQuery } from '@/api/queries'
-import { useGithub, useGithubReadiness, useMachines, useRepos } from '@/api/hooks'
+import { loaded, useGithub, useGithubReadiness, useMachines, useRepos, useWorkspaces } from '@/api/hooks'
 import { grant } from '@/lib/github'
+import type { Workspace } from '@/api'
 import type { Step } from '@/router'
 import { Button } from '@/m3/button/Button'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
@@ -18,7 +19,7 @@ import { useFormFactor } from '@/shell/formFactor'
 import { usePrefs } from '@/shell/prefs'
 import { readGeneral } from '@/screens/settings/general'
 import { useCloneFolder } from './clonePath'
-import { complete, pickMachine, plan, type Plan, reachable, sourceHint, STEPS, tilde, type Values } from './form'
+import { complete, knownWorkspace, pickMachine, plan, type Plan, reachable, sourceHint, STEPS, tilde, type Values } from './form'
 import { Starting } from './Starting'
 import { StepName } from './StepName'
 import { StepSource } from './StepSource'
@@ -40,7 +41,7 @@ const usePresetMachine = () =>
 
 const HINT_ID = 'ns-source-hint'
 
-function SourceHint(props: { values: Values }) {
+function SourceHint(props: { values: Values; known: Workspace | null }) {
   const { root, home } = useCloneFolder(props.values.machine)
   const github = useGithub()
   const repos = useRepos()
@@ -48,10 +49,23 @@ function SourceHint(props: { values: Values }) {
   const listed =
     !github.error && github.data?.connected === true && !refused && repos.looked === 'ok' && !home.error
   const hint = sourceHint(props.values, root, listed)
+  const { known } = props
   return (
-    <Text className="ns__hint" id={HINT_ID} render={<p role="status" />} scale="body-medium" tone="variant">
-      {hint}
-    </Text>
+    <>
+      <Text className="ns__hint" id={HINT_ID} render={<p role="status" />} scale="body-medium" tone="variant">
+        {hint}
+      </Text>
+      {known ? (
+        <p className="ns__known">
+          <Text scale="body-medium" tone="variant">
+            {known.name} already works in this folder. Start a thread in its chat.
+          </Text>
+          <Button render={<Link params={{ name: known.name }} search={{ view: 'chat' }} to="/w/$name" />}>
+            Open {known.name}
+          </Button>
+        </p>
+      ) : null}
+    </>
   )
 }
 
@@ -86,6 +100,8 @@ export function NewSession() {
     void navigate({ to: '/new', search: { step: 4 } })
   })
   const values = useStore(form.store, (state) => state.values)
+  const workspaces = loaded(useWorkspaces())
+  const known = workspaces.looked === 'ok' ? knownWorkspace(values, workspaces.data) : null
 
   // The list can arrive after mount, so the preset is resolved once it reads
   // ok; a pick made meanwhile is never overwritten.
@@ -197,7 +213,7 @@ export function NewSession() {
       {step === 3 ? <StepStart form={form} values={values} /> : null}
 
       <footer className="ns__foot">
-        {step === 2 ? <SourceHint values={values} /> : null}
+        {step === 2 ? <SourceHint known={known} values={values} /> : null}
         {step === 1 ? (
           <Button role="link" render={<Link to="/" />} variant="text">
             Cancel
@@ -211,6 +227,7 @@ export function NewSession() {
           aria-describedby={step === 2 && !complete(step, values) ? HINT_ID : undefined}
           disabled={!complete(step, values)}
           type="submit"
+          variant={step === 2 && known ? 'tonal' : undefined}
         >
           {step === 3 ? 'Create and open' : 'Continue'}
         </Button>
