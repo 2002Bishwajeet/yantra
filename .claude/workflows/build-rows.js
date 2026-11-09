@@ -124,6 +124,18 @@ const REVIEW_SCHEMA = {
   required: ['blocking', 'minor', 'doneMet', 'head'],
 }
 
+const WALK_SCHEMA = {
+  type: 'object',
+  properties: {
+    needs: { type: 'array', items: { type: 'string', enum: ['web', 'machine'] }, description: 'what `walk.sh needs` printed' },
+    shots: { type: 'array', items: { type: 'string' }, description: 'absolute paths of the PNG and TXT files `walk.sh shoot` listed' },
+    seen: { type: 'string', description: 'one line per screenshot: what it shows, and any console error from errors.txt' },
+    mac: { type: 'string', enum: ['not-needed', 'pass', 'fail', 'unreachable'] },
+    failures: { type: 'string', description: 'the failing command and the last 60 lines of its output' },
+  },
+  required: ['needs', 'shots', 'mac'],
+}
+
 const SHIP_SCHEMA = {
   type: 'object',
   properties: {
@@ -222,6 +234,44 @@ async function verifyUntilGreen(row, wt, plan, rounds) {
   return false
 }
 
+// Y-660: the gate runs against the fixture, so a visible row is also walked on the real product, and a machine row
+// also runs on the real Mac. walk.sh holds the paths that decide which, and its guard refuses the merge without it.
+const WALK = `${REPO}/.claude/workflows/walk.sh`
+async function walk(row, wt) {
+  return serialVerify(() =>
+    agent(
+      `Walk ${row.id} in ${wt} on the real product. Do not change any tracked file.
+1. Run \`bash ${WALK} needs ${wt}\`. Return its lines as needs. If it prints nothing, return needs=[], shots=[], mac=not-needed and stop.
+2. Run \`bash ${WALK} up ${wt}\`. It builds the branch's yantrad and dashboard and serves them against the real fleet on a spare port. Run it in a background shell and wait with Monitor, because the build can take longer than a Bash call.
+3. Read \`git diff origin/main...HEAD\` and web/src/router.ts, and choose the routes that show what the row changed. For a machine row, choose the screens that show that path: the fleet, the machine's page, or the Chat. Run \`bash ${WALK} shoot ${wt} <route>...\`. Only open pages; never press a control that writes, because the machines are real.
+4. Read every PNG and TXT file it lists with the Read tool, and read ${wt}/.walk/shots/errors.txt. Describe each screen in seen.
+5. Always run \`bash ${WALK} down ${wt}\`, also after a failure.
+6. If needs has machine, run \`bash ${WALK} mac ${wt}\` in a background shell and wait with Monitor. Exit 0 is pass, exit 2 is unreachable, any other exit is fail. Put the tail of ${wt}/.walk/test-mac.log in failures. Else mac=not-needed.
+${CLEANUP}`,
+      { label: `walk:${row.id}`, phase: 'Build', schema: WALK_SCHEMA, model: 'sonnet', effort: 'low' },
+    ),
+  )
+}
+
+// Returns the walk, or a reason to park. A failing Mac run is red like the gate, so it gets one fix.
+async function walkUntilGreen(row, wt, plan) {
+  for (let i = 1; ; i++) {
+    const w = await walk(row, wt)
+    if (!w) return 'the walk agent died'
+    if (w.needs.length && !w.shots.length) return `a ${w.needs.join(' and ')} row needs screenshots, and the walk took none: ${w.failures || ''}`
+    if (w.mac === 'unreachable') return 'the row needs the real Mac, and it is unreachable'
+    if (w.mac !== 'fail') return w
+    if (i === 2) return `just test-mac stayed red: ${w.failures || ''}`
+    await fix(row, wt, `\`just test-mac\` failed on the real Mac:\n${w.failures || ''}`)
+    if (!(await verifyUntilGreen(row, wt, plan, 2))) return 'the gate went red after the test-mac fix'
+  }
+}
+
+const shown = (w) =>
+  w.needs.length
+    ? `\nThe walk ran the branch on the real fleet. Read each screenshot and each text file with the Read tool and judge them against the row's outcome in tracker.md: ${w.shots.join(', ')}. Check the copy word by word in the text files, never only in an image: an eye reading a screenshot corrects a misspelt word. A wrong or misspelt word, a layout broken at 390 px, an error or an empty screen where the row expects content is blocking. The walker saw: ${w.seen || 'nothing noted'}.${w.mac === 'pass' ? ' `just test-mac` passed on the real Mac.' : ''}`
+    : ''
+
 async function runRow(row) {
   const branch = `${row.id.toLowerCase()}-auto`
   const wt = `${WT_ROOT}/${branch}`
@@ -250,11 +300,13 @@ Write the tests that prove the done condition first, then the code. Run the fast
     { label: `build:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
   )
   if (!(await verifyUntilGreen(row, wt, plan, 3))) return park('the gate stayed red after 3 rounds')
+  let w = await walkUntilGreen(row, wt, plan)
+  if (typeof w === 'string') return park(w)
 
   const REVIEW_RULE = `Put every finding in blocking or minor; none may be dropped. A finding is blocking when it makes the feature fail on a platform the row or the crate targets, stalls or drops the user's work, leaves state wrong after a failure, leaks a secret or private text, or breaks a crate invariant or a CLAUDE.md rule. Anything you would call "should hold the merge" is blocking. Only style, cost, cleanup and unlikely edge cases are minor. Do not change any file.`
   let r = await agent(
     `Review the change for ${row.id} in ${wt} (git diff origin/main...HEAD). You did not write it.
-Load the code-review skill and review at high effort, with the target \`${wt}\` named explicitly: a review run without it reads the main checkout. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.
+Load the code-review skill and review at high effort, with the target \`${wt}\` named explicitly: a review run without it reads the main checkout. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.${shown(w)}
 ${REVIEW_RULE}`,
     { label: `review:${row.id}:1`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'high' },
   )
@@ -265,9 +317,11 @@ ${REVIEW_RULE}`,
     const base = r.head || 'HEAD~1'
     await fix(row, wt, `A reviewer found:\n${issues}\nFix every point. A fix that changes the approach must also update the tests and the docs it touches.`)
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after review fixes')
+    w = await walkUntilGreen(row, wt, plan)
+    if (typeof w === 'string') return park(w)
     r = await agent(
       `Re-check the change for ${row.id} in ${wt}. You did not write it. An earlier review blocked it on:\n${issues}\n
-Read the fix (git diff ${base}..HEAD) and the code each point names. For each point, decide if the fix resolves it. Also report any new defect the fix brings in. Do not review the rest of the change again.
+Read the fix (git diff ${base}..HEAD) and the code each point names. For each point, decide if the fix resolves it. Also report any new defect the fix brings in. Do not review the rest of the change again.${shown(w)}
 ${REVIEW_RULE}`,
       { label: `review:${row.id}:${fixes + 1}`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'medium' },
     )
@@ -286,7 +340,7 @@ ${REVIEW_RULE}`,
 3. Commit "${row.id}: record the change in the tracker" if steps 1–2 changed anything.${DRY ? `
 4. Dry run: do not push. Return status open.` : `
 4. Push with git push --force-with-lease -u origin ${branch}. If gh pr view ${branch} finds a PR, reuse it. Else run gh pr create --base main --title "${title}" with a body that says what changed and how it was verified. If the row names GitHub issues as #NNN, end the body with one "Closes #NNN" line for each, so the merge closes them. The title becomes the squash commit on main, so it must keep the form "Y-NNN: <what changed>". No AI attribution anywhere.
-5. Run exactly one command: bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> && gh pr merge <pr number> --squash --delete-branch --subject "${title} (#<pr number>)". The guard waits for every check and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the guard fails, return checks-failed with the failing check's log tail.
+5. ${w.needs.length ? `Run \`bash ${WALK} publish ${wt} <pr number>\`. It posts the walk's screenshots on the PR. If it fails, return failed with its output. ` : ''}Run exactly one command: bash ${WALK} guard <pr number> && bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> && gh pr merge <pr number> --squash --delete-branch --subject "${title} (#<pr number>)". The walk guard exits non-zero when the PR changes a screen or a machine path and has no walk comment. The merge guard waits for every check and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the walk guard fails, return failed with its output. If the merge guard fails, return checks-failed with the failing check's log tail.
 6. If GitHub says the branch is behind, return status behind; do not rebase here, because the rebase must be verified.
 7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
         { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'sonnet', effort: 'medium' },
@@ -301,6 +355,8 @@ ${REVIEW_RULE}`,
   if (s && s.status === 'checks-failed') {
     await fix(row, wt, `CI failed on the PR ${s.pr || ''}:\n${s.failures || ''}`)
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return { ...park('CI failed and the fix did not pass the gate'), pr: s.pr }
+    w = await walkUntilGreen(row, wt, plan)
+    if (typeof w === 'string') return { ...park(w), pr: s.pr }
     s = await ship(false)
   }
   if (s && s.status === 'behind') s = await ship(false)

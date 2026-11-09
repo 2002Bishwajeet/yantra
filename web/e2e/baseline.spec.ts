@@ -3,6 +3,7 @@ import { expect, keyboardWalk, scenario, test } from './lib/test'
 /** Y-378: the screenshot budget is small enough that one changed word fails it. */
 test('a changed word fails the empty-states baseline', async ({ page, size }, testInfo) => {
   test.skip(size !== 'phone', 'one size is enough to prove the budget')
+  test.skip(testInfo.project.use.browserName === 'webkit', 'Y-660: the baseline is a Chromium render')
   // A regenerate run would overwrite the baseline with the altered page.
   test.skip(
     ['all', 'changed'].includes(testInfo.config.updateSnapshots),

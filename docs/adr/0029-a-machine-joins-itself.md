@@ -84,3 +84,16 @@ appliance keeps its `yantra` account, because `yantrad` runs as it.
   `install.sh` gives `tailscale serve` (Y-384), or `http://<tailnet address>:7717/join`.
 - **The macOS half is not measured.** Remote Login detection and the LaunchAgent for `yantra-agent`
   were written from Apple's documentation, and no Mac has run them yet.
+
+> **2026-11-09 ([Y-681](../../tracker.md)): a join from another machine carries a code.** Decision 3
+> trusted any caller from the owner's node, and an agent account on that node is not the owner. So
+> [ADR-0044](0044-a-write-needs-the-owners-passkey.md) decision 13 adds a one-time code from a
+> signed-in *Add a machine* screen. Decisions 3 and 4 otherwise stand. The hub's own join keeps
+> ADR-0042's socket path, with no code.
+
+> **2026-11-09 ([Y-667](../../tracker.md)): a Mac also gets a LaunchAgent for its tmux server.**
+> [R24](../research/24-decision-and-practice-audit.md) found that this ADR does not record it. Since
+> Y-632, `tmux::login_server` writes `~/Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux.plist`
+> where it is absent or differs, and loads or kickstarts it in `gui/<uid>` over ssh, without root.
+> [ADR-0018](0018-the-tmux-server-carries-the-macos-login-session.md)'s 2026-11-09 note puts its
+> server on the socket `-L yantra` and sets `ProcessType` to `Interactive`.

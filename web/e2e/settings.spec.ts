@@ -212,8 +212,9 @@ test.describe('settings · General', () => {
 })
 
 test.describe('settings · Providers', () => {
-  test('walks the device flow and never draws a token', async ({ page, size }) => {
-    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  test('walks the device flow and never draws a token', async ({ page, size, browserName }) => {
+    // WebKit has no clipboard permission to grant, and lets a tap write the clipboard without one.
+    if (browserName !== 'webkit') await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await scenario(page, 'nogrant')
     await page.goto('/settings/providers')
     await opened(page, 'Providers', size)
@@ -230,8 +231,10 @@ test.describe('settings · Providers', () => {
 
     await sheet.getByRole('button', { name: 'Copy the code' }).click()
     await expect(sheet.getByRole('button', { name: 'Copied the code' })).toBeVisible()
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('WDJB-MJHT')
-    await page.evaluate(() => navigator.clipboard.writeText(''))
+    // WebKit lets a page write the clipboard on a tap but never lets the test read it back.
+    const readable = browserName !== 'webkit'
+    if (readable) expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('WDJB-MJHT')
+    if (readable) await page.evaluate(() => navigator.clipboard.writeText(''))
 
     // One tap copies the code and opens GitHub in a new tab; the route keeps the test off the network.
     await page.context().route('https://github.com/login/device', (route) => route.fulfill({ body: 'github' }))
@@ -240,7 +243,7 @@ test.describe('settings · Providers', () => {
     const tab = await popup
     await tab.waitForLoadState()
     expect(tab.url()).toBe('https://github.com/login/device')
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('WDJB-MJHT')
+    if (readable) await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('WDJB-MJHT')
 
     // The fixture's daemon completes the flow itself, as the real one polls.
     await expect(sheet.getByText('Signed in as 2002Bishwajeet.')).toBeVisible({ timeout: 15_000 })

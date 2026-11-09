@@ -1082,6 +1082,27 @@ export const chatEvents = [
     "type": "thread.commands.updated"
   },
   {
+    "cursor": "Y0123456789abcdef:1630:0",
+    "payload": {
+      "tasks": [
+        {
+          "description": "Background sleep then echo completion marker",
+          "kind": "local_bash",
+          "taskId": "b561loltj"
+        }
+      ]
+    },
+    "threadId": "1a2b3c4d",
+    "type": "thread.background.updated"
+  },
+  {
+    "payload": {
+      "tasks": []
+    },
+    "threadId": "1a2b3c4d",
+    "type": "thread.background.updated"
+  },
+  {
     "payload": {
       "maxTokens": 200000,
       "usedTokens": 29149
@@ -1135,6 +1156,12 @@ export const chatFailure = {
 export const chatCheckpointFailed = {
   "kind": "checkpoint",
   "said": "git could not keep or restore a checkpoint: fatal: unable to write new index file",
+  "type": "error"
+} satisfies ChatFailure
+
+export const chatStopTaskFailed = {
+  "kind": "stopTask",
+  "said": "no background task `b561loltj` is running",
   "type": "error"
 } satisfies ChatFailure
 
@@ -1219,6 +1246,13 @@ export const chatFrames = [
   },
   {
     "type": "cancel"
+  },
+  {
+    "taskId": "b561loltj",
+    "type": "stopTask"
+  },
+  {
+    "type": "stopAll"
   },
   {
     "turn": 0,

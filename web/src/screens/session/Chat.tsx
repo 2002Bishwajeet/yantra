@@ -40,6 +40,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { BackgroundWork } from './BackgroundWork'
 import { appendToDraft } from './diff/comment'
 import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
@@ -581,10 +582,18 @@ export function Chat(props: ChatProps) {
                   ? 'The files could not be kept or put back'
                   : error.kind === 'diff'
                     ? "The branch's changes could not be read"
-                    : 'The chat could not go on'
+                    : error.kind === 'stopTask'
+                      ? 'The background task could not be stopped'
+                      : 'The chat could not go on'
             }
           />
         ) : null}
+        <BackgroundWork
+          disabled={link !== 'open'}
+          onStop={chat.stopTask}
+          onStopAll={chat.stopAll}
+          tasks={timeline.background}
+        />
         {timeline.queued.length > 0 ? (
           <section aria-label="Queued messages" className="chat__queued">
             <p className="chat__queued-title">Queued, sends when {agent} ends</p>

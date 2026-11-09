@@ -858,3 +858,8 @@
 :root:has([data-shell] .composer-dock) {
   scroll-padding-bottom: calc(var(--composer-dock-height, 260px) + 8px);
 }
+
+/* Y-670: the phone scrolls `main`, so the dock's room goes on it; this beats the shell's own padding by specificity. */
+[data-shell="phone"] .shell__main:has(.composer-dock) {
+  scroll-padding-bottom: calc(var(--composer-dock-height, 260px) + 8px);
+}

@@ -15,6 +15,7 @@ import {
   chatNotAttached,
   chatNotLoggedIn,
   chatQueue,
+  chatStopTaskFailed,
 } from '@/contract.gen'
 import { browser, daemon } from '@/screens/session/harness'
 import { AttachError, ChatError, IMAGE_LIMIT, PAUSES, chatAddress, frameOf, openChat, type ChatSocket } from './chat'
@@ -409,6 +410,22 @@ describe('a daemon frame', () => {
     expect(frameOf(JSON.stringify(chatBranchDiff))).toEqual(chatBranchDiff)
     expect(frameOf(JSON.stringify({ ...chatBranchDiff, files: 'x' }))).toBeNull()
     expect(frameOf(JSON.stringify(chatDiffFailed))).toEqual(chatDiffFailed)
+  })
+
+  it('sends a task stop and a stop of all as the frames the daemon reads, and types a failed stop', async () => {
+    const { socket, errors, opened } = connect()
+    expect(socket.stopTask('b561loltj')).toBe(false)
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    expect(socket.stopTask('b561loltj')).toBe(true)
+    expect(socket.stopAll()).toBe(true)
+    await settled(() => expect(server.heard).toHaveLength(2))
+    const sent = server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : null))
+    expect(sent).toEqual(chatFrames.filter((frame) => frame.type === 'stopTask' || frame.type === 'stopAll'))
+    server.say(JSON.stringify(chatStopTaskFailed))
+    await settled(() => expect(errors.map((error) => error.kind)).toEqual(['stopTask']))
+    expect(errors[0]?.said).toBe(chatStopTaskFailed.said)
+    expect(errors[0]?.describe()).toBe('The agent could not stop that background task. It may have ended already.')
+    socket.close()
   })
 
   it('reaches onBranchDiff, and a failed diff is its own kind', async () => {

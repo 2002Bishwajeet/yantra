@@ -168,3 +168,9 @@ guessed at.
   cannot choose honestly, because offering it means knowing the agent *ended* rather than never
   started. Y-084 put the verdict in the API; Y-096 is where the choice lands. Nothing here decides
   it.
+
+> **2026-11-09 ([Y-666](../../tracker.md)): superseded for Chat threads by
+> [ADR-0045](0045-the-hub-keeps-a-thread-store.md).** This ADR's premise was that Yantra keeps no
+> session id. A Chat thread now has one in the daemon's thread store, and a keeper resumes it by
+> name, as [ADR-0041](0041-a-claude-keeper-holds-the-thread.md) decision 8 says. `yantra resume`
+> for a workspace's TUI session is unchanged, and this ADR still decides it.

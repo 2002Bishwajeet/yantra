@@ -53,6 +53,10 @@ pub enum Event {
     /// Not T3 Code's event: an ACP agent's slash commands (Y-563).
     #[serde(rename = "thread.commands.updated")]
     CommandsUpdated { commands: Vec<Command> },
+    /// Not T3 Code's event: Claude's background tasks that still run, all of
+    /// them each time (ADR-0041 decision 2).
+    #[serde(rename = "thread.background.updated")]
+    BackgroundUpdated { tasks: Vec<BackgroundTask> },
     #[serde(rename = "content.delta")]
     ContentDelta(ContentDelta),
     #[serde(rename = "item.started")]
@@ -123,6 +127,16 @@ pub struct Command {
     /// What the argument is for. `None` takes no argument.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+}
+
+/// A background task Claude runs, such as a Bash command, a subagent or a
+/// workflow. `kind` is Claude's own `task_type`, such as `local_bash`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackgroundTask {
+    pub task_id: String,
+    pub kind: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

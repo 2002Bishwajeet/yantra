@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import type { Size } from './lib/sizes'
+import { endGap, scrollTo } from './lib/scroller'
 
 /* Y-347's screen, first pictured by Y-352. What the Fleet, TabletFleet and
    PhoneFleet boards say the page must carry, at all three sizes.
@@ -188,10 +189,8 @@ test('the last card on the phone clears the floating action button', async ({ pa
   await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
   const fab = page.locator('.shell__fab')
   await expect(fab).toBeVisible()
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-  await expect
-    .poll(() => page.evaluate(() => Math.ceil(window.scrollY + window.innerHeight) >= document.documentElement.scrollHeight - 1))
-    .toBe(true)
+  await scrollTo(page, 'end')
+  await expect.poll(() => endGap(page)).toBeGreaterThanOrEqual(-1)
   const last = (await page.locator('.fleet__card').last().boundingBox())!
   const button = (await fab.boundingBox())!
   expect(last.y + last.height).toBeLessThanOrEqual(button.y + 0.5)

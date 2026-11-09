@@ -2,9 +2,10 @@
 //! under dash, on its own and inside `c=$(…)` (Y-634, Y-635).
 //!
 //! A `Recorder` stands in for the machine and keeps each command it is sent,
-//! then one podman container runs `bash -n` and `dash -n` on all of them. The
-//! envelopes are opened, so the scripts inside base64 and `sh -c '…'` are
-//! checked as well.
+//! then one podman container runs `bash -n` and `dash -n` on all of them. On a
+//! Mac the machine's own `/bin/bash`, `/bin/sh` and `/bin/dash` run them
+//! instead (Y-661). The envelopes are opened, so the scripts inside base64 and
+//! `sh -c '…'` are checked as well.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -29,20 +30,25 @@ use crate::{
 };
 
 /// Bump the tag when `tests/fixture/shells/Containerfile` changes.
+#[cfg(not(target_os = "macos"))]
 const IMAGE: &str = "localhost/yantra-shells:1";
 
-/// Runs `bash -n` and `dash -n` on each file in `/s`, then on it inside
-/// `c=$(…)`, the embedding Y-634 broke. Prints one line per failure. The
-/// newline after `$(` is POSIX's: a script that opens with `(` reads as `$((`.
+/// Runs `<shell> -n` for each shell named after the directory `$1` on each
+/// file in it, then on it inside `c=$(…)`, the embedding Y-634 broke. Prints
+/// one line per failure. The newline after `$(` is POSIX's: a script that
+/// opens with `(` reads as `$((`.
 const CHECKER: &str = r#"
-for f in /s/*; do
+dir=$1; shift
+embedded=$(mktemp) || exit 1
+for f in "$dir"/*; do
   n=${f##*/}
-  { printf 'c=$(\n'; cat "$f"; printf '\n)\n'; } >/tmp/embedded
-  for sh in bash dash; do
+  { printf 'c=$(\n'; cat "$f"; printf '\n)\n'; } >"$embedded"
+  for sh in "$@"; do
     out=$("$sh" -n "$f" 2>&1) || echo "FAIL $n $sh plain: $out"
-    out=$("$sh" -n /tmp/embedded 2>&1) || echo "FAIL $n $sh in c=\$(…): $out"
+    out=$("$sh" -n "$embedded" 2>&1) || echo "FAIL $n $sh in c=\$(…): $out"
   done
 done
+rm -f "$embedded"
 "#;
 
 const REPO: &str = "/home/u/repo";
@@ -411,7 +417,7 @@ async fn every_script() -> Vec<(String, String)> {
         "claude",
         claude::command(
             WORKTREE,
-            Some("/tmp/images"),
+            &Keeper::new("web", "11111111"),
             chat::PermissionMode::Auto,
             chat::Interaction::Plan,
             None,
@@ -420,6 +426,20 @@ async fn every_script() -> Vec<(String, String)> {
                 url: "http://yantra:7717/api/mcp".to_owned(),
                 thread: "web/11111111".to_owned(),
             }),
+            None,
+        ),
+    );
+    r.keep(
+        "claude",
+        claude::command(
+            WORKTREE,
+            &Keeper::new("web", "11111111"),
+            chat::PermissionMode::Supervised,
+            chat::Interaction::Build,
+            None,
+            None,
+            None,
+            Some("9a11f727-ba24-4f1a-9c4b-76ce3721282e"),
         ),
     );
     for harness in [
@@ -518,15 +538,7 @@ const REACHED: &[&str] = &[
 
 /// The checker's failures for `scripts`, or `None` when podman is missing.
 fn check(scripts: &[(String, String)]) -> Option<Vec<String>> {
-    if !podman(&["--version"]).is_ok_and(|out| out.status.success()) {
-        assert!(
-            std::env::var_os("YANTRA_REQUIRE_PODMAN").is_none(),
-            "YANTRA_REQUIRE_PODMAN is set but `podman` is not available"
-        );
-        eprintln!("SKIPPED: `podman` is not available, so bash 3.2 and dash cannot run.");
-        return None;
-    }
-    ensure_image();
+    let shells = shells()?;
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("the clock is after 1970")
@@ -536,19 +548,9 @@ fn check(scripts: &[(String, String)]) -> Option<Vec<String>> {
     for (n, (_, script)) in scripts.iter().enumerate() {
         std::fs::write(dir.join(n.to_string()), script).expect("writing a script");
     }
-    let out = podman(&[
-        "run",
-        "--rm",
-        "--network=none",
-        "-v",
-        &format!("{}:/s:ro,Z", dir.display()),
-        IMAGE,
-        "sh",
-        "-c",
-        CHECKER,
-    ]);
+    let out = shells(&dir);
     let _ = std::fs::remove_dir_all(&dir);
-    let out = out.expect("spawning podman run");
+    let out = out.expect("spawning the checker");
     assert!(
         out.status.success(),
         "the checker did not run: {}",
@@ -570,6 +572,62 @@ fn check(scripts: &[(String, String)]) -> Option<Vec<String>> {
     Some(failures)
 }
 
+/// Runs [`CHECKER`] on a directory of scripts: in the bash 3.2 image with its
+/// dash, or `None` when podman is missing.
+#[cfg(not(target_os = "macos"))]
+fn shells() -> Option<impl Fn(&Path) -> std::io::Result<std::process::Output>> {
+    if !podman(&["--version"]).is_ok_and(|out| out.status.success()) {
+        assert!(
+            std::env::var_os("YANTRA_REQUIRE_PODMAN").is_none(),
+            "YANTRA_REQUIRE_PODMAN is set but `podman` is not available"
+        );
+        eprintln!("SKIPPED: `podman` is not available, so bash 3.2 and dash cannot run.");
+        return None;
+    }
+    ensure_image();
+    Some(|dir: &Path| {
+        podman(&[
+            "run",
+            "--rm",
+            "--network=none",
+            "-v",
+            &format!("{}:/s:ro,Z", dir.display()),
+            IMAGE,
+            "sh",
+            "-c",
+            CHECKER,
+            "checker",
+            "/s",
+            "bash",
+            "dash",
+        ])
+    })
+}
+
+/// A Mac's own shells, which are the ones a Mac runs the scripts with (Y-661).
+#[cfg(target_os = "macos")]
+fn shells() -> Option<impl Fn(&Path) -> std::io::Result<std::process::Output>> {
+    let version = Command::new("/bin/bash")
+        .arg("--version")
+        .output()
+        .expect("macOS has /bin/bash");
+    let version = String::from_utf8_lossy(&version.stdout);
+    assert!(
+        version.contains("version 3.2."),
+        "/bin/bash is not macOS's bash 3.2, so this check proves nothing: {version}"
+    );
+    Some(|dir: &Path| {
+        Command::new("/bin/sh")
+            .arg("-c")
+            .arg(CHECKER)
+            .arg("checker")
+            .arg(dir)
+            .args(["/bin/bash", "/bin/sh", "/bin/dash"])
+            .output()
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
 fn ensure_image() {
     if podman(&["image", "exists", IMAGE]).is_ok_and(|out| out.status.success()) {
         return;
@@ -587,6 +645,7 @@ fn ensure_image() {
     );
 }
 
+#[cfg(not(target_os = "macos"))]
 fn podman(args: &[&str]) -> std::io::Result<std::process::Output> {
     Command::new("podman").args(args).output()
 }

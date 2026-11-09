@@ -196,15 +196,30 @@
   display: contents;
 }
 
-/* WCAG 2.4.11: the navigation bar and the FAB above it are fixed, so the page
-   both leaves room under its last control and scrolls one clear of them —
-   which New session's sticky footer, shorter than the pair, gets as well. */
-:root:has([data-shell="phone"]) {
-  scroll-padding-top: var(--m3-safe-top);
-  scroll-padding-bottom: calc(136px + env(safe-area-inset-bottom, 0px));
+/* Y-670: the phone is an app frame. The shell is one screen tall and `main` is the scroller, so the top
+   bar and the navigation bar hold still, and the page behind them never rubber-bands or pulls to refresh.
+   The tablet and the desktop keep the document as the scroller. */
+[data-shell="phone"] {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
+:root:has([data-shell="phone"]),
+:root:has([data-shell="phone"]) body {
+  overscroll-behavior: none;
+}
+
+/* WCAG 2.4.11: the navigation bar and the FAB above it are fixed, so `main` both leaves room under its
+   last control and scrolls one clear of them — which New session's sticky footer, shorter than the pair,
+   gets as well. Scroll padding binds to the scroller, so it sits on `main` here. */
 [data-shell="phone"] .shell__main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: var(--m3-safe-top);
+  scroll-padding-bottom: calc(136px + env(safe-area-inset-bottom, 0px));
   padding: 0 var(--m3-gutter) calc(136px + env(safe-area-inset-bottom, 0px));
 }
 

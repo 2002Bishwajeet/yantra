@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import type { Scenario } from './scenario'
 import type { Size } from './sizes'
 
@@ -14,12 +14,16 @@ export async function screenshot(
   size: Size,
   options: { overlay?: boolean } = {},
 ) {
+  // Y-660: every baseline is a Chromium render, so WebKit runs the spec's assertions and skips the image.
+  if (test.info().project.use.browserName === 'webkit') return
   // Shell's lazy Account and BellPopover show a slot fallback until they load (321 px).
   await expect(page.locator('.shell__slot')).toHaveCount(0)
   // A full-page capture resizes the viewport under a sticky dock, and the Chat scrolls itself as the page resizes,
   // so two captures differ. A viewport as tall as the page needs no resize: the dock rests at the foot of it.
   const before = page.viewportSize()
-  const docked = !options.overlay && before !== null && (await page.locator('.composer-dock').first().isVisible())
+  // The phone scrolls `.shell__main`, which a full-page capture does not follow, so it grows the viewport to the whole of it too.
+  const phone = !options.overlay && before !== null && (await page.locator('[data-shell="phone"] .shell__main').count()) > 0
+  const docked = phone || (!options.overlay && before !== null && (await page.locator('.composer-dock').first().isVisible()))
   if (docked) {
     // The page grows after its last assertion (an image settles, a draft wraps), so the viewport follows it
     // until two reads a frame apart agree with it.
@@ -28,10 +32,13 @@ export async function screenshot(
     await expect
       .poll(async () => {
         await frame()
-        const height = await page.evaluate(() => document.documentElement.scrollHeight)
+        const height = await page.evaluate(() => {
+          const main = document.querySelector('[data-shell="phone"] .shell__main')
+          return main ? Math.ceil(main.getBoundingClientRect().top + main.scrollHeight) : document.documentElement.scrollHeight
+        })
         if (page.viewportSize()!.height !== height) {
           agreed = 0
-          await page.setViewportSize({ width: before.width, height })
+          await page.setViewportSize({ width: before!.width, height })
           return false
         }
         return ++agreed >= 3
@@ -41,5 +48,5 @@ export async function screenshot(
   await expect(page).toHaveScreenshot(`${screen}-${scenario}-${size}.png`, {
     fullPage: !options.overlay,
   })
-  if (docked) await page.setViewportSize(before)
+  if (docked) await page.setViewportSize(before!)
 }

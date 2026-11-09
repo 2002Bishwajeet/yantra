@@ -418,3 +418,90 @@ test.describe('the account button', () => {
     expect(await account(page).boundingBox()).toEqual(icon)
   })
 })
+
+/** Y-670: the phone shell is an app frame. The top bar and the navigation bar hold still, and `.shell__main` scrolls. */
+test.describe('the phone shell is an app frame', () => {
+  test.beforeEach(async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the app frame is the phone shell')
+    await scenario(page, 'busy')
+  })
+
+  const main = (page: Page) => page.locator('.shell__main')
+  const frame = (page: Page) =>
+    page.evaluate(() => ({
+      barTop: document.querySelector('header')!.getBoundingClientRect().top,
+      navBottom: document.querySelector('nav.m3-navigation-bar')?.getBoundingClientRect().bottom ?? window.innerHeight,
+      innerHeight: window.innerHeight,
+      scrollY: window.scrollY,
+      docOverflow: document.documentElement.scrollHeight - window.innerHeight,
+    }))
+
+  async function holdsWhileMainScrolls(page: Page, path: string, by = 300) {
+    await page.goto(path)
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    const tall = await main(page).evaluate((el) => el.scrollHeight - el.clientHeight)
+    expect(tall).toBeGreaterThan(by)
+
+    const before = await frame(page)
+    await main(page).evaluate((el, y) => el.scrollTo(0, y), by)
+    await expect.poll(() => main(page).evaluate((el) => el.scrollTop)).toBe(by)
+    const after = await frame(page)
+
+    expect(after.barTop).toBe(0)
+    expect(after.navBottom).toBe(after.innerHeight)
+    expect(before.navBottom).toBe(before.innerHeight)
+    expect(after.scrollY).toBe(0)
+    expect(after.docOverflow).toBeLessThanOrEqual(0)
+  }
+
+  test('keeps both bars still while main scrolls', async ({ page }) => {
+    await holdsWhileMainScrolls(page, '/')
+  })
+
+  test('keeps the back bar at the top of a pushed route', async ({ page }) => {
+    await holdsWhileMainScrolls(page, '/notifications', 60)
+    await expect(page.getByRole('button', { name: 'Back' })).toBeInViewport()
+  })
+
+  test('hands the scroll to main and stops the rubber band', async ({ page, browserName }) => {
+    await page.goto('/')
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).overscrollBehaviorY)).toBe('none')
+    const style = await main(page).evaluate((el) => {
+      const css = getComputedStyle(el)
+      return { overflowY: css.overflowY, overscroll: css.overscrollBehaviorY }
+    })
+    expect(style).toEqual({ overflowY: 'auto', overscroll: 'contain' })
+    // Y-660: Playwright has no wheel in mobile WebKit, so WebKit proves the styles and Chromium proves the scroll.
+    if (browserName === 'webkit') return
+
+    const box = (await main(page).boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + 200)
+    await page.mouse.wheel(0, 400)
+    await expect.poll(() => main(page).evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+    expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  })
+
+  test('restores the scroll position of main on back', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    await main(page).evaluate((el) => el.scrollTo(0, 500))
+    await expect.poll(() => main(page).evaluate((el) => el.scrollTop)).toBe(500)
+    await page.getByRole('link', { name: 'Fleet' }).last().click()
+    await expect(page).toHaveURL(/\/fleet$/)
+    await expect.poll(() => main(page).evaluate((el) => el.scrollTop)).toBe(0)
+    await page.goBack()
+    await expect(page).toHaveURL(/\/$/)
+    await expect.poll(() => main(page).evaluate((el) => el.scrollTop)).toBe(500)
+  })
+})
+
+test('the tablet and desktop shells still scroll the document', async ({ page, size }) => {
+  test.skip(size === 'phone', 'the phone shell is the app frame')
+  await scenario(page, 'busy')
+  await page.goto('/')
+  await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+  const style = await page.locator('.shell__main').evaluate((el) => getComputedStyle(el).overflowY)
+  expect(style).toBe('visible')
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-shell]')!).overflow)).toBe('visible')
+})
