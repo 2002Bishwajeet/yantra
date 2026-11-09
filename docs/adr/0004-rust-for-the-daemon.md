@@ -127,3 +127,12 @@ serves one user. Throughput was never the constraint, and no benchmark motivated
 > `~/.config/yantra/passkeys.toml`: passkey public keys and session token hashes. It is an input the
 > owner gives, not a store of what the daemon observed. It holds no session of the fleet, no verdict,
 > no beat and no history, and the first look after a start still knows nothing about the fleet.
+
+> **2026-11-09 (Y-666): the store Y-044 dropped comes back, for Chat threads only.** The Y-044 row
+> named what would bring a store back: the first question about the past. The owner asked it. An
+> offline machine's threads must show with their titles, a session id must outlive its branch, and
+> search needs one index. So [ADR-0045](0045-the-hub-keeps-a-thread-store.md) has the daemon keep
+> `~/.local/state/yantra/threads.sqlite`, one row per thread, with no message text and no secret.
+> The `rusqlite` row of the stack table is now built, and I-12, I-13 and I-14 bind it. The audit's
+> answer for everything else stands: workspaces stay declared, sessions stay derived from tmux, and
+> the beats stay in memory.

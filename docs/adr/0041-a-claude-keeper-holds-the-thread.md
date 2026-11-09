@@ -92,3 +92,9 @@ the thread is idle and no background work runs.**
 - `chat.rs` loses the Claude path that ends a keeper at each turn, and Claude and ACP keepers share
   one life cycle.
 - This ADR does not change who answers a permission request, or Q5.
+
+> **2026-11-09 ([Y-666](../../tracker.md)): decision 8's git config is the copy on the machine.**
+> [ADR-0045](0045-the-hub-keeps-a-thread-store.md) keeps the session id in the daemon's thread
+> store on the hub too, and writes it there first. On a conflict the store's id wins, because an
+> agent in the worktree can run `git config` and cannot write the store. Git config is still
+> written, and it is read for a thread the store has no row for.

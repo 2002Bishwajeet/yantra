@@ -138,8 +138,8 @@ person. Give the reason. Say what you do not know.
 
 Stack: `tokio` · `axum` (HTTP + WebSocket) · `tokio::process` (spawning `ssh`, `tmux`, `tailscale`) ·
 `portable-pty` · `serde`. Appliance target `aarch64-unknown-linux-musl` via `cargo-zigbuild`.
-**The daemon persists nothing about the fleet.** The `rusqlite` row in that ADR's stack table was
-never built (Y-044); see its 2026-08-02 amendment. It writes exactly one file, and that file is
+**The daemon persists nothing about the fleet except its Chat threads.** The `rusqlite` row in
+that ADR's stack table was not built for Y-044; see its 2026-08-02 amendment. It writes exactly one file, and that file is
 configuration rather than state —
 [ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) and the 2026-08-22 amendment
 beside the first. **Since 2026-10-19 it also writes the owner's dashboard layout**, a preference
@@ -149,6 +149,9 @@ to `~/.config/yantra/rooms/<name>.toml`, with no message, no fleet state and no 
 `~/.config/yantra/passkeys.toml`**, with passkey public keys and session token hashes only, no fleet
 state and no secret value ([ADR-0044](docs/adr/0044-a-write-needs-the-owners-passkey.md)). The appliance may keep a conversation history that the daemon never touches —
 [ADR-0032](docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md).
+**Since 2026-11-09 the daemon also keeps one store**, `~/.local/state/yantra/threads.sqlite`: one row per Chat
+thread with its session id, title, machine and status, and no message text and no secret
+([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md)).
 
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
 the daemon, the CLI or the agent. TypeScript's only home is the browser.
