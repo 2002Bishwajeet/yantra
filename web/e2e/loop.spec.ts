@@ -129,7 +129,7 @@ test('Checks lists each check and comment, and Fix with agent fills the composer
       'Check rust / test failed (failure).\n1 test failed\n`watch::tests::a_304_keeps_the_checks` panicked at watch.rs:212',
       'Review by reviewer (changes requested):\nPlease cover the 304 path.',
       '> crates/yantrad/src/watch.rs:L142\nThis drops the etag on a new head.',
-    ].join('\n\n'),
+    ].join('\n\n') + '\n', // appendToDraft leaves the caret on a fresh line
   )
   // Fix fills; the owner sends. The thread is still idle.
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled()
