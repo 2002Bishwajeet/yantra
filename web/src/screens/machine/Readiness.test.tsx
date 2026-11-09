@@ -9,6 +9,7 @@ import { renderInApp } from '@/test/inApp'
 import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 import { ReadinessCard } from './Readiness'
 import { useVerdict } from './useVerdict'
+import { chipOf, verdictOf } from './verdict'
 
 // The sudo sheet reads the form factor, and jsdom has no `matchMedia`.
 beforeEach(() => {
@@ -37,7 +38,7 @@ const checks = (absent: string[] = [], detail: Record<string, string> = {}): Che
 
 /** doctor.rs `no_login_server`, word for word. */
 const NO_SERVER =
-  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
+  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain, so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
 
 const report = (list: Check[]): Looked<Readiness> => ({ looked: 'ok', age_seconds: 0, data: { machine: 'pi', checks: list, age_seconds: 0 } })
 
@@ -105,6 +106,42 @@ async function draw(
 
 const card = () => within(screen.getByRole('region', { name: 'Readiness' }))
 
+describe('the counts on a machine with optional checks absent', () => {
+  const list = [...checks(['provider-cli', 'hooks', 'heartbeat']), { check: 'mic', state: 'absent', detail: 'not installed' } as Check]
+
+  /** Y-580: the chip, the title and the rows count the same checks. */
+  it('agrees: chip N, title N and the needs-marked rows are one number', async () => {
+    daemon()
+    await draw(report(list))
+    const rows = [...document.querySelectorAll('.machine__check')]
+    const needs = rows.filter((one) => one.querySelector('.m3-state')?.getAttribute('data-state') === 'needs')
+    expect(needs).toHaveLength(3)
+
+    const verdict = verdictOf({ name: 'pi', machine: machine(), readiness: report(list), events: [], watch: null })
+    expect(chipOf(verdict, null).word).toBe(`ready · ${needs.length} to fix`)
+    expect(card().getByRole('heading', { name: `${needs.length} checks need you` })).toBeTruthy()
+
+    // The count line's total is the rows drawn, the microphone included.
+    expect(rows).toHaveLength(list.length)
+    expect(card().getByText(new RegExp(`^9 of ${list.length} · asked`))).toBeTruthy()
+  })
+
+  it('draws the absent microphone idle, with the word optional', async () => {
+    daemon()
+    await draw(report(list))
+    const mic = [...document.querySelectorAll('.machine__check')].find((one) => one.textContent?.includes('microphone'))!
+    expect(mic.querySelector('.m3-state')?.getAttribute('data-state')).toBe('idle')
+    expect(within(mic as HTMLElement).getByText('optional')).toBeTruthy()
+  })
+
+  it('names no ADR, invariant, beat or yantra-agent on any row', async () => {
+    daemon()
+    const everything = list.map((one) => ({ ...one, state: 'absent' as const }))
+    await draw(report(everything))
+    expect([...document.querySelectorAll('.machine__check')].map((one) => one.textContent).join(' ')).not.toMatch(/ADR-\d|I-\d\d|beat|yantra-agent/)
+  })
+})
+
 describe('the Readiness card', () => {
   it('leads with Ready for sessions and New session when nothing is absent', async () => {
     daemon()
@@ -133,10 +170,10 @@ describe('the Readiness card', () => {
   })
 
   /** On a ready machine the microphone is all Install could do, so Install
-   *  waits for the box; the optional microphone is not counted against it. */
+   *  waits for the box; an absent microphone is a row of its own, marked optional. */
   it.each([
-    ['ready', [] as string[], 'Ready for sessions', '12 of 12'],
-    ['manual', ['provider-auth'], 'gh is not signed in', '11 of 12'],
+    ['ready', [] as string[], 'Ready for sessions', '12 of 13'],
+    ['manual', ['provider-auth'], 'gh is not signed in', '11 of 13'],
   ])('enables Install on a %s machine only while Microphone is ticked', async (_, absent, title, count) => {
     daemon()
     await draw(report([...checks(absent), { check: 'mic', state: 'absent', detail: 'not installed' }]))

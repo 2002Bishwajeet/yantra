@@ -8,10 +8,11 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono, Text } from '@/m3/text/Text'
 import { Since } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
-import { EmptyState } from '@/m3/empty-state/EmptyState'
+import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { fromReading } from '@/api/client'
 import { reachWords } from '@/lib/checks'
 import { SshSaid } from './ReachFailure'
-import { chipOf, noRows, sessionsFailure, titleOf, type Verdict } from './verdict'
+import { chipOf, sessionsFailure, titleOf, type Verdict } from './verdict'
 
 type Row = { session: Session; workspace: string | null }
 
@@ -39,7 +40,9 @@ export function Sessions(props: {
   const rows = rowsOf(answer, workspaces.looked === 'ok' ? workspaces.data : [])
   const free = rows.filter((row) => row.workspace === null).length
   const failure = answer?.reached === 'no' ? sessionsFailure(verdict, answer.error) : null
-  const empty = noRows(verdict, machine)
+
+  // A card with no session and nothing to report has nothing to say.
+  if (rows.length === 0 && !failure && sessions.looked !== 'pending' && sessions.looked !== 'failed') return null
 
   return (
     <Card aria-labelledby="machine-sessions" className="machine__card">
@@ -75,8 +78,8 @@ export function Sessions(props: {
           <State state={chipOf(failure, null).state}>{titleOf(failure, machine)}</State>
           <SshSaid detail={answer.error} />
         </div>
-      ) : rows.length === 0 ? (
-        <EmptyState title={empty.title}>{empty.words}</EmptyState>
+      ) : sessions.looked === 'failed' ? (
+        <ErrorSurface.Inline error={fromReading(sessions)!} title="The sessions could not be read" />
       ) : (
         <ul className="machine__rows">
           {rows.map(({ session, workspace }) => (

@@ -41,7 +41,7 @@
           { "check": "provider-cli", "state": "absent", "detail": "neither `gh` nor `glab` is on PATH there" },
           { "check": "provider-auth", "state": "unknown", "detail": "no provider CLI to ask" },
           { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
-          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 9s ago" }
+          { "check": "heartbeat", "state": "present", "detail": "last report 9s ago" }
         ]
       },
       {
@@ -71,7 +71,7 @@
           { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },
           { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
           { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
-          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 2s ago" }
+          { "check": "heartbeat", "state": "present", "detail": "last report 2s ago" }
         ]
       }
     ]

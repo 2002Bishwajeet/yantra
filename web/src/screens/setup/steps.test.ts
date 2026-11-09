@@ -157,7 +157,7 @@ describe("a machine's line", () => {
     expect(ready(one)).toBe(true)
   })
 
-  /** GitHub and `yantra-agent` are optional, so neither holds ready back. */
+  /** GitHub and the usage reports are optional, so neither holds ready back. */
   it('is ready with gh missing and no heartbeat, and counts every check it shows', () => {
     const optional = report([...needs(), check('provider-auth', 'absent'), check('heartbeat', 'absent')])
     expect(line(machine(), optional, null)).toEqual({ kind: 'ready', present: 7, total: 9 })

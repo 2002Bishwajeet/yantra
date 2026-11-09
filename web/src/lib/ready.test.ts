@@ -16,7 +16,7 @@ describe('ready', () => {
   })
 
   /** Coordinator's ruling by the owner's delegation, 2026-09-13: GitHub and
-   *  `yantra-agent` are optional. */
+   *  the usage reports are optional. */
   it('is not held back by gh, its sign-in or a heartbeat', () => {
     const optional = report({ ...seven(), 'provider-cli': 'absent', 'provider-auth': 'unknown', heartbeat: 'absent' })
     expect(isReady(optional)).toBe(true)

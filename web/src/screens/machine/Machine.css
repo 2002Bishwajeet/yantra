@@ -24,26 +24,6 @@
   min-width: 0;
 }
 
-/* The list's own `break-word` wraps the value; `anywhere` here would change the
-   row's intrinsic width and clip the headline (List.css, Y-360). */
-.machine__about .m3-mono {
-  white-space: normal;
-}
-
-/* On the phone About sits in a Disclosure, and two fifths of that row is less
-   than `Tailnet name`: the headline keeps its width and the value wraps below. */
-[data-shell='phone'] .machine__about .m3-list-item {
-  flex-wrap: wrap;
-}
-
-[data-shell='phone'] .machine__about .m3-list-item__text {
-  min-width: max-content;
-}
-
-[data-shell='phone'] .machine__about .m3-list-item__trailing {
-  max-width: 100%;
-}
-
 .machine__detail {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -71,8 +51,41 @@
   line-height: var(--md-sys-typescale-body-small-line-height);
 }
 
+/* One value column at every width: the labels size the first track, so every
+   value starts at one left edge. A name breaks at a <wbr> between labels and
+   inside a word only when it has to. */
 .machine__about {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
   margin: 0;
+  padding: 0 4px;
+}
+
+.machine__about dt,
+.machine__about dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.machine__about .machine__value {
+  overflow-wrap: break-word;
+}
+
+.machine__about .m3-mono {
+  white-space: normal;
+}
+
+/* On the phone the value drops under its label. */
+@media (max-width: 599px) {
+  .machine__about {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0;
+  }
+
+  .machine__about .machine__value {
+    margin-bottom: 8px;
+  }
 }
 
 .machine__checks {

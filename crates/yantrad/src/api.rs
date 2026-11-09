@@ -530,19 +530,19 @@ fn heard_from(
     let Some(id) = node_id(machine, snapshot) else {
         return says(
             doctor::State::Unknown,
-            "no tailnet node here answers to that name, so whether it has beaten is not known"
+            "no tailnet node here answers to that name, so whether it has reported is not known"
                 .to_owned(),
         );
     };
     match beats.get(id) {
         Some(reading) => says(
             doctor::State::Present,
-            format!("a beat arrived {}s ago", reading.age().as_secs()),
+            format!("last report {}s ago", reading.age().as_secs()),
         ),
         None => says(
             doctor::State::Absent,
-            "nothing has beaten from that machine since this daemon started — is `yantra-agent` \
-             running there?"
+            "no report since Yantra started. The join command offers Yantra's agent, which \
+             reports CPU, memory and disk"
                 .to_owned(),
         ),
     }
@@ -1764,7 +1764,7 @@ pub(crate) mod tests {
         assert!(
             silent["detail"]
                 .as_str()
-                .is_some_and(|d| d.contains("yantra-agent")),
+                .is_some_and(|d| d.contains("join command") && !d.contains("yantra-agent")),
             "{silent}"
         );
     }

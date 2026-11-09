@@ -105,19 +105,6 @@ export type SessionsFailure = Verdict | { kind: 'listing'; detail: string }
 export const sessionsFailure = (verdict: Verdict, error: string): SessionsFailure =>
   NOT_REACHED.has(verdict.kind) ? verdict : { kind: answerFailure(error), detail: error }
 
-/** Sessions with no row. `sessions.rs` answers an empty list for a machine with
- *  no tmux, so only a verdict that read the tmux check can speak for tmux. */
-export function noRows(verdict: Verdict, name: string): { title: string; words: string } {
-  const missing = 'missing' in verdict ? verdict.missing : null
-  if (missing?.includes(nameOf('tmux'))) {
-    return { title: 'No session can start here', words: `tmux is missing on ${name}. Readiness shows the fix.` }
-  }
-  if (missing || verdict.kind === 'ready' || verdict.kind === 'manual') {
-    return { title: 'No session is open here', words: `tmux lists nothing on ${name}` }
-  }
-  return { title: 'No session is listed', words: `Readiness has not read tmux on ${name}` }
-}
-
 /** A session can start: tmux and claude are there and ssh gets in. A missing
  *  `gh` does not stop one, so `manual` counts (B3 names only the basics and the
  *  key). */

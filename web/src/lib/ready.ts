@@ -6,7 +6,7 @@ type Asked = Pick<Readiness, 'machine' | 'checks'>
 
 /** The checks a session needs on a machine, from the one check table
  *  (coordinator's ruling by the owner's delegation, 2026-09-13). GitHub and
- *  `yantra-agent` are optional, so `provider-cli`, `provider-auth` and
+ *  the usage reports are optional, so `provider-cli`, `provider-auth` and
  *  `heartbeat` never hold ready back. */
 export const READY: readonly string[] = CHECK_IDS.filter(sessionNeeds)
 
