@@ -300,6 +300,25 @@ costs more to discover the same thing.
 > server still belongs to the login session, and ssh still never forks it. One limit remains: with
 > no user logged in at the screen there is no `gui/<uid>` domain, and Yantra then refuses as before.
 
+> **2026-11-09 ([Y-667](../../tracker.md), accepted by the owner): the gate is a lock, not a
+> check.** [R24](../research/24-decision-and-practice-audit.md) change 9 found that §5's gate does
+> not hold in the code. The Chat's keeper calls `tmux.ensure` without it (`keep.rs`), and
+> `login_server` passes any server that holds a session, so it cannot see a `Background` server. A
+> check at each call site misses the call site that forgets it. So, on a Mac:
+>
+> - **Every Yantra tmux call uses its own socket, `-L yantra`, and `-N`.** `-N` tells tmux never to
+>   start a server. An ssh session then cannot start a `Background` server by accident, and the
+>   owner's own `tmux kill-server` does not end Yantra's sessions.
+> - **One place in the `Tmux` seam kicks the LaunchAgent** (Y-632) when no server answers on that
+>   socket. No caller does it for itself. The LaunchAgent starts its server on `-L yantra`.
+> - **The plist sets `ProcessType` to `Interactive`**, so macOS does not throttle the server as a
+>   background job. T3 Code sets the same key (`apps/server/src/cloud/bootService.ts`, commit
+>   `67eebaca`).
+>
+> §1 and §5 hold in their intent: the server belongs to the login session, and ssh never forks it.
+> What changes is the enforcement, from a check that a caller can skip to a socket that ssh cannot
+> start. Linux is unchanged.
+
 ## Alternatives considered
 
 ### A. Do nothing — Yantra says *this machine cannot start an agent*, and why
