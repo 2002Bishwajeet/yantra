@@ -262,6 +262,17 @@ describe('the chat socket', () => {
     )
   })
 
+  it("sends Claude's model and effort only when they are picked", async () => {
+    const { socket, opened } = connect()
+    await settled(() => expect(opened).toHaveBeenCalled())
+    socket.send('and the docs', undefined, 'supervised', 'plan', null, null)
+    socket.send('think it through', undefined, 'supervised', 'build', 'opus', 'high')
+    await settled(() => expect(server.heard).toHaveLength(2))
+    expect(server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))).toEqual(
+      chatFrames.slice(1, 3),
+    )
+  })
+
   it('sends a revert with the checkpoint it names, and nothing when the socket is not open', async () => {
     const { socket, opened } = connect()
     expect(socket.revert(0)).toBe(false)

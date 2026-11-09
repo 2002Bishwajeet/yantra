@@ -124,9 +124,9 @@ export function Turns(props: { said: Said; machine: string; now: number; onRead:
           No agent has written a turn here.
         </Text>
         <Text render={<p />} scale="body-medium" tone="variant">
-          A transcript appears on the agent's first message, not when it launches.
+          The agent in the Terminal has not written a turn. Its transcript appears on its first message.
+          Chat turns are not here.
         </Text>
-        <Mono className="turns__said">{said.because}</Mono>
       </Card>
     )
   }

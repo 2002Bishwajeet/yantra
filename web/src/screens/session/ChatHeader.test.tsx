@@ -13,13 +13,25 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** `asked` holds the POSTs, which are the ssh reads; `reads` holds the GETs of the live states. */
+let reads: string[] = []
+let live: [number, unknown] = [200, []]
+
 function daemon(...replies: [number, unknown][]) {
   const asked: string[] = []
   let at = 0
+  reads = []
+  live = [200, []]
+  // A thread with an open PR draws Checks, which reads the form factor; jsdom has no `matchMedia`.
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
-      asked.push(`${init?.method ?? 'GET'} ${path}`)
+      if (!init?.method || init.method === 'GET') {
+        reads.push(path)
+        return Promise.resolve(answer(...live))
+      }
+      asked.push(`${init.method} ${path}`)
       const [status, body] = replies[Math.min(at++, replies.length - 1)]!
       return Promise.resolve(answer(status, body))
     }),
@@ -28,6 +40,7 @@ function daemon(...replies: [number, unknown][]) {
 }
 
 const idle = { current: null }
+const HEX = /[0-9a-f]{16}/
 
 type Over = Partial<ChatHeaderProps>
 
@@ -41,6 +54,7 @@ async function show(over: Over = {}, url = '/w/site?view=chat') {
     diff: { open: false, onToggle: () => {}, onRefresh: () => {} },
     diffRef: idle,
     added: false,
+    onFix: () => {},
     ...over,
   }
   const root = createRootRoute()
@@ -91,17 +105,16 @@ describe('the breadcrumb', () => {
     expect(within(crumbs).getByRole('button', { name: 'Threads, New thread' })).toBeTruthy()
   })
 
-  it('names the open thread by its branch tail once the list has read', async () => {
+  it('names the open thread by its title once the list has read, and never by its id', async () => {
     daemon([200, contract.threads])
     await show({ thread: '1a1b2c3d4e5f6a7b' })
-    const open = contract.threads.find((one) => one.id === '1a1b2c3d4e5f6a7b')!
-    const tail = open.branch.split('/').pop()!
-    expect(await screen.findByRole('button', { name: `Threads, ${tail}` })).toBeTruthy()
+    const button = await screen.findByRole('button', { name: 'Threads, #488 A workspace lists its threads' })
+    expect(button.textContent).not.toMatch(HEX)
   })
 })
 
 describe('the thread menu', () => {
-  it('reads once on mount, not on opening, and draws branch, issue and PR for each thread', async () => {
+  it('reads once on mount, not on opening, and draws title, branch, state and PR for each thread', async () => {
     const asked = daemon([200, contract.threads])
     await show({ thread: '1a1b2c3d4e5f6a7b' })
     await waitFor(() => expect(asked).toHaveLength(1))
@@ -111,8 +124,8 @@ describe('the thread menu', () => {
     expect(all).toHaveLength(5)
     expect(asked).toEqual(['POST /api/workspaces/site/threads'])
     const open = all[1]!
-    expect(within(open).getByText('1a1b2c3d4e5f6a7b')).toBeTruthy()
-    expect(within(open).getByText('2002Bishwajeet/yantra#488')).toBeTruthy()
+    expect(within(open).getByText('#488 A workspace lists its threads')).toBeTruthy()
+    expect(within(open).getByText('from main')).toBeTruthy()
     expect(within(open).getByText('PR #512 open')).toBeTruthy()
     expect(screen.getByText('PR #510 merged')).toBeTruthy()
     expect(screen.getByText('PR #511 closed')).toBeTruthy()
@@ -188,7 +201,7 @@ describe('the thread menu', () => {
       useEffect(() => {
         control.pick = set.current
       }, [])
-      return <ChatHeader busy={false} diff={{ open: false, onToggle: () => {}, onRefresh: () => {} }} diffRef={idle} diffs={0} added={false} thread={thread} workspace="site" />
+      return <ChatHeader busy={false} diff={{ open: false, onToggle: () => {}, onRefresh: () => {} }} diffRef={idle} diffs={0} added={false} onFix={() => {}} thread={thread} workspace="site" />
     }
     const root = createRootRoute({ component: Switch })
     const router = createRouter({ routeTree: root, history: createMemoryHistory() })
@@ -269,5 +282,91 @@ describe('the right side', () => {
     await show({ thread: '1a1b2c3d4e5f6a7b' })
     const link = await screen.findByRole('link', { name: 'PR #512' })
     expect(link.getAttribute('href')).toContain('github.com')
+  })
+})
+
+describe('the live state of each thread (Y-649)', () => {
+  const since = 1_790_000_000_000
+  const lone = (over: Partial<(typeof contract.threads)[number]>) => [{ ...contract.threads[0]!, ...over }]
+
+  it('shows no hex id in the header or the opened menu, and a title, "from main" and a state per row', async () => {
+    daemon([200, contract.threads])
+    await show({ thread: '0a1b2c3d4e5f6a7b' })
+    const menu = await openMenu()
+    const all = await rows()
+    expect(all).toHaveLength(5)
+    expect(document.querySelector('header')!.textContent).not.toMatch(HEX)
+    expect(menu.textContent).not.toMatch(HEX)
+    for (const row of all) {
+      expect(within(row).getByText('from main')).toBeTruthy()
+      expect(row.textContent).toMatch(/Idle|Working/)
+    }
+    expect(within(menu).getAllByText('Fix the login redirect')).toHaveLength(4)
+  })
+
+  it('reads the states only while the menu is open, and they override the list', async () => {
+    const asked = daemon([200, lone({ state: 'idle' })])
+    live = [200, [{ id: contract.threads[0]!.id, state: 'working', since: null }]]
+    await show()
+    await waitFor(() => expect(asked).toHaveLength(1))
+    expect(reads).toEqual([])
+    const [row] = await (async () => {
+      await openMenu()
+      return rows()
+    })()
+    await waitFor(() => expect(row!.textContent).toContain('Working'))
+    expect(row!.textContent).not.toContain('·')
+    expect(reads).toEqual(['/api/workspaces/site/threads'])
+  })
+
+  it('advances a working thread\'s elapsed time with the clock', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'], now: since + 8_000 })
+    try {
+      daemon([200, lone({ state: 'working', since })])
+      await show()
+      fireEvent.click(await trigger())
+      expect((await rows())[0]!.textContent).toContain('Working · 8s')
+      await act(async () => {
+        vi.advanceTimersByTime(65_000)
+      })
+      expect((await rows())[0]!.textContent).toContain('Working · 1m 13s')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads an untitled thread as "Untitled thread" and an issue thread by its issue', async () => {
+    daemon([200, [{ ...contract.threads[0]!, title: null, issue: null }, { ...contract.threads[1]!, id: 'b', title: null }]])
+    await show()
+    await openMenu()
+    await rows()
+    expect(screen.getByText('Untitled thread')).toBeTruthy()
+    expect(screen.getByText('2002Bishwajeet/yantra#488')).toBeTruthy()
+  })
+
+  it('says the states could not be read and keeps the list\'s state', async () => {
+    daemon([200, lone({ state: 'working', since })])
+    live = [503, 'daemon is restarting']
+    await show()
+    await openMenu()
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('The thread states could not be read')
+    expect((await rows())[0]!.textContent).toContain('Working')
+  })
+
+  it('lets the socket\'s busy override the open thread\'s row', async () => {
+    const id = contract.threads[0]!.id
+    daemon([200, lone({ state: 'idle' })])
+    live = [200, [{ id, state: 'idle', since: null }]]
+    const { unmount } = await show({ thread: id, busy: true })
+    await openMenu()
+    await waitFor(async () => expect((await rows())[0]!.textContent).toContain('Working'))
+    unmount()
+
+    daemon([200, lone({ state: 'working', since })])
+    live = [200, [{ id, state: 'working', since }]]
+    await show({ thread: id, busy: false })
+    await openMenu()
+    await waitFor(async () => expect((await rows())[0]!.textContent).toContain('Idle'))
   })
 })

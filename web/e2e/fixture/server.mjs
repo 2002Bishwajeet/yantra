@@ -79,6 +79,8 @@ function defaults() {
     // Y-349: the swept repository list New session filters in the browser.
     repos: contract.repos,
     notifications: contract.notifications,
+    // Y-495: the PR watch's memory. Its one PR is no thread's, so no Chat draws Checks; `checks` names one.
+    pulls: contract.pulls,
     about: contract.about,
     // Y-589: the device in use; null names none, so no note shifts a baseline.
     here: { machine: null },
@@ -330,6 +332,7 @@ const routes = [
   ['GET', /^\/api\/attention$/, (s) => [200, s.attention]],
   ['GET', /^\/api\/readiness\/github$/, (s) => [200, s.github]],
   ['GET', /^\/api\/notifications$/, (s) => [200, s.notifications]],
+  ['GET', /^\/api\/pulls$/, (s) => [200, s.pulls]],
   ['GET', /^\/api\/about$/, (s) => [200, s.about]],
   ['GET', /^\/api\/here$/, (s) => [200, s.here]],
   [
@@ -515,6 +518,15 @@ const routes = [
               ? { ...one, id: THREAD, worktree: `/home/biswa/.yantra/worktrees/chat/${name}/${THREAD}`, pr: s.opened?.[name] ?? one.pr }
               : one,
           )]
+        : [404, notFound(name)],
+  ],
+  // Y-649: what each thread is doing, which the thread menu polls while it is open.
+  [
+    'GET',
+    /^\/api\/workspaces\/([^/]+)\/threads$/,
+    (s, [name]) =>
+      findWorkspace(s, name)
+        ? [200, contract.threadStates.map((one, at) => (at === 0 ? { ...one, id: THREAD } : one))]
         : [404, notFound(name)],
   ],
   // Y-493: Y-492's and Y-449's git routes. The scenario `gitfails` refuses each as the daemon does.

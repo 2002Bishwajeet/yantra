@@ -302,6 +302,8 @@ async fn a_chat_turn_runs_through_the_keeper_on_the_mac() -> Result<()> {
         Interaction::Build,
         None,
         None,
+        None,
+        None,
     );
     let run = keep::run_id()?;
     let Started::Running { pane } = keep::start(
@@ -334,6 +336,8 @@ async fn a_chat_turn_runs_through_the_keeper_on_the_mac() -> Result<()> {
             text: "Say pong.",
             mode: PermissionMode::Supervised,
             interaction: Interaction::Build,
+            model: None,
+            effort: None,
         },
         said,
     );

@@ -48,7 +48,7 @@ export function Root(props: RootProps) {
   )
 }
 
-/** Controls on the left scroll sideways with their bar hidden; actions stay on the right. */
+/** Controls on the left wrap to a second row when a phone cannot hold them; actions stay on the right. */
 export function Footer(props: { controls?: ReactNode; actions: ReactNode }) {
   return (
     <div className="composer__footer" data-bare={props.controls ? undefined : ''}>

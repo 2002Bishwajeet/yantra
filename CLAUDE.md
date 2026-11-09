@@ -300,9 +300,10 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
 - **It picks by priority.** Until the owner calls Yantra a daily driver, a row that closes the daily-driver gap goes first and feature milestones wait (owner, 2026-11-05). 1: closes or unblocks an open milestone. 2: a defect or a red suite.
   3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
 - **It runs up to three rows at once.** Rows that edit the same file do not run at the same time.
-  The local gate tests only what a row changed, and so does CI: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607). Shipping waits for every check that runs.
-  Verification and shipping run one row at a time, because podman runs out of memory and rebases
-  must see each other's merges.
+  CI tests only what a row changed: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607).
+- **CI is the gate.** A row pushes its branch and opens its PR, and its checks on CI are the gate.
+  Rows verify on CI in parallel. Only merges run one at a time, because each rebase must see the
+  merge before it. The laptop runs only the walk and `just test-mac`. Owner, 2026-11-09 (Y-694).
 - **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a Pi,
   audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, a changed
   invariant, or an answer to an open question. A parked row keeps its branch and appears in the

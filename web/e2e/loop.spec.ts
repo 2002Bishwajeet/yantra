@@ -34,7 +34,8 @@ test('an inbox issue starts a session with its draft and lists the threads in th
   for (const mark of ['no PR', 'PR #512 open', 'PR #511 closed', 'PR #510 merged', 'PR unknown']) {
     await expect(threads.getByText(mark)).toBeVisible()
   }
-  await expect(threads.getByText('2002Bishwajeet/yantra#488')).toBeVisible()
+  await expect(threads.getByText('#488 A workspace lists its threads')).toBeVisible()
+  await expect(threads.getByText('The thread states could not be read')).toHaveCount(0)
 })
 
 /** The git actions (Y-493) on the fixture chat. `gitfails` refuses each route as the daemon does. */
@@ -93,5 +94,44 @@ test('each failed git action is drawn with the daemon text', async ({ page }) =>
   await expect(failure('The push was refused', 'non-fast-forward')).toBeVisible()
   await gitMenu(page, 'Open PR')
   await expect(failure('The pull request was refused', 'not pushed to its upstream')).toBeVisible()
+  await axe(page)
+})
+
+/** Y-495: the thread's PR checks and review comments from the watch, and Fix with agent. */
+test('Checks lists each check and comment, and Fix with agent fills the composer without sending', async ({ page }) => {
+  await scenario(page, 'checks')
+  await page.goto(ATTACHED)
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+
+  await page.locator('.chat__header').getByRole('button', { name: 'Checks' }).click()
+  const surface = page.getByRole('dialog', { name: 'Checks on PR #497' })
+  await expect(surface.getByText('1 of 2 failing')).toBeVisible()
+  const checks = surface.getByRole('list', { name: 'Checks' }).getByRole('listitem')
+  await expect(checks).toHaveCount(2)
+  await expect(checks.first()).toContainText('rust / test')
+  await expect(checks.first()).toContainText('1 test failed')
+  await expect(checks.last()).toContainText('web / lint')
+  const comments = surface.getByRole('list', { name: 'Review comments' }).getByRole('listitem')
+  await expect(comments.first()).toContainText('Please cover the 304 path.')
+  await expect(comments.last()).toContainText('crates/yantrad/src/watch.rs:142')
+  await expect(comments.last()).toContainText('This drops the etag on a new head.')
+  await axe(page)
+
+  const fix = surface.getByRole('button', { name: 'Fix with agent' })
+  expect((await fix.boundingBox())!.height).toBeGreaterThanOrEqual(page.viewportSize()!.width < 600 ? 44 : 40)
+  await fix.click()
+  await expect(surface).toBeHidden()
+  const composer = page.getByLabel('Message Claude in yantra-web', { exact: true })
+  await expect(composer).toBeFocused()
+  await expect(composer).toHaveValue(
+    [
+      'Fix PR #497:',
+      'Check rust / test failed (failure).\n1 test failed\n`watch::tests::a_304_keeps_the_checks` panicked at watch.rs:212',
+      'Review by reviewer (changes requested):\nPlease cover the 304 path.',
+      '> crates/yantrad/src/watch.rs:L142\nThis drops the etag on a new head.',
+    ].join('\n\n') + '\n', // appendToDraft leaves the caret on a fresh line
+  )
+  // Fix fills; the owner sends. The thread is still idle.
+  await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled()
   await axe(page)
 })

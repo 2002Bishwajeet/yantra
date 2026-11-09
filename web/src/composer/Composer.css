@@ -156,6 +156,7 @@
 .composer__controls {
   display: flex;
   flex: 1;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
   min-width: 0;
@@ -259,7 +260,7 @@
     padding: 0;
   }
 
-  /* Each control's hit area reaches 8 px past it, so 16 px apart keeps a tap off its neighbour. */
+  /* Each control's hit area reaches 8 px past it, so 16 px apart, across and between rows, keeps a tap off its neighbour. */
   .composer__controls {
     gap: 16px;
   }

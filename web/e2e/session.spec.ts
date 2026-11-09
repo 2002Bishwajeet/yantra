@@ -207,9 +207,7 @@ test.describe('the session screen, the other two views', () => {
     await open(page, 'Terminal')
 
     await expect(page.locator('.xterm-rows')).toContainText('Do you want to proceed?')
-    await expect(page.getByRole('status')).toContainText(
-      `attached · tmux ${NAME} on cachyos-g14`,
-    )
+    await expect(page.getByRole('status')).toContainText(`attached · ${NAME} on cachyos-g14`)
     if (size === 'phone') {
       // PhoneSessionTerminal: the keys a soft keyboard has no row for.
       await expect(page.getByRole('toolbar', { name: 'Keys' })).toBeVisible()
@@ -298,6 +296,8 @@ test.describe('the session screen, the other two views', () => {
     await expect(page.getByText('This session')).toBeVisible()
     await expect(page.getByText('tokens, unpriced')).toBeVisible()
     await expect(page.getByText('There is no fleet total')).toBeVisible()
+    await expect(page.getByText('Counts the agent in the Terminal tab. Chat turns are not counted.')).toBeVisible()
+    await expect(page.getByText('.jsonl')).toHaveCount(0)
     // Finding 128: the board dates the price table `4 Sep`, not `2026-08-11`.
     await expect(page.getByText('prices as of 2 Nov')).toBeVisible()
     await axe(page)

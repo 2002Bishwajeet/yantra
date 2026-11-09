@@ -500,13 +500,72 @@ export type ThreadPr =
   | { state: 'open' | 'closed' | 'merged'; number: number; url: string }
   | { state: 'unknown'; said: string }
 
+/** `GET /api/pulls` — `Looked<Pull[]>`: the PRs the appliance's watch holds
+ *  (Y-494, Y-512), as its last look left them. In memory, so the age is 0 and
+ *  a restart empties it until the next look. */
+export type Pull = {
+  workspace: string
+  url: string
+  number: number
+  /** null until the watch's first look lands. */
+  head_sha: string | null
+  /** Failed as soon as one check fails; passed only when every check has. */
+  summary: 'pending' | 'failed' | 'passed'
+  /** The head sha's check runs, the first hundred. */
+  checks: PullCheck[]
+  reviews: PullReview[]
+  /** The line comments, oldest first. */
+  comments: PullComment[]
+}
+
+export type PullCheck = {
+  name: string
+  /** `queued`, `in_progress` or `completed`, and a few rarer states. */
+  status: string
+  /** Set once `status` is `completed`: `success`, `failure`, `timed_out`, … */
+  conclusion: string | null
+  /** null when the check wrote neither. The summary is cut at 4 KiB. */
+  output: { title: string; summary: string } | null
+}
+
+export type PullReview = {
+  id: number
+  /** Empty for a deleted account. */
+  author: string
+  state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING'
+  body: string
+}
+
+export type PullComment = {
+  id: number
+  author: string
+  path: string
+  /** null when the line is no longer in the diff. */
+  line: number | null
+  body: string
+}
+
+/** What a thread is doing: the daemon holds a turn for `working`. `since` is
+ *  unix milliseconds, null when the start is unknown. */
+export type ThreadState = {
+  id: string
+  state: 'working' | 'idle'
+  since: number | null
+}
+
 /** One entry of `POST /api/workspaces/{name}/threads`. `issue` is
- *  `owner/repo#n` for a thread opened from an issue. */
+ *  `owner/repo#n` for a thread opened from an issue. `title` is the first line
+ *  of the first prompt, or `#n` and the issue's title; `from` is the repository
+ *  branch the thread left. `state` and `since` are read when the list was. */
 export type Thread = {
   id: string
   branch: string
   worktree: string
   issue: string | null
+  title: string | null
+  from: string | null
+  state: ThreadState['state']
+  since: number | null
   pr: ThreadPr
 }
 

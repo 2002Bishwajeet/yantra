@@ -40,7 +40,8 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
 | `POST /api/workspaces/{name}/mentions` | **None**: a terminal cannot mean it. The Chat composer's `@` files and `$` skills, for `{harness, thread?}` (Y-562, a `POST` for ADR-0019's reason) |
 | `POST /api/workspaces/{name}/commands` | **None**: a terminal cannot mean it. Claude's slash commands for the Chat composer's `/`, for `{harness, thread?}`; an ACP harness gets `[]`, since its list comes on the chat socket (Y-563, a `POST` for ADR-0019's reason) |
-| `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019) |
+| `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019). Each thread answers `id`, `branch`, `worktree`, `issue`, `title`, `from`, `state`, `since` and `pr` |
+| `GET /api/workspaces/{name}/threads` | The thread menu's live state: `[{id, state, since}]` for the threads the daemon holds, from memory with no ssh (Y-649) |
 | `POST /api/workspaces/{name}/threads/new` | `yantra chat new --issue` |
 | `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |
 | `POST /api/workspaces/{name}/threads/{thread}/commit` | `yantra commit [-m MSG]` |
@@ -56,6 +57,7 @@ API the CLI cannot reach.
 | `POST /api/join` | `yantra ssh-identity --machine <m> --user <u>`, with the machine taken from the caller |
 | `POST /api/join/forget-host-key` | `yantra forget-host-key <machine>`, with the machine taken from the caller |
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
+| `GET /api/pulls` | no verb, because it reads the PR watch's memory and asks GitHub nothing: each watched PR's checks with their output, its reviews and its line comments, for the Chat's Checks (Y-512, Y-495) |
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |
 | `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks/{id}/steer`, `GET /api/tasks/{id}/wait`, `POST /api/tasks/{id}/stop`, `DELETE /api/tasks/{id}` | `yantra mcp`'s tools — `start_task`, `list_tasks`, `task_status`, `steer_task`, `wait_task`, `cancel_task`, `remove_task` (ADR-0033, Y-435, Y-454). The `GET`s read memory |

@@ -33,6 +33,7 @@ import type {
   Mentions,
   Opened,
   Placement,
+  Pull,
   Readiness,
   Repo,
   Resumed,
@@ -52,6 +53,7 @@ import type {
   ThreadOpened,
   ThreadPrOpened,
   ThreadPushed,
+  ThreadState,
   Transcript,
   UpdateProgress,
   Workspace,
@@ -568,6 +570,57 @@ export const notifications = {
   "looked": "ok"
 } satisfies Looked<Event[]>
 
+export const pulls = {
+  "age_seconds": 0,
+  "data": [
+    {
+      "checks": [
+        {
+          "conclusion": "failure",
+          "name": "test",
+          "output": {
+            "summary": "`watch::look` panicked",
+            "title": "1 failed"
+          },
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "name": "lint",
+          "output": {
+            "summary": "",
+            "title": "Clean"
+          },
+          "status": "completed"
+        }
+      ],
+      "comments": [
+        {
+          "author": "friend",
+          "body": "This drops the etag.",
+          "id": 31,
+          "line": 12,
+          "path": "src/watch.rs"
+        }
+      ],
+      "head_sha": "aaa111",
+      "number": 21,
+      "reviews": [
+        {
+          "author": "friend",
+          "body": "Please add a test.",
+          "id": 7,
+          "state": "CHANGES_REQUESTED"
+        }
+      ],
+      "summary": "failed",
+      "url": "https://github.com/o/r/pull/21",
+      "workspace": "api"
+    }
+  ],
+  "looked": "ok"
+} satisfies Looked<Pull[]>
+
 export const notLooked = {
   "looked": "never"
 } satisfies Looked<Machine[]>
@@ -776,15 +829,20 @@ export const joinedKept = {
 export const threads = [
   {
     "branch": "yantra/chat/site/0a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "0a1b2c3d4e5f6a7b",
     "issue": null,
     "pr": {
       "state": "none"
     },
+    "since": null,
+    "state": "idle",
+    "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
   },
   {
     "branch": "yantra/chat/site/1a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "1a1b2c3d4e5f6a7b",
     "issue": "2002Bishwajeet/yantra#488",
     "pr": {
@@ -792,10 +850,14 @@ export const threads = [
       "state": "open",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/512"
     },
+    "since": 1790000000000,
+    "state": "working",
+    "title": "#488 A workspace lists its threads",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/1a1b2c3d4e5f6a7b"
   },
   {
     "branch": "yantra/chat/site/2a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "2a1b2c3d4e5f6a7b",
     "issue": null,
     "pr": {
@@ -803,10 +865,14 @@ export const threads = [
       "state": "closed",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/511"
     },
+    "since": null,
+    "state": "idle",
+    "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/2a1b2c3d4e5f6a7b"
   },
   {
     "branch": "yantra/chat/site/3a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "3a1b2c3d4e5f6a7b",
     "issue": null,
     "pr": {
@@ -814,19 +880,44 @@ export const threads = [
       "state": "merged",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/510"
     },
+    "since": null,
+    "state": "idle",
+    "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/3a1b2c3d4e5f6a7b"
   },
   {
     "branch": "yantra/chat/site/4a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "4a1b2c3d4e5f6a7b",
     "issue": null,
     "pr": {
       "said": "no GitHub grant — run `yantra github login`",
       "state": "unknown"
     },
+    "since": null,
+    "state": "idle",
+    "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/4a1b2c3d4e5f6a7b"
   }
 ] satisfies Thread[]
+
+export const threadStates = [
+  {
+    "id": "0a1b2c3d4e5f6a7b",
+    "since": null,
+    "state": "idle"
+  },
+  {
+    "id": "1a1b2c3d4e5f6a7b",
+    "since": 1790000000000,
+    "state": "working"
+  },
+  {
+    "id": "2a1b2c3d4e5f6a7b",
+    "since": null,
+    "state": "working"
+  }
+] satisfies ThreadState[]
 
 export const threadOpened = {
   "branch": "yantra/chat/site/0a1b2c3d4e5f6a7b",
@@ -1230,6 +1321,13 @@ export const chatFrames = [
     "interaction": "plan",
     "mode": "supervised",
     "text": "and the docs",
+    "type": "turn"
+  },
+  {
+    "effort": "high",
+    "mode": "supervised",
+    "model": "opus",
+    "text": "think it through",
     "type": "turn"
   },
   {

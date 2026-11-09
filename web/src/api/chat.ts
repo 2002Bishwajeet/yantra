@@ -2,12 +2,14 @@ import {
   HARNESSES,
   type ChatAttached,
   type ChatBranchDiff,
+  type ClaudeModel,
   type ChatQueue,
   type ChatFailure,
   type ChatFrame,
   type ChatNotAttached,
   type ChatPong,
   type Decision,
+  type Effort,
   type Harness,
   type Interaction,
   type PermissionMode,
@@ -153,7 +155,15 @@ export const PONG_WITHIN = 5_000
 export type ChatSocket = {
   /** `false` when the socket is not open, so nothing was sent. */
   /** `harness` opens a thread; the daemon ignores it on a later turn. */
-  send: (text: string, harness?: Harness, mode?: PermissionMode, interaction?: Interaction) => boolean
+  /** `model` and `effort` are Claude's; `null` or absent sends none. */
+  send: (
+    text: string,
+    harness?: Harness,
+    mode?: PermissionMode,
+    interaction?: Interaction,
+    model?: ClaudeModel | null,
+    effort?: Effort | null,
+  ) => boolean
   answer: (requestId: string, decision: Decision) => boolean
   stop: () => boolean
   /** Stops one background task (ADR-0041); a failure is `stopTask`. */
@@ -524,13 +534,15 @@ export function openChat(
   waiting = setTimeout(open, 0)
 
   return {
-    send: (text, harness, mode, interaction) => {
+    send: (text, harness, mode, interaction, model, effort) => {
       const sent = send({
         type: 'turn',
         text,
         ...(harness ? { harness } : {}),
         ...(mode ? { mode } : {}),
         ...(interaction === 'plan' ? { interaction } : {}),
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
       })
       // A turn that fails before it starts still gets its own error.
       if (sent) turn = ++sends

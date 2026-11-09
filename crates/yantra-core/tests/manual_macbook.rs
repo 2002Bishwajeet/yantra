@@ -260,8 +260,10 @@ async fn the_gate_finds_a_credential_in_the_server_where_ssh_finds_none() -> any
     // I-34 twice over: neither binary is on that machine's ssh `PATH`.
     let tmux = Tmux::resolve(&ssh).await?;
     let claude = Claude::resolve(&ssh).await?;
+    // Y-632's LaunchAgent keeps an empty `-D` server in the login session, so a
+    // server with no session still passes §1.
     anyhow::ensure!(
-        !tmux.list(&ssh).await?.is_empty(),
+        tmux.running(&ssh).await?,
         "no tmux server on {dest}. ADR-0018 §1 is exactly that this must not be started over ssh \
          — a server started here forks panes in launchd's `Background` domain, which is where the \
          login keychain is unreadable (I-44), so the run would measure the failure it exists to \
@@ -514,8 +516,8 @@ async fn the_transcript_advances_while_the_session_stays_detached() -> anyhow::R
 
     let tmux = Tmux::resolve(&ssh).await?;
     anyhow::ensure!(
-        !tmux.list(&ssh).await?.is_empty(),
-        "no tmux session on {dest}, so this harness would have to start the server itself — \
+        tmux.running(&ssh).await?,
+        "no tmux server on {dest}, so this harness would have to start the server itself — \
          which is the other experiment, and the one I-44 blocks. Start it at the Mac's own \
          keyboard, in Terminal.app: `tmux new-session -d -s yantra-gui`, and leave it running."
     );
@@ -795,6 +797,8 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
         Interaction::Build,
         None,
         None,
+        None,
+        None,
     );
     let run = keep::run_id()?;
     let Started::Running { pane } =
@@ -820,6 +824,8 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
             text: "Reply with just the word pong.",
             mode: PermissionMode::Supervised,
             interaction: Interaction::Build,
+            model: None,
+            effort: None,
         },
         said,
     );

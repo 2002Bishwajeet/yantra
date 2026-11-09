@@ -21,6 +21,7 @@ export const keys = {
   /** `null` is the workspace's repository, before a thread opens. */
   mentions: (name: string, thread: string | null, harness: string) =>
     ['workspaces', name, 'mentions', thread, harness] as const,
+  threadStates: (name: string) => ['workspaces', name, 'thread-states'] as const,
   commands: (name: string, thread: string | null, harness: string) =>
     ['workspaces', name, 'commands', thread, harness] as const,
   sessions: () => ['sessions'] as const,
@@ -35,6 +36,8 @@ export const keys = {
   githubReadiness: () => ['github', 'readiness'] as const,
   repos: () => ['repos'] as const,
   notifications: () => ['notifications'] as const,
+  /** The appliance's PR watch, one list for every thread's Checks. */
+  pulls: () => ['pulls'] as const,
   about: () => ['about'] as const,
   here: () => ['here'] as const,
   sshIdentity: () => ['ssh-identity'] as const,

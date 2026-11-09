@@ -471,17 +471,21 @@ impl Tmux {
     }
 
     /// I-4 via I-21: `remain-on-exit` is a *window* option, and a bare `=name`
-    /// is not a valid window target — so this uses the `@id` captured at
-    /// creation.
+    /// is not a valid window target — so this uses the `@id` and `$id`
+    /// captured at creation.
     async fn set_remain_on_exit<E: Exec>(&self, exec: &E, session: &Session) -> Result<(), Error> {
         let out = exec
-            .exec(&remain_on_exit(&self.path, &session.window_id))
+            .exec(&remain_on_exit(
+                &self.path,
+                &session.session_id,
+                &session.window_id,
+            ))
             .await?;
         if out.success() {
             Ok(())
         } else {
             Err(Error::Command {
-                command: "set-option remain-on-exit".to_owned(),
+                command: "set-option remain-on-exit status".to_owned(),
                 status: out.status,
                 stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
             })
@@ -637,12 +641,14 @@ pub(crate) fn login_server_command(tmux: &str) -> String {
 }
 
 /// The empty format keeps tmux's "Pane is dead" line off an attached terminal
-/// (Y-639); `-q` because tmux before 3.3 has no such option.
-fn remain_on_exit(tmux: &str, window_id: &str) -> String {
-    let (tmux, window) = (sq(tmux), sq(window_id));
+/// (Y-639); `-q` because tmux before 3.3 has no such option. The page draws its
+/// own header, so the status bar goes too (Y-644); it is a session option.
+fn remain_on_exit(tmux: &str, session_id: &str, window_id: &str) -> String {
+    let (tmux, session, window) = (sq(tmux), sq(session_id), sq(window_id));
     format!(
         "{tmux} set-option -w -t {window} remain-on-exit on \\; \
-         set-option -qw -t {window} remain-on-exit-format ''"
+         set-option -qw -t {window} remain-on-exit-format '' \\; \
+         set-option -t {session} status off"
     )
 }
 
@@ -724,11 +730,12 @@ mod tests {
     }
 
     #[test]
-    fn remain_on_exit_also_blanks_the_dead_pane_text_in_one_round_trip() {
+    fn remain_on_exit_also_blanks_the_dead_pane_text_and_the_status_bar_in_one_round_trip() {
         assert_eq!(
-            remain_on_exit("/usr/bin/tmux", "@7"),
+            remain_on_exit("/usr/bin/tmux", "$3", "@7"),
             "'/usr/bin/tmux' set-option -w -t '@7' remain-on-exit on \\; \
-             set-option -qw -t '@7' remain-on-exit-format ''"
+             set-option -qw -t '@7' remain-on-exit-format '' \\; \
+             set-option -t '$3' status off"
         );
     }
 

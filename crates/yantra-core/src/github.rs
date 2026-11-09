@@ -299,24 +299,57 @@ pub struct PullHead {
     pub author: String,
 }
 
-/// One check run. `output` holds a summary and text a check wrote, so it is
-/// not named and never read (Q5).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+/// Text a check or a reviewer wrote. The Chat shows it and Fix with agent
+/// sends it, but `Debug` prints only its length, so no log line carries it (Q5).
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct Unlogged(pub String);
+
+impl std::fmt::Debug for Unlogged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Unlogged(<{} bytes>)", self.0.len())
+    }
+}
+
+/// The most of a check's summary the watch keeps in memory.
+pub const SUMMARY_CAP: usize = 4 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckOutput {
+    pub title: Unlogged,
+    /// Cut to [`SUMMARY_CAP`] bytes at a character boundary.
+    pub summary: Unlogged,
+}
+
+/// One check run. `output.text` and the annotations are not read.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
     pub name: String,
     /// `queued`, `in_progress` or `completed`, and a few rarer states.
     pub status: String,
     /// Set once `status` is `completed`.
     pub conclusion: Option<String>,
+    /// `None` when the check wrote neither a title nor a summary.
+    pub output: Option<CheckOutput>,
 }
 
-/// One review, without its body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Review {
     pub id: u64,
     pub author: String,
     /// `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or `PENDING`.
     pub state: String,
+    pub body: Unlogged,
+}
+
+/// One comment on a line of a PR's diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewComment {
+    pub id: u64,
+    pub author: String,
+    pub path: String,
+    /// `None` when the line is no longer in the diff.
+    pub line: Option<u64>,
+    pub body: Unlogged,
 }
 
 /// `(owner, repo)` of a github.com remote, in its https, `ssh://` or scp form.
@@ -635,7 +668,7 @@ impl Github {
             &[("per_page", "100")],
             etag,
             "the check runs",
-            |found: Runs| found.check_runs,
+            |found: Runs| found.check_runs.into_iter().map(Check::from).collect(),
         )
         .await
     }
@@ -663,6 +696,39 @@ impl Github {
                         id: review.id,
                         author: review.user.map(|user| user.login).unwrap_or_default(),
                         state: review.state,
+                        body: Unlogged(review.body.unwrap_or_default()),
+                    })
+                    .collect()
+            },
+        )
+        .await
+    }
+
+    /// The line comments on PR `number`, the first hundred, oldest first.
+    pub async fn review_comments(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        etag: Option<&str>,
+    ) -> Result<Conditional<Vec<ReviewComment>>, Error> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/comments", self.api);
+        conditional(
+            url,
+            token,
+            &[("per_page", "100")],
+            etag,
+            "the review comments",
+            |found: Vec<CommentAnswer>| {
+                found
+                    .into_iter()
+                    .map(|comment| ReviewComment {
+                        id: comment.id,
+                        author: comment.user.map(|user| user.login).unwrap_or_default(),
+                        path: comment.path,
+                        line: comment.line,
+                        body: Unlogged(comment.body),
                     })
                     .collect()
             },
@@ -884,15 +950,58 @@ struct Sha {
 
 #[derive(serde::Deserialize)]
 struct Runs {
-    check_runs: Vec<Check>,
+    check_runs: Vec<RunAnswer>,
 }
 
-/// `body` is not named, so a review's text never reaches a log.
+#[derive(serde::Deserialize)]
+struct RunAnswer {
+    name: String,
+    status: String,
+    conclusion: Option<String>,
+    output: Option<OutputAnswer>,
+}
+
+#[derive(serde::Deserialize)]
+struct OutputAnswer {
+    title: Option<String>,
+    summary: Option<String>,
+}
+
+impl From<RunAnswer> for Check {
+    fn from(run: RunAnswer) -> Self {
+        let output = run.output.and_then(|output| {
+            let title = output.title.unwrap_or_default();
+            let mut summary = output.summary.unwrap_or_default();
+            summary.truncate(summary.floor_char_boundary(SUMMARY_CAP));
+            (!title.is_empty() || !summary.is_empty()).then_some(CheckOutput {
+                title: Unlogged(title),
+                summary: Unlogged(summary),
+            })
+        });
+        Self {
+            name: run.name,
+            status: run.status,
+            conclusion: run.conclusion,
+            output,
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct ReviewAnswer {
     id: u64,
     user: Option<User>,
     state: String,
+    body: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CommentAnswer {
+    id: u64,
+    user: Option<User>,
+    path: String,
+    line: Option<u64>,
+    body: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -2148,16 +2257,17 @@ pub(crate) mod tests {
         );
     }
 
-    /// `output` carries what a check printed, and it never reaches the value.
+    /// The Chat shows a check's output and Fix with agent sends it; `Debug`,
+    /// which is what a log line would print, does not carry it (Q5).
     #[tokio::test]
-    async fn check_runs_keep_the_name_status_and_conclusion_only() {
+    async fn check_runs_keep_the_output_title_and_summary() {
         let (listener, address) = listen();
         let served = serve(
             listener,
             vec![(
                 "200 OK",
                 "ETag: W/\"c1\"\r\n".to_owned(),
-                r#"{"total_count":2,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","output":{"title":"Leak","summary":"API_KEY=hunter2"}},{"name":"lint","status":"in_progress","conclusion":null}]}"#.to_owned(),
+                r#"{"total_count":3,"check_runs":[{"name":"test","status":"completed","conclusion":"failure","output":{"title":"2 failed","summary":"API_KEY=hunter2","text":"the full log"}},{"name":"lint","status":"in_progress","conclusion":null,"output":{"title":null,"summary":null}},{"name":"old","status":"queued","conclusion":null}]}"#.to_owned(),
             )],
         );
 
@@ -2177,15 +2287,28 @@ pub(crate) mod tests {
                     name: "test".to_owned(),
                     status: "completed".to_owned(),
                     conclusion: Some("failure".to_owned()),
+                    output: Some(CheckOutput {
+                        title: Unlogged("2 failed".to_owned()),
+                        summary: Unlogged("API_KEY=hunter2".to_owned()),
+                    }),
                 },
                 Check {
                     name: "lint".to_owned(),
                     status: "in_progress".to_owned(),
                     conclusion: None,
+                    output: None,
+                },
+                Check {
+                    name: "old".to_owned(),
+                    status: "queued".to_owned(),
+                    conclusion: None,
+                    output: None,
                 },
             ]
         );
-        assert!(!format!("{value:?}").contains("hunter2"));
+        let printed = format!("{value:?}");
+        assert!(!printed.contains("hunter2"), "{printed}");
+        assert!(!printed.contains("2 failed"), "{printed}");
         let seen = served.join().expect("the listener thread").remove(0);
         assert!(
             seen.starts_with("GET /repos/o/r/commits/aaa111/check-runs?per_page=100 HTTP/1.1"),
@@ -2193,14 +2316,30 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn a_long_summary_is_cut_at_a_character_boundary() {
+        let run = RunAnswer {
+            name: "test".to_owned(),
+            status: "completed".to_owned(),
+            conclusion: Some("failure".to_owned()),
+            output: Some(OutputAnswer {
+                title: None,
+                summary: Some(format!("a{}", "é".repeat(SUMMARY_CAP))),
+            }),
+        };
+        let summary = Check::from(run).output.expect("a summary").summary.0;
+        assert_eq!(summary.len(), SUMMARY_CAP - 1);
+        assert!(summary.ends_with('é'));
+    }
+
     #[tokio::test]
-    async fn reviews_keep_no_body() {
+    async fn reviews_keep_the_body_and_debug_does_not_print_it() {
         let (listener, address) = listen();
         let served = serve(
             listener,
             vec![reply(
                 "200 OK",
-                r#"[{"id":7,"user":{"login":"friend"},"state":"CHANGES_REQUESTED","body":"Your password is in line 3"},{"id":8,"user":null,"state":"PENDING","body":""}]"#,
+                r#"[{"id":7,"user":{"login":"friend"},"state":"CHANGES_REQUESTED","body":"Your password is in line 3"},{"id":8,"user":null,"state":"PENDING","body":null}]"#,
             )],
         );
 
@@ -2219,11 +2358,13 @@ pub(crate) mod tests {
                     id: 7,
                     author: "friend".to_owned(),
                     state: "CHANGES_REQUESTED".to_owned(),
+                    body: Unlogged("Your password is in line 3".to_owned()),
                 },
                 Review {
                     id: 8,
                     author: String::new(),
                     state: "PENDING".to_owned(),
+                    body: Unlogged::default(),
                 },
             ]
         );
@@ -2232,6 +2373,70 @@ pub(crate) mod tests {
         assert!(
             seen.starts_with("GET /repos/o/r/pulls/21/reviews?per_page=100 HTTP/1.1"),
             "{seen}"
+        );
+    }
+
+    #[tokio::test]
+    async fn review_comments_keep_the_path_line_and_body() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                (
+                    "200 OK",
+                    "ETag: \"rc1\"\r\n".to_owned(),
+                    r#"[{"id":31,"user":{"login":"friend"},"path":"src/main.rs","line":12,"original_line":12,"diff_hunk":"@@","body":"Rename this token"},{"id":32,"user":null,"path":"README.md","line":null,"body":"Outdated"}]"#.to_owned(),
+                ),
+                reply("304 Not Modified", ""),
+            ],
+        );
+        let github = at(address);
+
+        let read = github
+            .review_comments(&token(), "o", "r", 21, None)
+            .await
+            .expect("the comments");
+        let again = github
+            .review_comments(&token(), "o", "r", 21, Some("\"rc1\""))
+            .await
+            .expect("a 304");
+
+        assert_eq!(
+            read,
+            Conditional::Fresh {
+                etag: Some("\"rc1\"".to_owned()),
+                value: vec![
+                    ReviewComment {
+                        id: 31,
+                        author: "friend".to_owned(),
+                        path: "src/main.rs".to_owned(),
+                        line: Some(12),
+                        body: Unlogged("Rename this token".to_owned()),
+                    },
+                    ReviewComment {
+                        id: 32,
+                        author: String::new(),
+                        path: "README.md".to_owned(),
+                        line: None,
+                        body: Unlogged("Outdated".to_owned()),
+                    },
+                ],
+            }
+        );
+        assert_eq!(again, Conditional::NotModified);
+        assert!(!format!("{read:?}").contains("token"));
+        let seen = served.join().expect("the listener thread");
+        assert!(
+            seen[0].starts_with("GET /repos/o/r/pulls/21/comments?per_page=100 HTTP/1.1"),
+            "{}",
+            seen[0]
+        );
+        assert!(
+            seen[1]
+                .to_lowercase()
+                .contains("if-none-match: \"rc1\"\r\n"),
+            "{}",
+            seen[1]
         );
     }
 

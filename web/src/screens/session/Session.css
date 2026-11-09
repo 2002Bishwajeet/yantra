@@ -208,14 +208,6 @@
   margin: 0;
 }
 
-.turns__said {
-  display: block;
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: var(--md-sys-typescale-body-small-line-height);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .turns__waiting a {
   color: inherit;
   font-weight: 500;
@@ -513,14 +505,6 @@
   border-radius: var(--m3-row-radius);
 }
 
-.spend__path {
-  display: flex;
-  gap: 10px;
-  margin: 0;
-  padding: 0 8px;
-  min-width: 0;
-}
-
 .spend > p {
   margin: 0;
   padding: 0 8px;
@@ -627,7 +611,7 @@
   font: var(--md-sys-typescale-label-large);
 }
 
-.chat__title > :first-child {
+.chat__title-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -647,8 +631,11 @@
 
 .m3-menu.chat__threads {
   width: max-content;
-  min-width: min(320px, 92vw);
-  max-width: min(480px, 92vw);
+  min-width: min(320px, calc(100vw - 32px));
+  max-width: min(480px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  max-height: calc(100dvh - 96px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .threads__pending {
@@ -668,8 +655,18 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 16px;
+  gap: 2px 12px;
+  min-height: 48px;
   padding-block: 6px;
+}
+
+.threads__title {
+  flex: 1 0 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--md-sys-typescale-body-large);
 }
 
 .threads__row[aria-current='true'] {
@@ -681,12 +678,12 @@
   padding: 4px 12px;
 }
 
-.threads__issue,
+.threads__from,
 .threads__said {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-.threads__row[aria-current='true'] .threads__issue,
+.threads__row[aria-current='true'] .threads__from,
 .threads__row[aria-current='true'] .threads__said {
   color: inherit;
 }

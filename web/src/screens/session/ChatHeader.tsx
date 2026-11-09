@@ -10,17 +10,18 @@ import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { ChevronDown, Diff, RefreshCw } from 'lucide-react'
 import { useThreads } from '@/api/mutations'
+import { useThreadStates } from '@/api/queries'
+import { useTick } from '@/useTick'
 import { Button } from '@/m3/button/Button'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
 import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuSeparator, MenuTrigger } from '@/m3/menu/Menu'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
+import { Checks } from './Checks'
 import { GitActions } from './GitActions'
-import { groupThreads, prMark } from './threads'
-
-const branchTail = (branch: string) => branch.split('/').pop() ?? branch
+import { elapsed, groupThreads, prMark, threadTitle } from './threads'
 
 export type ChatHeaderProps = {
   workspace: string
@@ -37,12 +38,14 @@ export type ChatHeaderProps = {
   added: boolean
   /** The page's tab bar. Undefined draws the header in place; null draws nothing, for a tab that is not Chat. */
   into?: HTMLElement | null
+  /** Fix with agent: put this block in the composer, and send nothing. */
+  onFix: (block: string) => void
 }
 
 /** Y-633: the Chat tab's top line. The threads read on mount and on Refresh, and never poll:
  *  each read is an ssh to the machine and a call to GitHub (Y-489). */
 export function ChatHeader(props: ChatHeaderProps) {
-  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, added, into } = props
+  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, added, into, onFix } = props
   const active = thread ?? urlThread ?? null
   const threads = useThreads(workspace)
   const { mutate } = threads
@@ -58,8 +61,21 @@ export function ChatHeader(props: ChatHeaderProps) {
     tried.current = active
   }, [active, shown, mutate])
 
-  const current = shown?.find((one) => one.id === active)
-  const title = current ? branchTail(current.branch) : (active ?? 'New thread')
+  // The live read polls only while the menu is open, and the clock ticks only then too.
+  const [open, setOpen] = useState(false)
+  const states = useThreadStates(workspace, open)
+  const now = useTick(open)
+  const live = states.data
+  // The socket knows the open thread best, then the daemon's memory, then the list's read.
+  const listed = shown?.map((one) => {
+    const read = live?.find((state) => state.id === one.id) ?? one
+    if (one.id !== active) return { ...one, state: read.state, since: read.since }
+    return { ...one, state: busy ? ('working' as const) : ('idle' as const), since: busy ? read.since : null }
+  })
+
+  const current = listed?.find((one) => one.id === active)
+  const pr = thread ? shown?.find((one) => one.id === thread)?.pr : undefined
+  const title = current ? threadTitle(current) : active ? 'Thread' : 'New thread'
   const groupId = useId()
 
   if (into === null) return null
@@ -75,9 +91,9 @@ export function ChatHeader(props: ChatHeaderProps) {
             <span aria-hidden="true">/</span>
           </>
         ) : null}
-        <Menu>
+        <Menu onOpenChange={setOpen}>
           <MenuTrigger className="chat__title m3-interactive" aria-label={`Threads, ${title}`}>
-            <Mono>{title}</Mono>
+            <span className="chat__title-text">{title}</span>
             <ChevronDown aria-hidden="true" />
           </MenuTrigger>
           <MenuPopup align="start" className="chat__threads">
@@ -98,28 +114,42 @@ export function ChatHeader(props: ChatHeaderProps) {
                 title="The threads could not be listed"
               />
             ) : null}
+            {states.error ? (
+              <ErrorSurface.Inline error={states.error} title="The thread states could not be read" />
+            ) : null}
             {shown && shown.length === 0 ? (
               <EmptyState title="No threads yet">Send a message in Chat to start one.</EmptyState>
             ) : null}
-            {shown
-              ? groupThreads(shown).map((group) => (
+            {listed
+              ? groupThreads(listed).map((group) => (
                   <div aria-labelledby={`${groupId}-${group.title}`} className="threads__group" key={group.title} role="group">
                     <Text id={`${groupId}-${group.title}`} scale="body-small" tone="variant">
                       {group.title}
                     </Text>
                     {group.items.map((one) => {
                       const mark = prMark(one.pr)
+                      const name = threadTitle(one)
+                      const isWorking = one.state === 'working'
+                      const doing = isWorking ? (one.since === null ? 'Working' : `Working · ${elapsed(one.since, now)}`) : 'Idle'
                       return (
                         <MenuLinkItem
                           aria-current={one.id === active ? 'true' : undefined}
+                          aria-label={`${name}${one.from ? `, from ${one.from}` : ''}, ${doing}, ${mark.word}`}
                           className="threads__row"
                           key={one.id}
                           render={
                             <Link params={{ name: workspace }} replace search={{ view: 'chat', thread: one.id }} to="/w/$name" />
                           }
                         >
-                          <Mono className="threads__branch">{branchTail(one.branch)}</Mono>
-                          {one.issue ? <Mono className="threads__issue">{one.issue}</Mono> : null}
+                          <span className="threads__title">{name}</span>
+                          {one.from ? (
+                            <Text className="threads__from" scale="body-small" tone="variant">
+                              from {one.from}
+                            </Text>
+                          ) : null}
+                          <State className="threads__doing" state={isWorking ? 'running' : 'idle'}>
+                            {doing}
+                          </State>
                           <State className="threads__pr" state={mark.state}>
                             {mark.word}
                           </State>
@@ -155,11 +185,12 @@ export function ChatHeader(props: ChatHeaderProps) {
           Refresh
         </Button>
       ) : null}
+      <Checks onFix={onFix} pr={pr?.state === 'open' ? pr : null} />
       <GitActions
         busy={busy}
         diffs={diffs}
         key={thread ?? ''}
-        listed={thread ? shown?.find((one) => one.id === thread)?.pr : undefined}
+        listed={pr}
         refresh={() => mutate()}
         thread={thread}
         workspace={workspace}
