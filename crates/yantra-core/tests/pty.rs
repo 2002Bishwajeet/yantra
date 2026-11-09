@@ -39,6 +39,9 @@ use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tmux::Tmux;
 
 const SESSION: &str = "ptyspike";
+/// The pane's shell prompt in its `/tmp` start directory: tmux has drawn the
+/// pane. Y-644 turned the status bar off, so the session name is not on screen.
+const PROMPT: &str = "/tmp$";
 /// Long enough that only a signal can end it inside the test's lifetime, and
 /// distinctive enough to find by name.
 const VICTIM: &str = "sleep 300";
@@ -429,9 +432,8 @@ async fn the_module_carries_bytes_both_ways_and_resizes() -> Result<()> {
     };
     let mut terminal = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
 
-    // Bytes out are the far side's screen, and tmux's status line names the
-    // session it attached to.
-    screen_showing(&mut terminal, SESSION).await?;
+    // Bytes out are the far side's screen, which shows the pane's prompt.
+    screen_showing(&mut terminal, PROMPT).await?;
     assert_eq!(
         lab.client_size().await?,
         size_of(WINDOW),
@@ -466,7 +468,7 @@ async fn dropping_the_terminal_detaches_and_leaves_the_session_alone() -> Result
         return Ok(());
     };
     let mut terminal = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
-    screen_showing(&mut terminal, SESSION).await?;
+    screen_showing(&mut terminal, PROMPT).await?;
     assert!(lab.a_client_is_attached().await?);
 
     drop(terminal);
@@ -498,7 +500,7 @@ async fn a_second_terminal_is_drawn_the_screen_the_first_one_left() -> Result<()
         return Ok(());
     };
     let mut first = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
-    screen_showing(&mut first, SESSION).await?;
+    screen_showing(&mut first, PROMPT).await?;
     lab.echo(BEFORE).await?;
     screen_showing(&mut first, BEFORE).await?;
 
@@ -536,7 +538,7 @@ async fn a_full_screen_application_is_drawn_again_too() -> Result<()> {
         return Ok(());
     };
     let mut first = pty::on(&lab.ssh, &lab.plan(), cells(WINDOW))?;
-    screen_showing(&mut first, SESSION).await?;
+    screen_showing(&mut first, PROMPT).await?;
     lab.draw_a_full_screen_application().await?;
     screen_showing(&mut first, ON_THE_ALTERNATE_SCREEN).await?;
     assert_eq!(
