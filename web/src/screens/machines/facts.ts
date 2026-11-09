@@ -30,21 +30,22 @@ const words: Record<CheckState, string> = {
 export const markOf = (state: CheckState): MarkState => marks[state]
 export const wordOf = (state: CheckState): string => words[state]
 
+/** ADR-0031 §9: a microphone that is not installed is no fault. */
+const optionalAbsent = (check: Check) => check.check === 'mic' && check.state === 'absent'
+
 export type Tally = { present: number; absent: number; unknown: number; total: number }
 
-/** The count covers the checks drawn, so its total is the row count. */
+/** The count covers the checks drawn, so its total is the row count. An absent
+ *  microphone is a row but not a failure, so the summary never calls it one. */
 export function tally(checks: Check[]): Tally {
   const count = (state: CheckState) => checks.filter((one) => one.state === state).length
   return {
     present: count('present'),
-    absent: count('absent'),
+    absent: checks.filter((one) => one.state === 'absent' && !optionalAbsent(one)).length,
     unknown: count('unknown'),
     total: checks.length,
   }
 }
-
-/** ADR-0031 §9: a microphone that is not installed is no fault. */
-const optionalAbsent = (check: Check) => check.check === 'mic' && check.state === 'absent'
 
 /** A check the chip counts under "to fix" and the title counts as needing you:
  *  an absent one, or a session check that could not be asked. */

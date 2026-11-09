@@ -47,8 +47,14 @@ describe('the card summary', () => {
   /** Y-580: the count is built from the rows drawn, so the microphone is a row too. */
   it('counts every check it is given, the microphone included', () => {
     const ok = check('tmux', 'present')
-    expect(tally([ok, check('mic', 'absent')])).toEqual({ present: 1, absent: 1, unknown: 0, total: 2 })
+    expect(tally([ok, check('mic', 'absent')])).toEqual({ present: 1, absent: 0, unknown: 0, total: 2 })
     expect(summary(tally([ok, check('mic', 'present')]))).toBe('2 of 2')
+  })
+
+  it('never calls an absent microphone failing (ADR-0031 §9)', () => {
+    const ok = check('tmux', 'present')
+    expect(summary(tally([ok, check('mic', 'absent')]))).toBe('1 of 2')
+    expect(summary(tally([check('git', 'absent'), check('mic', 'absent')]))).toBe('0 of 2 · 1 failing')
   })
 })
 
