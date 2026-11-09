@@ -500,13 +500,27 @@ export type ThreadPr =
   | { state: 'open' | 'closed' | 'merged'; number: number; url: string }
   | { state: 'unknown'; said: string }
 
+/** What a thread is doing: the daemon holds a turn for `working`. `since` is
+ *  unix milliseconds, null when the start is unknown. */
+export type ThreadState = {
+  id: string
+  state: 'working' | 'idle'
+  since: number | null
+}
+
 /** One entry of `POST /api/workspaces/{name}/threads`. `issue` is
- *  `owner/repo#n` for a thread opened from an issue. */
+ *  `owner/repo#n` for a thread opened from an issue. `title` is the first line
+ *  of the first prompt, or `#n` and the issue's title; `from` is the repository
+ *  branch the thread left. `state` and `since` are read when the list was. */
 export type Thread = {
   id: string
   branch: string
   worktree: string
   issue: string | null
+  title: string | null
+  from: string | null
+  state: ThreadState['state']
+  since: number | null
   pr: ThreadPr
 }
 

@@ -34,7 +34,8 @@ test('an inbox issue starts a session with its draft and lists the threads in th
   for (const mark of ['no PR', 'PR #512 open', 'PR #511 closed', 'PR #510 merged', 'PR unknown']) {
     await expect(threads.getByText(mark)).toBeVisible()
   }
-  await expect(threads.getByText('2002Bishwajeet/yantra#488')).toBeVisible()
+  await expect(threads.getByText('#488 A workspace lists its threads')).toBeVisible()
+  await expect(threads.getByText('The thread states could not be read')).toHaveCount(0)
 })
 
 /** The git actions (Y-493) on the fixture chat. `gitfails` refuses each route as the daemon does. */

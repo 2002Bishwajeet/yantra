@@ -27,9 +27,26 @@ export function prMark(pr: ThreadPr): { state: MarkState; word: string } {
 
 const finished = (one: Thread) => one.pr.state === 'closed' || one.pr.state === 'merged'
 
+/** What a person reads for a thread: never its id, which is random hex. */
+export const threadTitle = (one: Thread) => one.title ?? one.issue ?? 'Untitled thread'
+
+/** "8s", "3m 04s" or "1h 02m". */
+export function elapsed(since: number, now: number) {
+  const seconds = Math.max(0, Math.floor((now - since) / 1000))
+  const two = (n: number) => String(n).padStart(2, '0')
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${two(seconds % 60)}s`
+  return `${Math.floor(seconds / 3600)}h ${two(Math.floor((seconds % 3600) / 60))}m`
+}
+
+const working = (one: Thread) => (one.state === 'working' ? 0 : 1)
+
 export function groupThreads(threads: Thread[]) {
   return [
-    { title: 'Active', items: threads.filter((one) => !finished(one)) },
+    {
+      title: 'Active',
+      items: threads.filter((one) => !finished(one)).sort((a, b) => working(a) - working(b)),
+    },
     { title: 'Finished', items: threads.filter(finished) },
   ].filter((group) => group.items.length > 0)
 }

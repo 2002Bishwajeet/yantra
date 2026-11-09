@@ -52,6 +52,7 @@ import type {
   ThreadOpened,
   ThreadPrOpened,
   ThreadPushed,
+  ThreadState,
   Transcript,
   UpdateProgress,
   Workspace,
@@ -776,15 +777,20 @@ export const joinedKept = {
 export const threads = [
   {
     "branch": "yantra/chat/site/0a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "0a1b2c3d4e5f6a7b",
     "issue": null,
     "pr": {
       "state": "none"
     },
+    "since": null,
+    "state": "idle",
+    "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/0a1b2c3d4e5f6a7b"
   },
   {
     "branch": "yantra/chat/site/1a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "1a1b2c3d4e5f6a7b",
     "issue": "2002Bishwajeet/yantra#488",
     "pr": {
@@ -792,10 +798,14 @@ export const threads = [
       "state": "open",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/512"
     },
+    "since": 1790000000000,
+    "state": "working",
+    "title": "#488 A workspace lists its threads",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/1a1b2c3d4e5f6a7b"
   },
   {
     "branch": "yantra/chat/site/2a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "2a1b2c3d4e5f6a7b",
     "issue": null,
     "pr": {
@@ -803,10 +813,14 @@ export const threads = [
       "state": "closed",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/511"
     },
+    "since": null,
+    "state": "idle",
+    "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/2a1b2c3d4e5f6a7b"
   },
   {
     "branch": "yantra/chat/site/3a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "3a1b2c3d4e5f6a7b",
     "issue": null,
     "pr": {
@@ -814,19 +828,44 @@ export const threads = [
       "state": "merged",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/510"
     },
+    "since": null,
+    "state": "idle",
+    "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/3a1b2c3d4e5f6a7b"
   },
   {
     "branch": "yantra/chat/site/4a1b2c3d4e5f6a7b",
+    "from": "main",
     "id": "4a1b2c3d4e5f6a7b",
     "issue": null,
     "pr": {
       "said": "no GitHub grant — run `yantra github login`",
       "state": "unknown"
     },
+    "since": null,
+    "state": "idle",
+    "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/4a1b2c3d4e5f6a7b"
   }
 ] satisfies Thread[]
+
+export const threadStates = [
+  {
+    "id": "0a1b2c3d4e5f6a7b",
+    "since": null,
+    "state": "idle"
+  },
+  {
+    "id": "1a1b2c3d4e5f6a7b",
+    "since": 1790000000000,
+    "state": "working"
+  },
+  {
+    "id": "2a1b2c3d4e5f6a7b",
+    "since": null,
+    "state": "working"
+  }
+] satisfies ThreadState[]
 
 export const threadOpened = {
   "branch": "yantra/chat/site/0a1b2c3d4e5f6a7b",
