@@ -24,6 +24,7 @@ const EMPTY: Record<RouteId, readonly string[] | null> = {
   room: ['No room is called release'],
   'add-device': null,
   setup: null,
+  'setup-route': null,
 }
 
 /** What `unreachable` does to a route: `page` is the Unreachable board with
@@ -50,6 +51,7 @@ const UNREACHABLE: Record<RouteId, 'page' | 'missing' | 'none'> = {
   'add-device': 'page',
   // The unreachable dashboard, which is what `/` draws when nothing answers.
   setup: 'page',
+  'setup-route': 'page',
 }
 
 /** `broken` overlays `/api/machines` with a body missing its `data`: every

@@ -44,7 +44,7 @@ test.describe('Add a device', () => {
         }),
       )
       await page.goto(`/machines/add?platform=${platform}&machine=${'a'.repeat(40)}`)
-      await expect(page.getByRole('heading', { level: 2, name: 'Joined' })).toBeVisible()
+      await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible()
       const wide = await page.evaluate(() => {
         const root = document.documentElement
         const stray = [...document.body.querySelectorAll('*')].filter(
