@@ -109,6 +109,13 @@ commit, push and PR cases of
 [`GitActionsControl.logic.ts`](https://github.com/pingdotgg/t3code/blob/1451e7c/apps/web/src/components/GitActionsControl.logic.ts)
 into typed failures for Yantra's daemon routes. Its name, wordmark and icon are not used.
 
+[`web/src/screens/session/Checks.tsx`](web/src/screens/session/Checks.tsx) adapts, at commit `b8c2cfad`,
+[`PullRequestChecksPopover.tsx`](https://github.com/pingdotgg/t3code/blob/b8c2cfad/apps/web/src/components/pullRequest/PullRequestChecksPopover.tsx),
+cut to one PR per thread, and [`checks.logic.ts`](web/src/screens/session/checks.logic.ts) adapts the check
+states and the summary line of
+[`pullRequestPresentation.tsx`](https://github.com/pingdotgg/t3code/blob/b8c2cfad/apps/web/src/components/pullRequest/pullRequestPresentation.tsx).
+Its name, wordmark and icon are not used.
+
 The composer in [`web/src/composer/`](web/src/composer/) adapts, at commit `810e8f6`, these files of T3 Code,
 each with its upstream path in the block comment at its top:
 [`ComposerSurface.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerSurface.tsx)

@@ -82,6 +82,7 @@ import type {
   Mentions,
   Opened,
   Placement,
+  Pull,
   Readiness,
   Repo,
   Resumed,
@@ -190,6 +191,7 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             "Looked<Event[]>",
             read(&fleet, "/notifications").await,
         ),
+        ("pulls", "Looked<Pull[]>", read(&fleet, "/pulls").await),
         (
             "notLooked",
             "Looked<Machine[]>",
@@ -504,7 +506,10 @@ async fn fleet() -> Fleet {
         },
     ]);
     drop(events);
-    fleet
+    Fleet {
+        pulls: crate::watch::tests::watching_one().await,
+        ..fleet
+    }
 }
 
 /// The look itself failing is the fourth state, and it is the one a page draws
