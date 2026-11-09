@@ -539,6 +539,7 @@ deleted everywhere else.
 | Y-689 | The ⌘K palette finds threads | ⬜ todo | claude | Y-688 | [#687](https://github.com/2002Bishwajeet/yantra/issues/687). `web/src/shell/Palette.tsx` and `PalettePopup.tsx` find only workspaces, machines and pages. **Done** when the palette finds threads by title from the store, an offline machine's too, opens the chosen thread, its footer says what it searches, and it is tested at 390 px. |
 | Y-690 | Search message text across threads | ⬜ todo | owner | Y-689 | [#688](https://github.com/2002Bishwajeet/yantra/issues/688). Needs the [ADR-0032](docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md) archive; ADR-0045 decision 9. **Parks:** until Y-689 is done. **Done** when the palette finds a thread by words in its messages, from the archive, and opens it. |
 | Y-691 | Keep ImgBot off test baselines and source art | 🔵 review | claude | — | Owner, 2026-11-09: #540 rewrote 94 Playwright baselines and the brand files. **Done** when `.imgbotconfig` ignores the screenshot baselines, test fixtures, `design/brand` and `docs/design`, and #540 is closed. |
+| Y-692 | The build loop's gate waits for its exit line | 🔵 review | claude | — | Y-649 and Y-653 parked on 2026-11-09 with no red test: the gate agent returned before `GATE_EXIT`. **Done** when a gate report without `GATE_EXIT` is not a failed round, and `build-rows.js` sends an agent to wait on the same log. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
