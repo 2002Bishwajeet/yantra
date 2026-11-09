@@ -15,6 +15,7 @@ import {
   chatNotAttached,
   chatNotLoggedIn,
   chatQueue,
+  chatStopTaskFailed,
 } from '@/contract.gen'
 import { browser, daemon } from '@/screens/session/harness'
 import { AttachError, ChatError, IMAGE_LIMIT, PAUSES, chatAddress, frameOf, openChat, type ChatSocket } from './chat'
@@ -26,9 +27,8 @@ let server: Awaited<ReturnType<typeof daemon>>
 
 const sockets: ChatSocket[] = []
 
-/** A socket that reopens after each pause in `pauses`; none by default, so a
- *  test that hangs up sees the end at once. */
-function connect(url: string | ((after?: string) => string) = chatAddress('yantra-web'), pauses: number[] = []) {
+/** A socket that reopens 10 ms after each drop, for as long as the page is visible. */
+function connect(url: string | ((after?: string) => string) = chatAddress('yantra-web'), pauses: number[] = [10]) {
   const events: ThreadEvent[] = []
   const errors: ChatError[] = []
   const opened = vi.fn()
@@ -75,7 +75,7 @@ describe('the chat socket', () => {
   })
 
   it('backs off as the daemon does: 1, 2, 4, then 8 seconds', () => {
-    expect(PAUSES).toEqual([1_000, 2_000, 4_000, 8_000, 8_000])
+    expect(PAUSES).toEqual([1_000, 2_000, 4_000, 8_000])
   })
 
   it('reopens a dropped socket after the last cursor it drew', async () => {
@@ -143,21 +143,6 @@ describe('the chat socket', () => {
     server.say(JSON.stringify(chatEvents[0]))
     await settled(() => expect(events).toHaveLength(1))
     expect(restarted).not.toHaveBeenCalled()
-  })
-
-  it('reports closed, and retryable, once every reopen in one outage failed', async () => {
-    const { errors, opened, dropped } = connect(chatAddress('yantra-web'), [10, 10])
-    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
-    server.keepHangingUp()
-    server.hangUp()
-    await settled(() => expect(errors).toHaveLength(1))
-    expect(server.asked).toHaveLength(3)
-    expect(dropped).toHaveBeenCalledTimes(2)
-    expect(errors[0]?.kind).toBe('closed')
-    expect(errors[0]?.retryable).toBe(true)
-    expect(errors[0]?.describe()).toBe(
-      'The chat socket closed and did not reopen. A running turn continues on the machine. Try again to see it.',
-    )
   })
 
   it('does not reopen a socket the page closed', async () => {
@@ -320,24 +305,23 @@ describe('the chat socket', () => {
     expect(errors.map((error) => error.kind)).toEqual(['unreachable'])
   })
 
-  it('reopens after an unreachable error and a clean close, and ends closed when the budget is spent', async () => {
+  it('reopens after an unreachable error and a clean close, every time', async () => {
     const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
-    const { errors, opened, dropped } = connect(at, [10, 10])
-    for (const n of [1, 2, 3]) {
+    const { errors, opened, dropped } = connect(at)
+    for (const n of [1, 2, 3, 4]) {
       await settled(() => expect(opened).toHaveBeenCalledTimes(n))
       server.say(JSON.stringify({ type: 'error', kind: 'unreachable', said: 'ssh: connection refused' }))
       await settled(() => expect(errors).toHaveLength(n))
       server.hangUp()
     }
-    await settled(() => expect(errors).toHaveLength(4))
-    expect(errors.map((error) => error.kind)).toEqual(['unreachable', 'unreachable', 'unreachable', 'closed'])
-    expect(dropped).toHaveBeenCalledTimes(2)
-    expect(server.asked).toHaveLength(3)
+    await settled(() => expect(opened).toHaveBeenCalledTimes(5))
+    expect(errors.map((error) => error.kind)).toEqual(['unreachable', 'unreachable', 'unreachable', 'unreachable'])
+    expect(dropped).toHaveBeenCalledTimes(4)
   })
 
-  it('ends the reopens when each one says thread.started and then unreachable', async () => {
+  it('keeps reopening when each one says thread.started and then unreachable', async () => {
     const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
-    const { errors, opened, dropped } = connect(at, [10, 10])
+    const { errors, opened, dropped } = connect(at)
     for (const n of [1, 2, 3]) {
       await settled(() => expect(opened).toHaveBeenCalledTimes(n))
       server.say(JSON.stringify({ threadId: '1a2b3c4d', type: 'thread.started', payload: { thread: '1a2b3c4d', harness: 'opencode' } }))
@@ -345,10 +329,9 @@ describe('the chat socket', () => {
       await settled(() => expect(errors).toHaveLength(n))
       server.hangUp()
     }
-    await settled(() => expect(errors).toHaveLength(4))
-    expect(errors.map((error) => error.kind)).toEqual(['unreachable', 'unreachable', 'unreachable', 'closed'])
-    expect(dropped).toHaveBeenCalledTimes(2)
-    expect(server.asked).toHaveLength(3)
+    await settled(() => expect(opened).toHaveBeenCalledTimes(4))
+    expect(errors.map((error) => error.kind)).toEqual(['unreachable', 'unreachable', 'unreachable'])
+    expect(dropped).toHaveBeenCalledTimes(3)
   })
 
   it('reports a failed turn once, though a reopen replays its start and a send went nowhere', async () => {
@@ -381,15 +364,6 @@ describe('the chat socket', () => {
     expect(errors.map((error) => error.kind)).toEqual(['badFrame', 'badFrame', 'badFrame'])
     expect(errors[0]?.describe()).toBe('The daemon sent a frame this dashboard cannot read.')
     expect(errors[0]?.said).toBe('not json')
-  })
-
-  it('reports a socket that dropped with no reopen left as closed, and retryable', async () => {
-    const { errors, opened } = connect()
-    await settled(() => expect(opened).toHaveBeenCalled())
-    server.hangUp()
-    await settled(() => expect(errors).toHaveLength(1))
-    expect(errors[0]?.kind).toBe('closed')
-    expect(errors[0]?.retryable).toBe(true)
   })
 
   it('reports a socket that never opened as refused', async () => {
@@ -425,6 +399,22 @@ describe('a daemon frame', () => {
     expect(frameOf(JSON.stringify(chatBranchDiff))).toEqual(chatBranchDiff)
     expect(frameOf(JSON.stringify({ ...chatBranchDiff, files: 'x' }))).toBeNull()
     expect(frameOf(JSON.stringify(chatDiffFailed))).toEqual(chatDiffFailed)
+  })
+
+  it('sends a task stop and a stop of all as the frames the daemon reads, and types a failed stop', async () => {
+    const { socket, errors, opened } = connect()
+    expect(socket.stopTask('b561loltj')).toBe(false)
+    await settled(() => expect(opened).toHaveBeenCalledTimes(1))
+    expect(socket.stopTask('b561loltj')).toBe(true)
+    expect(socket.stopAll()).toBe(true)
+    await settled(() => expect(server.heard).toHaveLength(2))
+    const sent = server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : null))
+    expect(sent).toEqual(chatFrames.filter((frame) => frame.type === 'stopTask' || frame.type === 'stopAll'))
+    server.say(JSON.stringify(chatStopTaskFailed))
+    await settled(() => expect(errors.map((error) => error.kind)).toEqual(['stopTask']))
+    expect(errors[0]?.said).toBe(chatStopTaskFailed.said)
+    expect(errors[0]?.describe()).toBe('The agent could not stop that background task. It may have ended already.')
+    socket.close()
   })
 
   it('reaches onBranchDiff, and a failed diff is its own kind', async () => {

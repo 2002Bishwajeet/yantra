@@ -327,8 +327,9 @@ image carries `bash` because claude's Bash tool refuses busybox `sh`.
 [ADR-0035](adr/0035-a-chat-turn-outlives-its-ssh-pipe.md)). It gives the daemon a scratch `HOME`
 and `XDG_RUNTIME_DIR` under `/tmp/ykc-<pid>`, and puts two shims first on its `PATH`: a `tailscale`
 that names this host at 127.0.0.1, and an `ssh` that adds `-F` with a config naming the fixture.
-The daemon binds `127.0.0.1:7717`, so its three cases take a file lock and run one at a time. A
-daemon of your own on the tailnet address does not collide with it.
+The daemon binds `127.0.0.1:7717`, so its six cases take a file lock and run one at a time. A
+daemon of your own on the tailnet address does not collide with it. The idle-keeper case starts the
+daemon with `YANTRA_CHAT_IDLE=15`, which only a debug build reads.
 
 **There is a second container, and it runs a real `systemd`.** Its fixture is
 `crates/yantrad/tests/common/mod.rs`, built from

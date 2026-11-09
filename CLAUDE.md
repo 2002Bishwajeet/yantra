@@ -138,15 +138,20 @@ person. Give the reason. Say what you do not know.
 
 Stack: `tokio` · `axum` (HTTP + WebSocket) · `tokio::process` (spawning `ssh`, `tmux`, `tailscale`) ·
 `portable-pty` · `serde`. Appliance target `aarch64-unknown-linux-musl` via `cargo-zigbuild`.
-**The daemon persists nothing about the fleet.** The `rusqlite` row in that ADR's stack table was
-never built (Y-044); see its 2026-08-02 amendment. It writes exactly one file, and that file is
+**The daemon persists nothing about the fleet except its Chat threads.** The `rusqlite` row in
+that ADR's stack table was not built for Y-044; see its 2026-08-02 amendment. It writes exactly one file, and that file is
 configuration rather than state —
 [ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) and the 2026-08-22 amendment
 beside the first. **Since 2026-10-19 it also writes the owner's dashboard layout**, a preference
 with no fleet state and no secret ([ADR-0036](docs/adr/0036-the-dashboard-layout-syncs-through-the-daemon.md)). **Since 2026-10-20 it also writes each room's definition**
 to `~/.config/yantra/rooms/<name>.toml`, with no message, no fleet state and no secret
-([ADR-0039](docs/adr/0039-a-room-is-a-shared-project.md)). The appliance may keep a conversation history that the daemon never touches —
+([ADR-0039](docs/adr/0039-a-room-is-a-shared-project.md)). **Since 2026-11-09 it also writes
+`~/.config/yantra/passkeys.toml`**, with passkey public keys and session token hashes only, no fleet
+state and no secret value ([ADR-0044](docs/adr/0044-a-write-needs-the-owners-passkey.md)). The appliance may keep a conversation history that the daemon never touches —
 [ADR-0032](docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md).
+**Since 2026-11-09 the daemon also keeps one store**, `~/.local/state/yantra/threads.sqlite`: one row per Chat
+thread with its session id, title, machine and status, and no message text and no secret
+([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md)).
 
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
 the daemon, the CLI or the agent. TypeScript's only home is the browser.
@@ -207,7 +212,9 @@ traits' own implementations must be tested against the real thing.
   [ADR-0023](docs/adr/0023-the-github-grant-lives-beside-the-relay.md) puts beside it. The owner
   took both decisions with the cost stated — whoever can read that file has both. It covers one
   file holding two credentials the daemon itself uses; a third is a reason to reread ADR-0023 and
-  not a licence it grants, and a machine never receives either. **Workspaces are untouched**: the schema still has no field for a
+  not a licence it grants, and a machine never receives either. The passkey file of
+  [ADR-0044](docs/adr/0044-a-write-needs-the-owners-passkey.md) is not a third: it keeps public keys
+  and token hashes, so no value in it grants access. **Workspaces are untouched**: the schema still has no field for a
   value, and a reference is still resolved at launch on the machine that runs the agent.
 - **Start small.** Prefer the smallest thing that runs end to end. This project's failure mode is a
   beautiful architecture that never boots — see the walking-skeleton milestone in `tracker.md`.
@@ -286,6 +293,10 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   A merged row goes to 🔵 review, because a row does not close in its own PR; the next release PR
   marks it ✅ done.
 - **It closes the issues its rows name.** An open GitHub issue gets a row first (§B0); the row names it as `#NNN`, and the PR body says `Closes #NNN`. Owner, 2026-10-20.
+- **It walks a visible row on the real product.** A row whose diff changes `web/src/` or a machine
+  path runs the branch's `yantrad` against the real fleet, and the PR carries WebKit and Chromium
+  screenshots. A machine row also passes `just test-mac` on the real Mac.
+  [`walk.sh`](.claude/workflows/walk.sh) holds the paths, and its guard refuses the merge without them (Y-660).
 - **It picks by priority.** Until the owner calls Yantra a daily driver, a row that closes the daily-driver gap goes first and feature milestones wait (owner, 2026-11-05). 1: closes or unblocks an open milestone. 2: a defect or a red suite.
   3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
 - **It runs up to three rows at once.** Rows that edit the same file do not run at the same time.

@@ -668,6 +668,17 @@ const routes = [
       return [200, { machine, ...reply }]
     },
   ],
+  // Y-668: the daemon goes away for `ms` (60 s by default). Open chat sockets die with no close
+  // frame and a new upgrade is refused, as a phone that slept finds them.
+  [
+    'POST',
+    /^\/api\/fixture\/chat-outage$/,
+    (state, _, sent) => {
+      state.outageUntil = Date.now() + (sent.ms ?? 60_000)
+      for (const one of state.chatSockets ?? []) one.terminate()
+      return [204]
+    },
+  ],
   ['POST', /^\/api\/relay$/, (_, __, sent) => (sent.url ? [204] : [400, 'a relay needs a topic URL'])],
   // ADR-0027 §3: the daemon only asks. Nothing here restarts, so the version
   // never moves and About stays on its updating line.
@@ -881,7 +892,12 @@ const HISTORY = [
   ['assistant_text', 'Yes. `cargo test -p yantra-core` passed, **326** tests in all.'],
 ]
 
-function converse(state, request, socket, head, name, thread) {
+function converse(state, request, socket, head, name, thread, after) {
+  if (state.outageUntil > Date.now()) {
+    // Y-668: a daemon that is away, as a phone that slept finds it.
+    socket.destroy()
+    return
+  }
   if (state.refuse) {
     socket.end(
       `HTTP/1.1 ${state.refuse.status} Refused\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n${state.refuse.text}`,
@@ -907,8 +923,11 @@ function converse(state, request, socket, head, name, thread) {
     },
   }
   const usage = contract.chatEvents.find((one) => one.type === 'thread.token-usage.updated')
+  // The `background` scenario (ADR-0041): the turn's background task runs on after its end.
+  const settled = (one) => one.type === 'thread.background.updated' && one.payload.tasks.length === 0
   const stream = contract.chatEvents
     .filter((one) => one.type !== 'thread.started' && !(one.type === 'turn.completed' && one.payload.state === 'failed'))
+    .filter((one) => !(state.background && settled(one)))
     .flatMap((one) => {
       if (!state.composer) return [one]
       // The usage arrives with the turn rather than after it, so a running turn draws the ring.
@@ -930,30 +949,49 @@ function converse(state, request, socket, head, name, thread) {
       ws.close()
       return
     }
-    if (thread) {
-      say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness: 'claude' } })
-      HISTORY.forEach(([kind, text], at) => say(delta(kind, text, `history:${at}`)))
-    }
     // chat.rs's `Running`: one set per thread, shared by every socket of the scenario.
     const running = (state.running ??= new Set())
+    // Y-668: the turn is the keeper's, not the socket's (ADR-0035), so it outlives this socket.
+    // `log` is the running turn's events with their cursors, which `?after=` continues from.
+    const keeper = (state.keeper ??= { held: null, sent: 0, log: [], seq: 0 })
+    const open = (state.chatSockets ??= new Set())
+    open.add(ws)
+    ws.on('close', () => open.delete(ws))
+    if (thread) {
+      const started = { threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness: 'claude' } }
+      const at = after ? keeper.log.findIndex((one) => one.cursor === after) : -1
+      if (at >= 0) {
+        say({ ...started, cursor: after })
+        keeper.log.slice(at + 1).forEach(say)
+      } else {
+        say(started)
+        HISTORY.forEach(([kind, text], index) => say(delta(kind, text, `history:${index}`)))
+        if (keeper.held) keeper.log.forEach(say)
+      }
+    }
     const elsewhere = 'another tab is running a turn or a revert in this thread; wait for it to end'
     let known = thread
-    let waiting = null
-    let sent = 0
     let images = 0
+    const emit = (one) => {
+      if (one.type === 'thread.background.updated') keeper.tasks = one.payload.tasks
+      const cursor = `F${keeper.seq++}:0:0`
+      const framed = { ...one, cursor }
+      keeper.log.push(framed)
+      say(framed)
+    }
     // chat.rs sends a completed turn's checkpoint diff right after `turn.completed`.
     const play = (events) =>
       events.forEach((one) => {
-        say(one)
+        emit(one)
         if (one.type === 'turn.completed' && one.payload.state === 'completed') {
-          say({ ...contract.chatCheckpoints[0], payload: { ...contract.chatCheckpoints[0].payload, turn: sent } })
+          say({ ...contract.chatCheckpoints[0], payload: { ...contract.chatCheckpoints[0].payload, turn: keeper.sent } })
         }
       })
     const release = () => {
-      if (waiting) running.delete(THREAD)
-      waiting = null
+      if (keeper.held) running.delete(THREAD)
+      keeper.held = null
+      keeper.log = []
     }
-    ws.on('close', release)
     ws.on('message', (data, binary) => {
       // An image (Y-424): yantrad's reply, under the name its counter gives.
       if (binary) {
@@ -964,8 +1002,10 @@ function converse(state, request, socket, head, name, thread) {
       try {
         frame = binary ? null : JSON.parse(data.toString())
       } catch {}
-      if (frame?.type === 'turn' && typeof frame.text === 'string') {
-        if (waiting) return fail('busy', 'a turn is running; stop it or wait for it to end')
+      if (frame?.type === 'ping') {
+        say({ type: 'pong' })
+      } else if (frame?.type === 'turn' && typeof frame.text === 'string') {
+        if (keeper.held) return fail('busy', 'a turn is running; stop it or wait for it to end')
         if (running.has(THREAD)) return fail('busy', elsewhere)
         if (!known) {
           const harness = frame.harness ?? 'claude'
@@ -980,8 +1020,9 @@ function converse(state, request, socket, head, name, thread) {
           known = THREAD
           say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness } })
         }
-        sent += 1
-        say(delta('user_text', frame.text, `user:${sent}`))
+        keeper.sent += 1
+        keeper.log = []
+        emit(delta('user_text', frame.text, `user:${keeper.sent}`))
         if (frame.mode === 'full-access') {
           // chat.rs `full_access_mode_answers_every_request_without_a_card`: no card, and the turn ends at once.
           play(stream.filter((one) => one.type !== 'request.opened'))
@@ -989,17 +1030,25 @@ function converse(state, request, socket, head, name, thread) {
         }
         running.add(THREAD)
         play(stream.slice(0, asked))
-        waiting = stream.slice(asked)
-      } else if (frame?.type === 'answer' && waiting) {
-        const [resolved, ...rest] = waiting
-        say({ ...resolved, payload: { ...resolved.payload, decision: frame.decision } })
+        keeper.held = stream.slice(asked)
+      } else if (frame?.type === 'answer' && keeper.held) {
+        const [resolved, ...rest] = keeper.held
+        emit({ ...resolved, payload: { ...resolved.payload, decision: frame.decision } })
         play(rest)
         release()
       } else if (frame?.type === 'cancel') {
-        if (!waiting) return
+        if (!keeper.held) return
         say({ threadId: THREAD, type: 'request.resolved', payload: { requestId: 'r1', requestType: 'exec_command_approval', decision: 'cancel' } })
         say({ threadId: THREAD, type: 'turn.completed', payload: { state: 'cancelled', stopReason: 'cancelled' } })
         release()
+      } else if (frame?.type === 'stopTask' && typeof frame.taskId === 'string') {
+        const tasks = keeper.tasks ?? []
+        if (!tasks.some((one) => one.taskId === frame.taskId)) {
+          return fail('stopTask', `no background task \`${frame.taskId}\` is running`)
+        }
+        emit({ threadId: THREAD, type: 'thread.background.updated', payload: { tasks: tasks.filter((one) => one.taskId !== frame.taskId) } })
+      } else if (frame?.type === 'stopAll') {
+        emit({ threadId: THREAD, type: 'thread.background.updated', payload: { tasks: [] } })
       } else if (frame?.type === 'revert' && typeof frame.turn === 'number') {
         if (running.has(THREAD)) return fail('busy', elsewhere)
         say({ threadId: THREAD, type: 'thread.reverted', payload: { turn: frame.turn } })
@@ -1010,7 +1059,7 @@ function converse(state, request, socket, head, name, thread) {
       } else if (frame?.type === 'answer') {
         fail('badFrame', 'no turn is running, so nothing is waiting')
       } else {
-        fail('badFrame', 'a frame is a turn, an answer, a cancel, a revert or a diff')
+        fail('badFrame', 'a frame is a turn, an answer, a cancel, a revert, a diff or a stop')
       }
     })
   })
@@ -1027,7 +1076,15 @@ server.on('upgrade', (request, socket, head) => {
   const step = url.pathname.match(/^\/api\/machines\/([^/]+)\/install\/(\d+)\/terminal$/)
   const chat = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/chat$/)
   if (chat) {
-    converse(state, request, socket, head, decodeURIComponent(chat[1]), url.searchParams.get('thread'))
+    converse(
+      state,
+      request,
+      socket,
+      head,
+      decodeURIComponent(chat[1]),
+      url.searchParams.get('thread'),
+      url.searchParams.get('after'),
+    )
     return
   }
   if (step) {

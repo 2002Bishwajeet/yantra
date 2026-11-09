@@ -7,8 +7,50 @@
 @import "tailwindcss" source(none);
 
 /* ADR-0024 §2: the Material roles, the type ramp, the springs and the three
-   faces. This file adds the page under them and nothing else. */
+   faces. This file adds the page and the touch basics under them and nothing else. */
 @import "./m3/tokens.css";
+
+/* Y-671, note 25 F2: touch basics. Unlayered element rules, so a class that
+   sets its own value (Talk, BottomSheet, Copyable) still wins. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a,
+button,
+summary,
+label,
+input,
+select,
+textarea,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="switch"],
+[role="option"],
+[role="radio"],
+[role="checkbox"],
+[role="menuitemradio"],
+[role="menuitemcheckbox"] {
+  touch-action: manipulation;
+}
+
+button,
+summary,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+[role="switch"],
+[role="option"],
+[role="radio"],
+[role="checkbox"],
+[role="menuitemradio"],
+[role="menuitemcheckbox"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 body {
   background: var(--md-sys-color-surface);

@@ -1,7 +1,7 @@
 # ADR-0040 — An agent caller is tagged and scoped
 
 - **Date:** 2026-11-05
-- **Status:** Proposed 2026-11-05 ([Y-657](../../tracker.md)). The owner accepts or changes it.
+- **Status:** Proposed 2026-11-05 ([Y-693](../../tracker.md)). The owner accepts or changes it.
 - **Evidence:** the marketing agent Bilbo, on the appliance since 2026-11-05. It runs in a
   rootless podman container under its own Unix user, `marketing`. Its egress rules drop the LAN,
   the tailnet, the host and all IPv6.

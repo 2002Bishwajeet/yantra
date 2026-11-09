@@ -68,6 +68,8 @@ R15's sources verify `--output-format stream-json`, `--include-partial-messages`
 running turn; R15 names it in prose and stops there. So the per-turn process is what is decided, and
 the long-lived bidirectional session is the upgrade this ADR does not take.
 
+> **2026-11-08, [Y-657](../../tracker.md):** [ADR-0041](0041-a-claude-keeper-holds-the-thread.md) takes that upgrade. One `claude -p --input-format stream-json` holds the thread across turns, and `--resume` is used only when a new keeper starts.
+
 **3. The events reach the browser on a socket beside the terminal socket**, in ADR-0022's shape:
 `GET /api/workspaces/{name}/chat`, and the session-addressed form where a session is reachable
 without a workspace. It carries JSON events rather than bytes, and it is a `GET` upgrade, so

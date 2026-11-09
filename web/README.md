@@ -363,10 +363,16 @@ Settings → General. Ten things about the code:
   text comes back to an empty field.
 - **Every failure is a `ChatError` of its own kind**: refused, unreachable,
   not logged in, unknown thread, busy, bad frame, checkpoint, turn failed and
-  closed.
+  diff.
   Not logged in shows the command to run on the machine and a Retry that
-  reopens the socket. Only unreachable and closed offer Try again, and a socket is never reopened behind the person's
-  back, because the daemon cancels a turn whose socket closed.
+  reopens the socket. Only unreachable offers Try again.
+- **A dropped socket is reopened for as long as the page is visible** (Y-668).
+  The pauses are 1, 2, 4 and 8 seconds, and 8 seconds from then on. A hidden page
+  schedules no reopen; showing it, or the `online` event, reopens at once. An open
+  socket sends `{"type":"ping"}` every 20 seconds, and any frame within 5 seconds
+  counts as the answer. A silent socket is dropped and reopened after the last
+  cursor, because a phone's OS can kill a socket with no close event. A turn
+  outlives its socket (ADR-0035), so no count of failures ends the chat.
 - **`@` and `$` open a menu in the Chat composer** (Y-562). `@` lists the
   thread's files and `$` the harness's skills, from one `POST …/mentions`
   (`useMentions`). It asks once when a trigger opens and keeps the answer for
@@ -732,8 +738,9 @@ scan was reading English words out of the `.tsx` files and buying `.container`,
 `.hidden`, `.collapse` and fourteen more that nothing drew. Add a `@source` back
 the day a call site writes a utility.
 
-[`src/index.css`](src/index.css) is three statements: that import, the token
-import, and the page under them.
+[`src/index.css`](src/index.css) is six statements: that import, the token
+import, the `html` text-size and tap-highlight rule, the `touch-action` list, the
+`user-select` list, and the page.
 
 ## What it weighs
 
@@ -780,7 +787,9 @@ render, the shell, the tokens, the colour scheme, `sw.test.ts` and
 **Playwright covers the screens, in a browser** ([ADR-0024](../docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md) §6).
 [`e2e/`](e2e/) runs three projects over every spec — **phone 390×844, tablet
 834×1194, desktop 1440×1024** ([`lib/sizes.ts`](e2e/lib/sizes.ts)) — against
-`vite preview` over a real build rather than the dev server. `lib/axe.ts` runs
+`vite preview` over a real build rather than the dev server. A fourth, `phone-webkit`, runs
+the phone in WebKit with an iPhone profile (Y-660). It skips the image comparison, because every
+baseline is a Chromium render. `lib/axe.ts` runs
 axe with `wcag2a wcag2aa wcag21a wcag21aa wcag22aa` and fails on any violation
 outside a spec's `known` list, and fails again the day a known one is fixed
 without the list being edited. **It waits for every CSS transition to end
@@ -834,7 +843,7 @@ src/
                      validates `?view=` without pulling xterm.js into `/`
   useTick.ts         the one-second clock. It returns the instant rather than
                      re-rendering, which is the compiler note above
-  index.css          three statements: Tailwind's reset, the tokens, the page
+  index.css          six statements: Tailwind's reset, the tokens, touch basics, the page
   lib/               `name`, `path`, `spend`, `time` — the formatting every
                      screen shares, so an age or a figure reads the same twice
   api/

@@ -697,7 +697,8 @@
 
 /* Y-561: what the person queued behind the running turn, above the composer card. */
 
-.chat__queued {
+.chat__queued,
+.chat__background {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -728,6 +729,58 @@
   color: var(--md-sys-color-on-surface);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ADR-0041: the agent's background tasks, each with a Stop that a thumb reaches. */
+.chat__background {
+  padding-right: 8px;
+}
+
+.chat__background-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font: var(--md-sys-typescale-label-medium);
+}
+
+.chat__background ul {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat__background li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat__background-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--md-sys-color-on-surface);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat__background-all {
+  align-self: flex-end;
+}
+
+.chat__background .m3-button {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (pointer: coarse) {
+  .chat__background .m3-button {
+    height: 44px;
+  }
 }
 
 .chat__asks {

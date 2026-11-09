@@ -65,8 +65,7 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         }
         if (
           asking.current &&
-          (failure.kind === 'closed' ||
-            failure.kind === 'refused' ||
+          (failure.kind === 'refused' ||
             failure.kind === 'unknownThread' ||
             failure.kind === 'notLoggedIn')
         ) {
@@ -80,7 +79,6 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
         // A missing login fails every turn the same way until a person logs
         // in, so the composer waits for Retry.
         if (
-          failure.kind === 'closed' ||
           failure.kind === 'refused' ||
           failure.kind === 'unknownThread' ||
           failure.kind === 'notLoggedIn'
@@ -114,6 +112,17 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
     attach: (file: Blob) => socket.current?.attach(file) ?? Promise.reject(new AttachError('closed')),
     stop: () => {
       if (socket.current?.stop()) dispatch({ type: 'stopping' })
+    },
+    /** Stops one background task; `false` when the socket is not open. */
+    stopTask: (taskId: string) => {
+      if (!socket.current?.stopTask(taskId)) return false
+      setError(null)
+      return true
+    },
+    stopAll: () => {
+      if (!socket.current?.stopAll()) return false
+      setError(null)
+      return true
     },
     /** Puts the files back as checkpoint `turn` kept them (Y-448). */
     revert: (turn: number) => {

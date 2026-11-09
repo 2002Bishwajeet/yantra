@@ -22,6 +22,7 @@ const RETRY = A.retry || []
 const REPO = '/home/biswa/Github/homelab/yantra'
 const WT_ROOT = `${REPO}/.claude/worktrees`
 const REPORT = `${REPO}/.claude/build-loop/${TODAY}.md`
+const GATE_LOGS = `${REPO}/.claude/build-loop/gate-logs`
 
 const BUILDER = {
   'rust-transport': { model: 'opus', effort: 'high' },
@@ -44,7 +45,7 @@ Rules for this run (CLAUDE.md §B7, the build loop):
 - Do not create or change anything under docs/adr/, and do not add or change an invariant in a crate tracker. If the row needs either, stop and say so.
 - Commit messages are "Y-NNN: <what changed>" and carry no AI attribution of any kind.
 - Never run the podman suite, \`just check\`, or Playwright in any form (\`just web-e2e\`, \`npm run e2e\`, \`npx playwright test\`). The verify stage runs them one row at a time, because parallel suites run the box out of memory. The one exception: when your gate includes \`just web-e2e\`, a fix agent may run \`just web-e2e --update-snapshots=changed <spec>\` to regenerate a baseline that its change was meant to alter, and commits the new images. Never regenerate a baseline on the host: its fonts differ. You may run \`just fmt-check\`, \`just lint\`, \`cargo nextest run -p <crate>\` without YANTRA_REQUIRE_PODMAN, and the web lint and unit tests.
-- Web code: load the skills vercel-react-best-practices, tanstack-router-best-practices, tanstack-query-best-practices, playwright-best-practices and accessibility before you write any. Errors are typed and every error path is tested.`
+- Web code: load the skills vercel-react-best-practices, tanstack-router-best-practices, tanstack-query-best-practices, playwright-best-practices, accessibility and mobile-native before you write any. Every screen you touch must feel native on a phone: check it at 390 px with touch, safe areas and no hover-only control. Errors are typed and every error path is tested.`
 
 function lock() {
   let tail = Promise.resolve()
@@ -98,12 +99,13 @@ const PLAN_SCHEMA = {
 const VERIFY_SCHEMA = {
   type: 'object',
   properties: {
+    finished: { type: 'boolean', description: 'true only when the log ends in its GATE_EXIT line. false means the gate still runs, and pass then means nothing' },
     pass: { type: 'boolean' },
     failures: { type: 'string', description: 'the failing command and the last 60 lines of its output' },
     flaky: { type: 'array', items: { type: 'string' }, description: 'tests that failed in the gate, are in files that `git diff --name-only origin/main...HEAD` does not list, and passed when rerun alone' },
     fixedChecks: { type: 'array', items: { type: 'string' }, description: 'only when a Then command is itself wrong (an unknown target, a filter that matches no test): every Then command, corrected' },
   },
-  required: ['pass', 'failures'],
+  required: ['finished', 'pass', 'failures'],
 }
 
 const REVIEW_SCHEMA = {
@@ -122,6 +124,18 @@ const REVIEW_SCHEMA = {
     head: { type: 'string', description: 'git rev-parse HEAD of the worktree you reviewed' },
   },
   required: ['blocking', 'minor', 'doneMet', 'head'],
+}
+
+const WALK_SCHEMA = {
+  type: 'object',
+  properties: {
+    needs: { type: 'array', items: { type: 'string', enum: ['web', 'machine'] }, description: 'what `walk.sh needs` printed' },
+    shots: { type: 'array', items: { type: 'string' }, description: 'absolute paths of the PNG and TXT files `walk.sh shoot` listed' },
+    seen: { type: 'string', description: 'one line per screenshot: what it shows, and any console error from errors.txt' },
+    mac: { type: 'string', enum: ['not-needed', 'pass', 'fail', 'unreachable'] },
+    failures: { type: 'string', description: 'the failing command and the last 60 lines of its output' },
+  },
+  required: ['needs', 'shots', 'mac'],
 }
 
 const SHIP_SCHEMA = {
@@ -156,40 +170,60 @@ const CLEANUP = `Afterwards remove only the test containers: those with label ya
 
 // Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
 // Y-493 parked because the agent read the log tail while the gate still ran, so the run must end in a sentinel line.
-const GATE_HOW = `The gate can take longer than a 10-minute Bash call. Put the gate commands and the Then commands in one background shell: \`( <commands> ) > "$LOG" 2>&1; echo "GATE_EXIT=$?" >> "$LOG"\`. Wait with Monitor and an until-loop on \`grep -q '^GATE_EXIT=' "$LOG"\`, because a foreground sleep is blocked. Set timeout_ms to 1800000 on the Monitor call. When the Monitor expires and the GATE_EXIT line does not exist, arm it again. Re-arm until the GATE_EXIT line exists. Report nothing until that line exists. Judge pass from GATE_EXIT and the failing tests, never from a partial tail. ${CLEANUP}`
+const WAIT = (gateLog) => `Wait with Monitor and an until-loop on \`grep -q '^GATE_EXIT=' ${gateLog}\`, because a foreground sleep is blocked. Set timeout_ms to 1800000 on the Monitor call. When the Monitor expires and the GATE_EXIT line does not exist, arm it again. Judge pass from GATE_EXIT and the failing tests, never from a partial tail. If you must return before the line exists, return finished=false: the run sends another agent to wait.`
+const GATE_HOW = (gateLog) => `The gate can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then put the gate commands and the Then commands in one background shell: \`( <commands> ) > ${gateLog} 2>&1; echo "GATE_EXIT=$?" >> ${gateLog}\`. ${WAIT(gateLog)} ${CLEANUP}`
+
+// A counter, not the clock, names the log: a prompt that changes on every run defeats the resume cache.
+const gateRuns = {}
+const nextGateLog = (row, label) => `${GATE_LOGS}/${TODAY}-${row.id}-${label}-${(gateRuns[row.id] = (gateRuns[row.id] || 0) + 1)}.log`
+
+// Y-649 and Y-653 parked on 2026-11-09 with no red test: the gate agent returned before GATE_EXIT, and that counted as a failed round.
+async function untilFinished(row, wt, gateLog, label, v) {
+  for (let i = 1; v && !v.finished && i <= 6; i++) {
+    v = await agent(
+      `The gate for ${row.id} in ${wt} runs in the background and writes to ${gateLog}. Do not start it again and do not change any file. If the log does not exist, the gate never started: return finished=true, pass=false. ${WAIT(gateLog)} ${CLEANUP}
+${FLAKY}`,
+      { label: `wait:${row.id}:${label}:${i}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
+    )
+  }
+  if (v && !v.finished) return { ...v, pass: false, failures: `The gate did not finish in 6 waits. Log: ${gateLog}` }
+  return v
+}
 
 // A slow-network test outside the diff parked Y-585; CI runs the full suites again, so a real regression still blocks the merge.
 const FLAKY = `When the gate fails, rerun each failing test alone. For nextest that is \`NEXTEST_TEST_THREADS=1 cargo nextest run -p <crate> -E 'test(=<name>)'\`, with YANTRA_REQUIRE_PODMAN=1 if the gate used it. For e2e that is one spec. A failure is a retry, not a failure, when its test file is outside \`git diff --name-only origin/main...HEAD\` and it passes alone. If every failure is like that, report pass=true and list those tests in flaky. Any other failure keeps pass=false.`
 
 // A web or docs row is built by Sonnet, so one Sonnet agent can run the gate and fix what it finds.
 async function verifyAndFix(row, wt, plan, label, attempts) {
-  return serialVerify(() =>
+  const gateLog = nextGateLog(row, label)
+  return serialVerify(async () => untilFinished(row, wt, gateLog, label, await
     agent(
       `Run the gate for ${row.id} in ${wt}, fix what fails, and report whether it passes at the end.
 Gate: ${GATE}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
-${GATE_HOW}
+${GATE_HOW(gateLog)} Each rerun of the whole gate writes to the same log: truncate it first.
 If a command fails, find the cause, fix the code, commit, and rerun only the failing test file or spec until it passes. Then rerun the gate once. Stop after ${attempts} gate runs.
 ${FLAKY} Do not change code for a flaky test.
 A screenshot that the row's change was meant to alter: regenerate it with \`just web-e2e --update-snapshots=changed <spec>\` and commit the images. A screenshot it was not meant to alter is a regression: fix the code.
 If a Then command fails before any test runs because the command is wrong, not the code, correct it and return the corrected list as fixedChecks.${RULES(wt)}`,
       { label: `gate:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'medium' },
     ),
-  )
+  ))
 }
 
 async function verify(row, wt, plan, label) {
-  return serialVerify(() =>
+  const gateLog = nextGateLog(row, label)
+  return serialVerify(async () => untilFinished(row, wt, gateLog, label, await
     agent(
       `Run the gate for ${row.id} in ${wt} and report whether it passes. Do not change any file.
 Gate: ${GATE}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 If a Then command fails before any test runs because the command is wrong, not the code, correct it, run the corrected one, judge pass on that, and return the corrected list as fixedChecks.
-${GATE_HOW}
+${GATE_HOW(gateLog)}
 ${FLAKY}`,
       { label: `verify:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
     ),
-  )
+  ))
 }
 
 async function fix(row, wt, what) {
@@ -222,6 +256,44 @@ async function verifyUntilGreen(row, wt, plan, rounds) {
   return false
 }
 
+// Y-660: the gate runs against the fixture, so a visible row is also walked on the real product, and a machine row
+// also runs on the real Mac. walk.sh holds the paths that decide which, and its guard refuses the merge without it.
+const WALK = `${REPO}/.claude/workflows/walk.sh`
+async function walk(row, wt) {
+  return serialVerify(() =>
+    agent(
+      `Walk ${row.id} in ${wt} on the real product. Do not change any tracked file.
+1. Run \`bash ${WALK} needs ${wt}\`. Return its lines as needs. If it prints nothing, return needs=[], shots=[], mac=not-needed and stop.
+2. Run \`bash ${WALK} up ${wt}\`. It builds the branch's yantrad and dashboard and serves them against the real fleet on a spare port. Run it in a background shell and wait with Monitor, because the build can take longer than a Bash call.
+3. Read \`git diff origin/main...HEAD\` and web/src/router.ts, and choose the routes that show what the row changed. For a machine row, choose the screens that show that path: the fleet, the machine's page, or the Chat. Run \`bash ${WALK} shoot ${wt} <route>...\`. Only open pages; never press a control that writes, because the machines are real.
+4. Read every PNG and TXT file it lists with the Read tool, and read ${wt}/.walk/shots/errors.txt. Describe each screen in seen.
+5. Always run \`bash ${WALK} down ${wt}\`, also after a failure.
+6. If needs has machine, run \`bash ${WALK} mac ${wt}\` in a background shell and wait with Monitor. Exit 0 is pass, exit 2 is unreachable, any other exit is fail. Put the tail of ${wt}/.walk/test-mac.log in failures. Else mac=not-needed.
+${CLEANUP}`,
+      { label: `walk:${row.id}`, phase: 'Build', schema: WALK_SCHEMA, model: 'sonnet', effort: 'low' },
+    ),
+  )
+}
+
+// Returns the walk, or a reason to park. A failing Mac run is red like the gate, so it gets one fix.
+async function walkUntilGreen(row, wt, plan) {
+  for (let i = 1; ; i++) {
+    const w = await walk(row, wt)
+    if (!w) return 'the walk agent died'
+    if (w.needs.length && !w.shots.length) return `a ${w.needs.join(' and ')} row needs screenshots, and the walk took none: ${w.failures || ''}`
+    if (w.mac === 'unreachable') return 'the row needs the real Mac, and it is unreachable'
+    if (w.mac !== 'fail') return w
+    if (i === 2) return `just test-mac stayed red: ${w.failures || ''}`
+    await fix(row, wt, `\`just test-mac\` failed on the real Mac:\n${w.failures || ''}`)
+    if (!(await verifyUntilGreen(row, wt, plan, 2))) return 'the gate went red after the test-mac fix'
+  }
+}
+
+const shown = (w) =>
+  w.needs.length
+    ? `\nThe walk ran the branch on the real fleet. Read each screenshot and each text file with the Read tool and judge them against the row's outcome in tracker.md: ${w.shots.join(', ')}. Check the copy word by word in the text files, never only in an image: an eye reading a screenshot corrects a misspelt word. A wrong or misspelt word, a layout broken at 390 px, an error or an empty screen where the row expects content is blocking. The walker saw: ${w.seen || 'nothing noted'}.${w.mac === 'pass' ? ' `just test-mac` passed on the real Mac.' : ''}`
+    : ''
+
 async function runRow(row) {
   const branch = `${row.id.toLowerCase()}-auto`
   const wt = `${WT_ROOT}/${branch}`
@@ -250,11 +322,13 @@ Write the tests that prove the done condition first, then the code. Run the fast
     { label: `build:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
   )
   if (!(await verifyUntilGreen(row, wt, plan, 3))) return park('the gate stayed red after 3 rounds')
+  let w = await walkUntilGreen(row, wt, plan)
+  if (typeof w === 'string') return park(w)
 
   const REVIEW_RULE = `Put every finding in blocking or minor; none may be dropped. A finding is blocking when it makes the feature fail on a platform the row or the crate targets, stalls or drops the user's work, leaves state wrong after a failure, leaks a secret or private text, or breaks a crate invariant or a CLAUDE.md rule. Anything you would call "should hold the merge" is blocking. Only style, cost, cleanup and unlikely edge cases are minor. Do not change any file.`
   let r = await agent(
     `Review the change for ${row.id} in ${wt} (git diff origin/main...HEAD). You did not write it.
-Load the code-review skill and review at high effort, with the target \`${wt}\` named explicitly: a review run without it reads the main checkout. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.
+Load the code-review skill and review at high effort, with the target \`${wt}\` named explicitly: a review run without it reads the main checkout. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.${shown(w)}
 ${REVIEW_RULE}`,
     { label: `review:${row.id}:1`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'high' },
   )
@@ -265,9 +339,11 @@ ${REVIEW_RULE}`,
     const base = r.head || 'HEAD~1'
     await fix(row, wt, `A reviewer found:\n${issues}\nFix every point. A fix that changes the approach must also update the tests and the docs it touches.`)
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after review fixes')
+    w = await walkUntilGreen(row, wt, plan)
+    if (typeof w === 'string') return park(w)
     r = await agent(
       `Re-check the change for ${row.id} in ${wt}. You did not write it. An earlier review blocked it on:\n${issues}\n
-Read the fix (git diff ${base}..HEAD) and the code each point names. For each point, decide if the fix resolves it. Also report any new defect the fix brings in. Do not review the rest of the change again.
+Read the fix (git diff ${base}..HEAD) and the code each point names. For each point, decide if the fix resolves it. Also report any new defect the fix brings in. Do not review the rest of the change again.${shown(w)}
 ${REVIEW_RULE}`,
       { label: `review:${row.id}:${fixes + 1}`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'medium' },
     )
@@ -286,7 +362,7 @@ ${REVIEW_RULE}`,
 3. Commit "${row.id}: record the change in the tracker" if steps 1–2 changed anything.${DRY ? `
 4. Dry run: do not push. Return status open.` : `
 4. Push with git push --force-with-lease -u origin ${branch}. If gh pr view ${branch} finds a PR, reuse it. Else run gh pr create --base main --title "${title}" with a body that says what changed and how it was verified. If the row names GitHub issues as #NNN, end the body with one "Closes #NNN" line for each, so the merge closes them. The title becomes the squash commit on main, so it must keep the form "Y-NNN: <what changed>". No AI attribution anywhere.
-5. Run exactly one command: bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> && gh pr merge <pr number> --squash --delete-branch --subject "${title} (#<pr number>)". The guard waits for every check and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the guard fails, return checks-failed with the failing check's log tail.
+5. ${w.needs.length ? `Run \`bash ${WALK} publish ${wt} <pr number>\`. It posts the walk's screenshots on the PR. If it fails, return failed with its output. ` : ''}Run exactly one command: bash ${WALK} guard <pr number> && bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> && gh pr merge <pr number> --squash --delete-branch --subject "${title} (#<pr number>)". The walk guard exits non-zero when the PR changes a screen or a machine path and has no walk comment. The merge guard waits for every check and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the walk guard fails, return failed with its output. If the merge guard fails, return checks-failed with the failing check's log tail.
 6. If GitHub says the branch is behind, return status behind; do not rebase here, because the rebase must be verified.
 7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
         { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'sonnet', effort: 'medium' },
@@ -301,6 +377,8 @@ ${REVIEW_RULE}`,
   if (s && s.status === 'checks-failed') {
     await fix(row, wt, `CI failed on the PR ${s.pr || ''}:\n${s.failures || ''}`)
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return { ...park('CI failed and the fix did not pass the gate'), pr: s.pr }
+    w = await walkUntilGreen(row, wt, plan)
+    if (typeof w === 'string') return { ...park(w), pr: s.pr }
     s = await ship(false)
   }
   if (s && s.status === 'behind') s = await ship(false)

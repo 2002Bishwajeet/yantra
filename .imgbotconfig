@@ -1,0 +1,9 @@
+{
+  "ignoredFiles": [
+    "web/e2e/__screenshots__/*",
+    "landing/tests/__screenshots__/*",
+    "crates/*/tests/fixture/*",
+    "design/brand/*",
+    "docs/design/*"
+  ]
+}

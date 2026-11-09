@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import type { Size } from './lib/sizes'
-import { axe, expect, scenario, screenshot, test } from './lib/test'
+import { axe, expect, IPHONE_ADD_DEVICE, scenario, screenshot, test } from './lib/test'
 import type { Scenario } from './lib/scenario'
 
 /* Y-578: a fresh install, screen by screen. Three things are asserted for every
@@ -259,7 +259,8 @@ function clipped(page: Page) {
 
 for (const destination of DESTINATIONS) {
   test.describe(`a fresh install at ${destination.path}`, () => {
-    test('draws, passes axe and is captured', async ({ page, size }) => {
+    test('draws, passes axe and is captured', async ({ page, size, browserName }) => {
+      test.fixme(browserName === 'webkit' && destination.id === 'add-device', IPHONE_ADD_DEVICE)
       await open(page, 'fresh', destination)
       // The page draws a random name; a fixed one keeps the capture the same each run.
       if (destination.id === 'new') await page.getByLabel('Name').fill('quiet-otter')
@@ -278,9 +279,11 @@ for (const destination of DESTINATIONS) {
       })
     }
 
-    test('answers every button', async ({ page, size, context }) => {
+    test('answers every button', async ({ page, size, context, browserName }) => {
+      test.fixme(browserName === 'webkit' && destination.id === 'add-device', IPHONE_ADD_DEVICE)
       test.setTimeout(240_000)
-      await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+      // WebKit has no clipboard permission to grant, and lets a tap write the clipboard without one.
+      if (browserName !== 'webkit') await context.grantPermissions(['clipboard-read', 'clipboard-write'])
       await walk(page, size, destination)
     })
 
@@ -296,10 +299,10 @@ for (const destination of DESTINATIONS) {
 // and the walk must fail on it. `test.fail` turns red the day the walk stops seeing the defect.
 for (const path of ['/machines', '/m/macbook']) {
   const destination = DESTINATIONS.find((one) => one.path === path)!
-  test(`the walk catches #514 at ${path}`, async ({ page, size, context }) => {
+  test(`the walk catches #514 at ${path}`, async ({ page, size, context, browserName }) => {
     test.fail()
     test.setTimeout(240_000)
-    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    if (browserName !== 'webkit') await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await walk(page, size, destination, 'freshdefect')
   })
 }

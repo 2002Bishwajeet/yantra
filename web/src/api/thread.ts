@@ -112,6 +112,10 @@ export type TurnDiff = { turn: number; unifiedDiff: string; truncated: boolean }
  *  `hint` says what the argument is for; with none, the command takes no argument. */
 export type SlashCommand = { name: string; description: string; hint?: string }
 
+/** A task the agent runs past its turn (ADR-0041). `kind` is the agent's own
+ *  word for it, such as `local_bash`. */
+export type BackgroundTask = { taskId: string; kind: string; description: string }
+
 /** `cursor` is `<run>:<line end>:<part>` on an event read from the agent's
  *  keeper, and absent on one the daemon made (ADR-0035). A reconnect sends the
  *  last one back as `after`. On `thread.started` it is the cursor the replay
@@ -127,6 +131,8 @@ export type ThreadEvent = { threadId: string; cursor?: string } & (
   | { type: 'thread.reverted'; payload: { turn: number } }
   /** Not T3 Code's: an ACP agent's slash commands, sent when its session opens. */
   | { type: 'thread.commands.updated'; payload: { commands: SlashCommand[] } }
+  /** Not T3 Code's: the whole list of background tasks that still run, empty when none do. */
+  | { type: 'thread.background.updated'; payload: { tasks: BackgroundTask[] } }
   | {
       type: 'turn.plan.updated'
       payload: { plan: { step: string; status: 'pending' | 'inProgress' | 'completed' }[] }
@@ -149,16 +155,30 @@ export type ChatFrame =
    *  `interaction` hold for this turn; absent, they are supervised and build. */
   | { type: 'turn'; text: string; harness?: Harness; mode?: PermissionMode; interaction?: Interaction }
   | { type: 'answer'; requestId: string; decision: Decision }
+  /** Stops the turn; background tasks run on. */
   | { type: 'cancel' }
+  /** Stops one background task; a failure is `stopTask`. */
+  | { type: 'stopTask'; taskId: string }
+  /** Stops every background task and the turn, and lets the keeper go. */
+  | { type: 'stopAll' }
   /** Puts the files back as checkpoint `turn` kept them; the conversation stays. */
   | { type: 'revert'; turn: number }
   /** Asks for the thread's whole-branch diff; answered while a turn runs. */
   | { type: 'diff' }
+  /** A browser cannot send a protocol ping, so it sends this; the daemon answers `pong`. */
+  | { type: 'ping' }
+
+/** The answer to `ping`. It proves the socket is alive and is no event. */
+export type ChatPong = { type: 'pong' }
 
 /** The one daemon frame that is not an event. `notLoggedIn` names the
  *  command to run on the machine, because the login stays there (ADR-0033 §6). */
 export type ChatFailure =
-  | { type: 'error'; kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable' | 'checkpoint' | 'diff'; said: string }
+  | {
+      type: 'error'
+      kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable' | 'checkpoint' | 'diff' | 'stopTask'
+      said: string
+    }
   | { type: 'error'; kind: 'notLoggedIn'; said: string; harness: Harness; machine: string; command: string }
 
 /** The one reply to each image the browser sends as a binary frame (Y-424),

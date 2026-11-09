@@ -63,6 +63,7 @@ import type {
   ChatFailure,
   ChatFrame,
   ChatNotAttached,
+  ChatPong,
   ChatQuery,
   ChatQueue,
   Check,

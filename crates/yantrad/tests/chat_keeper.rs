@@ -8,6 +8,7 @@
 //! and an `ssh` that adds `-F` with a config naming the fixture. The agent is
 //! a stand-in on the fixture's `PATH`: one plays a recorded Claude turn, one
 //! speaks ACP. A third case runs the real `claude` with the owner's login.
+//! ADR-0041's cases prove that a Claude keeper outlives its turn too.
 //!
 //! The daemon binds the fixed port 7717, so the cases take a file lock and run
 //! one at a time whatever the test runner does.
@@ -40,9 +41,13 @@ const REAL_PATIENCE: Duration = Duration::from_secs(180);
 
 const RECORDING: &str =
     include_str!("../../yantra-core/tests/recordings/claude-2.1.291-accept.jsonl");
+/// A turn that starts a background task, its end, and the wake turn.
+const WAKE: &str =
+    include_str!("../../yantra-core/tests/recordings/claude-2.1.319-background-wake.jsonl");
 
 /// Plays the recording a line every 0.5 s, and holds at the `control_request`
-/// until a `control_response` arrives on stdin, as `claude -p` does.
+/// until a `control_response` arrives on stdin, as `claude -p` does. Then it
+/// reads stdin until it closes, as a `claude` that waits for its next turn.
 const CLAUDE_STAND_IN: &str = r#"#!/bin/sh
 IFS= read -r prompt || exit 1
 while IFS= read -r line <&3; do
@@ -57,6 +62,7 @@ while IFS= read -r line <&3; do
     ;;
   esac
 done 3< /home/yantra/recording.jsonl
+while IFS= read -r line; do :; done
 "#;
 
 /// An ACP agent in a few lines of sh: four chunks, one permission request it
@@ -233,6 +239,11 @@ impl Host {
 
     /// Starts a `yantrad` and waits until it answers.
     async fn daemon(&self, label: &str) -> Result<Daemon> {
+        self.daemon_with(label, &[]).await
+    }
+
+    /// [`Self::daemon`], with `env` set too.
+    async fn daemon_with(&self, label: &str, env: &[(&str, &str)]) -> Result<Daemon> {
         let path = format!(
             "{}:{}",
             self.root.join("bin").display(),
@@ -245,6 +256,7 @@ impl Host {
             .env("HOME", self.root.join("home"))
             .env("XDG_RUNTIME_DIR", self.root.join("run"))
             .env("RUST_LOG", "info")
+            .envs(env.iter().copied())
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
@@ -843,27 +855,10 @@ async fn outlives(agent: Agent) -> Result<()> {
         );
     }
 
-    // 7. The keeper goes with its Claude turn; an ACP agent stays for the
-    // next turn (ADR-0035 decision 3) and stops only when idle.
-    match agent {
-        Agent::StandIn | Agent::RealClaude => {
-            machine
-                .until(
-                    Duration::from_secs(10),
-                    "the keeper's session going",
-                    |machine| Ok(!machine.session_exists(&thread)),
-                )
-                .await?;
-            machine
-                .until(
-                    Duration::from_secs(10),
-                    "the keeper's processes going",
-                    |machine| Ok(machine.leftovers(agent)?.is_empty()),
-                )
-                .await?;
-        }
-        Agent::Acp => assert_eq!(machine.agent_pid(agent, &thread)?, pid, "the agent stays"),
-    }
+    // 7. The agent stays for the next turn (ADR-0035 decision 3, ADR-0041
+    // decision 1) and stops only when idle.
+    assert_eq!(machine.agent_pid(agent, &thread)?, pid, "the agent stays");
+    assert!(machine.session_exists(&thread), "and so does its keeper");
     assert_eq!(host.files()?, files, "yantrad B wrote no file on the host");
     b.kill()?;
     Ok(())
@@ -882,4 +877,149 @@ async fn an_acp_turn_outlives_its_pipe_its_socket_and_its_daemon() -> Result<()>
 #[tokio::test]
 async fn a_real_claude_turn_outlives_its_pipe_its_socket_and_its_daemon() -> Result<()> {
     outlives(Agent::RealClaude).await
+}
+
+/// The thread a turn opened, from its first frame.
+fn thread_of(frames: &[Value]) -> Result<String> {
+    frames[0]["payload"]["thread"]
+        .as_str()
+        .map(str::to_owned)
+        .context("the first frame names the thread")
+}
+
+/// The length of each background roster the frames carry.
+fn rosters(frames: &[Value]) -> Vec<usize> {
+    frames
+        .iter()
+        .filter(|frame| frame["type"] == "thread.background.updated")
+        .map(|frame| frame["payload"]["tasks"].as_array().map_or(0, Vec::len))
+        .collect()
+}
+
+/// A turn's diff, of turn `turn`.
+fn diff_of(turn: u64) -> impl Fn(&Value) -> bool {
+    move |frame| frame["type"] == "turn.diff.updated" && frame["payload"]["turn"] == turn
+}
+
+/// ADR-0041 decisions 1 to 3, with the stand-in playing a recorded wake: the
+/// keeper outlives the turn that starts a task, and the task's end opens turn 2.
+#[tokio::test]
+async fn a_claude_background_task_outlives_its_turn_and_wakes_the_thread() -> Result<()> {
+    let Some(machine) = Machine::start(Agent::StandIn)? else {
+        return Ok(());
+    };
+    machine.write("/home/yantra/recording.jsonl", WAKE)?;
+    let host = Host::new(&machine.fixture)?;
+    let _daemon = host.daemon("a").await?;
+    let mut socket = Socket::open(&chat(None, None)).await?;
+    socket
+        .send(json!({"type": "turn", "text": "sleep in the background", "harness": "claude"}))
+        .await?;
+    let first = socket.through(PATIENCE, diff_of(1)).await?;
+    let thread = thread_of(&first)?;
+    assert_eq!(rosters(&first), [1], "one task: {first:#?}");
+    assert!(
+        first.iter().any(|frame| frame["type"] == "turn.completed"),
+        "turn 1 ends: {first:#?}"
+    );
+    assert!(
+        machine.session_exists(&thread),
+        "the keeper outlives its turn"
+    );
+
+    let wake = socket.through(PATIENCE, diff_of(2)).await?;
+    assert_eq!(rosters(&wake), [0], "the task ended: {wake:#?}");
+    for kind in ["turn.started", "turn.completed"] {
+        assert!(
+            wake.iter().any(|frame| frame["type"] == kind),
+            "the wake turn has {kind}: {wake:#?}"
+        );
+    }
+    assert!(machine.session_exists(&thread), "and its wake");
+    Ok(())
+}
+
+/*
+ * The prompt is T3 Code's, at commit 67eebaca:
+ * https://github.com/pingdotgg/t3code/blob/67eebaca/apps/server/src/orchestration-v2/testkit/fixtures/claude_background_task_wake/input.ts
+ * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
+ * THIRD_PARTY_NOTICES.md at the repository root.
+ */
+const BACKGROUND_WAKE: &str = "Live-test a background Bash wake. You must call the Bash tool before replying. \
+    Do exactly this, with no extra steps.\n\n\
+    1) Call the Bash tool with run_in_background set to true and this exact command:\n   \
+    sleep 8 && echo BG_DONE\n\
+    2) After that tool call returns, reply with exactly STARTED and stop. \
+    Do not poll, read its output, or wait for it.\n\
+    3) When its completion is reported later, reply with exactly WAKE_DONE and stop.";
+
+/// ADR-0041 with the real `claude`: its background task ends after its turn,
+/// and the wake turn reaches the thread as turn 2.
+#[tokio::test]
+async fn a_real_claude_background_task_wakes_the_thread() -> Result<()> {
+    let Some(machine) = Machine::start(Agent::RealClaude)? else {
+        return Ok(());
+    };
+    let host = Host::new(&machine.fixture)?;
+    let _daemon = host.daemon("a").await?;
+    let mut socket = Socket::open(&chat(None, None)).await?;
+    socket
+        .send(
+            json!({"type": "turn", "text": BACKGROUND_WAKE, "harness": "claude",
+                     "mode": "full-access"}),
+        )
+        .await?;
+    let first = socket.through(REAL_PATIENCE, diff_of(1)).await?;
+    let thread = thread_of(&first)?;
+    assert_eq!(rosters(&first).first(), Some(&1), "a task: {first:#?}");
+    let wake = socket.through(REAL_PATIENCE, diff_of(2)).await?;
+    assert_eq!(rosters(&wake).last(), Some(&0), "the task ended: {wake:#?}");
+    let said: String = wake
+        .iter()
+        .filter(|frame| frame["payload"]["streamKind"] == "assistant_text")
+        .filter_map(|frame| frame["payload"]["delta"].as_str())
+        .collect();
+    assert!(said.contains("WAKE_DONE"), "{said}");
+    assert!(machine.session_exists(&thread), "the keeper stays");
+    Ok(())
+}
+
+/// ADR-0041 decision 4, with the idle close cut to 15 s: a keeper with no
+/// turn and no task closes, and its processes go.
+#[tokio::test]
+async fn an_idle_claude_keeper_closes() -> Result<()> {
+    let Some(machine) = Machine::start(Agent::StandIn)? else {
+        return Ok(());
+    };
+    let host = Host::new(&machine.fixture)?;
+    let _daemon = host.daemon_with("a", &[("YANTRA_CHAT_IDLE", "15")]).await?;
+    let mut socket = Socket::open(&chat(None, None)).await?;
+    socket
+        .send(json!({"type": "turn", "text": Agent::StandIn.prompt(), "harness": "claude"}))
+        .await?;
+    let drawn = socket
+        .through(PATIENCE, |frame| frame["type"] == "request.opened")
+        .await?;
+    let thread = thread_of(&drawn)?;
+    let request = drawn[drawn.len() - 1]["payload"]["requestId"].clone();
+    socket
+        .send(json!({"type": "answer", "requestId": request, "decision": "accept"}))
+        .await?;
+    socket.through(PATIENCE, diff_of(1)).await?;
+    assert!(machine.session_exists(&thread), "kept after its turn");
+    machine
+        .until(
+            Duration::from_secs(60),
+            "the idle keeper's session going",
+            |machine| Ok(!machine.session_exists(&thread)),
+        )
+        .await?;
+    machine
+        .until(
+            Duration::from_secs(10),
+            "the keeper's processes going",
+            |machine| Ok(machine.leftovers(Agent::StandIn)?.is_empty()),
+        )
+        .await?;
+    Ok(())
 }

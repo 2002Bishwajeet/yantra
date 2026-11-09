@@ -1,6 +1,7 @@
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
 import type { Page } from '@playwright/test'
+import { endGap, scrollTo } from './lib/scroller'
 
 /** The chat flows the unit tests cannot reach (Y-484): they need a real
  *  mounted Session, a second tab, or a reload. The fixture's chat socket acts
@@ -78,6 +79,50 @@ test.describe('the chat, across views, tabs and reloads', () => {
       .getByRole('button', { name: 'Revert', exact: true })
       .click()
     await expect(page.getByText('Reverted')).toBeVisible()
+  })
+
+  test('a 60 s outage mid-turn reconnects after the last cursor and the turn finishes (Y-668)', async ({ page }) => {
+    test.setTimeout(150_000)
+    await turn(page)
+    const reopened = new Promise<string>((resolve) => {
+      page.on('websocket', (socket) => {
+        if (socket.url().includes('after=')) socket.on('framereceived', () => resolve(socket.url()))
+      })
+    })
+    await page.request.post('/api/fixture/chat-outage', { data: { ms: 60_000 } })
+
+    // The old client gave up after about 15 s; the chat must still show no error at 20 s.
+    await page.waitForTimeout(20_000)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0)
+    await expect(asking(page)).toBeVisible()
+
+    expect(decodeURIComponent(await reopened)).toMatch(/after=F\d+:0:0/)
+    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
+    await expect(page.getByRole('alert')).toHaveCount(0)
+  })
+
+  test('a page shown again opens a fresh socket at once (Y-668)', async ({ page }) => {
+    await turn(page)
+    const opened: string[] = []
+    page.on('websocket', (socket) => opened.push(socket.url()))
+    const visibility = (state: 'hidden' | 'visible') =>
+      page.evaluate((one) => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => one })
+        document.dispatchEvent(new Event('visibilitychange'))
+      }, state)
+    await visibility('hidden')
+    await page.request.post('/api/fixture/chat-outage', { data: { ms: 1 } })
+    // A hidden page schedules no reopen, whatever its backoff would have been.
+    await page.waitForTimeout(3_000)
+    expect(opened).toEqual([])
+
+    await visibility('visible')
+    await expect.poll(() => opened.length, { timeout: 2_000 }).toBe(1)
+    expect(decodeURIComponent(opened[0]!)).toMatch(/after=F\d+:0:0/)
+    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
   })
 
   test('Full access draws no permission card', async ({ page }) => {
@@ -280,7 +325,7 @@ test.describe('the composer', () => {
     )
     // Where a phone ends up scrolled depends on whether the thread list or the banner arrived first, so the capture is the top.
     await expect(page.getByRole('button', { name: /^Threads, / })).toBeVisible()
-    await page.evaluate(() => window.scrollTo(0, 0))
+    await scrollTo(page, 0)
     await screenshot(page, 'composer-closed', 'busy', size, { overlay: size === 'phone' })
   })
 
@@ -359,7 +404,7 @@ test.describe('the composer', () => {
 
   test('rides at the foot of the screen while the page scrolls', async ({ page }) => {
     await page.setViewportSize({ width: page.viewportSize()!.width, height: 520 })
-    await page.evaluate(() => window.scrollTo(0, 0))
+    await scrollTo(page, 0)
     const dock = page.locator('.composer-dock')
     await expect(dock).toBeInViewport({ ratio: 1 })
     const viewport = page.viewportSize()!.height
@@ -368,7 +413,7 @@ test.describe('the composer', () => {
       return Math.round(box.y + box.height)
     }
     expect(await at()).toBeGreaterThanOrEqual(viewport - 1)
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    await scrollTo(page, 'end')
     expect(await at()).toBeGreaterThanOrEqual(viewport - 1)
     await expect(dock).toBeInViewport({ ratio: 1 })
   })
@@ -463,10 +508,8 @@ test('an issue draft fills the card with no label over it', async ({ page, size 
   // The overlay capture races the history, the thread list and the scroll; wait for all three, then scroll to the end.
   await expect(page.getByText('Is the core crate green?')).toBeVisible()
   await expect(page.getByRole('button', { name: /^Threads, / })).toBeVisible()
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-  await expect
-    .poll(() => page.evaluate(() => Math.round(window.innerHeight + window.scrollY - document.documentElement.scrollHeight)))
-    .toBe(0)
+  await scrollTo(page, 'end')
+  await expect.poll(() => endGap(page)).toBe(0)
   await screenshot(page, 'composer-issue-draft', 'busy', size, { overlay: size === 'phone' })
 })
 

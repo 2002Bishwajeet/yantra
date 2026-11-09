@@ -1,5 +1,6 @@
-import { axe, expect, scenario, test } from './lib/test'
+import { axe, expect, IPHONE_ADD_DEVICE, scenario, test } from './lib/test'
 import { ROUTES, type Route } from './lib/routes'
+import { scrollTo } from './lib/scroller'
 
 /** Y-566: every route draws its body in one `Page` under one `PageHeader`, so
  *  the title and the first card share a left edge, the width stops at the
@@ -21,8 +22,9 @@ const SWEEP = [
 ] as readonly (Route | { id: string; path: string; heading: string })[]
 
 for (const one of SWEEP) {
-  test(`${one.id} ${one.path} keeps one left edge, one width and one scroll`, async ({ page, size }) => {
+  test(`${one.id} ${one.path} keeps one left edge, one width and one scroll`, async ({ page, size, browserName }) => {
     test.skip(size !== 'phone' && DIALOG_OFF_PHONE.includes(one.id), 'a dialog, not a page, off the phone')
+    test.fixme(browserName === 'webkit' && one.id === 'add-device', IPHONE_ADD_DEVICE)
     await scenario(page, ('scenario' in one && one.scenario) || 'busy')
     await page.goto(one.path)
     const body = page.locator('.m3-page').first()
@@ -212,7 +214,7 @@ for (const [label, path, scrolls] of [
     await expect
       .poll(async () => {
         // A thread opens at its top, so only the empty page is read as it opens; it carries itself to the end.
-        if (scrolls) await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+        if (scrolls) await scrollTo(page, 'end')
         return dock.evaluate((el) => {
           const scrim = parseFloat(getComputedStyle(el, '::before').height)
           // The text, not its box: the intro and a turn can run past the block that holds them.

@@ -503,6 +503,48 @@ pub async fn recall<E: Exec>(exec: &E, place: &Place) -> Result<Option<(Harness,
     }
 }
 
+/// Keeps a Claude thread's session id under a key of its own, so [`recall`]
+/// still reads the thread as Claude's (ADR-0041 decision 8).
+pub async fn remember_claude<E: Exec>(exec: &E, place: &Place, session: &str) -> Result<(), Error> {
+    let out = exec
+        .exec(&format!(
+            "git -C {} config {} {}",
+            sq(&place.repo),
+            key(place, CLAUDE_SESSION),
+            sq(session),
+        ))
+        .await?;
+    if !out.success() {
+        return Err(Error::Worktree {
+            stderr: said(&out.stderr),
+        });
+    }
+    Ok(())
+}
+
+/// The session id [`remember_claude`] kept, or `None` for a thread older than it.
+pub async fn claude_session<E: Exec>(exec: &E, place: &Place) -> Result<Option<String>, Error> {
+    let out = exec
+        .exec(&format!(
+            "git -C {} config --get {}",
+            sq(&place.repo),
+            key(place, CLAUDE_SESSION),
+        ))
+        .await?;
+    if out.status == 1 && out.stderr.is_empty() {
+        return Ok(None);
+    }
+    if !out.success() {
+        return Err(Error::Worktree {
+            stderr: said(&out.stderr),
+        });
+    }
+    let session = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    Ok((!session.is_empty()).then_some(session))
+}
+
+const CLAUDE_SESSION: &str = "yantraClaudeSession";
+
 /// Kills the keeper, then removes the worktree, branch, checkpoints, journals and images: the
 /// only path that deletes a thread. A keeper that will not go keeps all of it.
 pub async fn remove<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
@@ -924,6 +966,40 @@ mod tests {
         assert!(matches!(
             recall(&odd, &place()).await,
             Err(Error::Worktree { stderr }) if stderr.contains("`aider`")
+        ));
+    }
+
+    /// ADR-0041 decision 8: a Claude session id has its own key, which
+    /// `recall` does not read.
+    #[tokio::test]
+    async fn a_claude_session_id_is_kept_under_its_own_key() {
+        let machine = Machine::answering(vec![out(0, b"", ""), out(0, b"9a11f727\n", "")]);
+        remember_claude(&machine, &place(), "9a11f727")
+            .await
+            .expect("kept");
+        assert_eq!(
+            claude_session(&machine, &place()).await.expect("read"),
+            Some("9a11f727".to_owned())
+        );
+        assert_eq!(
+            machine.asked(),
+            [
+                format!(
+                    "git -C '{REPO}' config 'branch.yantra/chat/web/11111111.yantraClaudeSession' '9a11f727'"
+                ),
+                format!(
+                    "git -C '{REPO}' config --get 'branch.yantra/chat/web/11111111.yantraClaudeSession'"
+                ),
+            ]
+        );
+
+        let older = Machine::answering(vec![out(1, b"", "")]);
+        assert_eq!(claude_session(&older, &place()).await.expect("read"), None);
+        let refused =
+            Machine::answering(vec![out(255, b"", "error: could not lock config file\n")]);
+        assert!(matches!(
+            remember_claude(&refused, &place(), "s").await,
+            Err(Error::Worktree { stderr }) if stderr == "error: could not lock config file"
         ));
     }
 
