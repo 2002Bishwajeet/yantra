@@ -3244,7 +3244,10 @@ async fn keep_claude<M: Machine>(
                     {
                         live.publish(&not_logged_in(None, machine.machine(), said.clone()), None);
                     }
-                    kill_at = None;
+                    // A closing keeper keeps the deadline its close armed.
+                    if !live.lock().closing {
+                        kill_at = None;
+                    }
                     claude_turn_ended(machine.as_ref(), &name, &place, &live, failed).await;
                     // A keeper with background work waits for it (ADR-0041 decision 9).
                     if claude.session.background().is_empty()
@@ -7667,11 +7670,12 @@ mod tests {
         assert!(!closing(&script), "one task's stop keeps the keeper");
     }
 
-    /// ADR-0041 decision 6: Stop all stops every task, then closes the keeper.
+    /// ADR-0041 decision 6: Stop all stops every task, then closes the
+    /// keeper, and the tab's roster empties though Claude never said so.
     #[tokio::test]
     async fn stop_all_stops_every_task_and_closes_the_keeper() {
         let script = Arc::new(Script::default());
-        let (tab, mut claude, _) = a_turn_that_leaves_a_task(&script).await;
+        let (mut tab, mut claude, _) = a_turn_that_leaves_a_task(&script).await;
         tab.send(json!({"type": "stopAll"}));
         assert_eq!(
             claude.heard().await.expect("a stop")["request"]["subtype"],
@@ -7679,6 +7683,37 @@ mod tests {
         );
         assert_eq!(claude.heard().await, None, "then stdin closes");
         until_closed(&script, claude).await;
+        let frames = through(&mut tab, "thread.background.updated").await;
+        assert_eq!(rosters(&frames), [0]);
+    }
+
+    /// Stop all during a turn: the cancelled turn's end keeps the kill
+    /// deadline, so a Claude that ignores its closed stdin is killed.
+    #[tokio::test(start_paused = true)]
+    async fn stop_all_kills_a_claude_that_ignores_its_closed_stdin() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        tab.send(json!({"type": "stopAll"}));
+        assert_eq!(
+            claude.heard().await.expect("an interrupt")["request"]["subtype"],
+            "interrupt"
+        );
+        assert_eq!(claude.heard().await, None, "then stdin closes");
+        claude
+            .say(
+                json!({"type": "result", "subtype": "success", "is_error": false,
+                        "terminal_reason": "aborted_streaming"}),
+            )
+            .await;
+        assert_eq!(tab.next().await["payload"]["state"], "cancelled");
+        tokio::time::sleep(STOP_GRACE + Duration::from_secs(1)).await;
+        until_script(&script, |script| !lock(&script.finished).is_empty()).await;
+        assert_eq!(lock(&script.finished)[0], Duration::ZERO, "it was killed");
     }
 
     /// ADR-0041 decision 6: a cancel ends the turn and leaves its tasks running.

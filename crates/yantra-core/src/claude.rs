@@ -935,15 +935,23 @@ impl Shared {
     }
 
     /// stdout ended. A turn that is open or still waits to open failed, and
-    /// what `claude` and `ssh` said last is why. The events end here.
+    /// what `claude` and `ssh` said last is why. No task outlives the process,
+    /// so a roster that was not empty empties. The events end here.
     fn ended(&self, said: String) {
-        let unfinished_turn = {
-            let state = self.lock();
-            (state.open || state.waiting > 0).then_some(state.cancelled)
+        let (unfinished_turn, ran) = {
+            let mut state = self.lock();
+            let ran = !std::mem::take(&mut state.background).is_empty();
+            (
+                (state.open || state.waiting > 0).then_some(state.cancelled),
+                ran,
+            )
         };
         self.close();
         if let Some(cancelled) = unfinished_turn {
             self.emit_made(Event::TurnCompleted(unfinished(cancelled, said)));
+        }
+        if ran {
+            self.emit_made(Event::BackgroundUpdated { tasks: Vec::new() });
         }
         self.events
             .lock()
@@ -1089,15 +1097,22 @@ impl Replayed {
         background_ids(&self.state)
     }
 
-    /// The `turn.completed` the daemon made when this ended keeper's `out`
-    /// stopped inside a turn, made again for a replay (ADR-0035 decision 8).
+    /// The events the daemon made when this ended keeper's `out` stopped,
+    /// made again for a replay (ADR-0035 decision 8): the `turn.completed` of
+    /// a turn it stopped inside, and the emptied roster of tasks that still ran.
     /// `said` is what the keeper's `err` says.
-    pub fn end(&self, said: String) -> Option<ThreadEvent> {
-        self.running().then(|| ThreadEvent {
+    pub fn end(&self, said: String) -> Vec<ThreadEvent> {
+        let made = |event| ThreadEvent {
             thread_id: self.thread.clone(),
             cursor: None,
-            event: Event::TurnCompleted(unfinished(self.state.cancelled, said)),
-        })
+            event,
+        };
+        let turn = self
+            .running()
+            .then(|| made(Event::TurnCompleted(unfinished(self.state.cancelled, said))));
+        let roster = (!self.state.background.is_empty())
+            .then(|| made(Event::BackgroundUpdated { tasks: Vec::new() }));
+        turn.into_iter().chain(roster).collect()
     }
 }
 
@@ -2794,6 +2809,29 @@ mod tests {
         assert!(events.recv().await.is_none(), "no turn opened");
     }
 
+    /// A process that ends takes its tasks with it, so the roster empties
+    /// whether Claude said so or not.
+    #[tokio::test]
+    async fn an_end_with_tasks_running_empties_the_roster() {
+        let (session, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        let at = STOP
+            .lines()
+            .position(|line| line.contains("\"type\":\"result\""))
+            .expect("a result");
+        let lines: Vec<&str> = STOP.lines().collect();
+        fake.play(&(lines[..=at].join("\n") + "\n")).await;
+        until_completed(&mut events).await;
+        assert_eq!(session.background(), ["b5cnjn3f7"]);
+
+        drop(fake);
+        let made = events.recv().await.expect("an event");
+        assert_eq!(made.event, Event::BackgroundUpdated { tasks: vec![] });
+        assert_eq!(made.cursor, None, "the daemon made it");
+        assert!(session.background().is_empty());
+        assert!(events.recv().await.is_none(), "no turn was open");
+    }
+
     /// A replay of many turns draws each prompt before its turn, none before
     /// a wake, and says what still runs at the point `out` was cut.
     #[test]
@@ -2816,7 +2854,22 @@ mod tests {
         assert_eq!(after_the_turn.background(), ["b561loltj"]);
         let in_the_wake = replay(THREAD, RUN, cut(12).as_bytes(), input.as_bytes());
         assert!(in_the_wake.running());
-        assert!(in_the_wake.end(String::new()).is_some());
+        let made = |replayed: &Replayed| -> Vec<Event> {
+            replayed
+                .end(String::new())
+                .into_iter()
+                .map(|made| made.event)
+                .collect()
+        };
+        assert!(
+            matches!(&made(&in_the_wake)[..], [Event::TurnCompleted(_)]),
+            "the wake turn was open, and its task had ended"
+        );
+        assert_eq!(
+            made(&after_the_turn),
+            [Event::BackgroundUpdated { tasks: vec![] }],
+            "no turn was open, and the task still ran"
+        );
         assert_eq!(
             shape(&in_the_wake.events),
             ["prompt", "turn", "end", "turn"]
