@@ -10,7 +10,7 @@ import { ROUTES, type RouteId } from './lib/routes'
 const EMPTY: Record<RouteId, readonly string[] | null> = {
   dashboard: ['Nothing needs you', 'Nothing is running', 'No workspaces yet'],
   fleet: ['No workspaces yet'],
-  machines: ['every tmux session on the machines that answered belongs to a workspace'],
+  machines: null,
   machine: null,
   'session-terminal': null,
   usage: ['No spend yet'],
