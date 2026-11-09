@@ -2795,6 +2795,9 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
     fn of<T: serde::Serialize>(value: &T) -> serde_json::Value {
         serde_json::to_value(value).expect("a DTO of owned strings and numbers")
     }
+    let working = Doing::Working(Some(
+        std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_790_000_000_000),
+    ));
     vec![
         (
             "here",
@@ -2938,9 +2941,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         from: Some("main".to_owned()),
                         pr,
                     },
-                    (n == 1).then_some(Doing::Working(Some(
-                        std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_790_000_000_000),
-                    ))),
+                    (n == 1).then_some(working),
                 )
             })
             .collect::<Vec<_>>()),
@@ -2950,12 +2951,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             "ThreadState[]",
             of(&[
                 ThreadState::of("0a1b2c3d4e5f6a7b".to_owned(), Doing::Idle),
-                ThreadState::of(
-                    "1a1b2c3d4e5f6a7b".to_owned(),
-                    Doing::Working(Some(
-                        std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_790_000_000_000),
-                    )),
-                ),
+                ThreadState::of("1a1b2c3d4e5f6a7b".to_owned(), working),
                 ThreadState::of("2a1b2c3d4e5f6a7b".to_owned(), Doing::Working(None)),
             ]),
         ),
