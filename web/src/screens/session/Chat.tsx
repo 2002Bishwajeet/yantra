@@ -1,8 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ImagePlus } from 'lucide-react'
-import Markdown from 'react-markdown'
-import rehypeSanitize from 'rehype-sanitize'
-import remarkGfm from 'remark-gfm'
 import type { Mentions, SlashCommand, Workspace } from '@/api'
 import { IMAGE_TYPES, type ChatError } from '@/api/chat'
 import { asApiError } from '@/api/errors'
@@ -43,6 +40,7 @@ import { appendToDraft } from './diff/comment'
 import { branchData, type DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
 import { useEditors } from './diff/useEditors'
+import { ChatMarkdown } from './markdown/ChatMarkdown'
 import { ChatHeader } from './ChatHeader'
 import { HarnessPicker } from './HarnessPicker'
 import { keepInteraction, keepMode, recallInteraction, recallMode } from './mode'
@@ -51,10 +49,6 @@ import { PlanToggle } from './PlanToggle'
 import type { Message, Timeline, Tool } from './timeline'
 import { TurnDiff } from './TurnDiff'
 import { useChat } from './useChat'
-
-// Module constants, so the renderer is not handed new plugin lists per delta.
-const REMARK = [remarkGfm]
-const REHYPE = [rehypeSanitize]
 
 const KIND: Record<ItemType, string> = {
   command_execution: 'Command',
@@ -70,8 +64,8 @@ const ASKS: Record<RequestOpened['requestType'], string> = {
   dynamic_tool_call: 'asks to use a tool',
 }
 
-function Said(props: { message: Message; agent: string }) {
-  const { message, agent } = props
+function Said(props: { message: Message; agent: string; machine: string; worktree: string | null }) {
+  const { message, agent, machine, worktree } = props
   if (message.who === 'thinking') {
     return (
       <details className="chat__thinking">
@@ -90,9 +84,7 @@ function Said(props: { message: Message; agent: string }) {
       ) : (
         // ADR-0026 decision 4: GFM, sanitised, and no raw HTML is parsed.
         <div className="turn__text chat__markdown">
-          <Markdown rehypePlugins={REHYPE} remarkPlugins={REMARK}>
-            {message.text}
-          </Markdown>
+          <ChatMarkdown machine={machine} text={message.text} worktree={worktree} />
         </div>
       )}
     </article>
@@ -272,7 +264,7 @@ export function Chat(props: ChatProps) {
   const editors = useEditors(
     workspace.name,
     timeline.thread,
-    showDiff || timeline.entries.some((entry) => entry.kind === 'diff'),
+    showDiff || timeline.entries.some((entry) => entry.kind === 'diff' || (entry.kind === 'message' && entry.who === 'agent')),
   )
   const [picked, setPicked] = useState<Harness>('claude')
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
@@ -530,7 +522,7 @@ export function Chat(props: ChatProps) {
         ) : null}
         {timeline.entries.map((entry) =>
           entry.kind === 'message' ? (
-            <Said agent={agent} key={entry.id} message={entry} />
+            <Said agent={agent} key={entry.id} machine={workspace.machine} message={entry} worktree={editors.worktree} />
           ) : entry.kind === 'tool' ? (
             <ToolCard key={entry.id} tool={entry} />
           ) : (
