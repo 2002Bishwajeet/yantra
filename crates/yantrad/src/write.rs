@@ -39,6 +39,7 @@ use yantra_core::{
 use yantra_core::{identity, join, ssh, update};
 
 use crate::api::{Answer, Checked};
+use crate::chat::Doing;
 use crate::events::{self, Event};
 use crate::heartbeat::Fleet;
 use crate::refresh::Model;
@@ -159,7 +160,10 @@ where
         .route("/join/forget-host-key", post(forget_host_key::<I>))
         .route("/update", post(renew::<I>))
         // Here for the grant: a thread's PR and its issue are read with it.
-        .route("/workspaces/{name}/threads", post(threads::<I>))
+        .route(
+            "/workspaces/{name}/threads",
+            post(threads::<I>).get(thread_states::<I>),
+        )
         .route("/workspaces/{name}/threads/new", post(thread_new::<I>))
         // Opening a PR reads refs and writes GitHub, so a running turn does not refuse it.
         .route(
@@ -1666,7 +1670,41 @@ async fn threads<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_thread(&error),
             said: chain(&error),
         })?;
-    Ok(Json(found.into_iter().map(Thread::of).collect()))
+    let doing: std::collections::HashMap<_, _> =
+        state.fleet.chats.doing(&name).into_iter().collect();
+    Ok(Json(
+        found
+            .into_iter()
+            .map(|thread| {
+                let doing = doing.get(&thread.id).copied();
+                Thread::of(thread, doing)
+            })
+            .collect(),
+    ))
+}
+
+/// What each thread the daemon holds is doing, read from memory (Y-649).
+///
+/// **A `GET`, unlike [`threads`]**: it asks no machine and no GitHub, so the
+/// page may poll it ([ADR-0019]).
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn thread_states<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<Vec<ThreadState>>, Refused> {
+    allowed(&state.authoriser, from.ip(), &headers).await?;
+    let mut states: Vec<_> = state
+        .fleet
+        .chats
+        .doing(&name)
+        .into_iter()
+        .map(|(id, doing)| ThreadState::of(id, doing))
+        .collect();
+    states.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(Json(states))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -2250,18 +2288,57 @@ struct Thread {
     branch: String,
     worktree: String,
     issue: Option<String>,
+    title: Option<String>,
+    /// The repository branch the thread left.
+    from: Option<String>,
+    /// `"working"` or `"idle"`, as the daemon held the thread when asked.
+    state: &'static str,
+    /// Unix milliseconds the working turn started, or null when idle or unknown.
+    since: Option<u64>,
     pr: ThreadPr,
 }
 
 impl Thread {
-    fn of(thread: thread::Thread) -> Self {
+    fn of(thread: thread::Thread, doing: Option<Doing>) -> Self {
+        let (state, since) = wire(doing);
         Self {
             id: thread.id,
             branch: thread.branch,
             worktree: thread.worktree,
             issue: thread.issue,
+            title: thread.title,
+            from: thread.from,
+            state,
+            since,
             pr: ThreadPr::of(thread.pr),
         }
+    }
+}
+
+fn wire(doing: Option<Doing>) -> (&'static str, Option<u64>) {
+    match doing {
+        Some(Doing::Working(since)) => (
+            "working",
+            since
+                .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok()),
+        ),
+        Some(Doing::Idle) | None => ("idle", None),
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadState {
+    id: String,
+    state: &'static str,
+    since: Option<u64>,
+}
+
+impl ThreadState {
+    fn of(id: String, doing: Doing) -> Self {
+        let (state, since) = wire(Some(doing));
+        Self { id, state, since }
     }
 }
 
@@ -2718,6 +2795,9 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
     fn of<T: serde::Serialize>(value: &T) -> serde_json::Value {
         serde_json::to_value(value).expect("a DTO of owned strings and numbers")
     }
+    let working = Doing::Working(Some(
+        std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_790_000_000_000),
+    ));
     vec![
         (
             "here",
@@ -2848,15 +2928,32 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             .enumerate()
             .map(|(n, (issue, pr))| {
                 let id = format!("{n}a1b2c3d4e5f6a7b");
-                Thread::of(thread::Thread {
-                    branch: format!("yantra/chat/site/{id}"),
-                    worktree: format!("/home/<user>/.yantra/worktrees/chat/site/{id}"),
-                    id,
-                    issue: issue.map(str::to_owned),
-                    pr,
-                })
+                Thread::of(
+                    thread::Thread {
+                        branch: format!("yantra/chat/site/{id}"),
+                        worktree: format!("/home/<user>/.yantra/worktrees/chat/site/{id}"),
+                        id,
+                        issue: issue.map(str::to_owned),
+                        title: Some(match issue {
+                            Some(_) => "#488 A workspace lists its threads".to_owned(),
+                            None => "Fix the login redirect".to_owned(),
+                        }),
+                        from: Some("main".to_owned()),
+                        pr,
+                    },
+                    (n == 1).then_some(working),
+                )
             })
             .collect::<Vec<_>>()),
+        ),
+        (
+            "threadStates",
+            "ThreadState[]",
+            of(&[
+                ThreadState::of("0a1b2c3d4e5f6a7b".to_owned(), Doing::Idle),
+                ThreadState::of("1a1b2c3d4e5f6a7b".to_owned(), working),
+                ThreadState::of("2a1b2c3d4e5f6a7b".to_owned(), Doing::Working(None)),
+            ]),
         ),
         (
             "threadOpened",
@@ -4198,6 +4295,51 @@ mod tests {
                 .expect("the router is infallible");
             assert_eq!(answered.status(), StatusCode::FORBIDDEN);
         }
+    }
+
+    /// Y-649: the live states come from memory, for the owner only.
+    #[tokio::test]
+    async fn thread_states_read_the_registry_for_the_owner_only() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        fleet.chats.hold_for_test("chat/site/0a1b", true);
+        fleet.chats.hold_for_test("chat/site/1c2d", false);
+        fleet.chats.hold_for_test("chat/other/3e4f", true);
+        let ask = |last: u8| {
+            let mut request = Request::get("/workspaces/site/threads")
+                .body(Body::empty())
+                .expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::new(address(last), 61620)));
+            request
+        };
+
+        let app = router::<Fake, ()>(direct(mine(3)), fleet.clone());
+        let stranger = app
+            .clone()
+            .oneshot(ask(9))
+            .await
+            .expect("the router is infallible");
+        assert_eq!(stranger.status(), StatusCode::FORBIDDEN);
+
+        let owner = app.oneshot(ask(3)).await.expect("the router is infallible");
+        assert_eq!(owner.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(owner.into_body(), 4096)
+            .await
+            .expect("a body");
+        let states: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        let states = states.as_array().expect("a list");
+        assert_eq!(states.len(), 2, "{states:?}");
+        assert_eq!(states[0]["id"], "0a1b");
+        assert_eq!(states[0]["state"], "working");
+        assert!(states[0]["since"].as_u64().is_some_and(|ms| ms > 0));
+        assert_eq!(states[1]["id"], "1c2d");
+        assert_eq!(states[1]["state"], "idle");
+        assert!(states[1]["since"].is_null());
     }
 
     /// Y-492: drafting, committing and pushing refuse a stranger before any

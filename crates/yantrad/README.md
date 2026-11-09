@@ -40,7 +40,8 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/logs` | `yantra logs` |
 | `POST /api/workspaces/{name}/mentions` | **None**: a terminal cannot mean it. The Chat composer's `@` files and `$` skills, for `{harness, thread?}` (Y-562, a `POST` for ADR-0019's reason) |
 | `POST /api/workspaces/{name}/commands` | **None**: a terminal cannot mean it. Claude's slash commands for the Chat composer's `/`, for `{harness, thread?}`; an ACP harness gets `[]`, since its list comes on the chat socket (Y-563, a `POST` for ADR-0019's reason) |
-| `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019) |
+| `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019). Each thread answers `id`, `branch`, `worktree`, `issue`, `title`, `from`, `state`, `since` and `pr` |
+| `GET /api/workspaces/{name}/threads` | The thread menu's live state: `[{id, state, since}]` for the threads the daemon holds, from memory with no ssh (Y-649) |
 | `POST /api/workspaces/{name}/threads/new` | `yantra chat new --issue` |
 | `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |
 | `POST /api/workspaces/{name}/threads/{thread}/commit` | `yantra commit [-m MSG]` |

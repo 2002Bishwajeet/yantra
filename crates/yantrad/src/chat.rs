@@ -87,7 +87,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use axum::Router;
 use axum::body::Bytes;
@@ -642,6 +642,12 @@ trait Machine: Send + Sync + 'static {
         place: &Place,
         session: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
+    /// Keeps the thread's title, for the list of threads.
+    fn remember_title(
+        &self,
+        place: &Place,
+        title: &str,
+    ) -> impl Future<Output = Result<(), String>> + Send;
     /// Starts `harness` in a keeper.
     fn start_acp(
         &self,
@@ -871,6 +877,12 @@ impl Machine for Fleet {
 
     async fn remember_claude(&self, place: &Place, session: &str) -> Result<(), String> {
         thread::remember_claude(&self.ssh, place, session)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn remember_title(&self, place: &Place, title: &str) -> Result<(), String> {
+        thread::remember_title(&self.ssh, place, title)
             .await
             .map_err(|error| chain(&error))
     }
@@ -1152,6 +1164,14 @@ pub async fn tell(relay: Relay, mut waits: mpsc::UnboundedReceiver<Wait>) {
     }
 }
 
+/// What a held thread is doing. A working thread's start is unknown after a
+/// restart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Doing {
+    Working(Option<SystemTime>),
+    Idle,
+}
+
 /// Every live keeper this daemon reads, shared by every socket and by the
 /// refresh pass that adopts keepers after a restart. It holds nothing on disk
 /// (ADR-0035 decision 13).
@@ -1255,6 +1275,26 @@ impl Registry {
         })
     }
 
+    /// What each thread of workspace `name` that this daemon holds is doing, by
+    /// short id. Read from memory.
+    pub fn doing(&self, name: &str) -> Vec<(String, Doing)> {
+        let prefix = format!("chat/{name}/");
+        self.lock()
+            .lives
+            .values()
+            .filter_map(|live| {
+                let short = live.id.strip_prefix(&prefix)?;
+                let state = live.lock();
+                let doing = if state.busy {
+                    Doing::Working(state.since)
+                } else {
+                    Doing::Idle
+                };
+                Some((short.to_owned(), doing))
+            })
+            .collect()
+    }
+
     /// Whether a turn runs, starts, keeps its checkpoint or reverts in thread
     /// `id`, so a commit or a push there must wait (Y-544).
     pub fn occupied(&self, id: &str) -> bool {
@@ -1262,6 +1302,22 @@ impl Registry {
         held.reverting.contains(id)
             || held.claimed.contains(id)
             || held.lives.get(id).is_some_and(|live| live.unsettled())
+    }
+
+    /// Holds a keeper for thread `id`, busy or not, for a route's test.
+    #[cfg(test)]
+    pub(crate) fn hold_for_test(&self, id: &str, busy: bool) {
+        let place = Place {
+            id: id.to_owned(),
+            branch: format!("yantra/{id}"),
+            repo: String::new(),
+            worktree: String::new(),
+            base: String::new(),
+        };
+        let (live, commands) = Live::new(&place, "run".to_owned(), false);
+        live.set_busy(busy);
+        self.insert(&live);
+        std::mem::forget(commands);
     }
 
     #[cfg(test)]
@@ -1301,7 +1357,7 @@ impl Registry {
         if state.busy || state.closing {
             return Ok(false);
         }
-        state.busy = true;
+        state.set_busy(true);
         Ok(true)
     }
 
@@ -1367,7 +1423,7 @@ impl Registry {
             if state.busy || state.closing || !held.next.contains_key(&live.id) {
                 return Vec::new();
             }
-            state.busy = true;
+            state.set_busy(true);
         }
         held.drain_next(live)
     }
@@ -1584,6 +1640,9 @@ struct Published {
     /// The last event sent that carries a cursor.
     last: Option<Cursor>,
     busy: bool,
+    /// When the running turn started. `None` when idle, and for a keeper
+    /// adopted as busy, whose start is unknown.
+    since: Option<SystemTime>,
     /// Set while a turn's end keeps its checkpoint, so no revert runs beside
     /// the capture. A new turn may still start.
     checkpointing: bool,
@@ -1602,6 +1661,13 @@ struct Published {
     diff: Option<ThreadEvent>,
 }
 
+impl Published {
+    fn set_busy(&mut self, busy: bool) {
+        self.busy = busy;
+        self.since = busy.then(SystemTime::now);
+    }
+}
+
 impl Live {
     fn new(
         place: &Place,
@@ -1617,6 +1683,7 @@ impl Live {
             state: Mutex::new(Published {
                 last: None,
                 busy,
+                since: None,
                 checkpointing: false,
                 closing: false,
                 sender: Some(sender),
@@ -1637,7 +1704,7 @@ impl Live {
     }
 
     fn set_busy(&self, busy: bool) {
-        self.lock().busy = busy;
+        self.lock().set_busy(busy);
     }
 
     /// Whether a turn runs or its checkpoint is still being kept.
@@ -2207,7 +2274,7 @@ async fn checkpointed<M: Machine>(
 ) {
     {
         let mut state = live.lock();
-        state.busy = false;
+        state.set_busy(false);
         state.checkpointing = true;
     }
     let kept = match within(machine.capture(place)).await {
@@ -2684,6 +2751,16 @@ async fn begin<M: Machine, P: Peer>(
             Ok((opened, subscribed)) => {
                 if !peer.say(&opened.started(None)).await {
                     return false;
+                }
+                // The thread lists by this title; a failed write leaves it untitled.
+                if let Err(said) = machine
+                    .remember_title(&opened.place, &thread::title(&next.text))
+                    .await
+                {
+                    tracing::warn!(
+                        "chat {name}: thread {} has no title: {said}",
+                        opened.place.id
+                    );
                 }
                 if subscribed.is_some() {
                     *sub = subscribed;
@@ -4656,6 +4733,8 @@ mod tests {
         opened: Mutex<usize>,
         removed: Mutex<usize>,
         remembered: Mutex<Vec<(Harness, String)>>,
+        titled: Mutex<Vec<String>>,
+        title_fails: bool,
         /// Each write of an image fails, as a full disk would.
         put_fails: bool,
         /// The size of each image that reached the machine.
@@ -4876,6 +4955,14 @@ mod tests {
                 return Err("git config: could not lock config file".to_owned());
             }
             lock(&self.remembered).push((harness, session.to_owned()));
+            Ok(())
+        }
+
+        async fn remember_title(&self, _: &Place, title: &str) -> Result<(), String> {
+            if self.title_fails {
+                return Err("git config: could not lock config file".to_owned());
+            }
+            lock(&self.titled).push(title.to_owned());
             Ok(())
         }
 
@@ -5515,6 +5602,46 @@ mod tests {
         assert_eq!(prompt["params"]["sessionId"], SESSION);
         assert_eq!(tab.next().await["type"], "turn.started");
         (tab, agent, prompt)
+    }
+
+    #[tokio::test]
+    async fn the_first_turn_titles_the_thread_and_a_failed_title_does_not_stop_it() {
+        let script = Arc::new(Script::default());
+        let (_tab, _agent, _prompt) = an_opencode_thread(&script).await;
+        assert_eq!(*script.titled.lock().expect("a lock"), ["list the files"]);
+
+        let script = Arc::new(Script {
+            title_fails: true,
+            ..Script::default()
+        });
+        let (_tab, _agent, prompt) = an_opencode_thread(&script).await;
+        assert_eq!(prompt["method"], "session/prompt", "the turn still runs");
+        assert!(script.titled.lock().expect("a lock").is_empty());
+    }
+
+    #[test]
+    fn a_turn_records_when_it_started_and_a_finished_or_adopted_one_does_not() {
+        let registry = Registry::default();
+        let (live, _commands) = Live::new(&place(), "1".to_owned(), false);
+        assert!(registry.insert(&live));
+        let name = THREAD.rsplit('/').next().expect("an id");
+        let workspace = place()
+            .id
+            .split('/')
+            .nth(1)
+            .expect("a workspace")
+            .to_owned();
+        let doing = |registry: &Registry| registry.doing(&workspace);
+        assert_eq!(doing(&registry), [(name.to_owned(), Doing::Idle)]);
+
+        assert_eq!(registry.mark_busy(&live).ok(), Some(true));
+        assert!(matches!(doing(&registry)[0].1, Doing::Working(Some(_))));
+        live.set_busy(false);
+        assert_eq!(doing(&registry)[0].1, Doing::Idle);
+
+        let (adopted, _commands) = Live::new(&place(), "2".to_owned(), true);
+        assert_eq!(adopted.lock().since, None);
+        assert!(adopted.busy());
     }
 
     #[tokio::test]

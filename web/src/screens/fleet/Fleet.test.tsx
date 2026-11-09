@@ -129,7 +129,7 @@ describe('/fleet Start session', () => {
     mount('desktop', `/w/yantra-web?view=chat&thread=${first!.id}`)
     await waitFor(() => expect(urls.some((one) => one.includes(`thread=${first!.id}`))).toBe(true), { timeout: 5000 })
     fireEvent.click(await screen.findByRole('button', { name: /^Threads, / }))
-    const rows = await screen.findAllByRole('menuitem', { name: new RegExp(second!.branch.split('/').pop()!) })
+    const rows = await screen.findAllByRole('menuitem', { name: /#488 A workspace/ })
     fireEvent.click(rows[0]!)
     await waitFor(() => expect(urls.some((one) => one.includes(`thread=${second!.id}`))).toBe(true), { timeout: 5000 })
   })

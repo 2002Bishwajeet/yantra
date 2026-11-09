@@ -338,7 +338,7 @@ async fn every_script() -> Vec<(String, String)> {
         thread::open(&r, &ws),
         thread::open_as(&r, &ws, "11111111"),
         thread::list(&r, &ws),
-        thread::open_for_issue(&r, &ws, &issue),
+        thread::open_for_issue(&r, &ws, &issue, "Fix"),
         thread::listed(&r, &ws),
         thread::remember(&r, &place, Harness::Codex, "s1"),
         thread::recall(&r, &place),

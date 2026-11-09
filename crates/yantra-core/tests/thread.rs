@@ -253,7 +253,7 @@ async fn a_thread_remembers_its_harness_and_acp_session() -> Result<()> {
 
 /// Y-488: a thread opened from an issue keeps it in git config, `listed`
 /// reads it back with the upstream git keeps, and removing the thread forgets
-/// both.
+/// both. Y-649: each thread also keeps its title and the branch it left.
 #[tokio::test]
 async fn a_thread_from_an_issue_lists_its_issue_and_its_upstream() -> Result<()> {
     let Some(fixture) = SshFixture::start()? else {
@@ -281,8 +281,31 @@ async fn a_thread_from_an_issue_lists_its_issue_and_its_upstream() -> Result<()>
     };
     let issue: github::IssueRef = "o/r#7".parse()?;
 
-    let from_issue = thread::open_for_issue(&ssh, &workspace, &issue).await?;
+    let first = fixture.run(&format!("git -C {repo} symbolic-ref --short HEAD"))?;
+    let from_issue = thread::open_for_issue(&ssh, &workspace, &issue, "Fix it").await?;
+    fixture.run(&format!("git -C {repo} checkout -qb other"))?;
     let plain = thread::open(&ssh, &workspace).await?;
+    thread::remember_title(&ssh, &plain, "Fix the login").await?;
+    // Y-649: each thread keeps the branch it left, whatever HEAD is now.
+    fixture.run(&format!("git -C {repo} checkout -q --detach"))?;
+    let detached = thread::open(&ssh, &workspace).await?;
+    let listed = thread::listed(&ssh, &workspace).await?;
+    let kept = |place: &thread::Place| {
+        listed
+            .iter()
+            .find(|l| &l.place == place)
+            .map(|l| (l.title.clone(), l.from.clone()))
+    };
+    assert_eq!(
+        kept(&from_issue),
+        Some((Some("#7 Fix it".to_owned()), Some(first.trim().to_owned())))
+    );
+    assert_eq!(
+        kept(&plain),
+        Some((Some("Fix the login".to_owned()), Some("other".to_owned())))
+    );
+    assert_eq!(kept(&detached), Some((None, None)));
+    thread::remove(&ssh, &detached).await?;
     let issue_of = |listed: &[thread::Listed], place: &thread::Place| {
         listed
             .iter()

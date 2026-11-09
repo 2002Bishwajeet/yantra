@@ -742,8 +742,9 @@ scan was reading English words out of the `.tsx` files and buying `.container`,
 `.hidden`, `.collapse` and fourteen more that nothing drew. Add a `@source` back
 the day a call site writes a utility.
 
-[`src/index.css`](src/index.css) is three statements: that import, the token
-import, and the page under them.
+[`src/index.css`](src/index.css) is six statements: that import, the token
+import, the `html` text-size and tap-highlight rule, the `touch-action` list, the
+`user-select` list, and the page.
 
 ## What it weighs
 
@@ -846,7 +847,7 @@ src/
                      validates `?view=` without pulling xterm.js into `/`
   useTick.ts         the one-second clock. It returns the instant rather than
                      re-rendering, which is the compiler note above
-  index.css          three statements: Tailwind's reset, the tokens, the page
+  index.css          six statements: Tailwind's reset, the tokens, touch basics, the page
   lib/               `name`, `path`, `spend`, `time` — the formatting every
                      screen shares, so an age or a figure reads the same twice
   api/

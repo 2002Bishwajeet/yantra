@@ -409,16 +409,21 @@ pub(crate) fn said(stderr: &[u8]) -> String {
 /// `repo` may name any directory inside a repository; the worktree is made from
 /// its top level, at that repository's `HEAD`. `--no-track`, because
 /// `branch.autoSetupMerge` would otherwise give the branch `HEAD`'s upstream.
+/// `HEAD`'s branch is kept as `branch.<b>.yantraFrom`. A detached `HEAD` or a
+/// failed write keeps none, so the worktree is never left without its `Place`.
 fn worktree_command(repo: &str, id: &str) -> String {
     format!(
         "top=$(git -C {repo} rev-parse --show-toplevel 2>/dev/null) || exit {NOT_A_REPO}\n\
          wt=\"$HOME\"/.yantra/worktrees/{id}\n\
          mkdir -p \"$HOME/.yantra/worktrees\" \
          && git -C \"$top\" worktree add -q --no-track -b {branch} \"$wt\" HEAD >&2 \
+         && {{ from=$(git -C \"$top\" symbolic-ref --short -q HEAD) \
+         && git -C \"$top\" config {from} \"$from\" || :; }} \
          && printf '%s\\n%s\\n' \"$top\" \"$wt\" && git -C \"$wt\" rev-parse HEAD",
         repo = destination(repo),
         id = sq(id),
         branch = sq(&branch(id)),
+        from = sq(&format!("branch.{}.yantraFrom", branch(id))),
     )
 }
 
