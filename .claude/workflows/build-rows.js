@@ -4,9 +4,9 @@ export const meta = {
   whenToUse: 'The owner wants open tracker rows built and merged without reviewing each one',
   phases: [
     { title: 'Triage', detail: 'rank the rows an agent can finish alone' },
-    { title: 'Build', detail: 'plan, build, verify, fix' },
+    { title: 'Build', detail: 'plan, build, CI gate, fix' },
     { title: 'Review', detail: 'independent review, fix, re-check' },
-    { title: 'Ship', detail: 'one row at a time: rebase, tracker, PR, checks, merge' },
+    { title: 'Ship', detail: 'one row at a time: rebase, tracker, checks, merge' },
     { title: 'Report' },
   ],
 }
@@ -31,12 +31,14 @@ const BUILDER = {
   docs: { model: 'sonnet', effort: 'low' },
 }
 
-// Owner, 2026-11-03: the gate tests only what the branch changed. CI runs every suite on the PR, and ship waits for it.
-// e2e runs in the image the screenshot baselines are rendered in; on the host, fonts differ. A missing baseline fails, not written.
-const GATE = `Test only what this branch changed. List the files with \`git diff --name-only origin/main...HEAD\`. CI runs the full suites on the PR.
-- A changed file under crates/ or a Cargo file: run \`just fmt-check && just lint\`, then \`YANTRA_REQUIRE_PODMAN=1 NEXTEST_TEST_THREADS=4 cargo nextest run -p <crate>\` for each changed crate.
-- A changed file under web/: run \`cd web && npm ci --prefer-offline && npm run lint && npx tsc --noEmit -p tsconfig.app.json && npx vitest run --changed origin/main\`. Then run \`just web-e2e --update-snapshots=none <specs>\` with only the e2e specs that changed or that cover the changed screens. If no spec covers them, skip e2e.
-- Nothing else changed: run \`just fmt-check\`.`
+const branchOf = (row) => `${row.id.toLowerCase()}-auto`
+const titleOf = (row) => `${row.id}: ${row.title.charAt(0).toLowerCase()}${row.title.slice(1)}`
+const MERGE_GUARD = `${REPO}/.claude/workflows/merge-guard.sh`
+const PUSH_PR = (row) => `git push --force-with-lease -u origin ${branchOf(row)}. If \`gh pr view ${branchOf(row)}\` finds a PR, reuse it. Else run \`gh pr create --base main --head ${branchOf(row)} --title "${titleOf(row)}"\` with a body that says what changed and how it was verified. If the row names GitHub issues as #NNN, end the body with one "Closes #NNN" line for each, so the merge closes them. The title becomes the squash commit on main, so it must keep the form "Y-NNN: <what changed>". No AI attribution anywhere.`
+
+// Owner, 2026-11-09 (Y-694): CI is the gate. The local gate ran one row at a time and repeated CI: Y-649 spent 64 min in it, CI takes 6.
+// merge-guard, not \`gh pr checks --watch\`: the latter exits with "no checks reported" in the seconds after a push, and ignores the required names.
+const GATE = (row) => `Run the Then commands below in the worktree first. Then push the branch and open its PR: ${PUSH_PR(row)} Then wait for CI with \`bash ${MERGE_GUARD} <pr number>\`. It waits until every check on the pushed commit completes, and exits 0 only when all are green and the required checks are present.`
 
 const RULES = (wt) => `
 Rules for this run (CLAUDE.md §B7, the build loop):
@@ -44,7 +46,7 @@ Rules for this run (CLAUDE.md §B7, the build loop):
 - Do not edit tracker.md or docs/session-log.md. The ship stage does that.
 - Do not create or change anything under docs/adr/, and do not add or change an invariant in a crate tracker. If the row needs either, stop and say so.
 - Commit messages are "Y-NNN: <what changed>" and carry no AI attribution of any kind.
-- Never run the podman suite, \`just check\`, or Playwright in any form (\`just web-e2e\`, \`npm run e2e\`, \`npx playwright test\`). The verify stage runs them one row at a time, because parallel suites run the box out of memory. The one exception: when your gate includes \`just web-e2e\`, a fix agent may run \`just web-e2e --update-snapshots=changed <spec>\` to regenerate a baseline that its change was meant to alter, and commits the new images. Never regenerate a baseline on the host: its fonts differ. You may run \`just fmt-check\`, \`just lint\`, \`cargo nextest run -p <crate>\` without YANTRA_REQUIRE_PODMAN, and the web lint and unit tests.
+- Never run the podman suite, \`just check\`, or Playwright in any form (\`just web-e2e\`, \`npm run e2e\`, \`npx playwright test\`). CI runs them on the PR. Rows run in parallel, and parallel local suites run the box out of memory. The one exception: when your gate includes \`just web-e2e\`, a fix agent may run \`just web-e2e --update-snapshots=changed <spec>\` to regenerate a baseline that its change was meant to alter, and commits the new images. Never regenerate a baseline on the host: its fonts differ. You may run \`just fmt-check\`, \`just lint\`, \`cargo nextest run -p <crate>\` without YANTRA_REQUIRE_PODMAN, and the web lint and unit tests.
 - Web code: load the skills vercel-react-best-practices, tanstack-router-best-practices, tanstack-query-best-practices, playwright-best-practices, accessibility and mobile-native before you write any. Every screen you touch must feel native on a phone: check it at 390 px with touch, safe areas and no hover-only control. Errors are typed and every error path is tested.`
 
 function lock() {
@@ -55,8 +57,8 @@ function lock() {
     return run
   }
 }
-// Verification is serial so three podman or e2e suites never share 15 GB; shipping is serial so rebases see each other's merges.
-const serialVerify = lock()
+// The walk is serial because it builds and serves on one port; shipping is serial so rebases see each other's merges.
+const serialWalk = lock()
 const serialShip = lock()
 
 const TRIAGE_SCHEMA = {
@@ -91,7 +93,7 @@ const PLAN_SCHEMA = {
     park: { type: 'boolean' },
     parkReason: { type: 'string' },
     plan: { type: 'string' },
-    extraChecks: { type: 'array', items: { type: 'string' }, description: 'commands beyond the standard gate that prove the done condition. Each must run as written: `yantrad` is binary-only, so use `--bin yantrad` and never `--lib`, and a nextest filter must match a test (check with `cargo nextest list`). Leave it empty when the gate already proves the row.' },
+    extraChecks: { type: 'array', items: { type: 'string' }, description: 'commands that prove the done condition and that CI does not run. They run on this box before the push, so none may need podman or Playwright; a test in a CI suite needs no entry. Each must run as written: `yantrad` is binary-only, so use `--bin yantrad` and never `--lib`, and a nextest filter must match a test (check with `cargo nextest list`). Leave it empty when CI already proves the row.' },
   },
   required: ['park', 'plan', 'extraChecks'],
 }
@@ -102,7 +104,7 @@ const VERIFY_SCHEMA = {
     finished: { type: 'boolean', description: 'true only when the log ends in its GATE_EXIT line. false means the gate still runs, and pass then means nothing' },
     pass: { type: 'boolean' },
     failures: { type: 'string', description: 'the failing command and the last 60 lines of its output' },
-    flaky: { type: 'array', items: { type: 'string' }, description: 'tests that failed in the gate, are in files that `git diff --name-only origin/main...HEAD` does not list, and passed when rerun alone' },
+    flaky: { type: 'array', items: { type: 'string' }, description: 'tests that failed on CI, are in files that `git diff --name-only origin/main...HEAD` does not list, and passed when the failed jobs reran' },
     fixedChecks: { type: 'array', items: { type: 'string' }, description: 'only when a Then command is itself wrong (an unknown target, a filter that matches no test): every Then command, corrected' },
   },
   required: ['finished', 'pass', 'failures'],
@@ -141,7 +143,7 @@ const WALK_SCHEMA = {
 const SHIP_SCHEMA = {
   type: 'object',
   properties: {
-    status: { type: 'string', enum: ['merged', 'open', 'checks-failed', 'behind', 'needs-verify', 'failed'] },
+    status: { type: 'string', enum: ['merged', 'open', 'checks-failed', 'behind', 'failed'] },
     pr: { type: 'string' },
     failures: { type: 'string' },
   },
@@ -171,7 +173,7 @@ const CLEANUP = `Afterwards remove only the test containers: those with label ya
 // Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
 // Y-493 parked because the agent read the log tail while the gate still ran, so the run must end in a sentinel line.
 const WAIT = (gateLog) => `Wait with Monitor and an until-loop on \`grep -q '^GATE_EXIT=' ${gateLog}\`, because a foreground sleep is blocked. Set timeout_ms to 1800000 on the Monitor call. When the Monitor expires and the GATE_EXIT line does not exist, arm it again. Judge pass from GATE_EXIT and the failing tests, never from a partial tail. If you must return before the line exists, return finished=false: the run sends another agent to wait.`
-const GATE_HOW = (gateLog) => `The gate can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then put the gate commands and the Then commands in one background shell: \`( <commands> ) > ${gateLog} 2>&1; echo "GATE_EXIT=$?" >> ${gateLog}\`. ${WAIT(gateLog)} ${CLEANUP}`
+const GATE_HOW = (gateLog) => `CI can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then run the merge guard in a background shell: \`( bash ${MERGE_GUARD} <pr number> ) > ${gateLog} 2>&1; echo "GATE_EXIT=$?" >> ${gateLog}\`. ${WAIT(gateLog)}`
 
 // A counter, not the clock, names the log: a prompt that changes on every run defeats the resume cache.
 const gateRuns = {}
@@ -181,7 +183,7 @@ const nextGateLog = (row, label) => `${GATE_LOGS}/${TODAY}-${row.id}-${label}-${
 async function untilFinished(row, wt, gateLog, label, v) {
   for (let i = 1; v && !v.finished && i <= 6; i++) {
     v = await agent(
-      `The gate for ${row.id} in ${wt} runs in the background and writes to ${gateLog}. Do not start it again and do not change any file. If the log does not exist, the gate never started: return finished=true, pass=false. ${WAIT(gateLog)} ${CLEANUP}
+      `The gate for ${row.id} in ${wt} runs in the background and writes to ${gateLog}. Do not start it again and do not change any file. If the log does not exist, the gate never started: return finished=true, pass=false. ${WAIT(gateLog)}
 ${FLAKY}`,
       { label: `wait:${row.id}:${label}:${i}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
     )
@@ -190,53 +192,53 @@ ${FLAKY}`,
   return v
 }
 
-// A slow-network test outside the diff parked Y-585; CI runs the full suites again, so a real regression still blocks the merge.
-const FLAKY = `When the gate fails, rerun each failing test alone. For nextest that is \`NEXTEST_TEST_THREADS=1 cargo nextest run -p <crate> -E 'test(=<name>)'\`, with YANTRA_REQUIRE_PODMAN=1 if the gate used it. For e2e that is one spec. A failure is a retry, not a failure, when its test file is outside \`git diff --name-only origin/main...HEAD\` and it passes alone. If every failure is like that, report pass=true and list those tests in flaky. Any other failure keeps pass=false.`
+// A slow-network test outside the diff parked Y-585, so a failure outside the diff gets one rerun before it counts.
+const FLAKY = `When a check fails, find its run with \`gh pr checks <pr number>\` and read the failed job log with \`gh run view <run-id> --log-failed\`. Put the failing check, its run id and the last 60 lines of the failing test's output in failures. A failure is a retry, not a failure, when its test file is outside \`git diff --name-only origin/main...HEAD\`: rerun the failed jobs once with \`gh run rerun <run-id> --failed\`, then truncate the log, run the merge guard into it again in a background shell, and wait as before. If every failure is like that and the rerun passes, report pass=true and list those tests in flaky. Any other failure keeps pass=false.`
 
 // A web or docs row is built by Sonnet, so one Sonnet agent can run the gate and fix what it finds.
 async function verifyAndFix(row, wt, plan, label, attempts) {
   const gateLog = nextGateLog(row, label)
-  return serialVerify(async () => untilFinished(row, wt, gateLog, label, await
+  return untilFinished(row, wt, gateLog, label, await
     agent(
-      `Run the gate for ${row.id} in ${wt}, fix what fails, and report whether it passes at the end.
-Gate: ${GATE}
+      `Run the CI gate for ${row.id} in ${wt}, fix what fails, and report whether it passes at the end.
+Gate: ${GATE(row)}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
-${GATE_HOW(gateLog)} Each rerun of the whole gate writes to the same log: truncate it first.
-If a command fails, find the cause, fix the code, commit, and rerun only the failing test file or spec until it passes. Then rerun the gate once. Stop after ${attempts} gate runs.
+${GATE_HOW(gateLog)} Each rerun of the gate writes to the same log: truncate it first.
+If a check fails, read its failed job log, find the cause, fix the code, run the fast local checks for it, commit, and run the gate again: it pushes the fix. Stop after ${attempts} gate runs.
 ${FLAKY} Do not change code for a flaky test.
 A screenshot that the row's change was meant to alter: regenerate it with \`just web-e2e --update-snapshots=changed <spec>\` and commit the images. A screenshot it was not meant to alter is a regression: fix the code.
 If a Then command fails before any test runs because the command is wrong, not the code, correct it and return the corrected list as fixedChecks.${RULES(wt)}`,
       { label: `gate:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'medium' },
     ),
-  ))
+  )
 }
 
 async function verify(row, wt, plan, label) {
   const gateLog = nextGateLog(row, label)
-  return serialVerify(async () => untilFinished(row, wt, gateLog, label, await
+  return untilFinished(row, wt, gateLog, label, await
     agent(
-      `Run the gate for ${row.id} in ${wt} and report whether it passes. Do not change any file.
-Gate: ${GATE}
+      `Run the CI gate for ${row.id} in ${wt} and report whether it passes. Do not change any file.
+Gate: ${GATE(row)}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 If a Then command fails before any test runs because the command is wrong, not the code, correct it, run the corrected one, judge pass on that, and return the corrected list as fixedChecks.
 ${GATE_HOW(gateLog)}
 ${FLAKY}`,
       { label: `verify:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
     ),
-  ))
+  )
 }
 
 async function fix(row, wt, what) {
   const b = BUILDER[row.kind]
-  // The fixer holds the verify lock, so it may rerun the failing tests itself and the next gate run is the last.
-  return serialVerify(() => agent(
+  return agent(
     `Fix ${row.id} in ${wt}. ${what}
-Find the cause before you change code. Commit the fix. You hold the test lock: rerun only the failing tests (one podman test with NEXTEST_TEST_THREADS=4, or one e2e spec) until they pass. Do not run the gate. ${CLEANUP}${RULES(wt)}`,
+When CI failed, find the run with \`gh pr checks ${branchOf(row)}\` and read its failed job log with \`gh run view <run-id> --log-failed\`. Find the cause before you change code. Commit the fix and do not push: the next gate pushes it and CI tests it. Run only the fast local checks. ${CLEANUP}${RULES(wt)}`,
     { label: `fix:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
-  ))
+  )
 }
 
 async function verifyUntilGreen(row, wt, plan, rounds) {
+  if (DRY) return (log(`${row.id}: dry run, so no push and no CI gate`), true)
   const selfFix = row.kind === 'web' || row.kind === 'docs'
   if (selfFix) {
     const v = await verifyAndFix(row, wt, plan, 'g', rounds)
@@ -260,7 +262,7 @@ async function verifyUntilGreen(row, wt, plan, rounds) {
 // also runs on the real Mac. walk.sh holds the paths that decide which, and its guard refuses the merge without it.
 const WALK = `${REPO}/.claude/workflows/walk.sh`
 async function walk(row, wt) {
-  return serialVerify(() =>
+  return serialWalk(() =>
     agent(
       `Walk ${row.id} in ${wt} on the real product. Do not change any tracked file.
 1. Run \`bash ${WALK} needs ${wt}\`. Return its lines as needs. If it prints nothing, return needs=[], shots=[], mac=not-needed and stop.
@@ -295,7 +297,7 @@ const shown = (w) =>
     : ''
 
 async function runRow(row) {
-  const branch = `${row.id.toLowerCase()}-auto`
+  const branch = branchOf(row)
   const wt = `${WT_ROOT}/${branch}`
   const park = (reason) => ({ id: row.id, title: row.title, status: 'parked', reason, branch })
 
@@ -350,39 +352,34 @@ ${REVIEW_RULE}`,
   }
   if (!r) return park('the reviewer died')
 
-  const title = `${row.id}: ${row.title.charAt(0).toLowerCase()}${row.title.slice(1)}`
-  // verified: the gate has passed on the code as it stands after the rebase, so a second rebase cannot ask for another.
-  const ship = (verified) =>
+  const title = titleOf(row)
+  // The merge guard waits for CI on the rebased commit, so a rebase needs no gate of its own.
+  const ship = () =>
     serialShip(() =>
       agent(
-        `Ship ${row.id} from ${wt}, branch ${branch}. The gate passed.
-0. git fetch origin and rebase on origin/main. Resolve conflicts in tracker.md and docs/session-log.md by keeping both sides and deduplicating by Y-number. Do not change any other file except to resolve a conflict. If a conflict in any other file cannot be resolved, abort the rebase and return failed.${verified ? '' : ` If origin/main changed a file this branch also touches, outside tracker.md and docs/session-log.md, or a conflict there needed a resolution, stop here and return needs-verify.`}
+        `Ship ${row.id} from ${wt}, branch ${branch}. CI passed on the branch.
+0. git fetch origin and rebase on origin/main. Resolve conflicts in tracker.md and docs/session-log.md by keeping both sides and deduplicating by Y-number. Do not change any other file except to resolve a conflict. If a conflict in any other file cannot be resolved, abort the rebase and return failed.
 1. In tracker.md set the ${row.id} row to 🔵 review and add "**Merged ${TODAY}** by the build loop." with one line on what shipped. A row does not close in its own PR: a later release PR marks it ✅ done. Update the row; never add a second one. Then check: grep -oE '^\\| Y-[0-9]+ \\|' tracker.md | sort | uniq -d prints nothing. Skip this step if the row already says it.
 2. Append one entry to docs/session-log.md for ${TODAY}, in the style of the entries above it. Plain prose, CLAUDE.md §A6. Skip this step if the entry exists.
 3. Commit "${row.id}: record the change in the tracker" if steps 1–2 changed anything.${DRY ? `
 4. Dry run: do not push. Return status open.` : `
-4. Push with git push --force-with-lease -u origin ${branch}. If gh pr view ${branch} finds a PR, reuse it. Else run gh pr create --base main --title "${title}" with a body that says what changed and how it was verified. If the row names GitHub issues as #NNN, end the body with one "Closes #NNN" line for each, so the merge closes them. The title becomes the squash commit on main, so it must keep the form "Y-NNN: <what changed>". No AI attribution anywhere.
-5. ${w.needs.length ? `Run \`bash ${WALK} publish ${wt} <pr number>\`. It posts the walk's screenshots on the PR. If it fails, return failed with its output. ` : ''}Run exactly one command: bash ${WALK} guard <pr number> && bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> && gh pr merge <pr number> --squash --delete-branch --subject "${title} (#<pr number>)". The walk guard exits non-zero when the PR changes a screen or a machine path and has no walk comment. The merge guard waits for every check and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the walk guard fails, return failed with its output. If the merge guard fails, return checks-failed with the failing check's log tail.
-6. If GitHub says the branch is behind, return status behind; do not rebase here, because the rebase must be verified.
+4. Push the branch: ${PUSH_PR(row)}
+5. ${w.needs.length ? `Run \`bash ${WALK} publish ${wt} <pr number>\`. It posts the walk's screenshots on the PR. If it fails, return failed with its output. ` : ''}Run exactly one command: bash ${WALK} guard <pr number> && bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> && gh pr merge <pr number> --squash --delete-branch --subject "${title} (#<pr number>)". The walk guard exits non-zero when the PR changes a screen or a machine path and has no walk comment. The merge guard waits for every check on the rebased commit and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the walk guard fails, return failed with its output. If the merge guard fails, return checks-failed with the failing check's log tail.
+6. If GitHub says the branch is behind, return status behind; do not rebase here, because a rebase runs before the tracker step.
 7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
         { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'sonnet', effort: 'medium' },
       ),
     )
 
-  let s = await ship(false)
-  if (s && s.status === 'needs-verify') {
-    if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after the rebase')
-    s = await ship(true)
-  }
+  let s = await ship()
   if (s && s.status === 'checks-failed') {
     await fix(row, wt, `CI failed on the PR ${s.pr || ''}:\n${s.failures || ''}`)
-    if (!(await verifyUntilGreen(row, wt, plan, 2))) return { ...park('CI failed and the fix did not pass the gate'), pr: s.pr }
+    if (!(await verifyUntilGreen(row, wt, plan, 2))) return { ...park('CI failed and the fix stayed red'), pr: s.pr }
     w = await walkUntilGreen(row, wt, plan)
     if (typeof w === 'string') return { ...park(w), pr: s.pr }
-    s = await ship(false)
+    s = await ship()
   }
-  if (s && s.status === 'behind') s = await ship(false)
-  if (s && s.status === 'needs-verify') return park('origin/main moved under the branch twice; rerun to verify the rebase')
+  if (s && s.status === 'behind') s = await ship()
   if (!s) return park('the shipper died')
   return { id: row.id, title: row.title, status: s.status, pr: s.pr || '', reason: s.failures || '', branch }
 }
