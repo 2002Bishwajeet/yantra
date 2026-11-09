@@ -134,11 +134,6 @@ function Figure(props: { spend: Read }) {
           null and this card shows tokens and no money.
         </Text>
       </Card>
-      {/* A path is long and a phone is 390 px wide, so it clips rather than
-          pushing the page sideways. */}
-      <Text render={<p />} className="spend__path" scale="body-small" tone="variant">
-        transcript <Mono clip>{spend.path}</Mono>
-      </Text>
     </>
   )
 }
@@ -188,6 +183,9 @@ export function Spend(props: SpendProps) {
           ) : null}
         </Text>
       </div>
+      <Text render={<p />} scale="body-small" tone="variant">
+        Counts the agent in the Terminal tab. Chat turns are not counted.
+      </Text>
       <div aria-live="polite" className="spend__answer">
         {asked.asked === 'asking' || asked.asked === 'no' ? (
           <div aria-busy="true" className="turns__reading" data-slot="reading">
@@ -204,10 +202,9 @@ export function Spend(props: SpendProps) {
               There is nothing to add up yet.
             </Text>
             <Text render={<p />} scale="body-medium" tone="variant">
-              No agent in this workspace has written a turn. A fresh one has not started, and one waiting
-              at claude's trust prompt never gets that far.
+              The agent in the Terminal has not written a turn. A new agent writes its first turn on its
+              first message. An agent at claude's trust prompt writes none.
             </Text>
-            <Mono className="turns__said">{asked.said}</Mono>
           </Card>
         ) : null}
         {asked.asked === 'refused' ? (

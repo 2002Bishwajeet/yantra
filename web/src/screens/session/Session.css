@@ -208,14 +208,6 @@
   margin: 0;
 }
 
-.turns__said {
-  display: block;
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: var(--md-sys-typescale-body-small-line-height);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .turns__waiting a {
   color: inherit;
   font-weight: 500;
@@ -511,14 +503,6 @@
   gap: 12px;
   padding: 10px 16px;
   border-radius: var(--m3-row-radius);
-}
-
-.spend__path {
-  display: flex;
-  gap: 10px;
-  margin: 0;
-  padding: 0 8px;
-  min-width: 0;
 }
 
 .spend > p {

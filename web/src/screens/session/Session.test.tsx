@@ -228,6 +228,22 @@ describe('one workspace, three views the URL carries', () => {
     expect(sockets).toEqual([])
   })
 
+  /** Y-644: the page says which session and where, and not which multiplexer. */
+  it('names the terminal by session and machine, with no tmux word', async () => {
+    daemon()
+    vi.stubGlobal(
+      'WebSocket',
+      class {
+        send() {}
+        close() {}
+      },
+    )
+    await open('landing', 'terminal')
+
+    expect(await screen.findByText('connecting · landing on macbook')).toBeTruthy()
+    expect(document.querySelector('.session__terminal')?.textContent).not.toMatch(/tmux/i)
+  })
+
   it('reattaches the chat when the URL names another thread', async () => {
     daemon()
     const sockets: { url: string; closed: boolean }[] = []
