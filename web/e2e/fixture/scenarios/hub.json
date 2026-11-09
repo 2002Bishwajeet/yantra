@@ -108,7 +108,7 @@
           {
             "check": "heartbeat",
             "state": "present",
-            "detail": "a beat arrived 3s ago"
+            "detail": "last report 3s ago"
           }
         ]
       }

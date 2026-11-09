@@ -124,24 +124,25 @@ describe('/machines on the busy fleet', () => {
     expect(alert.textContent).toContain('Check was refused')
   })
 
-  /** Y-616: Worth a look may not claim a clean fleet when no machine answered. */
-  it('says no machine has answered yet, whatever the doctor reports say', async () => {
+  /** Y-580: a section with no action is not drawn, so it cannot claim a clean fleet. */
+  it('draws no Worth a look when no machine answered, or when nothing is unclaimed', async () => {
     const state = scenario('busy')
     state.sessions!.data = [{ machine: 'cachyos-g14', reached: 'no', error: 'timed out' }]
     mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
-    expect(await screen.findByText('No machine has answered yet')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Worth a look' })).toBeNull()
+    expect(screen.queryByText('No machine has answered yet')).toBeNull()
     expect(screen.queryByText('Nothing unaccounted for')).toBeNull()
   })
 
-  it('says nothing is unaccounted for once a machine has answered, checked or not', async () => {
+  it('draws no Worth a look once a machine has answered with nothing unclaimed', async () => {
     const state = scenario('busy')
     state.sessions!.data = [{ machine: 'cachyos-g14', reached: 'yes', sessions: [] }]
     state.readiness!.data = []
     mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
-    expect(await screen.findByText('Nothing unaccounted for')).toBeTruthy()
-    expect(screen.queryByText('No machine has answered yet')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Worth a look' })).toBeNull()
+    expect(screen.queryByText('Nothing unaccounted for')).toBeNull()
   })
 
   /** Y-579: no workspace names the machine, and the daemon now keeps the
@@ -180,20 +181,26 @@ describe('/machines on the busy fleet', () => {
     expect(worth.queryByText('yantra-web')).toBeNull()
   })
 
-  /** Ledger row 142: a machine dark for a week read `beat 4 Sep ago`, because
-   *  the card wrote the word behind a helper that names the day past 24 h. */
-  it('drops `ago` from a beat that has become a date', async () => {
+  /** Y-580: the card leads with facts, not with a beat. */
+  it('leads with a facts line and says nothing of a beat, an address or an internal term', async () => {
     const state = scenario('busy')
-    const machines = state.machines!.data as { name: string; heartbeat: { age_seconds: number } }[]
-    machines.find((one) => one.name === 'thinkpad')!.heartbeat = { age_seconds: 7 * 86_400 }
+    const machines = state.machines!.data as { name: string; heartbeat: unknown }[]
+    machines.find((one) => one.name === 'pi-5')!.heartbeat = null
     mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
 
     const about = (name: string) =>
       screen.getByRole('region', { name }).querySelector('.machines__about')?.textContent ?? ''
-    expect(about('thinkpad')).toMatch(/· beat \d{1,2} \w{3}$/)
-    // The band under a day is unchanged, and it keeps the word.
-    expect(about('cachyos-g14')).toMatch(/· beat 4s ago$/)
+    expect(about('cachyos-g14')).toMatch(
+      /^linux · \S+ · CPU \d+% busy · [\d.]+ GB memory free · [\d.]+ GB disk free( · (no sessions|\d+ sessions?))?$/,
+    )
+    // I-47: no heartbeat is no numbers, never zeros.
+    expect(about('pi-5')).not.toMatch(/CPU|GB|\b0\b/)
+    const cards = screen.getAllByRole('region').map((one) => one.textContent ?? '')
+    for (const text of cards) {
+      expect(text).not.toMatch(/beat|not asked|yantrad|ADR-\d|I-\d\d/)
+      expect(text).not.toMatch(/100\.\d+\.\d+\.\d+/)
+    }
   })
 
   it('Kill asks first, and the daemon is only told after the answer', async () => {
@@ -223,13 +230,12 @@ describe('/machines on the phone', () => {
 })
 
 describe('/machines on an empty fleet', () => {
-  it("says every session belongs to a workspace", async () => {
+  it('draws no empty Worth a look', async () => {
     mount('desktop', '/machines', scenario('empty'))
-    expect(
-      await screen.findByText(
-        'every tmux session on the machines that answered belongs to a workspace',
-      ),
-    ).toBeTruthy()
+    await screen.findByRole('heading', { level: 1, name: 'Machines' })
+    await screen.findByText(/^looked /)
+    expect(screen.queryByRole('region', { name: 'Worth a look' })).toBeNull()
+    expect(screen.queryByText(/every tmux session/)).toBeNull()
   })
 })
 
@@ -242,12 +248,8 @@ describe('/machines with devices that open the dashboard', () => {
     expect(screen.getAllByRole('link', { name: 'Open' })).toHaveLength(4)
     expect(screen.queryByRole('region', { name: 'iphone' })).toBeNull()
 
-    const devices = within(
-      screen.getByRole('region', { name: 'Devices that open the dashboard' }),
-    )
-    expect(devices.getByText('iphone')).toBeTruthy()
-    expect(devices.getByText('gaming-pc')).toBeTruthy()
-    expect(devices.getByText('coming soon')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Devices that open the dashboard' })).toBeNull()
+    expect(screen.queryByText('gaming-pc')).toBeNull()
   })
 
   it('reads a missing basic as Install, and a refused key as Copy join command', async () => {
@@ -394,7 +396,7 @@ describe('/machines with a hub', () => {
     await screen.findByText(/^looked /)
     const hub = screen.getByRole('region', { name: 'Hub' })
     expect(within(hub).getByRole('region', { name: 'cachyos-g14' })).toBeTruthy()
-    expect(within(hub).getByText('Agents on the hub share its CPU and memory with yantrad.')).toBeTruthy()
+    expect(within(hub).getByText('Agents on the hub share its CPU and memory with Yantra.')).toBeTruthy()
     const grid = document.querySelector('.machines__grid')!
     expect(within(grid as HTMLElement).queryByRole('region', { name: 'cachyos-g14' })).toBeNull()
     expect(within(grid as HTMLElement).getByRole('region', { name: 'pi-5' })).toBeTruthy()

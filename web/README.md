@@ -128,17 +128,18 @@ the one to read.
 
 [`facts.ts`](src/screens/machines/facts.ts)'s `machineState()` names three
 things and no more: **key expired** where Tailscale says the key is, otherwise
-**online** or **unreachable**. The beat is drawn beside it as an age — a machine
-card says `beat 12s ago` or `no beat has arrived`, and the machine page says
-`never` with *nothing has ever arrived from this machine*. `heartbeat: null` is
-never a row of zeros (I-47).
+**online** or **unreachable**. A machine card leads with one facts line —
+`linux · x86_64 · CPU 15% busy · 19.5 GB memory free · 209 GB disk free · 2 sessions` —
+and a machine with no heartbeat shows its OS and its session count alone. The
+machine page's About lists the same numbers as rows and leaves them out when no
+heartbeat exists. `heartbeat: null` is never a row of zeros (I-47).
 
 **ADR-0013 §7's four states are no longer named by any screen.** The pre-M14
 table computed *ready*, *up, but not reporting*, *asleep or off* and *never heard
 from* from a 30 s threshold; the M14 screens put the tailnet's own word and the
-beat's own age side by side and let the reader combine them. Most of this tailnet
-is a phone, a tablet and two dead laptops, so *no beat has arrived* is the
-permanent and correct line on most cards.
+usage numbers side by side and let the reader combine them. Most of this tailnet
+is a phone, a tablet and two dead laptops, so a card with only its OS is the
+permanent and correct line for most of them.
 
 ## The one verb a row computes
 
@@ -166,7 +167,10 @@ row word for word under the question.
 `GET /api/readiness` and `GET /api/machines/{name}/readiness` serve
 [D2](../docs/design/02-setup.md) §3.1's checks off the daemon's own sweep, so the
 page draws them rather than running anything. A machine card draws four of them
-(`CARD_CHECKS`) and the machine page draws all nine. Three states, three marks,
+(`CARD_CHECKS`) and the machine page draws all of them. Its count is built from the
+rows it draws, so the total is the row count. A `mic` that is absent gets an idle
+mark and the word *optional*; every other row the chip counts as *to fix* has the
+*needs* mark, and the title agrees. Three states, three marks,
 and `unknown` is never a shade of `absent` — one sends you to install something,
 the other to go and look (R-23).
 

@@ -28,7 +28,7 @@
           { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },
           { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
           { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
-          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 3s ago" }
+          { "check": "heartbeat", "state": "present", "detail": "last report 3s ago" }
         ]
       },
       {
@@ -73,7 +73,7 @@
           { "check": "provider-cli", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
           { "check": "provider-auth", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
           { "check": "login-session", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
-          { "check": "heartbeat", "state": "absent", "detail": "the last beat arrived 3 hours ago" }
+          { "check": "heartbeat", "state": "absent", "detail": "last report 3 hours ago" }
         ]
       }
     ]

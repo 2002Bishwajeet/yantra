@@ -82,6 +82,15 @@ test.describe('one machine on a busy fleet', () => {
     expect(cut).toBeLessThanOrEqual(1)
   })
 
+  /* Y-580: one value column on the desktop; on the phone each value drops under its label. */
+  test('starts every About value at one left edge', async ({ page, size }) => {
+    const about = card(page, 'About')
+    if (size === 'phone') await about.getByRole('button', { name: /^Show/ }).click()
+    const edges = await about.locator('dd').evaluateAll((all) => all.map((el) => Math.round(el.getBoundingClientRect().left)))
+    expect(edges.length).toBeGreaterThan(3)
+    expect(new Set(edges).size).toBe(1)
+  })
+
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {
     const h1 = page.locator('h1:visible')
     await expect(h1).toHaveCount(1)

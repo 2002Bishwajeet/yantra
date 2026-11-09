@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Check, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
 import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
-import { chipOf, noRows, sessionsFailure, sorted, startable, titleOf, verdictOf } from './verdict'
+import { chipOf, sessionsFailure, sorted, startable, titleOf, verdictOf } from './verdict'
 
 const machine = (over: Partial<Machine> = {}) =>
   ({ name: 'pi', dns_name: 'pi.ts.net.', os: 'linux', online: true, expired: false, last_seen: null, heartbeat: null, ...over }) as Machine
@@ -34,7 +34,7 @@ const stopped = (at: number, commands: string[]): Event => ({
 
 /** doctor.rs `no_login_server`, word for word. */
 const NO_SERVER =
-  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
+  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain, so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
 
 /** yantrad's words for `ssh::Error::Transport` and a tmux error (Y-585). */
 const SSH = 'ssh to pi failed before the command reported a status:'
@@ -311,27 +311,5 @@ describe('the machine page’s verdict', () => {
   it('sorts missing lines first', () => {
     const lines = sorted([check('a', 'present'), check('b', 'unknown'), check('c', 'absent')])
     expect(lines.map((one) => one.check)).toEqual(['c', 'b', 'a'])
-  })
-})
-
-describe('noRows', () => {
-  const tmuxMissing = { title: 'No session can start here', words: 'tmux is missing on pi. Readiness shows the fix.' }
-
-  it('names tmux while Readiness says it is missing, needs a password or is installing', () => {
-    const event = stopped(1, ['sudo apk add tmux'])
-    expect(noRows({ kind: 'missing', missing: ['tmux'], result: null, fresh: false }, 'pi')).toEqual(tmuxMissing)
-    expect(noRows({ kind: 'sudo', missing: ['tmux', 'claude'], result: event }, 'pi')).toEqual(tmuxMissing)
-    expect(noRows({ kind: 'installing', missing: ['tmux'] }, 'pi')).toEqual(tmuxMissing)
-  })
-
-  it('takes the listing at its word where the checks found tmux', () => {
-    const listing = { title: 'No session is open here', words: 'tmux lists nothing on pi' }
-    expect(noRows({ kind: 'ready' }, 'pi')).toEqual(listing)
-    expect(noRows({ kind: 'manual', absent: [check('provider-cli', 'absent')], ready: true }, 'pi')).toEqual(listing)
-    expect(noRows({ kind: 'missing', missing: ['git'], result: null, fresh: false }, 'pi')).toEqual(listing)
-  })
-
-  it.each(['pending', 'asleep', 'expired', 'unasked'] as const)('claims no listing on %s', (kind) => {
-    expect(noRows({ kind }, 'pi')).toEqual({ title: 'No session is listed', words: 'Readiness has not read tmux on pi' })
   })
 })

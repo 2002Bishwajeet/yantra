@@ -500,7 +500,7 @@ describe('a Mac with no login tmux server (Y-631)', () => {
   const UP_SAID =
     '`cachyos-g14` runs macOS and has no tmux server, and Yantra will not start one there: panes in a server started over ssh cannot read the login keychain, so the agent would come up unauthenticated. Start one from a login session on that machine — in Terminal: `tmux new-session -d`'
   const DOCTOR_SAID =
-    'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain (ADR-0018 §1, I-44). Start one in Terminal there: `tmux new-session -d`'
+    'no tmux server from a login session is running on this Mac, and Yantra will not start one, because panes in a server started over ssh cannot read the login keychain. Start one in Terminal there: `tmux new-session -d`'
   const MAC = 'bishwajeets-macbook-pro'
   const writeText = vi.fn<(text: string) => Promise<void>>()
   const stubClipboard = (clipboard: unknown) =>

@@ -99,7 +99,7 @@ test.describe('the hub on a busy fleet', () => {
     await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
     const hub = page.getByRole('region', { name: 'Hub' })
     await expect(hub.getByRole('region', { name: 'cachyos-g14' })).toBeVisible()
-    await expect(hub.getByText('Agents on the hub share its CPU and memory with yantrad.')).toBeVisible()
+    await expect(hub.getByText('Agents on the hub share its CPU and memory with Yantra.')).toBeVisible()
     const grid = page.locator('.machines__grid')
     await expect(grid.getByRole('region', { name: 'cachyos-g14' })).toHaveCount(0)
     const [above, below] = await Promise.all([hub.boundingBox(), grid.boundingBox()])
@@ -143,10 +143,8 @@ test.describe('the machines list with devices that open the dashboard', () => {
     await expect(page.getByRole('link', { name: 'Open' })).toHaveCount(4)
     await expect(page.getByRole('region', { name: 'iphone' })).toHaveCount(0)
 
-    const devices = page.getByRole('region', { name: 'Devices that open the dashboard' })
-    await expect(devices.getByText('iphone')).toBeVisible()
-    await expect(devices.getByText('gaming-pc')).toBeVisible()
-    await expect(devices.getByText('coming soon', { exact: true })).toBeVisible()
+    // Y-580: a phone has no action here, so the page draws no section for it.
+    await expect(page.getByRole('region', { name: 'Devices that open the dashboard' })).toHaveCount(0)
   })
 
   test('reads a missing basic as Install, and a refused key as Copy join command', async ({ page }) => {

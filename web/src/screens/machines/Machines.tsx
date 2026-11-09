@@ -5,7 +5,7 @@ import type { Machine } from '@/api'
 import { fromReading } from '@/api/client'
 import { Button } from '@/m3/button/Button'
 import { loaded, useMachines, useReadiness, useSessions, useWorkspaces } from '@/api/hooks'
-import { apart, notYours, runsSessions } from '@/lib/platform'
+import { notYours, runsSessions } from '@/lib/platform'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
@@ -74,16 +74,20 @@ export function Machines() {
   // Y-582: the hub is drawn apart, first, and never in the grid.
   const hub = runs.find((one) => one.hub) ?? null
   const others = runs.filter((one) => !one.hub)
-  const devices = list.filter((one) => one.ownership === 'yours' && !runsSessions(one))
   // Y-404: listed with the reason, never counted.
   const foreign = list.filter((one) => one.ownership !== 'yours')
   const checks = readiness.looked === 'ok' ? readiness.data : []
+  const countOf = (name: string) => {
+    const answer = sessions.looked === 'ok' ? sessions.data.find((one) => one.machine === name) : undefined
+    return answer?.reached === 'yes' ? answer.sessions.length : null
+  }
   const cardOf = (machine: Machine) => (
     <MachineCard
       checks={checksOf(checks, machine.name)}
       condensed={factor === 'phone'}
       machine={machine}
       pending={readiness.looked === 'pending'}
+      sessions={countOf(machine.name)}
     />
   )
   const held =
@@ -113,7 +117,7 @@ export function Machines() {
             </Eyebrow>
             {cardOf(hub)}
             <Text render={<p />} scale="body-small" tone="variant">
-              Agents on the hub share its CPU and memory with yantrad.
+              Agents on the hub share its CPU and memory with Yantra.
             </Text>
           </section>
         </ErrorBoundary>
@@ -146,26 +150,6 @@ export function Machines() {
         )}
       </ErrorBoundary>
 
-      {machines.looked === 'ok' && devices.length > 0 ? (
-        <ErrorBoundary eyebrow="Devices" title="The devices could not be drawn">
-          <Card aria-labelledby="machines-devices">
-            <Eyebrow id="machines-devices" render={<h2 />}>
-              Devices that open the dashboard
-            </Eyebrow>
-            <List>
-              {devices.map((device) => (
-                <ListItem
-                  headline={device.name}
-                  key={device.name}
-                  supporting={apart(device)}
-                  trailing={device.os === 'windows' ? <Chip>coming soon</Chip> : null}
-                />
-              ))}
-            </List>
-          </Card>
-        </ErrorBoundary>
-      ) : null}
-
       {machines.looked === 'ok' && foreign.length > 0 ? (
         <ErrorBoundary eyebrow="Another account" title="The other account's devices could not be drawn">
           <Card aria-labelledby="machines-foreign">
@@ -192,7 +176,6 @@ export function Machines() {
           pending={
             sessions.looked === 'pending' || workspaces.looked === 'pending' || readiness.looked === 'pending'
           }
-          answered={sessions.looked === 'ok' && sessions.data.some((one) => one.reached === 'yes')}
         />
       </ErrorBoundary>
     </Page>

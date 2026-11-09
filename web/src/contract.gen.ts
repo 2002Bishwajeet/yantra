@@ -337,7 +337,7 @@ export const readiness = {
         },
         {
           "check": "heartbeat",
-          "detail": "a beat arrived 0s ago",
+          "detail": "last report 0s ago",
           "state": "present"
         }
       ],
@@ -359,7 +359,7 @@ export const readiness = {
         },
         {
           "check": "heartbeat",
-          "detail": "a beat arrived 0s ago",
+          "detail": "last report 0s ago",
           "state": "present"
         }
       ],
@@ -387,7 +387,7 @@ export const oneReadiness = {
       },
       {
         "check": "heartbeat",
-        "detail": "a beat arrived 0s ago",
+        "detail": "last report 0s ago",
         "state": "present"
       }
     ],

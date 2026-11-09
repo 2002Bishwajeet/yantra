@@ -16,7 +16,7 @@ export type Fix =
   | { by: 'hand'; words: string }
 
 /** `session`: a session cannot start on the machine without it, which is what
- *  `lib/ready` asks. GitHub and `yantra-agent` are optional (Y-390 review). */
+ *  `lib/ready` asks. GitHub and the usage reports are optional (Y-390 review). */
 const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; session: boolean }> = {
   reachable: { name: 'ssh', fix: () => ({ by: 'join' }), session: true },
   sshd: { name: 'sshd', fix: () => ({ by: 'join' }), session: true },
@@ -29,7 +29,7 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
     session: true,
   },
   'provider-cli': {
-    name: 'gh',
+    name: 'gh installed',
     fix: () => ({ by: 'hand', words: 'Install gh with that machine’s package manager.' }),
     session: false,
   },
@@ -67,8 +67,8 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
     session: false,
   },
   heartbeat: {
-    name: 'heartbeat',
-    fix: () => ({ by: 'hand', words: 'The join command offers yantra-agent, which sends it.' }),
+    name: 'usage reports',
+    fix: () => ({ by: 'hand', words: 'The join command offers Yantra’s agent, which reports CPU, memory and disk.' }),
     session: false,
   },
 }

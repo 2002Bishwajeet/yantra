@@ -178,7 +178,7 @@
           { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },
           { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
           { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
-          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 4s ago" }
+          { "check": "heartbeat", "state": "present", "detail": "last report 4s ago" }
         ]
       },
       {
@@ -192,7 +192,7 @@
           { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /opt/homebrew/bin/gh" },
           { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
           { "check": "login-session", "state": "present", "detail": "a launchd user session is running" },
-          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 12s ago" }
+          { "check": "heartbeat", "state": "present", "detail": "last report 12s ago" }
         ]
       },
       {
@@ -206,7 +206,7 @@
           { "check": "provider-cli", "state": "absent", "detail": "neither `gh` nor `glab` is on PATH there" },
           { "check": "provider-auth", "state": "unknown", "detail": "no provider CLI to ask" },
           { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
-          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 9s ago" }
+          { "check": "heartbeat", "state": "present", "detail": "last report 9s ago" }
         ]
       },
       {
@@ -220,7 +220,7 @@
           { "check": "provider-cli", "state": "present", "detail": "gh 2.96.0 at /usr/bin/gh" },
           { "check": "provider-auth", "state": "present", "detail": "`gh` reports a stored credential there — that it works is not asked" },
           { "check": "login-session", "state": "present", "detail": "a systemd user session is running" },
-          { "check": "heartbeat", "state": "present", "detail": "a beat arrived 2s ago" }
+          { "check": "heartbeat", "state": "present", "detail": "last report 2s ago" }
         ]
       },
       {
@@ -248,7 +248,7 @@
           { "check": "provider-cli", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
           { "check": "provider-auth", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
           { "check": "login-session", "state": "unknown", "detail": "the machine could not be reached, so nothing was asked" },
-          { "check": "heartbeat", "state": "absent", "detail": "the last beat arrived 61 days ago" }
+          { "check": "heartbeat", "state": "absent", "detail": "last report 61 days ago" }
         ]
       }
     ]

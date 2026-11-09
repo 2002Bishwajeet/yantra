@@ -37,7 +37,9 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     const about = card('About')
     expect(about.getByText('linux')).toBeTruthy()
     expect(about.getByText('online')).toBeTruthy()
-    expect(about.getByText(/beat 4s ago/)).toBeTruthy()
+    expect(about.getByText('CPU')).toBeTruthy()
+    expect(about.getByText(/% busy$/)).toBeTruthy()
+    expect(about.queryByText(/beat/)).toBeNull()
 
     const here = card('Workspaces on this machine')
     expect(here.getByRole('link', { name: 'yantra-web' })).toBeTruthy()
@@ -167,36 +169,95 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
   })
 })
 
-describe('the Sessions card with no row', () => {
-  /** Y-585: `sessions.rs` answers an empty list here, and tmux did not run. */
-  it('agrees with Readiness on a machine with no tmux', async () => {
+describe('About on the machine page', () => {
+  it('lists each fact in one value column, with no Heartbeat row and no trailing dot', async () => {
+    mount('desktop', '/m/cachyos-g14')
+    await screen.findByText(/^looked /)
+    const about = screen.getByRole('region', { name: 'About' }).querySelector('dl')!
+    expect(about.tagName).toBe('DL')
+    const labels = [...about.querySelectorAll('dt')].map((one) => one.textContent)
+    expect(labels).toEqual(expect.arrayContaining(['OS', 'Address', 'Tailnet name', 'Status', 'CPU', 'Memory', 'Disk', 'Power']))
+    expect(labels).not.toContain('Heartbeat')
+    // Every dt has exactly one dd, so each value sits in the one value column.
+    expect(about.querySelectorAll('dd')).toHaveLength(labels.length)
+    expect(about.children).toHaveLength(labels.length * 2)
+
+    const name = [...about.querySelectorAll('dt')].find((one) => one.textContent === 'Tailnet name')!
+      .nextElementSibling as HTMLElement
+    expect(name.textContent).not.toMatch(/\.$/)
+    expect(name.querySelectorAll('wbr').length).toBeGreaterThan(0)
+    expect(name.textContent).toMatch(/^cachyos-g14\..+\.ts\.net$/)
+  })
+
+  it('draws no usage rows and no zeros for a machine that never reported (I-47)', async () => {
+    const state = scenario('busy')
+    ;(state.machines!.data as { name: string; heartbeat: unknown }[]).find((one) => one.name === 'cachyos-g14')!.heartbeat = null
+    mount('desktop', '/m/cachyos-g14', state)
+    await screen.findByText(/^looked /)
+    const about = within(screen.getByRole('region', { name: 'About' }))
+    expect(about.queryByText('CPU')).toBeNull()
+    expect(about.queryByText('Memory')).toBeNull()
+    expect(about.queryByText(/never|beat/)).toBeNull()
+  })
+})
+
+describe('the machine page in plain words', () => {
+  it('names no ADR, invariant, beat or yantra-agent anywhere, with every check open', async () => {
+    mount('desktop', '/m/cachyos-g14')
+    await screen.findByText(/^looked /)
+    fireEvent.click(card('Readiness').getByRole('button', { name: /^Show/ }))
+    expect((document.body.textContent ?? '').match(/.{30}(ADR-\d|I-\d\d|beat|yantra-agent).{20}/)?.[0]).toBeUndefined()
+  })
+})
+
+describe('the cards with nothing to say', () => {
+  const none = (extra: Record<string, unknown>) => {
+    const busy = scenario('busy')
+    return { ...busy, ...extra } as unknown as typeof busy
+  }
+  const empty = (machine: string) => ({
+    looked: 'ok',
+    age_seconds: 0,
+    data: [{ machine, reached: 'yes', sessions: [] }],
+  })
+
+  /** Y-580: no tmux listed and nothing failed, so no Sessions card. */
+  it('leaves out Sessions when it is empty with no failure', async () => {
+    mount('desktop', '/m/pi-5', none({ sessions: empty('pi-5') }))
+    await screen.findByRole('heading', { level: 1, name: 'pi-5' })
+    await screen.findByText(/^looked /)
+    expect(screen.queryByRole('region', { name: 'Sessions' })).toBeNull()
+    expect(screen.queryByText(/tmux lists nothing/)).toBeNull()
+  })
+
+  it('keeps Sessions when the machine did not answer', async () => {
+    const error = 'ssh to pi-5 failed before the command reported a status: No route to host'
+    mount('desktop', '/m/pi-5', none({ sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'pi-5', reached: 'no', error }] } }))
+    await screen.findByRole('region', { name: 'Sessions' })
+    expect(await card('Sessions').findByText(/ssh to pi-5 fails/)).toBeTruthy()
+  })
+
+  it('keeps Sessions while it is pending', async () => {
+    mount('desktop', '/m/cachyos-g14', none({ sessions: { looked: 'pending' } }))
+    expect(await screen.findByRole('region', { name: 'Sessions' })).toBeTruthy()
+  })
+
+  /** Y-580: no workspace and no way to start one, so no Workspaces card. */
+  it('leaves out Workspaces when it is empty and no session can start', async () => {
     mount('desktop', '/m/nas')
     const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
     expect(await ready.findByRole('heading', { name: /tmux.* missing/ })).toBeTruthy()
-    const sessions = card('Sessions')
-    expect(await sessions.findByText('No session can start here')).toBeTruthy()
-    expect(sessions.getByText('tmux is missing on nas. Readiness shows the fix.')).toBeTruthy()
-    expect(sessions.queryByText(/tmux lists nothing/)).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Workspaces on this machine' })).toBeNull()
   })
 
-  it('claims a tmux listing where Readiness found tmux', async () => {
-    mount('desktop', '/m/pi-5')
-    expect(await screen.findByText('tmux lists nothing on pi-5')).toBeTruthy()
-    expect(card('Sessions').getByText('No session is open here')).toBeTruthy()
-  })
-
-  /** A fresh machine no workspace names: the sweep skipped it, so nothing has
-   *  read tmux, and it may not be there. */
-  it('claims nothing about tmux where no check has read it', async () => {
-    const busy = scenario('busy')
-    const state = {
-      ...busy,
-      readiness: { looked: 'never' },
-      sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'cachyos-g14', reached: 'yes', sessions: [] }] },
-    }
-    mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
-    expect(await screen.findByText('Readiness has not read tmux on cachyos-g14')).toBeTruthy()
-    expect(card('Sessions').queryByText(/tmux lists nothing/)).toBeNull()
+  it('keeps Workspaces, with New session, when it is empty and a session can start', async () => {
+    const state = scenario('busy')
+    state.workspaces!.data = []
+    mount('desktop', '/m/cachyos-g14', state)
+    await screen.findByRole('region', { name: 'Workspaces on this machine' })
+    const here = card('Workspaces on this machine')
+    expect(await here.findByRole('link', { name: 'New session' })).toBeTruthy()
+    expect(here.getByText('No workspace lives here')).toBeTruthy()
   })
 })
 

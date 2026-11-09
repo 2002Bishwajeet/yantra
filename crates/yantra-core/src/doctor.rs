@@ -89,7 +89,7 @@ fn no_login_server(check: &'static str) -> Check {
         check,
         format!(
             "{NO_LOGIN_SERVER}. Panes in a server started over ssh cannot read the login \
-             keychain (ADR-0018 §1, I-44), so Yantra starts one in the login session when a \
+             keychain, so Yantra starts one in the login session when a \
              session starts. Start one in Terminal there: `tmux new-session -d`"
         ),
     )

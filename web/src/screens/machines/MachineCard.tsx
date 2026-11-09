@@ -12,43 +12,13 @@ import { Chip } from '@/m3/chip/Chip'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Mark, State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
-import { Ago } from '@/screens/fleet/age'
-import { isAge } from '@/screens/fleet/clock'
+import { Text } from '@/m3/text/Text'
 import { answer, newestInstall, type Watch } from '@/screens/machine/install'
 import { chipOf, verdictOf } from '@/screens/machine/verdict'
 import { SshSaid } from '@/screens/machine/ReachFailure'
 import { asEvents } from '@/shell/notifications'
 import { Doctor } from './Doctor'
-import { CARD_CHECKS, checkNamed, markOf, summary, tally, wordOf } from './facts'
-
-/** `os` is a family rather than a distribution (api.ts), and the beat carries
- *  the architecture — so the line says what the daemon knows and no more. */
-function About(props: { machine: Machine }) {
-  const { machine } = props
-  const beat = machine.heartbeat
-  return (
-    <Text render={<p />} className="machines__about" scale="body-small" tone="variant">
-      {machine.os}
-      {beat ? ` · ${beat.arch}` : ''}
-      {machine.address ? (
-        <>
-          {' · '}
-          <Mono>{machine.address}</Mono>
-        </>
-      ) : null}
-      {beat ? (
-        <>
-          {' · beat '}
-          <Ago seconds={beat.age_seconds} />
-          {isAge(beat.age_seconds) ? ' ago' : null}
-        </>
-      ) : (
-        ' · no beat has arrived'
-      )}
-    </Text>
-  )
-}
+import { CARD_CHECKS, checkNamed, factsOf, markOf, rowWord, summary, tally } from './facts'
 
 /** `pressable` is false on a machine that is off: D7 §3.3 gives that card
  *  nothing to press, and its machine page holds the raw text. */
@@ -61,7 +31,7 @@ function CheckLine(props: { check: Check; machine: string; pressable: boolean })
         {nameOf(check.check)}
       </State>
       <Text className="machines__word" scale="label-small">
-        {wordOf(check.state)}
+        {rowWord(check)}
       </Text>
       <Text className="machines__detail m3-wrap" scale="body-small" tone="variant">
         {failed ? reachWords(reachableFailure(check.detail), machine).cause : check.detail}
@@ -154,10 +124,12 @@ export type MachineCardProps = {
    *  named and the rest are one line. */
   condensed: boolean
   pending: boolean
+  /** Tmux sessions the machine reported; null when it did not answer. */
+  sessions: number | null
 }
 
 export function MachineCard(props: MachineCardProps) {
-  const { machine, checks, condensed, pending } = props
+  const { machine, checks, condensed, pending, sessions } = props
   const four = CARD_CHECKS.flatMap((name) => {
     const check = checkNamed(checks, name)
     return check ? [check] : []
@@ -186,7 +158,9 @@ export function MachineCard(props: MachineCardProps) {
         </Chip>
       </div>
 
-      <About machine={machine} />
+      <Text render={<p />} className="machines__about" scale="body-small" tone="variant">
+        {factsOf(machine, sessions)}
+      </Text>
 
       {pending ? (
         <div aria-busy="true" className="machines__pending">

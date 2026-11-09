@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
 import type { AgentRow, Beat, Machine as OneMachine, Workspace } from '@/api'
@@ -18,7 +19,6 @@ import { Chip } from '@/m3/chip/Chip'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
-import { List, ListItem, ListValue } from '@/m3/list/List'
 import { Mark, State } from '@/m3/mark/Mark'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
@@ -29,7 +29,7 @@ import { Looked } from '@/screens/fleet/age'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { Verb } from '@/screens/fleet/Verb'
 import { stateOf } from '@/screens/fleet/verbs'
-import { machineState } from '@/screens/machines/facts'
+import { gb, machineState } from '@/screens/machines/facts'
 import { useFormFactor } from '@/shell/formFactor'
 import { useTick } from '@/useTick'
 import { unreachable } from '@/work'
@@ -44,34 +44,72 @@ import './Machine.css'
 const power = (beat: Beat) =>
   beat.power === 'ac' ? 'on AC' : `battery ${beat.power.battery.percent}%`
 
-function About(props: { machine: OneMachine }) {
-  const { machine } = props
+/** One value column at every width; on the phone the value drops under its label. */
+function Fact(props: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <Text render={<dt />} scale="body-medium" tone="variant">
+        {props.label}
+      </Text>
+      <Text render={<dd />} className="machine__value" scale="body-medium">
+        {props.children}
+      </Text>
+    </>
+  )
+}
+
+/** The tailnet name without its root dot, breakable between labels only. */
+function Tailnet(props: { name: string }) {
+  const labels = props.name.replace(/\.$/, '').split('.')
+  return (
+    <Mono>
+      {labels.map((label, index) => (
+        <Fragment key={index}>
+          {index > 0 ? (
+            <>
+              .
+              <wbr />
+            </>
+          ) : null}
+          {label}
+        </Fragment>
+      ))}
+    </Mono>
+  )
+}
+
+function About(props: { machine: OneMachine; lastSeen: string | null }) {
+  const { machine, lastSeen } = props
   const { word } = machineState(machine)
   const beat = machine.heartbeat
   return (
-    <List className="machine__about">
-      <ListItem headline="OS" trailing={<ListValue>{machine.os}</ListValue>} />
-      <ListItem
-        headline="Address"
-        trailing={<ListValue>{machine.address ? <Mono>{machine.address}</Mono> : 'none reported'}</ListValue>}
-      />
-      <ListItem headline="Tailnet name" trailing={<ListValue><Mono>{machine.dns_name}</Mono></ListValue>} />
-      <ListItem headline="Status" trailing={<ListValue>{word}</ListValue>} />
-      <ListItem
-        headline="Heartbeat"
-        supporting={
-          beat
-            ? `${beat.arch} · ${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy · ${power(beat)}`
-            : 'nothing has ever arrived from this machine'
-        }
-        trailing={<ListValue>{beat ? `beat ${beat.age_seconds}s ago` : 'never'}</ListValue>}
-      />
-    </List>
+    <dl className="machine__about">
+      <Fact label="OS">{machine.os}</Fact>
+      <Fact label="Address">{machine.address ? <Mono>{machine.address}</Mono> : 'none reported'}</Fact>
+      <Fact label="Tailnet name">
+        <Tailnet name={machine.dns_name} />
+      </Fact>
+      <Fact label="Status">{word}</Fact>
+      {lastSeen && !machine.online ? (
+        <Fact label="Last seen">{/^\d+[smhd]$/.test(lastSeen) ? `${lastSeen} ago` : lastSeen}</Fact>
+      ) : null}
+      {beat ? (
+        <>
+          <Fact label="Architecture">{beat.arch}</Fact>
+          <Fact label="CPU">{beat.cpu_busy_pct}% busy</Fact>
+          <Fact label="Memory">{gb(beat.free_ram_mb)} GB free</Fact>
+          <Fact label="Disk">{gb(beat.free_disk_mb)} GB free</Fact>
+          <Fact label="Power">{power(beat)}</Fact>
+        </>
+      ) : null}
+    </dl>
   )
 }
 
 function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string; ready: boolean }) {
   const { rows, pending, machine, ready } = props
+  // D7 B3: a card with nothing in it and no way to start one says nothing.
+  if (!pending && rows.length === 0 && !ready) return null
   return (
     <Card aria-labelledby="machine-workspaces" className="machine__card">
       <div className="machine__head">
@@ -87,14 +125,7 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
         </div>
       ) : rows.length === 0 ? (
         <EmptyState title="No workspace lives here">
-          {/* D7 B3: offered only where a session can start. */}
-          {ready ? (
-            <>
-              <Link to="/new">New session</Link> puts one on {machine}
-            </>
-          ) : (
-            `A session can start on ${machine} once Readiness says it is ready`
-          )}
+          <Link to="/new">New session</Link> puts one on {machine}
         </EmptyState>
       ) : (
         <ul className="machine__rows">
@@ -240,10 +271,10 @@ export function Machine() {
             {one ? (
               factor === 'phone' ? (
                 <Disclosure summary={`${one.os} · ${machineState(one).word}`}>
-                  <About machine={one} />
+                  <About lastSeen={lastSeen} machine={one} />
                 </Disclosure>
               ) : (
-                <About machine={one} />
+                <About lastSeen={lastSeen} machine={one} />
               )
             ) : (
               <div aria-busy="true" className="machine__pending">

@@ -12,13 +12,13 @@ import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
-import { type MarkState, State } from '@/m3/mark/Mark'
+import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Snackbar } from '@/m3/snackbar/Snackbar'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Doctor } from '@/screens/machines/Doctor'
-import { counted, tally, wordOf } from '@/screens/machines/facts'
+import { counted, rowMark, rowWord, tally } from '@/screens/machines/facts'
 import { joinUrl } from '@/lib/join'
 import { useTick } from '@/useTick'
 import { answer, LOST_MS, needsSudo, newestInstall } from './install'
@@ -28,19 +28,16 @@ import type { Verdicted } from './useVerdict'
 import { sorted, startable, titleOf, type Verdict } from './verdict'
 import './Readiness.css'
 
-/** D7 §3.3: a missing check is something to do, not a failure. */
-const marks: Record<Check['state'], MarkState> = { present: 'done', absent: 'needs', unknown: 'unknown' }
-
 function CheckLine(props: { check: Check; machine: string }) {
   const { check, machine } = props
   const fix = check.state === 'absent' ? fixOf(check, machine) : null
   return (
     <li className="machine__check">
-      <State size="small" state={marks[check.state]}>
+      <State size="small" state={rowMark(check)}>
         {nameOf(check.check)}
       </State>
       <Text className="machine__word" scale="label-small">
-        {wordOf(check.state)}
+        {rowWord(check)}
       </Text>
       <Text className="machine__detail" scale="body-small" tone="variant">
         {withoutSignIn(check.detail)}
