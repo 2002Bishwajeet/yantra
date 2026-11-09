@@ -51,8 +51,8 @@ const UNREACHABLE: Record<RouteId, 'page' | 'missing' | 'none'> = {
   'add-device': 'page',
   // The unreachable dashboard, which is what `/` draws when nothing answers.
   setup: 'page',
-  // /setup is reachable in the app but reads nothing the tailnet answers in a way that draws an alert.
-  'setup-route': 'none',
+  // Unreachable machines draw an alert (Machines could not be read) that has no Try again.
+  'setup-route': 'missing',
 }
 
 /** `broken` overlays `/api/machines` with a body missing its `data`: every

@@ -48,19 +48,29 @@ test.describe('the dashboard on a busy fleet', () => {
 
   test('keeps the New session button off the "waiting on you" headline', async ({ page, size }) => {
     test.skip(size !== 'phone', 'the FAB floats over the page only on a phone')
-    const fab = page.locator('.shell__fab')
+    // nogrant leaves GitHub unset, so Finish setup sits above the hero and pushes the headline down.
+    await scenario(page, 'nogrant')
+    await page.goto('/')
+    await firstReading(page)
+    await expect(region(page, 'Finish setup')).toBeVisible()
     const words = page.locator('.dash__hero-words')
-    await expect(fab).toBeVisible()
-    const apart = async () => {
-      const [a, b] = [await fab.boundingBox(), await words.boundingBox()]
-      expect(a && b).toBeTruthy()
-      const touching =
-        a!.x < b!.x + b!.width && b!.x < a!.x + a!.width && a!.y < b!.y + b!.height && b!.y < a!.y + a!.height
-      expect(touching).toBe(false)
-    }
-    await apart()
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-    await apart()
+    await expect(words).toBeVisible()
+    // Scroll until the headline's line is level with the FAB, then measure the text and not the box.
+    await words.evaluate((el) => {
+      const text = el.getBoundingClientRect()
+      const fab = document.querySelector('.shell__fab')!.getBoundingClientRect()
+      window.scrollBy(0, text.top + text.height / 2 - (fab.top + fab.height / 2))
+    })
+    const gap = await page.evaluate(() => {
+      const fab = document.querySelector('.shell__fab')!.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(document.querySelector('.dash__hero-words')!)
+      return [...range.getClientRects()].map(
+        (line) => line.top < fab.bottom && fab.top < line.bottom && line.left < fab.right && fab.left < line.right,
+      )
+    })
+    expect(gap.length).toBeGreaterThan(0)
+    expect(gap.some(Boolean)).toBe(false)
   })
 
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {
