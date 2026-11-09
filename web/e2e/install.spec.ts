@@ -24,8 +24,8 @@ test.describe('install from the machine page', () => {
     await ready(page).getByRole('button', { name: 'Install' }).click()
     await expect(ready(page).getByRole('heading', { name: 'Installing claude' })).toBeVisible()
     await asked
-    // pi-5 still has no gh, so the next thing is gh, and a session may start.
-    await expect(ready(page).getByRole('heading', { name: 'gh is missing' })).toBeVisible({ timeout: 15_000 })
+    // pi-5 still has no gh installed, so the next thing is gh, and a session may start.
+    await expect(ready(page).getByRole('heading', { name: 'gh installed is missing' })).toBeVisible({ timeout: 15_000 })
     await expect(ready(page).getByText(/^8 of 10 · asked/)).toBeVisible()
     await expect(ready(page).getByText('installed by Yantra')).toBeVisible()
     await expect(ready(page).getByRole('link', { name: 'New session' })).toBeVisible()
