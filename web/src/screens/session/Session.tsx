@@ -260,7 +260,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
               <Terminal
                 height={factor === 'phone' ? '50vh' : '60vh'}
                 key={name}
-                label={`tmux ${name} on ${workspace.machine}`}
+                label={`${name} on ${workspace.machine}`}
                 target={{ workspace: name, machine: workspace.machine }}
               >
                 {factor === 'phone' ? <KeyRow /> : null}

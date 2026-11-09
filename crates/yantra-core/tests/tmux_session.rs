@@ -116,6 +116,37 @@ async fn remain_on_exit_is_actually_set_on_the_window() -> Result<()> {
     Ok(())
 }
 
+/// Y-644: the page draws its own header, so tmux's bar is noise there. `status`
+/// is a session option, so a session made outside `ensure` keeps its bar.
+#[tokio::test]
+async fn ensure_turns_the_status_bar_off_for_its_own_session_only() -> Result<()> {
+    let Some(lab) = Lab::start("status").await? else {
+        return Ok(());
+    };
+
+    let opened = lab.tmux.ensure(&lab.ssh, "barless", "/tmp", None).await?;
+    let session = &opened.session().session_id;
+    let out = lab
+        .ssh
+        .exec(&format!("tmux show-options -t '{session}' status"))
+        .await?;
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "status off");
+
+    let other = lab
+        .ssh
+        .exec("tmux new-session -d -s plain && tmux display-message -p -t '=plain:' '#{status}'")
+        .await?;
+    assert_eq!(
+        String::from_utf8_lossy(&other.stdout).trim(),
+        "on",
+        "a session Yantra did not make keeps tmux's bar"
+    );
+
+    lab.tmux.kill(&lab.ssh, "plain").await?;
+    lab.tmux.kill(&lab.ssh, "barless").await?;
+    Ok(())
+}
+
 /// Confirms the worry about ordering is unfounded: a startup command that exits
 /// immediately still leaves an inspectable dead pane, so `remain-on-exit` wins
 /// the race against a fast exit.

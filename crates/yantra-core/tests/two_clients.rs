@@ -25,9 +25,10 @@ use yantra_core::ssh::{Exec, Machine, Ssh};
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tmux::Tmux;
 
-/// Short enough to survive tmux's status-left truncation, which is what a test
-/// waits to see before calling a client attached.
 const SESSION: &str = "twocli";
+/// The pane's shell prompt in its `/tmp` start directory, which a test waits to
+/// see before it calls a client attached.
+const PROMPT: &str = "/tmp$";
 const PATIENCE: Duration = Duration::from_secs(15);
 
 const DESKTOP: pty::Size = pty::Size {
@@ -40,10 +41,10 @@ const WIDER: pty::Size = pty::Size {
     cols: 170,
 };
 
-/// The status line takes the bottom row, so a window is one row shorter than the
-/// client showing it.
+/// `ensure` turns the status bar off (Y-644), so a window is as tall as the
+/// client that shows it.
 fn window_of(size: pty::Size) -> String {
-    format!("{}x{}", size.cols, size.rows - 1)
+    format!("{}x{}", size.cols, size.rows)
 }
 
 struct Lab {
@@ -92,8 +93,8 @@ impl Lab {
         }
     }
 
-    /// A client of `size`, waited on until the far side has drawn its status
-    /// line — "attached" is a thing tmux has done, not a call that returned.
+    /// A client of `size`, waited on until the far side has drawn the pane —
+    /// "attached" is a thing tmux has done, not a call that returned.
     async fn client_of(&self, size: pty::Size) -> Result<Terminal> {
         let mut terminal = pty::on(&self.ssh, &self.plan(), size)?;
         let deadline = Instant::now() + PATIENCE;
@@ -104,7 +105,7 @@ impl Lab {
                 Ok(None) => bail!("the terminal ended before it drew anything: {seen:?}"),
                 Err(_) => break,
             }
-            if seen.contains(SESSION) {
+            if seen.contains(PROMPT) {
                 return Ok(terminal);
             }
         }
@@ -309,9 +310,7 @@ async fn window_size_manual_stops_following_the_only_client_either() -> Result<(
     .await?;
     lab.ask(&format!(
         "resize-window -t '{}' -x {} -y {}",
-        lab.pane,
-        DESKTOP.cols,
-        DESKTOP.rows - 1
+        lab.pane, DESKTOP.cols, DESKTOP.rows
     ))
     .await?;
 
