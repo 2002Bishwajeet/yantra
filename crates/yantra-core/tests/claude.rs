@@ -88,6 +88,8 @@ async fn run_in(
             text,
             mode,
             interaction,
+            model: None,
+            effort: None,
         },
     )?;
     let mut seen = Vec::new();
@@ -274,6 +276,8 @@ async fn a_real_claude_streams_resumes_asks_and_stops_in_the_threads_worktree() 
             text: "Count from 1 to 400, one number per line, with no tools.",
             mode: PermissionMode::Supervised,
             interaction: Interaction::Build,
+            model: None,
+            effort: None,
         },
     )?;
     next_delta(&mut events).await?;
@@ -419,6 +423,8 @@ async fn a_real_claude_background_task_outlives_its_turn() -> Result<()> {
             text: BACKGROUND_WAKE,
             mode: PermissionMode::FullAccess,
             interaction: Interaction::Build,
+            model: None,
+            effort: None,
         },
     )?;
     let mut seen = Vec::new();

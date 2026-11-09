@@ -420,6 +420,8 @@ async fn every_script() -> Vec<(String, String)> {
             &Keeper::new("web", "11111111"),
             chat::PermissionMode::Auto,
             chat::Interaction::Plan,
+            None,
+            None,
             Some(&claude::Mcp {
                 url: "http://yantra:7717/api/mcp".to_owned(),
                 thread: "web/11111111".to_owned(),
@@ -434,6 +436,8 @@ async fn every_script() -> Vec<(String, String)> {
             &Keeper::new("web", "11111111"),
             chat::PermissionMode::Supervised,
             chat::Interaction::Build,
+            None,
+            None,
             None,
             Some("9a11f727-ba24-4f1a-9c4b-76ce3721282e"),
         ),

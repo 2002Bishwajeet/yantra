@@ -797,6 +797,8 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
         Interaction::Build,
         None,
         None,
+        None,
+        None,
     );
     let run = keep::run_id()?;
     let Started::Running { pane } =
@@ -822,6 +824,8 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
             text: "Reply with just the word pong.",
             mode: PermissionMode::Supervised,
             interaction: Interaction::Build,
+            model: None,
+            effort: None,
         },
         said,
     );

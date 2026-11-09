@@ -1272,6 +1272,13 @@ export const chatFrames = [
     "type": "turn"
   },
   {
+    "effort": "high",
+    "mode": "supervised",
+    "model": "opus",
+    "text": "think it through",
+    "type": "turn"
+  },
+  {
     "decision": "acceptAlways",
     "requestId": "r1",
     "type": "answer"

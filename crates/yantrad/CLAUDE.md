@@ -731,7 +731,7 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   `{"type":"queue","threadId","texts"}`, the list as it is now. A tab that attaches gets it too,
   an empty list included, so a tab that was away while the queue drained clears it. A turn holds
   the thread from its start until its checkpoint is kept. When the turn ends, the queue goes as
-  one prompt, the texts joined with a blank line, in the last one's mode, before any room prompt.
+  one prompt, the texts joined with a blank line, in the last one's mode, model and effort, before any room prompt.
   It goes to the same agent, Claude's or ACP's, or to the next keeper when this one closes. A
   turn that Claude opens with no prompt, a wake, holds the thread too, so a prompt sent during it
   waits for its `result` (ADR-0041 decision 7). `cancel` empties the queue. A socket follows its thread's next keeper, so a tab sees a queued or a room-woken
@@ -810,6 +810,11 @@ The rules from before the keeper still hold:
   `notAnImage` and `unreachable`. Every Claude keeper makes the directory and gets `--add-dir` on
   it at its start, since its process outlives the turn. A new keeper keeps `images/`, and `thread::remove` deletes it with the thread. The log
   says `image attached` and never a byte or a size.
+- **A `turn` may carry `model` and `effort`** (Y-564). A keeper's first Claude turn passes them
+  as `--model` and `--effort`. A later turn that changes one sends `set_model` or
+  `apply_flag_settings` to the live process first (ADR-0041 decision 5). A room's turn keeps the
+  model and effort the live process runs with. An ACP turn ignores them. A model outside `[A-Za-z0-9._[]-]`, over 64
+  characters or starting with `-`, and an effort outside `low` to `max`, are `badFrame`.
 - **A thread keeps its harness.** An unknown name, or a name that differs from the thread's, is
   `badFrame`. An ACP event is relayed under the worktree's thread id, and ACP's own
   `thread.started` is dropped. A browser's decision is answered with the option the agent offered.

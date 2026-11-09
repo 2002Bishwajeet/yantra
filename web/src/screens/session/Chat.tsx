@@ -6,6 +6,8 @@ import { asApiError } from '@/api/errors'
 import { useCommands, useMentions } from '@/api/queries'
 import {
   LABEL,
+  type ClaudeModel,
+  type Effort,
   type Harness,
   type Interaction,
   type ItemType,
@@ -43,8 +45,19 @@ import { useEditors } from './diff/useEditors'
 import { ChatMarkdown } from './markdown/ChatMarkdown'
 import { ChatHeader } from './ChatHeader'
 import { HarnessPicker } from './HarnessPicker'
-import { keepInteraction, keepMode, recallInteraction, recallMode } from './mode'
+import { EffortPicker } from './EffortPicker'
+import {
+  keepEffort,
+  keepInteraction,
+  keepMode,
+  keepModel,
+  recallEffort,
+  recallInteraction,
+  recallMode,
+  recallModel,
+} from './mode'
 import { ModePicker } from './ModePicker'
+import { ModelPicker } from './ModelPicker'
 import { PlanToggle } from './PlanToggle'
 import type { Message, Timeline, Tool } from './timeline'
 import { TurnDiff } from './TurnDiff'
@@ -268,10 +281,15 @@ export function Chat(props: ChatProps) {
   )
   const [picked, setPicked] = useState<Harness>('claude')
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
-  // A new thread is named on its first turn, and keeps the mode it was sent with.
+  const [model, setModel] = useState<ClaudeModel | null>(() => recallModel(thread))
+  const [effort, setEffort] = useState<Effort | null>(() => recallEffort(thread))
+  // A new thread is named on its first turn, and keeps the mode, model and effort it was sent with.
   useEffect(() => {
-    if (timeline.thread) keepMode(timeline.thread, mode)
-  }, [timeline.thread, mode])
+    if (!timeline.thread) return
+    keepMode(timeline.thread, mode)
+    keepModel(timeline.thread, model)
+    keepEffort(timeline.thread, effort)
+  }, [timeline.thread, mode, model, effort])
   const [interaction, setInteraction] = useState<Interaction>(() => recallInteraction(thread))
   useEffect(() => {
     if (timeline.thread) keepInteraction(timeline.thread, interaction)
@@ -364,7 +382,8 @@ export function Chat(props: ChatProps) {
   const sendWords = (words: string) => {
     const out = compose(words)
     if (out === '' || uploading) return
-    if (chat.send(out, locked ? undefined : picked, mode, planning)) {
+    const claude = harness === 'claude'
+    if (chat.send(out, locked ? undefined : picked, mode, planning, claude ? model : null, claude ? effort : null)) {
       lastSent.current = words.trim()
       recalled.current = null
       setDraft('')
@@ -696,6 +715,12 @@ export function Chat(props: ChatProps) {
                   onChange={setInteraction}
                   value={planning}
                 />
+                {harness === 'claude' ? (
+                  <>
+                    <ModelPicker disabled={link !== 'open'} onChange={setModel} value={model} />
+                    <EffortPicker disabled={link !== 'open'} onChange={setEffort} value={effort} />
+                  </>
+                ) : null}
               </>
             }
           />

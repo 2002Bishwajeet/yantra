@@ -1,4 +1,13 @@
-import { DEFAULT_MODE, MODES, type Interaction, type PermissionMode } from '@/api/thread'
+import {
+  DEFAULT_MODE,
+  EFFORTS,
+  MODELS,
+  MODES,
+  type ClaudeModel,
+  type Effort,
+  type Interaction,
+  type PermissionMode,
+} from '@/api/thread'
 
 const KEY = 'yantra.chat.mode.'
 
@@ -42,3 +51,37 @@ export function keepInteraction(thread: string, interaction: Interaction) {
     // As in keepMode.
   }
 }
+
+/** A value this browser kept for `thread` under `key`, if `known` holds it (Y-564). */
+function recall<T extends string>(key: string, thread: string | null | undefined, known: readonly (T | null)[]) {
+  if (!thread) return null
+  try {
+    const kept = localStorage.getItem(key + thread)
+    return known.find((one) => one === kept) ?? null
+  } catch {
+    return null
+  }
+}
+
+function keep(key: string, thread: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key + thread)
+    else localStorage.setItem(key + thread, value)
+  } catch {
+    // Held for this page only, as with the mode.
+  }
+}
+
+const MODEL_KEY = 'yantra.chat.model.'
+const EFFORT_KEY = 'yantra.chat.effort.'
+
+/** Claude's model this browser kept for `thread`, or `null` for Claude's default. */
+export const recallModel = (thread: string | null | undefined): ClaudeModel | null =>
+  recall(MODEL_KEY, thread, MODELS.map((one) => one.model))
+
+export const keepModel = (thread: string, model: ClaudeModel | null) => keep(MODEL_KEY, thread, model)
+
+export const recallEffort = (thread: string | null | undefined): Effort | null =>
+  recall(EFFORT_KEY, thread, EFFORTS.map((one) => one.effort))
+
+export const keepEffort = (thread: string, effort: Effort | null) => keep(EFFORT_KEY, thread, effort)

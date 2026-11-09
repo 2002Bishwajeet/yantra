@@ -354,6 +354,84 @@ describe('plan mode', () => {
   })
 })
 
+describe("Claude's model and effort", () => {
+  async function pick(control: 'Model' | 'Effort', label: string) {
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${control}: `) }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    fireEvent.click(options.find((one) => one.getAttribute('aria-label') === label)!)
+    await settled(() => expect(screen.getByRole('button', { name: `${control}: ${label}` })).toBeTruthy())
+    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
+  }
+
+  it('sends no model and no effort until they are picked, and then sends both on the turn', async () => {
+    await open()
+    expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Effort: Default' })).toBeTruthy()
+    type('first')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say(started())
+    say(of('turn.started'))
+    await pick('Model', 'Opus')
+    await pick('Effort', 'Extra High')
+    say({ ...of('turn.completed'), payload: { state: 'completed', stopReason: 'end_turn' } })
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude finished.'))
+    type('second')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([
+        { type: 'turn', text: 'first', harness: 'claude', mode: 'supervised' },
+        { type: 'turn', text: 'second', mode: 'supervised', model: 'opus', effort: 'xhigh' },
+      ]),
+    )
+  })
+
+  it('shows neither picker on a thread another harness holds, and sends neither', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Harness: Claude' }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    fireEvent.click(options[4])
+    await settled(() => expect(screen.getByRole('button', { name: 'Harness: opencode' })).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /^Model: / })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Effort: / })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Message opencode in yantra-web'), { target: { value: 'list the files' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([{ type: 'turn', text: 'list the files', harness: 'opencode', mode: 'supervised' }]),
+    )
+  })
+
+  it('keeps each thread its own model and effort', async () => {
+    await open()
+    await pick('Model', 'Haiku')
+    await pick('Effort', 'Low')
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(2))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Model: Haiku' })).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Effort: Low' })).toBeTruthy()
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(3))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy())
+  })
+
+  it('falls back to the default for a stored value it does not know', async () => {
+    localStorage.setItem('yantra.chat.model.1a2b3c4d', 'gpt-9')
+    localStorage.setItem('yantra.chat.effort.1a2b3c4d', 'ultra')
+    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(1))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Effort: Default' })).toBeTruthy()
+  })
+})
+
 describe('the chat', () => {
   it('opens on an empty conversation, and says why Send is off', async () => {
     await open()
