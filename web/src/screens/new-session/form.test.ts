@@ -6,6 +6,7 @@ import {
   expand,
   happenings,
   hubJoined,
+  knownWorkspace,
   nameError,
   offered,
   pickMachine,
@@ -17,7 +18,7 @@ import {
   tilde,
   type Values,
 } from './form'
-import { aMachine } from '@/api/fixtures'
+import { aMachine, aWorkspace } from '@/api/fixtures'
 import { generateName } from './words'
 
 const repo: Repo = {
@@ -266,5 +267,26 @@ describe('the hub in New session', () => {
     const other = aMachine({ name: 'cachyos-g14' })
     expect(offered([hub, other], [null, null])).toEqual([other])
     expect(offered([hub, other], [joined, null])).toEqual([hub, other])
+  })
+})
+
+describe('knownWorkspace', () => {
+  const mine = aWorkspace({ name: 'k8s', machine: 'cachyos-g14', repo: '/home/biswa/Github/homelab-k8s' })
+  const found = (over: Partial<Values> = {}) => knownWorkspace({ ...cloned('yes'), ...over }, [mine])
+
+  it('finds the workspace on the same machine and path', () => {
+    expect(found()).toBe(mine)
+  })
+
+  it('ignores a trailing slash on either side', () => {
+    expect(knownWorkspace(cloned('yes'), [{ ...mine, repo: `${mine.repo}/` }])).toBeTruthy()
+    const typed = values({ source: { kind: 'local', path: `${mine.repo}/`, origin: null, checked: 'yes' } })
+    expect(knownWorkspace(typed, [mine])).toBe(mine)
+  })
+
+  it('finds nothing on another machine, on another path, or with no source', () => {
+    expect(found({ machine: 'macbook' })).toBeNull()
+    expect(knownWorkspace(values({ source: { kind: 'local', path: '/home/biswa/other', origin: null, checked: 'yes' } }), [mine])).toBeNull()
+    expect(knownWorkspace(values(), [mine])).toBeNull()
   })
 })

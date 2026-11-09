@@ -75,7 +75,10 @@ const openMenu = async (name?: string | RegExp) => {
   fireEvent.click(await trigger(name))
   return screen.findByRole('menu')
 }
-const rows = () => screen.findAllByRole('menuitem').then((all) => all.filter((one) => one.tagName === 'A'))
+const rows = () =>
+  screen
+    .findAllByRole('menuitem')
+    .then((all) => all.filter((one) => one.tagName === 'A' && one.textContent !== 'New thread'))
 
 describe('prMark', () => {
   it('names each of the five states', () => {
@@ -143,6 +146,26 @@ describe('the thread menu', () => {
     const current = all.filter((one) => one.getAttribute('aria-current') === 'true')
     expect(current).toHaveLength(1)
     expect(current[0]!.getAttribute('href')).toContain('thread=1a1b2c3d4e5f6a7b')
+  })
+
+  it('offers New thread, a push to the blank chat, only while a thread is open', async () => {
+    daemon([200, contract.threads])
+    const { router } = await show({ urlThread: '1a1b2c3d4e5f6a7b' }, '/w/site?view=chat&thread=1a1b2c3d4e5f6a7b')
+    await openMenu()
+    const fresh = await screen.findByRole('menuitem', { name: 'New thread' })
+    expect(fresh.getAttribute('href')).toBe('/w/site?view=chat')
+    const before = router.history.length
+    fireEvent.click(fresh)
+    await waitFor(() => expect(router.state.location.search).toEqual({ view: 'chat' }))
+    expect(router.history.length).toBe(before + 1)
+  })
+
+  it('leaves New thread out of a blank chat, whose title already says it', async () => {
+    daemon([200, contract.threads])
+    await show()
+    await openMenu()
+    await rows()
+    expect(screen.queryByRole('menuitem', { name: 'New thread' })).toBeNull()
   })
 
   it('replaces the thread search param when a thread is picked', async () => {
