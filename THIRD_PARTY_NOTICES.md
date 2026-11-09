@@ -33,6 +33,20 @@ at commit `67eebaca`. The prompt in `a_real_claude_background_task_outlives_its_
 `a_real_claude_background_task_wakes_the_thread` is T3 Code's
 [`claude_background_task_wake/input.ts`](https://github.com/pingdotgg/t3code/blob/67eebaca/apps/server/src/orchestration-v2/testkit/fixtures/claude_background_task_wake/input.ts).
 
+[`web/src/screens/session/markdown/CodeBlock.tsx`](web/src/screens/session/markdown/CodeBlock.tsx) copies the
+frame of
+[`apps/web/src/components/chat/MarkdownCodeBlock.tsx`](https://github.com/pingdotgg/t3code/blob/67eebaca/apps/web/src/components/chat/MarkdownCodeBlock.tsx),
+and [`markdown.logic.ts`](web/src/screens/session/markdown/markdown.logic.ts) copies the fence rules of
+[`MarkdownCodeBlock.logic.ts`](https://github.com/pingdotgg/t3code/blob/67eebaca/apps/web/src/components/chat/MarkdownCodeBlock.logic.ts)
+and the file path rules of
+[`packages/shared/src/markdownLinks.ts`](https://github.com/pingdotgg/t3code/blob/67eebaca/packages/shared/src/markdownLinks.ts)
+and
+[`fileLinks.ts`](https://github.com/pingdotgg/t3code/blob/67eebaca/packages/shared/src/fileLinks.ts),
+at commit `67eebaca`.
+[`ChatMarkdown.tsx`](web/src/screens/session/markdown/ChatMarkdown.tsx) follows the `pre`, `code` and `a`
+renderers of
+[`apps/web/src/components/ChatMarkdown.tsx`](https://github.com/pingdotgg/t3code/blob/67eebaca/apps/web/src/components/ChatMarkdown.tsx).
+
 [`crates/yantra-core/src/checkpoint.rs`](crates/yantra-core/src/checkpoint.rs) copies the shape of
 [`apps/server/src/checkpointing/CheckpointStore.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/server/src/checkpointing/CheckpointStore.ts)
 and the checkpoint operations of
