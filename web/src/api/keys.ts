@@ -36,6 +36,8 @@ export const keys = {
   githubReadiness: () => ['github', 'readiness'] as const,
   repos: () => ['repos'] as const,
   notifications: () => ['notifications'] as const,
+  /** The appliance's PR watch, one list for every thread's Checks. */
+  pulls: () => ['pulls'] as const,
   about: () => ['about'] as const,
   here: () => ['here'] as const,
   sshIdentity: () => ['ssh-identity'] as const,

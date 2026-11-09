@@ -1,0 +1,116 @@
+.checks,
+.checks__pending {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 12px 4px;
+}
+
+/* The sheet itself pads past the home indicator (BottomSheet.css). */
+.checks__sheet .checks {
+  padding: 0 24px 8px;
+}
+
+.checks__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checks__check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+}
+
+.checks__check > .checks__title,
+.checks__check > .checks__body {
+  grid-column: 2 / -1;
+}
+
+.checks__icon {
+  width: 18px;
+  height: 18px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.checks__check[data-status="success"] .checks__icon,
+.checks__trigger[data-summary="passed"] .m3-button__icon {
+  color: var(--md-sys-color-primary);
+}
+
+.checks__check[data-status="failure"] .checks__icon,
+.checks__check[data-status="cancelled"] .checks__icon,
+.checks__trigger[data-summary="failed"] .m3-button__icon {
+  color: var(--md-sys-color-error);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .checks__check[data-status="pending"] .checks__icon {
+    animation: checks-spin 1.2s linear infinite;
+  }
+}
+
+@keyframes checks-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.checks__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: var(--md-sys-typescale-body-medium);
+}
+
+.checks__title {
+  font: var(--md-sys-typescale-body-small);
+}
+
+.checks__comment {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.checks__where {
+  overflow-wrap: anywhere;
+}
+
+/* Text a check or a reviewer wrote: content, so it stays selectable. */
+.checks__body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font: var(--md-sys-typescale-body-small);
+  user-select: text;
+}
+
+.checks__body > :first-child {
+  margin-top: 0;
+}
+
+.checks__body > :last-child {
+  margin-bottom: 0;
+}
+
+.checks__fix {
+  align-self: flex-start;
+}
+
+@media (pointer: coarse) {
+  .checks__trigger,
+  .checks__fix {
+    height: 44px;
+  }
+
+  .checks__fix {
+    align-self: stretch;
+  }
+}

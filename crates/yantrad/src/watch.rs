@@ -5,8 +5,9 @@
 //! decision 3). Discovery finds the open PR of every thread's upstream. The
 //! first look at a PR the start-up rebuild found records a baseline and says
 //! nothing, so a restart does not repeat what was already said (I-59). A PR
-//! added later starts with nothing told, so its first look is said. Each look is three conditional
-//! reads, so a PR that did not change costs no rate limit. A PR leaves the
+//! added later starts with nothing told, so its first look is said. Each look is four conditional
+//! reads, so a PR that did not change costs no rate limit. The last fresh
+//! checks, reviews and line comments stay in memory for `GET /api/pulls`. A PR leaves the
 //! watch when it merges, when it closes, or after [`FAILURES`] failed looks in
 //! a row, as T3 Code's watch does; discovery adds an open one back.
 
@@ -14,7 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
-use yantra_core::github::{self, Check, Conditional, Github, PullHead, PullState, Review, Token};
+use yantra_core::github::{
+    self, Check, Conditional, Github, PullHead, PullState, Review, ReviewComment, Token,
+};
 use yantra_core::thread::{self, Watched};
 use yantra_core::workspace;
 
@@ -24,7 +27,7 @@ use crate::notify::{PrNote, PrPhase, Teller, Viewers};
 /// `(owner, repo, number)`.
 pub type Key = (String, String, u64);
 
-/// Beside the beats, where `GET` routes can read it later (Y-512).
+/// Beside the beats, where `GET /api/pulls` reads it.
 pub type Pulls = Arc<RwLock<BTreeMap<Key, Tracked>>>;
 
 /// T3 Code's limit: a PR that cannot be read eight times running is gone.
@@ -38,15 +41,20 @@ pub struct Tracked {
     pub workspace: String,
     pub url: String,
     /// The last pull read, which a 304 reuses. `None` until the first look.
-    head: Option<PullHead>,
+    pub head: Option<PullHead>,
+    /// The last fresh answers, which a 304 keeps. A new head drops the checks.
+    pub checks: Vec<Check>,
+    pub reviews: Vec<Review>,
+    pub comments: Vec<ReviewComment>,
     pull_etag: Option<String>,
     /// For the head sha's check runs only; a new head drops it.
     checks_etag: Option<String>,
     reviews_etag: Option<String>,
+    comments_etag: Option<String>,
     /// What was already said about the head sha's checks.
     told_failed: bool,
     told_passed: bool,
-    reviews: BTreeSet<u64>,
+    told_reviews: BTreeSet<u64>,
     failures: u32,
     /// The start-up rebuild found it, so its first look says nothing.
     baseline: bool,
@@ -58,24 +66,29 @@ impl Tracked {
             workspace,
             url,
             head: None,
+            checks: Vec::new(),
+            reviews: Vec::new(),
+            comments: Vec::new(),
             pull_etag: None,
             checks_etag: None,
             reviews_etag: None,
+            comments_etag: None,
             told_failed: false,
             told_passed: false,
-            reviews: BTreeSet::new(),
+            told_reviews: BTreeSet::new(),
             failures: 0,
             baseline,
         }
     }
 }
 
-/// One look's three answers.
+/// One look's four answers.
 #[derive(Debug)]
 pub struct Read {
     pub pull: Conditional<PullHead>,
     pub checks: Conditional<Vec<Check>>,
     pub reviews: Conditional<Vec<Review>>,
+    pub comments: Conditional<Vec<ReviewComment>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -85,8 +98,9 @@ pub enum Look {
     Stop,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum Summary {
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Summary {
     Pending,
     Failed,
     Passed,
@@ -94,7 +108,7 @@ enum Summary {
 
 /// Failed as soon as one run fails, so the phone hears before the slowest run
 /// ends.
-fn summary(checks: &[Check]) -> Summary {
+pub fn summary(checks: &[Check]) -> Summary {
     let concluded = |check: &Check, set: &[&str]| {
         check.status == "completed"
             && check
@@ -132,6 +146,7 @@ pub fn look(tracked: &mut Tracked, read: Result<Read, github::Error>) -> Look {
             .is_none_or(|head| head.head_sha != value.head_sha)
         {
             tracked.checks_etag = None;
+            tracked.checks.clear();
             tracked.told_failed = false;
             tracked.told_passed = false;
         }
@@ -145,7 +160,8 @@ pub fn look(tracked: &mut Tracked, read: Result<Read, github::Error>) -> Look {
     let mut said = Vec::new();
     if let Conditional::Fresh { etag, value } = read.checks {
         tracked.checks_etag = etag;
-        match summary(&value) {
+        tracked.checks = value;
+        match summary(&tracked.checks) {
             Summary::Failed if !tracked.told_failed => {
                 tracked.told_failed = true;
                 said.push(PrPhase::CheckFailed);
@@ -163,11 +179,16 @@ pub fn look(tracked: &mut Tracked, read: Result<Read, github::Error>) -> Look {
         // counted as seen.
         let mut reviewed = false;
         for review in value.iter().filter(|review| review.state != "PENDING") {
-            reviewed |= tracked.reviews.insert(review.id) && review.author != head.author;
+            reviewed |= tracked.told_reviews.insert(review.id) && review.author != head.author;
         }
         if reviewed {
             said.push(PrPhase::Reviewed);
         }
+        tracked.reviews = value;
+    }
+    if let Conditional::Fresh { etag, value } = read.comments {
+        tracked.comments_etag = etag;
+        tracked.comments = value;
     }
     if std::mem::take(&mut tracked.baseline) {
         said.clear();
@@ -175,7 +196,7 @@ pub fn look(tracked: &mut Tracked, read: Result<Read, github::Error>) -> Look {
     Look::Keep(said)
 }
 
-/// The three reads. A PR no longer open needs only the first.
+/// The four reads. A PR no longer open needs only the first.
 async fn read(
     github: &Github,
     token: &Token,
@@ -194,6 +215,7 @@ async fn read(
             pull,
             checks: Conditional::NotModified,
             reviews: Conditional::NotModified,
+            comments: Conditional::NotModified,
         });
     };
     let sha = head.head_sha.clone();
@@ -208,10 +230,20 @@ async fn read(
     let reviews = github
         .reviews(token, owner, repo, *number, tracked.reviews_etag.as_deref())
         .await?;
+    let comments = github
+        .review_comments(
+            token,
+            owner,
+            repo,
+            *number,
+            tracked.comments_etag.as_deref(),
+        )
+        .await?;
     Ok(Read {
         pull,
         checks,
         reviews,
+        comments,
     })
 }
 
@@ -298,8 +330,9 @@ pub async fn track(pulls: &Pulls, watched: Watched, baseline: bool) {
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use yantra_core::github::Unlogged;
 
     fn tracked() -> Tracked {
         Tracked::new(
@@ -325,6 +358,7 @@ mod tests {
             name: "test".to_owned(),
             status: status.to_owned(),
             conclusion: conclusion.map(str::to_owned),
+            output: None,
         }
     }
 
@@ -340,6 +374,7 @@ mod tests {
             id,
             author: author.to_owned(),
             state: state.to_owned(),
+            body: Unlogged::default(),
         }
     }
 
@@ -359,6 +394,7 @@ mod tests {
             pull,
             checks,
             reviews,
+            comments: Conditional::NotModified,
         })
     }
 
@@ -368,6 +404,60 @@ mod tests {
             Conditional::NotModified,
             Conditional::NotModified,
         )
+    }
+
+    /// One PR after a look that found a failed and a passed check, a review
+    /// and a line comment, for `GET /api/pulls` and its contract.
+    pub(crate) async fn watching_one() -> Pulls {
+        let mut watched = Tracked::new(
+            "api".to_owned(),
+            "https://github.com/o/r/pull/21".to_owned(),
+            true,
+        );
+        let output = |title: &str, summary: &str| {
+            Some(github::CheckOutput {
+                title: Unlogged(title.to_owned()),
+                summary: Unlogged(summary.to_owned()),
+            })
+        };
+        look(
+            &mut watched,
+            Ok(Read {
+                pull: head("aaa111", PullState::Open),
+                checks: checks(vec![
+                    Check {
+                        name: "test".to_owned(),
+                        output: output("1 failed", "`watch::look` panicked"),
+                        ..run("completed", Some("failure"))
+                    },
+                    Check {
+                        name: "lint".to_owned(),
+                        output: output("Clean", ""),
+                        ..run("completed", Some("success"))
+                    },
+                ]),
+                reviews: reviews(vec![Review {
+                    body: Unlogged("Please add a test.".to_owned()),
+                    ..review(7, "friend", "CHANGES_REQUESTED")
+                }]),
+                comments: Conditional::Fresh {
+                    etag: None,
+                    value: vec![ReviewComment {
+                        id: 31,
+                        author: "friend".to_owned(),
+                        path: "src/watch.rs".to_owned(),
+                        line: Some(12),
+                        body: Unlogged("This drops the etag.".to_owned()),
+                    }],
+                },
+            }),
+        );
+        let pulls = Pulls::default();
+        pulls
+            .write()
+            .await
+            .insert(("o".to_owned(), "r".to_owned(), 21), watched);
+        pulls
     }
 
     fn failed() -> Vec<Check> {
@@ -564,6 +654,61 @@ mod tests {
         assert_eq!(watched.pull_etag.as_deref(), Some("\"a\""));
     }
 
+    /// `GET /api/pulls` reads what the last fresh answers said, and a 304
+    /// changes none of it.
+    #[test]
+    fn a_304_keeps_the_checks_reviews_and_comments() {
+        let mut watched = tracked();
+        let comment = ReviewComment {
+            id: 31,
+            author: "friend".to_owned(),
+            path: "src/main.rs".to_owned(),
+            line: Some(12),
+            body: Unlogged("Rename this".to_owned()),
+        };
+        look(
+            &mut watched,
+            Ok(Read {
+                pull: head("a", PullState::Open),
+                checks: checks(failed()),
+                reviews: reviews(vec![review(1, "friend", "COMMENTED")]),
+                comments: Conditional::Fresh {
+                    etag: Some("\"rc\"".to_owned()),
+                    value: vec![comment.clone()],
+                },
+            }),
+        );
+        look(&mut watched, unchanged());
+
+        assert_eq!(watched.checks, failed());
+        assert_eq!(watched.reviews, [review(1, "friend", "COMMENTED")]);
+        assert_eq!(watched.comments, [comment]);
+        assert_eq!(watched.comments_etag.as_deref(), Some("\"rc\""));
+    }
+
+    /// A new head's checks are not the old head's, even before they are read.
+    #[test]
+    fn a_new_head_drops_the_old_checks() {
+        let mut watched = tracked();
+        look(
+            &mut watched,
+            read(
+                head("a", PullState::Open),
+                checks(failed()),
+                reviews(vec![]),
+            ),
+        );
+        look(
+            &mut watched,
+            read(
+                head("b", PullState::Open),
+                Conditional::NotModified,
+                Conditional::NotModified,
+            ),
+        );
+        assert!(watched.checks.is_empty());
+    }
+
     #[test]
     fn a_merged_or_closed_pr_stops_the_watch() {
         for state in [PullState::Merged, PullState::Closed] {
@@ -602,6 +747,88 @@ mod tests {
             look(&mut watched, refused());
         }
         assert_eq!(look(&mut watched, refused()), Look::Stop);
+    }
+
+    /// Q5: a look keeps what checks and reviewers wrote, for the Chat, and no
+    /// log line carries any of it.
+    #[tokio::test]
+    async fn a_look_keeps_the_text_and_logs_none_of_it() {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let base = format!("http://{}", listener.local_addr().expect("its address"));
+        let answers = [
+            r#"{"state":"open","merged_at":null,"head":{"sha":"aaa"},"user":{"login":"owner"}}"#,
+            r#"{"check_runs":[{"name":"test","status":"completed","conclusion":"failure","output":{"title":"CHECK_TITLE","summary":"CHECK_SUMMARY"}}]}"#,
+            r#"[{"id":7,"user":{"login":"friend"},"state":"COMMENTED","body":"REVIEW_BODY"}]"#,
+            r#"[{"id":31,"user":{"login":"friend"},"path":"a.rs","line":3,"body":"COMMENT_BODY"}]"#,
+        ];
+        let served = std::thread::spawn(move || {
+            for body in answers {
+                let (mut stream, _) = listener.accept().expect("the look connects");
+                let mut request = Vec::new();
+                let mut byte = [0u8; 1];
+                while !request.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap_or(0) == 1 {
+                    request.push(byte[0]);
+                }
+                let answer = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                stream
+                    .write_all(answer.as_bytes())
+                    .expect("the fake answers");
+            }
+        });
+        let capture = crate::terminal::tests::Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _logged = tracing::subscriber::set_default(subscriber);
+        let pulls = Pulls::default();
+        track(
+            &pulls,
+            Watched {
+                workspace: "web".to_owned(),
+                owner: "o".to_owned(),
+                repo: "r".to_owned(),
+                number: 21,
+                url: "https://github.com/o/r/pull/21".to_owned(),
+            },
+            false,
+        )
+        .await;
+        let mut teller = Teller::new(None);
+        let (viewers, events) = (Viewers::default(), Events::default());
+
+        poll(
+            &pulls,
+            &Github::at(&base, &base),
+            Some(Token::new("t".to_owned())),
+            &mut teller,
+            &viewers,
+            &events,
+        )
+        .await;
+        served.join().expect("the fake GitHub");
+
+        let held = pulls.read().await;
+        let tracked = held.values().next().expect("still watched");
+        let output = tracked.checks[0].output.as_ref().expect("an output");
+        assert_eq!(output.summary.0, "CHECK_SUMMARY");
+        assert_eq!(tracked.reviews[0].body.0, "REVIEW_BODY");
+        assert_eq!(tracked.comments[0].body.0, "COMMENT_BODY");
+        let log = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+        for text in [
+            "CHECK_TITLE",
+            "CHECK_SUMMARY",
+            "REVIEW_BODY",
+            "COMMENT_BODY",
+        ] {
+            assert!(!log.contains(text), "{text} reached the log: {log}");
+        }
     }
 
     /// A GitHub that cannot be reached drops the entry on the eighth pass, and

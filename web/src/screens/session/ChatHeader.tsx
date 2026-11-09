@@ -19,6 +19,7 @@ import { State } from '@/m3/mark/Mark'
 import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuSeparator, MenuTrigger } from '@/m3/menu/Menu'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
+import { Checks } from './Checks'
 import { GitActions } from './GitActions'
 import { elapsed, groupThreads, prMark, threadTitle } from './threads'
 
@@ -37,12 +38,14 @@ export type ChatHeaderProps = {
   added: boolean
   /** The page's tab bar. Undefined draws the header in place; null draws nothing, for a tab that is not Chat. */
   into?: HTMLElement | null
+  /** Fix with agent: put this block in the composer, and send nothing. */
+  onFix: (block: string) => void
 }
 
 /** Y-633: the Chat tab's top line. The threads read on mount and on Refresh, and never poll:
  *  each read is an ssh to the machine and a call to GitHub (Y-489). */
 export function ChatHeader(props: ChatHeaderProps) {
-  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, added, into } = props
+  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, added, into, onFix } = props
   const active = thread ?? urlThread ?? null
   const threads = useThreads(workspace)
   const { mutate } = threads
@@ -71,6 +74,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   })
 
   const current = listed?.find((one) => one.id === active)
+  const pr = thread ? shown?.find((one) => one.id === thread)?.pr : undefined
   const title = current ? threadTitle(current) : active ? 'Thread' : 'New thread'
   const groupId = useId()
 
@@ -181,11 +185,12 @@ export function ChatHeader(props: ChatHeaderProps) {
           Refresh
         </Button>
       ) : null}
+      <Checks onFix={onFix} pr={pr?.state === 'open' ? pr : null} />
       <GitActions
         busy={busy}
         diffs={diffs}
         key={thread ?? ''}
-        listed={thread ? shown?.find((one) => one.id === thread)?.pr : undefined}
+        listed={pr}
         refresh={() => mutate()}
         thread={thread}
         workspace={workspace}

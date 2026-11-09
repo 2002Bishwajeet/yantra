@@ -57,6 +57,7 @@ API the CLI cannot reach.
 | `POST /api/join` | `yantra ssh-identity --machine <m> --user <u>`, with the machine taken from the caller |
 | `POST /api/join/forget-host-key` | `yantra forget-host-key <machine>`, with the machine taken from the caller |
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
+| `GET /api/pulls` | no verb, because it reads the PR watch's memory and asks GitHub nothing: each watched PR's checks with their output, its reviews and its line comments, for the Chat's Checks (Y-512, Y-495) |
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |
 | `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks/{id}/steer`, `GET /api/tasks/{id}/wait`, `POST /api/tasks/{id}/stop`, `DELETE /api/tasks/{id}` | `yantra mcp`'s tools — `start_task`, `list_tasks`, `task_status`, `steer_task`, `wait_task`, `cancel_task`, `remove_task` (ADR-0033, Y-435, Y-454). The `GET`s read memory |
