@@ -84,3 +84,9 @@ appliance keeps its `yantra` account, because `yantrad` runs as it.
   `install.sh` gives `tailscale serve` (Y-384), or `http://<tailnet address>:7717/join`.
 - **The macOS half is not measured.** Remote Login detection and the LaunchAgent for `yantra-agent`
   were written from Apple's documentation, and no Mac has run them yet.
+
+> **2026-11-09 ([Y-681](../../tracker.md)): a join from another machine carries a code.** Decision 3
+> trusted any caller from the owner's node, and an agent account on that node is not the owner. So
+> [ADR-0044](0044-a-write-needs-the-owners-passkey.md) decision 13 adds a one-time code from a
+> signed-in *Add a machine* screen. Decisions 3 and 4 otherwise stand. The hub's own join keeps
+> ADR-0042's socket path, with no code.

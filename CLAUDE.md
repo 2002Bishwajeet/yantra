@@ -145,7 +145,9 @@ configuration rather than state —
 beside the first. **Since 2026-10-19 it also writes the owner's dashboard layout**, a preference
 with no fleet state and no secret ([ADR-0036](docs/adr/0036-the-dashboard-layout-syncs-through-the-daemon.md)). **Since 2026-10-20 it also writes each room's definition**
 to `~/.config/yantra/rooms/<name>.toml`, with no message, no fleet state and no secret
-([ADR-0039](docs/adr/0039-a-room-is-a-shared-project.md)). The appliance may keep a conversation history that the daemon never touches —
+([ADR-0039](docs/adr/0039-a-room-is-a-shared-project.md)). **Since 2026-11-09 it also writes
+`~/.config/yantra/passkeys.toml`**, with passkey public keys and session token hashes only, no fleet
+state and no secret value ([ADR-0044](docs/adr/0044-a-write-needs-the-owners-passkey.md)). The appliance may keep a conversation history that the daemon never touches —
 [ADR-0032](docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md).
 
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
@@ -207,7 +209,9 @@ traits' own implementations must be tested against the real thing.
   [ADR-0023](docs/adr/0023-the-github-grant-lives-beside-the-relay.md) puts beside it. The owner
   took both decisions with the cost stated — whoever can read that file has both. It covers one
   file holding two credentials the daemon itself uses; a third is a reason to reread ADR-0023 and
-  not a licence it grants, and a machine never receives either. **Workspaces are untouched**: the schema still has no field for a
+  not a licence it grants, and a machine never receives either. The passkey file of
+  [ADR-0044](docs/adr/0044-a-write-needs-the-owners-passkey.md) is not a third: it keeps public keys
+  and token hashes, so no value in it grants access. **Workspaces are untouched**: the schema still has no field for a
   value, and a reference is still resolved at launch on the machine that runs the agent.
 - **Start small.** Prefer the smallest thing that runs end to end. This project's failure mode is a
   beautiful architecture that never boots — see the walking-skeleton milestone in `tracker.md`.

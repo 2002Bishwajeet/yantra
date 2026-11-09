@@ -1,16 +1,16 @@
 # ADR-0044 — A write needs the owner's passkey
 
 - **Date:** 2026-11-09
-- **Status:** Proposed 2026-11-09 ([Y-681](../../tracker.md), issue #672). The owner chose a
-  passkey on 2026-11-09 ("Option A"). The owner accepts or changes this text.
-- **Closes, when accepted:** the open hole in
+- **Status:** Accepted 2026-11-09 ([Y-681](../../tracker.md), issue #672). The owner chose a
+  passkey on 2026-11-09 ("Option A") and accepted this text the same day.
+- **Closes:** the open hole in
   [ADR-0042](0042-the-proxy-hop-is-proved-by-the-kernel.md)'s Consequences and its first
   *Not decided here* item.
-- **Amends, when accepted:** [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)
+- **Amends:** [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)
   decision 1 (reads stay open) and the premise it builds on, Q6 (*no authentication*).
   [ADR-0029](0029-a-machine-joins-itself.md) decision 3, for a join from another machine.
   [ADR-0004](0004-rust-for-the-daemon.md)'s 2026-08-22 amendment, a fourth time. Each gets a dated
-  note on acceptance.
+  note.
 - **Unchanged:** ADR-0016's predicate (`whois`, live, same user, no tags, failure closed). ADR-0042
   decisions 1 to 5. [ADR-0038](0038-rooms-and-guest-devices.md)'s guest grants.
 - **Comes before:** ADR-0040, *An agent caller is tagged and scoped* (Proposed, PR #643).

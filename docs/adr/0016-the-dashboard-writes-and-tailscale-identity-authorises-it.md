@@ -166,3 +166,9 @@ here is that granting them later has to be deliberate.
 > node breaks that premise: a guest would read the fleet and the private repo list. So every route now
 > checks the caller, and a non-owner reaches only what its grant names. The `whois` predicate for the
 > owner does not change.
+
+> **2026-11-09 ([Y-681](../../tracker.md)): the node is not enough; the owner also needs a passkey
+> session.** Q6 assumed every account on the owner's machines was the owner. Agents now run in their
+> own `karigar` account on each machine, from the owner's untagged node. So
+> [ADR-0044](0044-a-write-needs-the-owners-passkey.md) adds a session cookie from a passkey sign-in
+> to this ADR's predicate, on reads and on writes. The `whois` predicate itself does not change.
