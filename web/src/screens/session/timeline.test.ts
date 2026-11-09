@@ -14,10 +14,11 @@ describe('the timeline', () => {
     expect(timeline.thread).toBe('1a2b3c4d')
     expect(timeline.harness).toBe('opencode')
     expect(timeline.entries).toEqual([
-      { kind: 'message', id: 'msg_1:1', who: 'agent', text: 'Running the tests.' },
+      { kind: 'message', id: 'msg_1:1', who: 'agent', text: 'Running the tests.', turn: 1 },
       {
         kind: 'tool',
         id: 'toolu_1',
+        turn: 1,
         itemType: 'command_execution',
         status: 'completed',
         title: 'cargo test',
@@ -55,7 +56,7 @@ describe('the timeline', () => {
       payload: { streamKind: 'user_text', delta: 'run the tests', itemId: 'user:r1:1' },
     })
     const timeline = fold([prompt, { type: 'event', event: { threadId: 't', type: 'turn.started' } }, prompt])
-    expect(timeline.entries).toEqual([{ kind: 'message', id: 'user:r1:1', who: 'you', text: 'run the tests' }])
+    expect(timeline.entries).toEqual([{ kind: 'message', id: 'user:r1:1', who: 'you', text: 'run the tests', turn: 0 }])
   })
 
   it('keeps an open request until it is resolved or the turn ends', () => {
@@ -92,6 +93,19 @@ describe('the timeline', () => {
     expect(queued.turn).toBe('running')
     expect(reduce(queued, { type: 'queue', texts: [] }).queued).toEqual([])
     expect(reduce(queued, { type: 'reset' }).queued).toEqual([])
+  })
+
+  it('numbers each turn that starts, and keeps how each ended', () => {
+    const started = event({ threadId: 't', type: 'turn.started' })
+    const ended = (state: 'completed' | 'cancelled', durationMs?: number) =>
+      event({ threadId: 't', type: 'turn.completed', payload: { state, durationMs } })
+    const call = (itemId: string) =>
+      event({ threadId: 't', type: 'item.started', payload: { itemId, itemType: 'command_execution' } })
+    const timeline = fold([started, call('a'), ended('completed', 4000), started, call('b'), ended('cancelled')])
+    expect(timeline.turns).toBe(2)
+    expect(timeline.entries.map((one) => one.kind === 'tool' && one.turn)).toEqual([1, 2])
+    expect(timeline.worked).toEqual({ 1: { state: 'completed', durationMs: 4000 }, 2: { state: 'cancelled' } })
+    expect(reduce(timeline, { type: 'reset' })).toMatchObject({ turns: 0, worked: {} })
   })
 
   it('starts over on a reset and keeps the thread and its harness', () => {

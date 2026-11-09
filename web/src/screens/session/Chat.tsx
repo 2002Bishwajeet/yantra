@@ -10,7 +10,6 @@ import {
   type Effort,
   type Harness,
   type Interaction,
-  type ItemType,
   type PermissionMode,
   type RequestOpened,
 } from '@/api/thread'
@@ -35,7 +34,6 @@ import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
-import { State, type MarkState } from '@/m3/mark/Mark'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { BackgroundWork } from './BackgroundWork'
 import { appendToDraft } from './diff/comment'
@@ -59,16 +57,11 @@ import {
 import { ModePicker } from './ModePicker'
 import { ModelPicker } from './ModelPicker'
 import { PlanToggle } from './PlanToggle'
-import type { Message, Timeline, Tool } from './timeline'
+import type { Message, Timeline } from './timeline'
 import { TurnDiff } from './TurnDiff'
 import { useChat } from './useChat'
-
-const KIND: Record<ItemType, string> = {
-  command_execution: 'Command',
-  file_change: 'File change',
-  web_search: 'Web',
-  dynamic_tool_call: 'Tool',
-}
+import { WorkLog } from './WorkLog'
+import { workRows } from './workLog.logic'
 
 const ASKS: Record<RequestOpened['requestType'], string> = {
   exec_command_approval: 'asks to run',
@@ -101,34 +94,6 @@ function Said(props: { message: Message; agent: string; machine: string; worktre
         </div>
       )}
     </article>
-  )
-}
-
-const STATUS: Record<Tool['status'], { state: MarkState; word: string }> = {
-  inProgress: { state: 'running', word: 'running' },
-  completed: { state: 'done', word: 'done' },
-  failed: { state: 'failed', word: 'failed' },
-}
-
-function ToolCard(props: { tool: Tool }) {
-  const { tool } = props
-  const status = STATUS[tool.status]
-  return (
-    <Card className="chat__tool" render={<article />} surface="low">
-      <div className="chat__tool-head">
-        <Eyebrow>{KIND[tool.itemType]}</Eyebrow>
-        <State size="small" state={status.state}>
-          {status.word}
-        </State>
-      </div>
-      {tool.title ? <Mono className="chat__tool-title">{tool.title}</Mono> : null}
-      {tool.output ? (
-        <details className="chat__tool-output">
-          <summary>Output</summary>
-          <pre>{tool.output}</pre>
-        </details>
-      ) : null}
-    </Card>
   )
 }
 
@@ -315,6 +280,7 @@ export function Chat(props: ChatProps) {
   const dock = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
   const busy = timeline.turn !== 'idle'
+  const rows = useMemo(() => workRows(timeline), [timeline])
   const diffs = timeline.entries.filter((entry) => entry.kind === 'diff').length
   const enterSends = useEnterSends()
   const box = useRef<HTMLTextAreaElement>(null)
@@ -545,22 +511,34 @@ export function Chat(props: ChatProps) {
             terminal is untouched.
           </EmptyState>
         ) : null}
-        {timeline.entries.map((entry) =>
-          entry.kind === 'message' ? (
-            <Said agent={agent} key={entry.id} machine={workspace.machine} message={entry} worktree={editors.worktree} />
-          ) : entry.kind === 'tool' ? (
-            <ToolCard key={entry.id} tool={entry} />
-          ) : (
+        {rows.map((row) =>
+          row.kind === 'work' ? (
+            <WorkLog
+              key={row.id}
+              said={(message) => (
+                <Said agent={agent} machine={workspace.machine} message={message} worktree={editors.worktree} />
+              )}
+              work={row}
+            />
+          ) : row.entry.kind === 'message' ? (
+            <Said
+              agent={agent}
+              key={row.entry.id}
+              machine={workspace.machine}
+              message={row.entry}
+              worktree={editors.worktree}
+            />
+          ) : row.entry.kind === 'diff' ? (
             <TurnDiff
               disabled={busy || link !== 'open'}
-              diff={entry}
-              key={entry.id}
+              diff={row.entry}
+              key={row.entry.id}
               editors={editors}
               onComment={addComment}
               onRevert={chat.revert}
               workspace={workspace}
             />
-          ),
+          ) : null,
         )}
         {showDiff ? null : asks}
         <div ref={end} />
