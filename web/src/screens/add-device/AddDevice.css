@@ -72,8 +72,10 @@
   text-underline-offset: 2px;
 }
 
-.add-device__link:hover {
-  text-decoration-thickness: 2px;
+@media (hover: hover) and (pointer: fine) {
+  .add-device__link:hover {
+    text-decoration-thickness: 2px;
+  }
 }
 
 /* A plain link is not `.m3-interactive`, so it draws its own ring. */
