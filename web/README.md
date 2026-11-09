@@ -339,12 +339,16 @@ permission mode, Supervised by default (Y-453). Each turn frame carries it, and
 this browser keeps it per thread. [`PlanToggle.tsx`](src/screens/session/PlanToggle.tsx),
 copied from T3 Code's interaction-mode toggle, makes the next Claude turn a plan
 turn that writes nothing (Y-565); this browser keeps it per thread too, and it is
-off for any other harness. Each turn runs
+off for any other harness. On a Claude thread,
+[`ModelPicker.tsx`](src/screens/session/ModelPicker.tsx) and
+[`EffortPicker.tsx`](src/screens/session/EffortPicker.tsx) pick Claude's model
+and effort, and each is kept per thread the same way (Y-564). A change
+reaches the running Claude process before the next turn. Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
 harness. The composer under it is [`src/composer/`](src/composer/Composer.tsx),
 one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
-Attach, harness and permission controls, a context ring that turns red above 90%,
+Attach, harness, permission, model and effort controls, a context ring that turns red above 90%,
 the agent's plan on the card's top edge, a Send button or a Stop with Queue beside it, a draft kept
 per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
 Settings → General. Ten things about the code:

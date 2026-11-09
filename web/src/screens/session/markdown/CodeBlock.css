@@ -1,0 +1,66 @@
+.chat__code {
+  margin: 12px 0;
+  min-width: 0;
+  max-width: 100%;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container-highest);
+  overflow: hidden;
+}
+
+.chat__code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px 0 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-small-size);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chat__code-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A 44 px touch target, always shown: a phone has no hover. */
+.chat__code-copy {
+  min-width: 44px;
+  min-height: 44px;
+  flex: none;
+}
+
+.chat__code-frame {
+  display: block;
+}
+
+.chat__markdown .chat__code-body {
+  margin: 0;
+  padding: 0 12px 12px;
+  overflow-x: auto;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--md-ref-typeface-mono, monospace);
+  font-size: var(--md-sys-typescale-body-small-size);
+  white-space: pre;
+}
+
+.chat__code-body span[style] {
+  color: light-dark(var(--shiki-light), var(--shiki-dark));
+}
+
+.chat__code-hint {
+  padding: 0 12px;
+}
+
+.chat__code-hint:empty {
+  display: none;
+}
+
+.chat__markdown a.chat__file {
+  color: var(--md-sys-color-primary);
+  text-decoration: underline;
+}

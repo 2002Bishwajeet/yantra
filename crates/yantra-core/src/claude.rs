@@ -13,9 +13,9 @@
 //! Measured on claude 2.1.291 (R20) and 2.1.319 (ADR-0041): with
 //! `--permission-prompt-tool stdio` a permission arrives on stdout as a
 //! `control_request`, and the answer on stdin runs or refuses the tool.
-//! `set_permission_mode` and `stop_task` are answered on stdin too. The
-//! process exits once stdin closes. No prompt, output or file content is ever
-//! logged.
+//! `set_permission_mode`, `set_model`, `apply_flag_settings` and `stop_task`
+//! are answered on stdin too. The process exits once stdin closes. No prompt,
+//! output or file content is ever logged.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -72,6 +72,8 @@ pub struct Prompt<'a> {
     pub text: &'a str,
     pub mode: chat::PermissionMode,
     pub interaction: chat::Interaction,
+    pub model: Option<&'a chat::Model>,
+    pub effort: Option<chat::Effort>,
 }
 
 /// One running `claude -p`. Dropping it kills the local `ssh` and leaves the
@@ -109,6 +111,8 @@ impl Session {
             &keeper,
             first.mode,
             first.interaction,
+            first.model,
+            first.effort,
             None,
             None,
         ))?;
@@ -218,7 +222,10 @@ impl Session {
 
     /// The first prompt, in the mode the command line already set.
     fn first(&self, first: &Prompt) -> Result<(), Error> {
-        self.shared.lock().flag = Some(flag(first.mode, first.interaction).to_owned());
+        let mut state = self.shared.lock();
+        state.flag = Some(flag(first.mode, first.interaction).to_owned());
+        state.picked = (first.model.cloned(), first.effort);
+        drop(state);
         self.prompt(first.text)
     }
 
@@ -227,20 +234,34 @@ impl Session {
         self.shared.send(&user(text))
     }
 
-    /// Sends the next turn. A mode other than the one Claude runs in is set
-    /// first, on the live process (ADR-0041 decision 5).
+    /// Sends the next turn. A mode, model or effort other than the one Claude
+    /// runs with is set first, on the live process (ADR-0041 decision 5,
+    /// Y-564); `null` is Claude's default.
     pub fn send_turn(&self, prompt: &Prompt) -> Result<(), Error> {
         let flag = flag(prompt.mode, prompt.interaction);
-        let changed = {
+        let (model, effort) = (prompt.model.cloned(), prompt.effort);
+        let (mode_changed, (was_model, was_effort)) = {
             let mut state = self.shared.lock();
-            let changed = state.flag.as_deref() != Some(flag);
+            let mode_changed = state.flag.as_deref() != Some(flag);
             state.flag = Some(flag.to_owned());
-            changed
+            let was = std::mem::replace(&mut state.picked, (model.clone(), effort));
+            (mode_changed, was)
         };
-        if changed {
+        if mode_changed {
             self.shared.request(
                 "mode",
                 json!({"subtype": "set_permission_mode", "mode": flag}),
+            )?;
+        }
+        if was_model != model {
+            self.shared
+                .request("model", json!({"subtype": "set_model", "model": model}))?;
+        }
+        if was_effort != effort {
+            self.shared.request(
+                "effort",
+                json!({"subtype": "apply_flag_settings",
+                    "settings": {"effortLevel": effort}}),
             )?;
         }
         self.prompt(prompt.text)
@@ -307,6 +328,11 @@ impl Session {
         self.shared.lock().session.clone()
     }
 
+    /// The `--model` and `--effort` Claude runs with now; `None` is Claude's default.
+    pub fn picked(&self) -> (Option<chat::Model>, Option<chat::Effort>) {
+        self.shared.lock().picked.clone()
+    }
+
     /// When Claude last wrote any line, an event or not.
     pub fn heard(&self) -> Option<tokio::time::Instant> {
         self.shared.lock().heard
@@ -323,14 +349,18 @@ impl Session {
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
 /// cannot turn approval off. `Plan` is Claude's own `plan` whatever the mode
-/// (Y-565). `mcp` adds the room server and lets a woken turn
+/// (Y-565). `model` and `effort` reach Claude only when the person picked them
+/// (Y-564). `mcp` adds the room server and lets a woken turn
 /// use its tools without a prompt (ADR-0038 decision 2). The task tools are
 /// Claude's plan, and `-p` has them only when asked for (`Tasks`).
+#[allow(clippy::too_many_arguments)]
 pub fn command(
     worktree: &str,
     keeper: &Keeper,
     mode: chat::PermissionMode,
     interaction: chat::Interaction,
+    model: Option<&chat::Model>,
+    effort: Option<chat::Effort>,
     mcp: Option<&Mcp>,
     session: Option<&str>,
 ) -> String {
@@ -348,7 +378,7 @@ pub fn command(
          export CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n\
          mkdir -p -m 700 {images} || exit 1\n\
          {resume}\
-         exec \"$c\" --add-dir {images} {rooms}--permission-mode {mode} -p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" --add-dir {images} {rooms}--permission-mode {mode} {model}{effort}-p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         images = keeper.images(),
@@ -357,6 +387,11 @@ pub fn command(
             sq(&mcp.config())
         )),
         mode = flag(mode, interaction),
+        model = model.map_or_else(String::new, |model| format!(
+            "--model {} ",
+            sq(model.as_str())
+        )),
+        effort = effort.map_or_else(String::new, |effort| format!("--effort {} ", effort.name())),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
     )
@@ -477,6 +512,9 @@ struct State {
     session: Option<String>,
     /// The `--permission-mode` Claude runs in now.
     flag: Option<String>,
+    /// The `--model` and `--effort` Claude runs with now. A session this
+    /// daemon did not start is taken to run with neither.
+    picked: (Option<chat::Model>, Option<chat::Effort>),
     /// The background tasks that still run, in the order they started.
     background: Vec<chat::BackgroundTask>,
     /// When Claude last wrote a line, which pins a keeper with background work.
@@ -1567,14 +1605,16 @@ impl Behaviour {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, Interaction, Item, ItemStatus, ItemType, PermissionMode, PlanStep,
-        PlanStepStatus, RequestOpened, RequestResolved, RequestType, Scope, StopReason, StreamKind,
-        TokenUsage, TurnCompleted, TurnState,
+        ContentDelta, Decision, Effort, Interaction, Item, ItemStatus, ItemType, Model,
+        PermissionMode, PlanStep, PlanStepStatus, RequestOpened, RequestResolved, RequestType,
+        Scope, StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
     const WAKE: &str = include_str!("../tests/recordings/claude-2.1.319-background-wake.jsonl");
     const STOP: &str = include_str!("../tests/recordings/claude-2.1.319-stop-task.jsonl");
+    const MODEL_EFFORT: &str =
+        include_str!("../tests/recordings/claude-2.1.319-set-model-effort.jsonl");
 
     const ACCEPT: &str = include_str!("../tests/recordings/claude-2.1.291-accept.jsonl");
     const DECLINE: &str = include_str!("../tests/recordings/claude-2.1.291-decline.jsonl");
@@ -2069,6 +2109,8 @@ mod tests {
             Interaction::Build,
             None,
             None,
+            None,
+            None,
         );
         assert!(
             script.starts_with("cd '/home/u/.yantra/worktrees/chat/w/11111111' || exit 1\nc=$("),
@@ -2092,6 +2134,8 @@ mod tests {
             Interaction::Build,
             None,
             None,
+            None,
+            None,
         );
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
     }
@@ -2106,6 +2150,8 @@ mod tests {
             PermissionMode::Supervised,
             Interaction::Build,
             None,
+            None,
+            None,
             Some("9a11f727-ba24"),
         );
         assert!(
@@ -2118,6 +2164,8 @@ mod tests {
             &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
+            None,
+            None,
             None,
             Some("x'; touch /tmp/pwned; '"),
         );
@@ -2137,6 +2185,8 @@ mod tests {
             &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
+            None,
+            None,
             None,
             None,
         );
@@ -2163,7 +2213,16 @@ mod tests {
             (PermissionMode::Supervised, "default"),
             (PermissionMode::FullAccess, "default"),
         ] {
-            let script = command("/w", &keeper(), mode, Interaction::Build, None, None);
+            let script = command(
+                "/w",
+                &keeper(),
+                mode,
+                Interaction::Build,
+                None,
+                None,
+                None,
+                None,
+            );
             assert!(
                 script.contains(&format!(
                     "exec \"$c\" --add-dir {IMAGES} --permission-mode {flag} -p --input-format"
@@ -2184,7 +2243,16 @@ mod tests {
             PermissionMode::Auto,
             PermissionMode::FullAccess,
         ] {
-            let script = command("/w", &keeper(), mode, Interaction::Plan, None, None);
+            let script = command(
+                "/w",
+                &keeper(),
+                mode,
+                Interaction::Plan,
+                None,
+                None,
+                None,
+                None,
+            );
             assert!(
                 script.contains(&format!(
                     "exec \"$c\" --add-dir {IMAGES} --permission-mode plan -p"
@@ -2193,6 +2261,73 @@ mod tests {
             );
             assert_eq!(script.matches("--permission-mode").count(), 1, "{script}");
         }
+    }
+
+    /// Y-564: the model and the effort follow the mode, each only when picked.
+    #[test]
+    fn a_picked_model_and_effort_follow_the_mode() {
+        let model = Model::try_from("claude-opus-5-5[1m]".to_owned()).expect("a model");
+        let both = command(
+            "/w",
+            &keeper(),
+            PermissionMode::Supervised,
+            Interaction::Build,
+            Some(&model),
+            Some(Effort::Xhigh),
+            None,
+            None,
+        );
+        assert!(
+            both.contains(
+                "--permission-mode default --model 'claude-opus-5-5[1m]' --effort xhigh -p --input-format"
+            ),
+            "{both}"
+        );
+        let model_only = command(
+            "/w",
+            &keeper(),
+            PermissionMode::Supervised,
+            Interaction::Build,
+            Some(&model),
+            None,
+            None,
+            None,
+        );
+        assert!(
+            model_only.contains("--model 'claude-opus-5-5[1m]' -p "),
+            "{model_only}"
+        );
+        assert!(!model_only.contains("--effort"), "{model_only}");
+        let effort_only = command(
+            "/w",
+            &keeper(),
+            PermissionMode::Auto,
+            Interaction::Build,
+            None,
+            Some(Effort::Low),
+            None,
+            None,
+        );
+        assert!(
+            effort_only.contains("--permission-mode auto --effort low -p "),
+            "{effort_only}"
+        );
+        assert!(!effort_only.contains("--model"), "{effort_only}");
+        let neither = command(
+            "/w",
+            &keeper(),
+            PermissionMode::Auto,
+            Interaction::Build,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(neither.contains("--permission-mode auto -p "), "{neither}");
+        assert!(
+            !neither.contains("--model") && !neither.contains("--effort"),
+            "{neither}"
+        );
     }
 
     /// ADR-0038 decision 2: a Chat turn reaches the room tools over HTTP,
@@ -2208,6 +2343,8 @@ mod tests {
             &keeper(),
             PermissionMode::FullAccess,
             Interaction::Build,
+            None,
+            None,
             Some(&mcp),
             None,
         );
@@ -2231,6 +2368,8 @@ mod tests {
             &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
+            None,
+            None,
             Some(&hostile),
             None,
         );
@@ -2541,6 +2680,8 @@ mod tests {
             text,
             mode: PermissionMode::Supervised,
             interaction: Interaction::Build,
+            model: None,
+            effort: None,
         }
     }
 
@@ -2746,6 +2887,8 @@ mod tests {
             text,
             mode: PermissionMode::AutoAcceptEdits,
             interaction: Interaction::Build,
+            model: None,
+            effort: None,
         };
         session.send_turn(&edits("edit")).expect("stdin is open");
         assert_eq!(
@@ -2763,6 +2906,8 @@ mod tests {
                 text: "plan it",
                 mode: PermissionMode::Supervised,
                 interaction: Interaction::Plan,
+                model: None,
+                effort: None,
             })
             .expect("stdin is open");
         assert_eq!(
@@ -2770,6 +2915,79 @@ mod tests {
             json!({"subtype": "set_permission_mode", "mode": "plan"})
         );
         assert_eq!(fake.receive().await, Some(user("plan it")));
+    }
+
+    /// Y-564, ADR-0041 decision 5: a turn with another model or effort sets
+    /// it on the live process before its line, and an unchanged pair sends
+    /// nothing. `None` goes back to Claude's default.
+    #[tokio::test]
+    async fn a_new_model_or_effort_is_set_on_the_live_process_once() {
+        let (session, _events, mut fake) = pair(None);
+        fake.receive().await;
+        let opus = Model::try_from("opus".to_owned()).expect("a model");
+        let turn = |text, model, effort| Prompt {
+            model,
+            effort,
+            ..build(text)
+        };
+        session
+            .send_turn(&turn("same", None, None))
+            .expect("stdin is open");
+        assert_eq!(fake.receive().await, Some(user("same")));
+
+        session
+            .send_turn(&turn("opus", Some(&opus), None))
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await,
+            Some(
+                json!({"type": "control_request", "request_id": "yantra-model-1",
+                "request": {"subtype": "set_model", "model": "opus"}})
+            )
+        );
+        assert_eq!(fake.receive().await, Some(user("opus")));
+
+        session
+            .send_turn(&turn("think", Some(&opus), Some(Effort::Max)))
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await.expect("a line")["request"],
+            json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": "max"}})
+        );
+        assert_eq!(fake.receive().await, Some(user("think")));
+
+        session
+            .send_turn(&turn("again", Some(&opus), Some(Effort::Max)))
+            .expect("stdin is open");
+        assert_eq!(fake.receive().await, Some(user("again")));
+
+        session
+            .send_turn(&turn("default", None, None))
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await.expect("a line")["request"],
+            json!({"subtype": "set_model", "model": null})
+        );
+        assert_eq!(
+            fake.receive().await.expect("a line")["request"],
+            json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": null}})
+        );
+        assert_eq!(fake.receive().await, Some(user("default")));
+    }
+
+    /// Recorded on 2.1.319 with no user turn: Claude answers `set_model` and
+    /// `apply_flag_settings` with success, `null` included, and the session
+    /// reads those answers as no event.
+    #[tokio::test]
+    async fn claudes_answers_to_a_model_or_effort_change_make_no_event() {
+        assert_eq!(MODEL_EFFORT.matches("\"subtype\":\"success\"").count(), 4);
+        assert!(!MODEL_EFFORT.contains("not supported"));
+        let (_session, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        fake.play(MODEL_EFFORT).await;
+        fake.play(&(line(&init()) + &line(&result(None)))).await;
+        let seen = until_completed(&mut events).await;
+        assert!(matches!(seen.first(), Some(Event::TurnStarted)), "{seen:?}");
     }
 
     /// ADR-0041 decision 6, recorded on 2.1.319: `stop_task` stops a task

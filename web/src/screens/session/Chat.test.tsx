@@ -22,6 +22,7 @@ import {
   chatNotLoggedIn,
   chatQueue,
   chatStopTaskFailed,
+  threads,
 } from '@/contract.gen'
 import { aMentions, commands as claudeCommands } from '@/api/fixtures'
 import { writePrefs } from '@/shell/prefs'
@@ -350,6 +351,84 @@ describe('plan mode', () => {
     expect(alert.textContent).toContain('The daemon could not read what the dashboard sent.')
     expect(alert.textContent).toContain('plan mode needs the Claude harness')
     expect(toggle()).toHaveProperty('disabled', false)
+  })
+})
+
+describe("Claude's model and effort", () => {
+  async function pick(control: 'Model' | 'Effort', label: string) {
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${control}: `) }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    fireEvent.click(options.find((one) => one.getAttribute('aria-label') === label)!)
+    await settled(() => expect(screen.getByRole('button', { name: `${control}: ${label}` })).toBeTruthy())
+    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
+  }
+
+  it('sends no model and no effort until they are picked, and then sends both on the turn', async () => {
+    await open()
+    expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Effort: Default' })).toBeTruthy()
+    type('first')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say(started())
+    say(of('turn.started'))
+    await pick('Model', 'Opus')
+    await pick('Effort', 'Extra High')
+    say({ ...of('turn.completed'), payload: { state: 'completed', stopReason: 'end_turn' } })
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude finished.'))
+    type('second')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([
+        { type: 'turn', text: 'first', harness: 'claude', mode: 'supervised' },
+        { type: 'turn', text: 'second', mode: 'supervised', model: 'opus', effort: 'xhigh' },
+      ]),
+    )
+  })
+
+  it('shows neither picker on a thread another harness holds, and sends neither', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Harness: Claude' }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    fireEvent.click(options[4])
+    await settled(() => expect(screen.getByRole('button', { name: 'Harness: opencode' })).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /^Model: / })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Effort: / })).toBeNull()
+    fireEvent.change(screen.getByLabelText('Message opencode in yantra-web'), { target: { value: 'list the files' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([{ type: 'turn', text: 'list the files', harness: 'opencode', mode: 'supervised' }]),
+    )
+  })
+
+  it('keeps each thread its own model and effort', async () => {
+    await open()
+    await pick('Model', 'Haiku')
+    await pick('Effort', 'Low')
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(2))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Model: Haiku' })).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Effort: Low' })).toBeTruthy()
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(3))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy())
+  })
+
+  it('falls back to the default for a stored value it does not know', async () => {
+    localStorage.setItem('yantra.chat.model.1a2b3c4d', 'gpt-9')
+    localStorage.setItem('yantra.chat.effort.1a2b3c4d', 'ultra')
+    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(1))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy())
+    expect(screen.getByRole('button', { name: 'Effort: Default' })).toBeTruthy()
   })
 })
 
@@ -1618,5 +1697,71 @@ describe('/ slash commands (Y-563)', () => {
     key('Enter', 'opencode')
     expect(field('opencode').value).toBe('/review ')
     expect(asked).toEqual([])
+  })
+})
+
+describe('markdown in a reply (Y-653)', () => {
+  const reply = (delta: string) =>
+    say({ threadId: '1a2b3c4d', type: 'content.delta', payload: { streamKind: 'assistant_text', delta, itemId: 'm:1' } })
+  const FENCE = 'Here:\n\n```rust\nfn main() {}\n```\n'
+  const clipboard = (writeText: (text: string) => Promise<void>) => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  }
+  const threadsAnswer = (worktree: string) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).endsWith('/threads')
+          ? Response.json([{ ...threads[0], id: '1a2b3c4d', worktree }])
+          : new Response('no', { status: 404 }),
+      ),
+    )
+
+  it('copies the exact code from the button and says Copied', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    clipboard(writeText)
+    await open()
+    reply(FENCE)
+    fireEvent.click(await settled(() => screen.getByRole('button', { name: 'Copy code' })))
+    await settled(() => expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy())
+    expect(writeText).toHaveBeenCalledWith('fn main() {}')
+  })
+
+  it('selects the code and shows the hint when the clipboard refuses', async () => {
+    clipboard(() => Promise.reject(new Error('insecure context')))
+    await open()
+    reply(FENCE)
+    fireEvent.click(await settled(() => screen.getByRole('button', { name: 'Copy code' })))
+    await settled(() => expect(document.querySelector('.chat__code-hint')?.textContent).toMatch(/no clipboard/))
+    expect(screen.queryByRole('button', { name: 'Copied' })).toBeNull()
+  })
+
+  it('draws a file in inline code as an editor link once the worktree is known', async () => {
+    threadsAnswer('/wt/site')
+    await open()
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
+    reply('See `src/main.rs:12` and `foo()`.')
+    const link = await settled(() => screen.getByRole('link', { name: 'Open src/main.rs in VS Code' }))
+    expect(link.getAttribute('href')).toBe('vscode://vscode-remote/ssh-remote+cachyos-g14/wt/site/src/main.rs:12')
+    expect(link.querySelector('code')?.textContent).toBe('src/main.rs:12')
+    expect(screen.getByText('foo()').closest('a')).toBeNull()
+  })
+
+  it('leaves a path as plain code with no worktree', async () => {
+    await open()
+    reply('See `src/main.rs`.')
+    await settled(() => expect(screen.getByText('src/main.rs')).toBeTruthy())
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('opens another link in a new tab, and renders no markdown for the user', async () => {
+    await open()
+    say({ threadId: '1a2b3c4d', type: 'content.delta', payload: { streamKind: 'user_text', delta: 'use **bold** `a/b.rs`', itemId: 'user:1' } })
+    reply('[docs](https://example.com/x)')
+    const link = await settled(() => screen.getByRole('link', { name: 'docs' }))
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noreferrer')
+    expect(screen.getByText('use **bold** `a/b.rs`').tagName).toBe('P')
   })
 })
