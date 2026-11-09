@@ -811,7 +811,8 @@ The rules from before the keeper still hold:
   says `image attached` and never a byte or a size.
 - **A `turn` may carry `model` and `effort`** (Y-564). A keeper's first Claude turn passes them
   as `--model` and `--effort`. A later turn that changes one sends `set_model` or
-  `apply_flag_settings` to the live process first (ADR-0041 decision 5). An ACP turn ignores them. A model outside `[A-Za-z0-9._[]-]`, over 64
+  `apply_flag_settings` to the live process first (ADR-0041 decision 5). A room's turn keeps the
+  model and effort the live process runs with. An ACP turn ignores them. A model outside `[A-Za-z0-9._[]-]`, over 64
   characters or starting with `-`, and an effort outside `low` to `max`, are `badFrame`.
 - **A thread keeps its harness.** An unknown name, or a name that differs from the thread's, is
   `badFrame`. An ACP event is relayed under the worktree's thread id, and ACP's own

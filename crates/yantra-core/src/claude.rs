@@ -328,6 +328,11 @@ impl Session {
         self.shared.lock().session.clone()
     }
 
+    /// The `--model` and `--effort` Claude runs with now; `None` is Claude's default.
+    pub fn picked(&self) -> (Option<chat::Model>, Option<chat::Effort>) {
+        self.shared.lock().picked.clone()
+    }
+
     /// When Claude last wrote any line, an event or not.
     pub fn heard(&self) -> Option<tokio::time::Instant> {
         self.shared.lock().heard

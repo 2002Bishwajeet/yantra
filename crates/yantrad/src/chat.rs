@@ -438,6 +438,8 @@ struct Next {
     interaction: Interaction,
     model: Option<Model>,
     effort: Option<Effort>,
+    /// A room's turn, which keeps the model and effort the thread runs with.
+    room: bool,
 }
 
 impl Next {
@@ -2022,6 +2024,7 @@ async fn heard_frame<M: Machine, P: Peer>(
                         interaction,
                         model,
                         effort,
+                        room: false,
                     };
                     let next = match &live {
                         Some(live) => match machine.registry().hold(live, next) {
@@ -2821,6 +2824,7 @@ async fn start_or_hold<M: Machine>(
             interaction: next.interaction,
             model: next.model.clone(),
             effort: next.effort,
+            room: next.room,
         };
         let turned = match here.harness {
             None => claude_turn(machine, name, &here.place, turn, unsubscribed).await?,
@@ -2982,6 +2986,7 @@ async fn acp_turn<M: Machine>(
         interaction: Interaction::Build,
         model: None,
         effort: None,
+        room: false,
     }));
     Ok(Turned::Started(subscribed))
 }
@@ -3337,7 +3342,7 @@ async fn keep_claude<M: Machine>(
 }
 
 /// Sends a turn the thread is marked busy with to Claude: its mode, the prompt
-/// the browser draws, and the prompt. A keeper whose stdin has gone holds the
+/// the browser draws, and the prompt. A room's turn keeps the model and effort. A keeper whose stdin has gone holds the
 /// turn for the next one.
 async fn send_turn<M: Machine>(
     machine: &M,
@@ -3345,8 +3350,11 @@ async fn send_turn<M: Machine>(
     place: &Place,
     live: &Live,
     claude: &mut ClaudeKeeper,
-    turn: Next,
+    mut turn: Next,
 ) {
+    if turn.room {
+        (turn.model, turn.effort) = claude.session.picked();
+    }
     if let Err(said) = machine.write_mode(place, turn.mode).await {
         tracing::warn!("chat {name}: the mode was not written: {said}");
     }
@@ -3428,6 +3436,7 @@ async fn claude_next<M: Machine>(
         interaction: Interaction::Build,
         model: None,
         effort: None,
+        room: true,
     };
     send_turn(machine, name, place, live, claude, turn).await;
     tracing::info!(
@@ -3890,6 +3899,7 @@ fn wake_on<M: Machine>(
                 interaction: Interaction::Build,
                 model: None,
                 effort: None,
+                room: true,
             };
             match claude_turn(&machine, &name, &place, turn, false).await {
                 Ok(Turned::Started(_)) => {
@@ -4331,6 +4341,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    room: false,
                 }],
             ))
             .expect("a queue serialises"),
@@ -8198,6 +8209,49 @@ mod tests {
         assert_eq!(lock(&script.commands).len(), 1, "one process");
     }
 
+    /// Y-564: a room's turn, queued behind the person's or on an idle
+    /// thread, runs in the model and effort the thread runs with.
+    #[tokio::test]
+    async fn a_room_prompt_keeps_the_picked_model_and_effort() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(
+            json!({"type": "turn", "text": "fix the test", "mode": "full-access",
+                        "model": "opus", "effort": "max"}),
+        );
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        let waking = tokio::spawn(wake_on(
+            Arc::clone(&script),
+            "web".to_owned(),
+            place(),
+            "one".to_owned(),
+        ));
+        until_script(&script, |script| queued(script) == 1).await;
+        claude.say(ended()).await;
+        let mode = claude.heard().await.expect("a line");
+        assert_eq!(mode["request"]["subtype"], "set_permission_mode");
+        assert_eq!(prompt_of(&claude.heard().await.expect("a line")), "one");
+        assert_eq!(waking.await.expect("no panic"), Woke::Started);
+        claude.say(ended()).await;
+        until_turn_over(&script).await;
+
+        assert_eq!(
+            wake_on(
+                Arc::clone(&script),
+                "web".to_owned(),
+                place(),
+                "two".to_owned()
+            )
+            .await,
+            Woke::Started
+        );
+        assert_eq!(prompt_of(&claude.heard().await.expect("a line")), "two");
+        assert_eq!(lock(&script.commands).len(), 1, "one process");
+    }
+
     #[tokio::test]
     async fn queue_two_turns_run_in_the_last_ones_model_and_effort() {
         let script = Arc::new(Script::default());
@@ -8736,6 +8790,7 @@ mod tests {
             interaction: Interaction::default(),
             model: None,
             effort: None,
+            room: false,
         }
     }
 
