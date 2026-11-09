@@ -22,6 +22,7 @@ const RETRY = A.retry || []
 const REPO = '/home/biswa/Github/homelab/yantra'
 const WT_ROOT = `${REPO}/.claude/worktrees`
 const REPORT = `${REPO}/.claude/build-loop/${TODAY}.md`
+const GATE_LOGS = `${REPO}/.claude/build-loop/gate-logs`
 
 const BUILDER = {
   'rust-transport': { model: 'opus', effort: 'high' },
@@ -98,12 +99,13 @@ const PLAN_SCHEMA = {
 const VERIFY_SCHEMA = {
   type: 'object',
   properties: {
+    finished: { type: 'boolean', description: 'true only when the log ends in its GATE_EXIT line. false means the gate still runs, and pass then means nothing' },
     pass: { type: 'boolean' },
     failures: { type: 'string', description: 'the failing command and the last 60 lines of its output' },
     flaky: { type: 'array', items: { type: 'string' }, description: 'tests that failed in the gate, are in files that `git diff --name-only origin/main...HEAD` does not list, and passed when rerun alone' },
     fixedChecks: { type: 'array', items: { type: 'string' }, description: 'only when a Then command is itself wrong (an unknown target, a filter that matches no test): every Then command, corrected' },
   },
-  required: ['pass', 'failures'],
+  required: ['finished', 'pass', 'failures'],
 }
 
 const REVIEW_SCHEMA = {
@@ -168,40 +170,60 @@ const CLEANUP = `Afterwards remove only the test containers: those with label ya
 
 // Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
 // Y-493 parked because the agent read the log tail while the gate still ran, so the run must end in a sentinel line.
-const GATE_HOW = `The gate can take longer than a 10-minute Bash call. Put the gate commands and the Then commands in one background shell: \`( <commands> ) > "$LOG" 2>&1; echo "GATE_EXIT=$?" >> "$LOG"\`. Wait with Monitor and an until-loop on \`grep -q '^GATE_EXIT=' "$LOG"\`, because a foreground sleep is blocked. Set timeout_ms to 1800000 on the Monitor call. When the Monitor expires and the GATE_EXIT line does not exist, arm it again. Re-arm until the GATE_EXIT line exists. Report nothing until that line exists. Judge pass from GATE_EXIT and the failing tests, never from a partial tail. ${CLEANUP}`
+const WAIT = (gateLog) => `Wait with Monitor and an until-loop on \`grep -q '^GATE_EXIT=' ${gateLog}\`, because a foreground sleep is blocked. Set timeout_ms to 1800000 on the Monitor call. When the Monitor expires and the GATE_EXIT line does not exist, arm it again. Judge pass from GATE_EXIT and the failing tests, never from a partial tail. If you must return before the line exists, return finished=false: the run sends another agent to wait.`
+const GATE_HOW = (gateLog) => `The gate can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then put the gate commands and the Then commands in one background shell: \`( <commands> ) > ${gateLog} 2>&1; echo "GATE_EXIT=$?" >> ${gateLog}\`. ${WAIT(gateLog)} ${CLEANUP}`
+
+// A counter, not the clock, names the log: a prompt that changes on every run defeats the resume cache.
+const gateRuns = {}
+const nextGateLog = (row, label) => `${GATE_LOGS}/${TODAY}-${row.id}-${label}-${(gateRuns[row.id] = (gateRuns[row.id] || 0) + 1)}.log`
+
+// Y-649 and Y-653 parked on 2026-11-09 with no red test: the gate agent returned before GATE_EXIT, and that counted as a failed round.
+async function untilFinished(row, wt, gateLog, label, v) {
+  for (let i = 1; v && !v.finished && i <= 6; i++) {
+    v = await agent(
+      `The gate for ${row.id} in ${wt} runs in the background and writes to ${gateLog}. Do not start it again and do not change any file. If the log does not exist, the gate never started: return finished=true, pass=false. ${WAIT(gateLog)} ${CLEANUP}
+${FLAKY}`,
+      { label: `wait:${row.id}:${label}:${i}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
+    )
+  }
+  if (v && !v.finished) return { ...v, pass: false, failures: `The gate did not finish in 6 waits. Log: ${gateLog}` }
+  return v
+}
 
 // A slow-network test outside the diff parked Y-585; CI runs the full suites again, so a real regression still blocks the merge.
 const FLAKY = `When the gate fails, rerun each failing test alone. For nextest that is \`NEXTEST_TEST_THREADS=1 cargo nextest run -p <crate> -E 'test(=<name>)'\`, with YANTRA_REQUIRE_PODMAN=1 if the gate used it. For e2e that is one spec. A failure is a retry, not a failure, when its test file is outside \`git diff --name-only origin/main...HEAD\` and it passes alone. If every failure is like that, report pass=true and list those tests in flaky. Any other failure keeps pass=false.`
 
 // A web or docs row is built by Sonnet, so one Sonnet agent can run the gate and fix what it finds.
 async function verifyAndFix(row, wt, plan, label, attempts) {
-  return serialVerify(() =>
+  const gateLog = nextGateLog(row, label)
+  return serialVerify(async () => untilFinished(row, wt, gateLog, label, await
     agent(
       `Run the gate for ${row.id} in ${wt}, fix what fails, and report whether it passes at the end.
 Gate: ${GATE}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
-${GATE_HOW}
+${GATE_HOW(gateLog)} Each rerun of the whole gate writes to the same log: truncate it first.
 If a command fails, find the cause, fix the code, commit, and rerun only the failing test file or spec until it passes. Then rerun the gate once. Stop after ${attempts} gate runs.
 ${FLAKY} Do not change code for a flaky test.
 A screenshot that the row's change was meant to alter: regenerate it with \`just web-e2e --update-snapshots=changed <spec>\` and commit the images. A screenshot it was not meant to alter is a regression: fix the code.
 If a Then command fails before any test runs because the command is wrong, not the code, correct it and return the corrected list as fixedChecks.${RULES(wt)}`,
       { label: `gate:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'medium' },
     ),
-  )
+  ))
 }
 
 async function verify(row, wt, plan, label) {
-  return serialVerify(() =>
+  const gateLog = nextGateLog(row, label)
+  return serialVerify(async () => untilFinished(row, wt, gateLog, label, await
     agent(
       `Run the gate for ${row.id} in ${wt} and report whether it passes. Do not change any file.
 Gate: ${GATE}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 If a Then command fails before any test runs because the command is wrong, not the code, correct it, run the corrected one, judge pass on that, and return the corrected list as fixedChecks.
-${GATE_HOW}
+${GATE_HOW(gateLog)}
 ${FLAKY}`,
       { label: `verify:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
     ),
-  )
+  ))
 }
 
 async function fix(row, wt, what) {
