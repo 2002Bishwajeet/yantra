@@ -200,7 +200,8 @@
    bar and the navigation bar hold still, and the page behind them never rubber-bands or pulls to refresh.
    The tablet and the desktop keep the document as the scroller. */
 [data-shell="phone"] {
-  height: 100dvh;
+  /* Y-672: the keyboard inset (useKeyboardInset) ends `main` at the keyboard's top, so the sticky dock rides above it. */
+  height: calc(100dvh - var(--m3-keyboard-inset, 0px));
   min-height: 0;
   overflow: hidden;
 }

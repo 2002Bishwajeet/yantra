@@ -23,6 +23,7 @@ import { StatusAnnouncer } from './Announce'
 import { DESTINATIONS, isDestination, isRailed } from './destinations'
 import { useFabFocus, type FabFocus } from './fabFocus'
 import { useFormFactor } from './formFactor'
+import { useKeyboardInset } from './useKeyboardInset'
 import { Avatar } from './Avatar'
 import { Bell } from './Bell'
 import { Palette } from './Palette'
@@ -406,6 +407,7 @@ export function Shell() {
   // Here rather than on a page: every route is the dashboard being open, and
   // D3 §13 suppresses the push for as long as one is.
   useViewing()
+  useKeyboardInset()
   const { theme, density, seed } = usePrefs()
   const factor = useFormFactor()
   const pathname = usePathname()
