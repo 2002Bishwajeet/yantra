@@ -7,7 +7,7 @@
 @import "tailwindcss" source(none);
 
 /* ADR-0024 §2: the Material roles, the type ramp, the springs and the three
-   faces. This file adds the page under them and nothing else. */
+   faces. This file adds the page and the touch basics under them and nothing else. */
 @import "./m3/tokens.css";
 
 /* Y-671, note 25 F2: touch basics. Unlayered element rules, so a class that
@@ -29,7 +29,11 @@ textarea,
 [role="tab"],
 [role="menuitem"],
 [role="switch"],
-[role="option"] {
+[role="option"],
+[role="radio"],
+[role="checkbox"],
+[role="menuitemradio"],
+[role="menuitemcheckbox"] {
   touch-action: manipulation;
 }
 
@@ -39,7 +43,11 @@ summary,
 [role="tab"],
 [role="menuitem"],
 [role="switch"],
-[role="option"] {
+[role="option"],
+[role="radio"],
+[role="checkbox"],
+[role="menuitemradio"],
+[role="menuitemcheckbox"] {
   -webkit-user-select: none;
   user-select: none;
 }

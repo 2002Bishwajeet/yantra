@@ -21,6 +21,14 @@ test('the base touch rules hold on a touch screen', async ({ page, size }) => {
   await expect(button).toHaveCSS('touch-action', 'manipulation')
   await expect(button).toHaveCSS('user-select', 'none')
 
+  // A Segmented segment is a span[role=radio], not a button.
+  await page.goto('/settings/appearance')
+  const segment = page.getByRole('radio', { name: 'Dark' })
+  await expect(segment).toHaveCSS('touch-action', 'manipulation')
+  await expect(segment).toHaveCSS('user-select', 'none')
+  await page.goto('/')
+  await firstReading(page)
+
   // A tap must not leave the hover layer lit.
   await button.tap()
   await expect(button).toHaveAttribute('aria-expanded', 'true')
