@@ -211,3 +211,8 @@ Accessed 2026-11-08.
   check of `SO_PEERCRED` on a loopback TCP pair and a Unix pair. On `yantra-box`, over ssh and read
   only: `tailscale version`, `tailscale serve status`, `ps`, and `curl` to `/healthz` on `:8443`
   and `:7717`.
+
+> **2026-11-09 ([Y-681](../../tracker.md)): the hole on other machines is closed by a passkey.**
+> [ADR-0044](0044-a-write-needs-the-owners-passkey.md) closes the open hole in the Consequences and
+> the first *Not decided here* item. It changes one case in decision 3: a `serve` hop whose forwarded
+> address is this node's own passes when it carries a live session cookie.

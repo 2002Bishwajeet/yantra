@@ -121,3 +121,9 @@ serves one user. Throughput was never the constraint, and no benchmark motivated
 > turn on an archive of every machine's redacted conversations, encrypted on the appliance's disk.
 > Syncthing writes it and `ctx` indexes it. yantrad writes none of it and reads none of it, so the
 > amendments above still hold for the daemon. What changed is the appliance, not the daemon.
+
+> **Bent a fourth time on 2026-11-09 (Y-681), by the same bound.**
+> [ADR-0044](0044-a-write-needs-the-owners-passkey.md) has the daemon write
+> `~/.config/yantra/passkeys.toml`: passkey public keys and session token hashes. It is an input the
+> owner gives, not a store of what the daemon observed. It holds no session of the fleet, no verdict,
+> no beat and no history, and the first look after a start still knows nothing about the fleet.
