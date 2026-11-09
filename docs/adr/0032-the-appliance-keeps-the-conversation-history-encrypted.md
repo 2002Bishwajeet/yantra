@@ -90,3 +90,9 @@ and Grok history. The build rows carry these checks.
 > fresh session there from a short handoff summary and moves the work through git, because a full
 > transcript fills the new session's context. Y-518 plans it. The raw archive stays for search.
 
+
+> **2026-11-09 ([Y-666](../../tracker.md)): yantrad now persists one thing, and it is not the
+> history.** [ADR-0045](0045-the-hub-keeps-a-thread-store.md) has the daemon keep a store of thread
+> state: session id, title, machine and status, with no message text. Decision 6 still holds for the
+> history: yantrad stores none of it. A search of message text across threads asks `ctx` on this
+> archive, not the thread store.
