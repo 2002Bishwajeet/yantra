@@ -1,3 +1,9 @@
+/* A real key fingerprint, a path and a 63-character tailnet name are single
+   words wider than a phone. */
+.add-device {
+  overflow-wrap: anywhere;
+}
+
 .add-device__lead {
   margin: 0;
 }

@@ -231,7 +231,6 @@ describe('commit', () => {
   })
 
   it.each([
-    ['the thread has nothing to commit', 'Nothing to commit'],
     ['the Mac has no tmux server from a login session', 'The Mac has no login tmux server'],
   ])('draws a 409 draft saying "%s" as %s, not as a running turn', async (said, title) => {
     daemon({ message: [409, said] })
@@ -240,6 +239,23 @@ describe('commit', () => {
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByRole('heading', { name: title })).toBeTruthy()
     expect(within(alert).queryByText(/Wait for the turn/)).toBeNull()
+  })
+
+  it.each([
+    ['the quick action', async () => fireEvent.click(quick('Commit'))],
+    ['the menu', async () => pick('Commit')],
+  ])('draws a draft that finds nothing to commit from %s as an empty state, with nothing to fill or retry', async (_, start) => {
+    daemon({ message: [409, 'the thread has nothing to commit'] })
+    open()
+    await start()
+    const popup = within(await dialog())
+    expect(await popup.findByText('Nothing to commit')).toBeTruthy()
+    expect(popup.getByText('The thread has no changes.')).toBeTruthy()
+    expect(popup.queryByRole('textbox')).toBeNull()
+    expect(popup.queryByRole('alert')).toBeNull()
+    expect(popup.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(popup.queryByRole('button', { name: 'Commit' })).toBeNull()
+    expect(popup.getByRole('button', { name: 'Close' })).toBeTruthy()
   })
 
   it.each([

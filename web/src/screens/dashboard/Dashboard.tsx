@@ -45,7 +45,7 @@ import { asEvents } from '@/shell/notifications'
 import { phrase } from '@/shell/phrase'
 import { usePrefs } from '@/shell/prefs'
 import { useTick } from '@/useTick'
-import { unclaimed, unreachable, waiting, work, type WorkRow } from '@/work'
+import { openedByHand, unclaimed, unreachable, waiting, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
@@ -146,13 +146,15 @@ function Strip(props: {
   }
   // D7 §3.4: only a machine that runs sessions is counted; a phone never is.
   const counted = machines.data.filter(runsSessions)
-  const { up, down } = online(counted, now)
+  const { up: awake, down } = online(counted, now)
   // D7 §3.3: off is asleep, which is normal; online and not answering ssh is
   // the one that needs a look.
   const named = new Set(down.map((one) => one.name))
+  const silent = notAnswering.filter((name) => !named.has(name) && counted.some((one) => one.name === name))
+  const up = awake - silent.length
   const all = [
     ...down.map((one) => ({ ...one, asleep: true })),
-    ...notAnswering.filter((name) => !named.has(name)).map((name) => ({ name, since: null, asleep: false })),
+    ...silent.map((name) => ({ name, since: null, asleep: false })),
   ]
   return (
     <div className="dash__strip">
@@ -515,21 +517,23 @@ function Worth(props: {
               >
                 Attach
               </Button>
-              <Suspense fallback={kill(false)}>
-                <KillSession
-                  machine={machine}
-                  row={
-                    <Row>
-                      <RowText
-                        headline={session.name}
-                        supporting={`${machine} · ${plural(session.windows, 'window')} · ${ago(now / 1000 - session.created_at, now).text}`}
-                      />
-                    </Row>
-                  }
-                  session={session.name}
-                  trigger={kill(true)}
-                />
-              </Suspense>
+              {openedByHand(session.name) ? null : (
+                <Suspense fallback={kill(false)}>
+                  <KillSession
+                    machine={machine}
+                    row={
+                      <Row>
+                        <RowText
+                          headline={session.name}
+                          supporting={`${machine} · ${plural(session.windows, 'window')} · ${ago(now / 1000 - session.created_at, now).text}`}
+                        />
+                      </Row>
+                    }
+                    session={session.name}
+                    trigger={kill(true)}
+                  />
+                </Suspense>
+              )}
             </li>
           ))}
         </ul>

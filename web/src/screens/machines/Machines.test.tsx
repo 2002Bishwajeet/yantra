@@ -181,6 +181,19 @@ describe('/machines on the busy fleet', () => {
     expect(worth.queryByText('yantra-web')).toBeNull()
   })
 
+  it('keeps a digit-named session listed with Attach but draws no Kill for it', async () => {
+    const state = scenario('busy')
+    const held = (state.sessions!.data as { machine: string; sessions: object[] }[])[0]!
+    held.sessions.push({ name: '0', windows: 1, attached: 0, created: 'Fri Sep  4 18:40:55 2026', created_at: 1788547255 })
+    mount('desktop', '/machines', state)
+    await screen.findByText('scratch')
+    const worth = within(screen.getByRole('region', { name: 'Worth a look' }))
+    const item = (name: string) => worth.getByText(name, { selector: '.machines__name' }).closest('li')!
+    expect(within(item('0')).getByRole('link', { name: 'Attach' })).toBeTruthy()
+    expect(within(item('0')).queryByRole('button', { name: 'Kill' })).toBeNull()
+    expect(within(item('scratch')).getByRole('button', { name: 'Kill' })).toBeTruthy()
+  })
+
   /** Y-580: the card leads with facts, not with a beat. */
   it('leads with a facts line and says nothing of a beat, an address or an internal term', async () => {
     const state = scenario('busy')

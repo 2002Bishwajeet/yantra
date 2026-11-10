@@ -70,6 +70,7 @@ describe('gitFailure', () => {
   it('lets a person retry everything but an empty message and a missing thread', () => {
     expect(gitFailure('commit', refused(400)).retryable).toBe(false)
     expect(gitFailure('commit', refused(409)).retryable).toBe(true)
+    expect(gitFailure('draft', refused(409, 'the thread has nothing to commit')).retryable).toBe(false)
   })
 
   it('has a distinct title for every kind', () => {

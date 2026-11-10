@@ -46,6 +46,27 @@ test.describe('the dashboard on a busy fleet', () => {
     await expect(worth.getByRole('button', { name: 'Adopt' })).toHaveCount(0)
   })
 
+  test('keeps the New session button off the "waiting on you" headline', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the FAB floats over the page only on a phone')
+    // nogrant leaves GitHub unset, so Finish setup sits above the hero and pushes the headline down.
+    await scenario(page, 'nogrant')
+    await page.goto('/')
+    await firstReading(page)
+    await expect(region(page, 'Finish setup')).toBeVisible()
+    const words = page.locator('.dash__hero-words')
+    await expect(words).toBeVisible()
+    // The page scrolls under the FAB, so the headline is judged by where its lines end across the page:
+    // every line must stop left of the FAB, wherever the scroll puts it.
+    const clear = await page.evaluate(() => {
+      const fab = document.querySelector('.shell__fab')!.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(document.querySelector('.dash__hero-words')!)
+      return [...range.getClientRects()].map((line) => line.right <= fab.left)
+    })
+    expect(clear.length).toBeGreaterThan(0)
+    expect(clear.every(Boolean)).toBe(true)
+  })
+
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {
     const h1 = page.locator('h1:visible')
     await expect(h1).toHaveCount(1)

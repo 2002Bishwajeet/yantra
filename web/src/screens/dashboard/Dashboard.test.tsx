@@ -114,6 +114,28 @@ describe('the Dashboard on a busy fleet', () => {
     )
   })
 
+  it('keeps a digit-named session listed with Attach but draws no Kill for it', async () => {
+    const state = scenario('busy')
+    const held = (state.sessions!.data as { machine: string; sessions: object[] }[])[0]!
+    held.sessions.push({ name: '0', windows: 1, attached: 0, created: 'Fri Sep  4 18:40:55 2026', created_at: 1788547255 })
+    mount('desktop', '/', state)
+    await drawn()
+    const item = (name: string) => screen.getByText(name, { selector: '.dash__name' }).closest('li')!
+    expect(within(item('0')).getByRole('link', { name: 'Attach' })).toBeTruthy()
+    expect(within(item('0')).queryByRole('button', { name: 'Kill' })).toBeNull()
+    await waitFor(() => expect(within(item('scratch')).getByRole('button', { name: 'Kill' })).toBeTruthy())
+  })
+
+  it('does not count a machine as online while it is not answering', async () => {
+    const state = scenario('busy')
+    const was = state.status.landing!.data as object
+    state.status.landing = { looked: 'ok', age_seconds: 0, data: { ...was, reached: 'no', status: null, error: 'ssh timed out' } } as never
+    mount('desktop', '/', state)
+    await drawn()
+    expect(screen.getByText(/of 6/).textContent).toBe('4 of 6 machines online')
+    expect(screen.getByText(/macbook not answering/)).toBeTruthy()
+  })
+
   it('asks before Kill, because a killed session cannot be brought back', async () => {
     const asked = mount('desktop', '/')
     await drawn()

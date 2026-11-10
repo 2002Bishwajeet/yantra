@@ -160,12 +160,16 @@ function Refusals(props: { rows: Row[] }) {
   )
 }
 
-function Read(props: { fanned: Fanned; factor: FormFactor }) {
-  const { fanned, factor } = props
+function Read(props: { fanned: Fanned; factor: FormFactor; read: () => void }) {
+  const { fanned, factor, read } = props
   if (fanned.fanned === 'no') {
     return (
       <Card className="usage__card">
-        <EmptyState state="unknown" title="Nothing read yet" />
+        <EmptyState
+          action={<Button onClick={read}>Read spend</Button>}
+          state="unknown"
+          title="Nothing read yet"
+        />
       </Card>
     )
   }
@@ -258,13 +262,11 @@ export function Usage() {
                   </Segment>
                 ))}
               </Segmented>
-              <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
-                {fanned.fanned === 'reading'
-                  ? `reading ${fanned.of}…`
-                  : fanned.fanned === 'done'
-                    ? 'Read again'
-                    : 'Read spend'}
-              </Button>
+              {fanned.fanned === 'no' ? null : (
+                <Button disabled={fanned.fanned === 'reading'} onClick={() => void read()}>
+                  {fanned.fanned === 'reading' ? `reading ${fanned.of}…` : 'Read again'}
+                </Button>
+              )}
             </>
           ) : null
         }
@@ -289,7 +291,7 @@ export function Usage() {
           </EmptyState>
         </Card>
       ) : (
-        <Read factor={factor} fanned={fanned} />
+        <Read factor={factor} fanned={fanned} read={() => void read()} />
       )}
 
       <Text render={<p />} className="usage__note" scale="body-small" tone="variant">

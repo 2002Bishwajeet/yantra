@@ -132,3 +132,26 @@ test.describe('a fresh install with a ready hub', () => {
     await axe(page)
   })
 })
+
+test.describe('the first run with a real key', () => {
+  test('keeps the key fingerprint inside the phone', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'only a phone is narrower than a fingerprint')
+    await scenario(page, 'firstrun')
+    await page.route('**/api/ssh-identity', (route) =>
+      route.fulfill({
+        json: {
+          fingerprint: 'SHA256:aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789abcdefgHiJkLmNoPqRsTuVwXyZ',
+          kind: 'ed25519',
+          path: '/home/a/.ssh/id_yantra',
+          public_key: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra',
+        },
+      }),
+    )
+    await page.goto(route('dashboard').path)
+    const key = page.getByText(/SHA256:aBcDe/)
+    await expect(key).toBeVisible()
+    await expect(key).toHaveAttribute('title', /^SHA256:aBcDe/)
+    const box = (await key.boundingBox())!
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+  })
+})

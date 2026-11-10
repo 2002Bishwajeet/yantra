@@ -1,13 +1,13 @@
 # yantra web — the dashboard
 
-Sixteen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+Seventeen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every workspace and machine at `/fleet`, the machines compared at
 `/machines`, the guided Add a device at `/machines/add`, one machine at `/m/$machine`, one tmux session's terminal at
 `/m/$machine/s/$session`, one workspace's chat, terminal (with its transcript as History) and spend
 at `/w/$name`, its file at `/w/$name/repair`, the four-step create at `/new`,
-spend at `/usage`, the preferences at `/settings` and `/settings/$category`, and
+spend at `/usage`, the setup checklist at `/setup`, the preferences at `/settings` and `/settings/$category`, and
 the phone's notifications at `/notifications`, and the rooms live agents share at
-`/rooms` and `/rooms/$room` (Y-536). A sixteenth, `/m3`, is the
+`/rooms` and `/rooms/$room` (Y-536). A seventeenth, `/m3`, is the
 component gallery and has a chunk behind it in dev builds only.
 `/` is the one eager route; every other screen arrives with its own chunk
 (ADR-0024 §3). The readings poll on TanStack Query and every write is a
@@ -843,7 +843,7 @@ public/
 src/
   api.ts             the wire shapes, read and written; every state is a tag
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
-  router.ts          TanStack Router: sixteen routes, one a dev-only gallery,
+  router.ts          TanStack Router: seventeen routes, one a dev-only gallery,
                      one of them eager, each with a loader that warms its reads
   work.ts            D3 §4's bands — who must act next, and the fourth state
                      that is nobody having read yet
