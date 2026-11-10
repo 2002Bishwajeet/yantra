@@ -197,7 +197,7 @@ export type ChatFrame =
       model?: string
       effort?: Effort
     }
-  | { type: 'answer'; requestId: string; decision: Decision; answers?: Record<string, string[]> }
+  | { type: 'answer'; requestId: string; decision: Decision; answers?: Record<string, string[]> | null }
   /** Stops the turn; background tasks run on. */
   | { type: 'cancel' }
   /** Stops one background task; a failure is `stopTask`. */
