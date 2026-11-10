@@ -15,6 +15,7 @@ import { useTick } from '@/useTick'
 import { Button } from '@/m3/button/Button'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { IconButton } from '@/m3/icon-button/IconButton'
 import { State } from '@/m3/mark/Mark'
 import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuSeparator, MenuTrigger } from '@/m3/menu/Menu'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -191,18 +192,19 @@ export function ChatHeader(props: ChatHeaderProps) {
           </MenuPopup>
         </Menu>
       </nav>
-      <Button
+      {/* An icon, as T3 Code draws it: a labelled button wraps the desktop header onto two lines. */}
+      <IconButton
         aria-describedby={thread ? undefined : noTerminal}
         aria-pressed={terminal.open}
         disabled={!thread}
         focusableWhenDisabled
-        icon={<SquareTerminal />}
+        label="Terminal"
         onClick={terminal.onToggle}
         ref={terminalRef}
-        variant={terminal.open ? 'tonal' : 'text'}
+        variant={terminal.open ? 'tonal' : 'standard'}
       >
-        Terminal
-      </Button>
+        <SquareTerminal />
+      </IconButton>
       <Button
         aria-pressed={diff.open}
         icon={<Diff />}
