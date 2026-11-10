@@ -24,7 +24,7 @@ test.describe('one machine on a busy fleet', () => {
     await expect(ready.getByRole('heading', { name: 'Ready for sessions' })).toBeVisible()
     await expect(ready.getByText(/^10 of 10 · asked/)).toBeVisible()
     await expect(ready.getByRole('link', { name: 'New session' })).toBeVisible()
-    await ready.getByRole('button', { name: /^Show/ }).click()
+    await ready.getByRole('button', { name: /^Show (?!What ssh said)/ }).click()
     await expect(ready.getByText('ok', { exact: true })).toHaveCount(10)
     await expect(ready.getByText('gh signed in', { exact: true })).toBeVisible()
 
@@ -146,4 +146,36 @@ test.describe('one machine missing a basic', () => {
     await expect(card(page, 'Workspaces on this machine').getByRole('link', { name: 'New session' })).toHaveCount(0)
     await fits(page)
   })
+})
+
+/* Y-676: a phone reads the first fix, not a wall of probe text. */
+test.describe('a machine page on a phone', () => {
+  test.skip(({ size }) => size !== 'phone', 'the phone owns the page length')
+
+  test.beforeEach(async ({ page }) => {
+    await scenario(page, 'busy')
+  })
+
+  for (const name of ['nas', 'cachyos-g14']) {
+    test(`/m/${name} is under two screens, with the probe text behind What ssh said`, async ({ page }) => {
+      await page.goto(`/m/${name}`)
+      const readiness = card(page, 'Readiness')
+      await expect(readiness.getByRole('button', { name: /^Show What ssh said/ })).toBeVisible({ timeout: 15_000 })
+      const { tall, high } = await page.evaluate(() => ({
+        tall: document.documentElement.scrollHeight,
+        high: window.innerHeight,
+      }))
+      expect(tall).toBeLessThan(2 * high)
+      if (name === 'nas') {
+        const copy = readiness.getByRole('button', { name: /^Copy the command that fixes/ }).first()
+        const box = await copy.boundingBox()
+        expect(box!.y).toBeLessThan(600)
+      }
+      const mono = readiness.locator('.m3-mono.m3-wrap')
+      await expect(mono).toHaveCount(0)
+      await readiness.getByRole('button', { name: /^Show What ssh said/ }).click()
+      await expect(mono.first()).toBeVisible()
+      await fits(page)
+    })
+  }
 })

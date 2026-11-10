@@ -106,6 +106,10 @@ async function draw(
 
 const card = () => within(screen.getByRole('region', { name: 'Readiness' }))
 
+/** The folded checks; the button named "What ssh said" is the other disclosure. */
+const openChecks = () => fireEvent.click(card().getByRole('button', { name: /^Show (?!What ssh said)/ }))
+const openSaid = () => fireEvent.click(card().getByRole('button', { name: /^Show What ssh said/ }))
+
 describe('the counts on a machine with optional checks absent', () => {
   const list = [...checks(['provider-cli', 'hooks', 'heartbeat']), { check: 'mic', state: 'absent', detail: 'not installed' } as Check]
 
@@ -113,6 +117,7 @@ describe('the counts on a machine with optional checks absent', () => {
   it('agrees: chip N, title N and the needs-marked rows are one number', async () => {
     daemon()
     await draw(report(list))
+    openChecks()
     const rows = [...document.querySelectorAll('.machine__check')]
     const needs = rows.filter((one) => one.querySelector('.m3-state')?.getAttribute('data-state') === 'needs')
     expect(needs).toHaveLength(3)
@@ -129,6 +134,7 @@ describe('the counts on a machine with optional checks absent', () => {
   it('draws the absent microphone idle, with the word optional', async () => {
     daemon()
     await draw(report(list))
+    openChecks()
     const mic = [...document.querySelectorAll('.machine__check')].find((one) => one.textContent?.includes('microphone'))!
     expect(mic.querySelector('.m3-state')?.getAttribute('data-state')).toBe('idle')
     expect(within(mic as HTMLElement).getByText('optional')).toBeTruthy()
@@ -495,9 +501,9 @@ describe('the Readiness card', () => {
     daemon()
     const timed = checks().map((one) => (one.check === 'tmux' ? { ...one, took_ms: 84 } : one))
     await draw(report(timed))
-    fireEvent.click(card().getByRole('button', { name: /^Show/ }))
-    expect(card().getByText('· 84 ms')).toBeTruthy()
-    expect(card().getAllByText(/^· /)).toHaveLength(1)
+    openChecks()
+    expect(card().getByText('84 ms')).toBeTruthy()
+    expect(document.querySelectorAll('.machine__detail')).toHaveLength(1)
   })
 
   it('puts a manual fix beside its check, and still offers a session', async () => {
@@ -517,6 +523,8 @@ describe('the Readiness card', () => {
     const both = { 'login-session': NO_SERVER, 'provider-auth': NO_SERVER }
     await draw(report(checks(['login-session', 'provider-auth'], both)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'No tmux server from a login on pi' })).toBeTruthy()
+    expect(card().getAllByText('Open Terminal on pi and run:')).toHaveLength(1)
+    openChecks()
     expect(card().getAllByText('Open Terminal on pi and run:')).toHaveLength(2)
     expect(card().getAllByText('tmux -L yantra new-session -d')).toHaveLength(2)
     expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/log in|sign in/i)
@@ -542,6 +550,8 @@ describe('the Readiness card', () => {
     }
     await draw(report(checks(['hooks'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'a hook cannot run' })).toBeTruthy()
+    expect(card().queryByText(/lacks `node`/)).toBeNull()
+    openSaid()
     expect(card().getByText(/lacks `node` \(SessionStart in claude-mem@thedotmack\)/)).toBeTruthy()
     expect(card().getByText(/put its directory on PATH in your login shell/)).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
@@ -599,5 +609,38 @@ describe('the Readiness card', () => {
     await renderInApp(<Page machine={machine()} />, client)
     const install = card().getByRole('button', { name: 'Install' })
     expect(install.hasAttribute('disabled') || install.getAttribute('aria-disabled') === 'true').toBe(true)
+  })
+})
+
+/** Y-676: a phone's page is the first fix, not a wall of probe text. */
+describe('the checks on a phone-sized card', () => {
+  it('shows the first absent check with its fix open and folds the others', async () => {
+    daemon()
+    await draw(report(checks(['tmux', 'git'])))
+    expect(document.querySelectorAll('.machine__check')).toHaveLength(1)
+    expect(card().getByText('tmux')).toBeTruthy()
+    const fold = card().getByRole('button', { name: /^Show (?!What ssh said)/ })
+    expect(fold.getAttribute('aria-expanded')).toBe('false')
+    openChecks()
+    expect(document.querySelectorAll('.machine__check')).toHaveLength(IDS.length)
+  })
+
+  it('keeps every probe text out of the page until What ssh said opens', async () => {
+    daemon()
+    await draw(report(checks(['tmux'], { tmux: 'tmux is not on PATH or in any of: $HOME/.local/bin', git: 'git 2.45' })))
+    openChecks()
+    expect(card().queryByText(/not on PATH or in any of/)).toBeNull()
+    expect(card().queryByText(/git 2\.45/)).toBeNull()
+    openSaid()
+    expect(card().getByText(/tmux: tmux is not on PATH or in any of: \$HOME\/\.local\/bin/)).toBeTruthy()
+    expect(card().getByText(/git: git 2\.45/)).toBeTruthy()
+  })
+
+  it('folds a ready machine’s checks and still offers What ssh said', async () => {
+    daemon()
+    await draw(report(checks()))
+    expect(document.querySelectorAll('.machine__check')).toHaveLength(0)
+    expect(card().getByRole('button', { name: /^Show What ssh said/ }).getAttribute('aria-expanded')).toBe('false')
+    expect(card().getByRole('button', { name: /^Show (?!What ssh said)/ })).toBeTruthy()
   })
 })
