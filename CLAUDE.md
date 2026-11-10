@@ -297,7 +297,7 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   path runs the branch's `yantrad` against the real fleet, and the PR carries WebKit and Chromium
   screenshots. A machine row also passes `just test-mac` on the real Mac.
   [`walk.sh`](.claude/workflows/walk.sh) holds the paths, and its guard refuses the merge without them (Y-660).
-- **It picks by priority.** Until the owner calls Yantra a daily driver, a row that closes the daily-driver gap goes first and feature milestones wait (owner, 2026-11-05). 1: closes or unblocks an open milestone. 2: a defect or a red suite.
+- **It picks by priority.** Until the owner calls Yantra a daily driver, a row that closes the daily-driver gap ([M18](tracker.md#2-milestones)) goes first and feature milestones wait (owner, 2026-11-05). 1: closes or unblocks an open milestone. 2: a defect or a red suite.
   3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
 - **It runs up to three rows at once.** Rows that edit the same file do not run at the same time.
   CI tests only what a row changed: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607).
