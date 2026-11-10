@@ -28,9 +28,8 @@ export const grantPage = (clientId: string | null) =>
     ? `https://github.com/settings/connections/applications/${encodeURIComponent(clientId)}`
     : 'https://github.com/settings/applications'
 
-/** True when the organisation hides its repositories and when it has none, so it claims neither.
- *  GitHub cannot name a private membership in an organisation that restricts the app, so the
- *  note never claims to be complete. */
+/** The note never claims a full list: GitHub cannot name a private membership in an organisation
+ *  that restricts the app, and an organisation with no repository is named too. */
 export const hiddenNote = (orgs: string[]) =>
   orgs.length === 0
     ? 'An organisation that restricts OAuth apps hides its repositories from Yantra. If your membership there is private, Yantra cannot name it.'
