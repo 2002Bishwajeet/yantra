@@ -125,6 +125,8 @@ export type TurnCompleted = {
   stopReason?: StopReason
   /** Why a failed turn failed, in the agent's or ssh's own words. */
   message?: string
+  /** Not T3 Code's: how long the turn ran, as the agent measured it. */
+  durationMs?: number
 }
 
 /** What turn `turn` changed in the thread's worktree (Y-448). `truncated` is a

@@ -89,6 +89,9 @@ pub struct TurnCompleted {
     /// Why a failed turn failed, in the agent's or `ssh`'s own words.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Not T3 Code's: how long the turn ran, as the agent measured it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 /// What turn `turn` changed in the worktree, as a unified diff.
@@ -423,6 +426,7 @@ mod tests {
     #[test]
     fn a_completed_turn_names_its_state_and_stop_reason() {
         let done = wire(Event::TurnCompleted(TurnCompleted {
+            duration_ms: None,
             state: TurnState::Cancelled,
             stop_reason: Some(StopReason::Cancelled),
             message: None,
@@ -432,6 +436,7 @@ mod tests {
             json!({"state": "cancelled", "stopReason": "cancelled"})
         );
         let failed = wire(Event::TurnCompleted(TurnCompleted {
+            duration_ms: None,
             state: TurnState::Failed,
             stop_reason: None,
             message: Some("Not logged in · Please run /login".to_owned()),

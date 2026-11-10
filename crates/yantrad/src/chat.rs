@@ -4295,11 +4295,13 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     max_tokens: 200_000,
                 })),
                 event(Event::TurnCompleted(TurnCompleted {
+                    duration_ms: None,
                     state: TurnState::Completed,
                     stop_reason: Some(StopReason::EndTurn),
                     message: None,
                 })),
                 event(Event::TurnCompleted(TurnCompleted {
+                    duration_ms: None,
                     state: TurnState::Failed,
                     stop_reason: None,
                     message: Some("Not logged in · Please run /login".to_owned()),
