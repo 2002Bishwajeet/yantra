@@ -53,6 +53,8 @@ async function show(over: Over = {}, url = '/w/site?view=chat') {
     diffs: 0,
     diff: { open: false, onToggle: () => {}, onRefresh: () => {} },
     diffRef: idle,
+    terminal: { open: false, onToggle: () => {} },
+    terminalRef: idle,
     added: false,
     onFix: () => {},
     ...over,
@@ -224,7 +226,7 @@ describe('the thread menu', () => {
       useEffect(() => {
         control.pick = set.current
       }, [])
-      return <ChatHeader busy={false} diff={{ open: false, onToggle: () => {}, onRefresh: () => {} }} diffRef={idle} diffs={0} added={false} onFix={() => {}} thread={thread} workspace="site" />
+      return <ChatHeader busy={false} diff={{ open: false, onToggle: () => {}, onRefresh: () => {} }} diffRef={idle} diffs={0} terminal={{ open: false, onToggle: () => {} }} terminalRef={idle} added={false} onFix={() => {}} thread={thread} workspace="site" />
     }
     const root = createRootRoute({ component: Switch })
     const router = createRouter({ routeTree: root, history: createMemoryHistory() })
@@ -292,6 +294,35 @@ describe('the right side', () => {
     expect((await screen.findByRole('button', { name: 'Diff' })).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh the diff' }))
     expect(refresh).toHaveBeenCalled()
+  })
+
+  it('holds Terminal until the first turn makes a thread, and says why', async () => {
+    daemon([200, contract.threads])
+    const toggle = vi.fn()
+    await show({ terminal: { open: false, onToggle: toggle } })
+    const button = await screen.findByRole('button', { name: 'Terminal' })
+    expect(button.getAttribute('aria-disabled')).toBe('true')
+    const why = document.getElementById(button.getAttribute('aria-describedby') ?? '')
+    expect(why?.textContent).toBe("The terminal opens in the thread's worktree, which the first turn makes.")
+    fireEvent.click(button)
+    expect(toggle).not.toHaveBeenCalled()
+  })
+
+  it('draws Terminal pressed while the drawer is open, beside Diff', async () => {
+    daemon([200, contract.threads])
+    const toggle = vi.fn()
+    const terminal = { open: false, onToggle: toggle }
+    const { unmount } = await show({ thread: '1a1b2c3d4e5f6a7b', terminal })
+    const button = await screen.findByRole('button', { name: 'Terminal' })
+    expect(button.getAttribute('aria-pressed')).toBe('false')
+    expect(button.getAttribute('aria-describedby')).toBeNull()
+    expect(button.nextElementSibling).toBe(screen.getByRole('button', { name: 'Diff' }))
+    fireEvent.click(button)
+    expect(toggle).toHaveBeenCalledOnce()
+    unmount()
+
+    await show({ thread: '1a1b2c3d4e5f6a7b', terminal: { ...terminal, open: true } })
+    expect((await screen.findByRole('button', { name: 'Terminal' })).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('says a comment was added, politely', async () => {

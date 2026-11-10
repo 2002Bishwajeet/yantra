@@ -741,6 +741,7 @@ pub async fn status<E: Exec>(exec: &E, place: &Place) -> Result<Status, Error> {
 mod tests {
     use super::*;
     use crate::ssh;
+    use crate::tmux::fake::{Mac, Server};
     use std::path::PathBuf;
     use std::sync::{Mutex, PoisonError};
 
@@ -1063,19 +1064,13 @@ mod tests {
         assert_eq!(terminal_session(&task), None, "a task is not a thread");
     }
 
-    /// ADR-0018 §1: a Mac with no tmux server is refused before any session.
+    /// ADR-0018 §1: a Mac whose LaunchAgent starts no tmux server is refused
+    /// before any session.
     #[tokio::test]
     async fn a_mac_with_no_tmux_server_opens_no_terminal() {
-        let machine = Machine::answering(vec![
-            found(),
-            out(
-                1,
-                b"",
-                "no server running on /private/tmp/tmux-501/default\n",
-            ),
-        ]);
-        let tmux = Tmux::resolve(&machine).await.expect("found");
-        let refused = terminal(&machine, &tmux, &place(), Os::MacOs, "mac").await;
+        let mac = Mac::new(Server::None, 3);
+        let tmux = Tmux::resolve(&mac).await.expect("a tmux");
+        let refused = terminal(&mac, &tmux, &place(), Os::MacOs, "mac").await;
         assert!(
             matches!(
                 &refused,
@@ -1083,9 +1078,8 @@ mod tests {
             ),
             "{refused:?}"
         );
-        let asked = machine.asked();
-        assert_eq!(asked.len(), 2, "{asked:?}");
-        assert!(asked[1].contains("list-sessions"), "{}", asked[1]);
+        assert!(mac.asked_for("launchctl"));
+        assert!(!mac.asked_for("new-session"));
     }
 
     /// Y-542: a machine that cannot say whether tmux runs a keeper keeps

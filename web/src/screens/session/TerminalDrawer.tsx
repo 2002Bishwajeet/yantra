@@ -17,6 +17,9 @@ import { KeyRow } from './Keys'
 import { Terminal } from './Terminal'
 import './TerminalDrawer.css'
 
+// The drawer sits in the composer's dock, so on a phone it shrinks with the screen the keyboard leaves.
+const PHONE_HEIGHT = 'calc((100dvh - var(--m3-keyboard-inset, 0px)) * 0.3)'
+
 function failure(error: ApiError, machine: string): string {
   if (error.kind === 'missing') return 'The thread has no worktree to open a terminal in'
   if (error.kind === 'network') return 'The daemon did not answer, so no terminal was opened'
@@ -70,7 +73,7 @@ export function TerminalDrawer(props: TerminalDrawerProps) {
         />
       ) : data ? (
         <Terminal
-          height={factor === 'phone' ? '40vh' : '45vh'}
+          height={factor === 'phone' ? PHONE_HEIGHT : 'min(40dvh, 320px)'}
           key={`${data.machine}/${data.session}`}
           label={`tmux ${data.session} on ${data.machine}`}
           target={{ machine: data.machine, session: data.session }}

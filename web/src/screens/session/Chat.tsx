@@ -183,7 +183,6 @@ export function Chat(props: ChatProps) {
   const [showDiff, setShowDiff] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
   const terminalButton = useRef<HTMLButtonElement>(null)
-  const noTerminal = useId()
   const [added, setAdded] = useState(false)
   const diffButton = useRef<HTMLButtonElement>(null)
   const { branch } = chat
@@ -441,6 +440,8 @@ export function Chat(props: ChatProps) {
         diffs={diffs}
         into={slot}
         onFix={fixWithAgent}
+        terminal={{ open: showTerminal, onToggle: () => (showTerminal ? closeTerminal() : setShowTerminal(true)) }}
+        terminalRef={terminalButton}
         thread={timeline.thread}
         urlThread={thread}
         workspace={workspace.name}
@@ -685,6 +686,15 @@ export function Chat(props: ChatProps) {
         <Composer.Status quiet={timeline.requests.length > 0 && draft === '' && link === 'open'}>
           {status(timeline, harness)}
         </Composer.Status>
+        {showTerminal && timeline.thread ? (
+          <TerminalDrawer
+            agent={agent}
+            key={timeline.thread}
+            onClose={closeTerminal}
+            thread={timeline.thread}
+            workspace={workspace}
+          />
+        ) : null}
       </div>
     </div>
   )

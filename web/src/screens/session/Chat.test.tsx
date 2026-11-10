@@ -839,17 +839,7 @@ describe('the chat', () => {
   })
 })
 
-describe('the terminal toggle', () => {
-  it('holds the toggle until a thread exists, and says why', async () => {
-    await open()
-    const toggle = screen.getByRole('button', { name: 'Terminal' })
-    expect(toggle.getAttribute('aria-disabled')).toBe('true')
-    const why = document.getElementById(toggle.getAttribute('aria-describedby') ?? '')
-    expect(why?.textContent).toBe("The terminal opens in the thread's worktree, which the first turn makes.")
-    fireEvent.click(toggle)
-    expect(screen.queryByRole('complementary', { name: "Terminal in the thread's worktree" })).toBeNull()
-  })
-
+describe('the terminal drawer', () => {
   it("opens the drawer on the thread's worktree, and Close puts focus back on the toggle", async () => {
     await open('1a2b3c4d')
     say(started())
@@ -863,6 +853,19 @@ describe('the terminal toggle', () => {
     fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('complementary', { name: "Terminal in the thread's worktree" })).toBeNull()
     expect(document.activeElement).toBe(toggle)
+  })
+
+  it('opens under the composer and stays while the Diff is open', async () => {
+    await open('1a2b3c4d')
+    say(started())
+    const toggle = screen.getByRole('button', { name: 'Terminal' })
+    await settled(() => expect(toggle.getAttribute('aria-disabled')).not.toBe('true'))
+    fireEvent.click(toggle)
+    const drawer = screen.getByRole('complementary', { name: "Terminal in the thread's worktree" })
+    expect(composerBox().compareDocumentPosition(drawer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Conversation' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Diff' }))
+    expect(screen.getByRole('complementary', { name: "Terminal in the thread's worktree" })).toBe(drawer)
   })
 })
 

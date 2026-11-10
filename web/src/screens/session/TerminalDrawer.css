@@ -23,3 +23,9 @@
 .terminal-drawer__note {
   margin: 0;
 }
+
+@media (pointer: coarse) {
+  .terminal-drawer__head .m3-button {
+    height: 44px;
+  }
+}
