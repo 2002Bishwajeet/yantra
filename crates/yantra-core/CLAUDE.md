@@ -147,6 +147,8 @@ generates a keypair per run, passes `-F /dev/null`, and tears down in `Drop`.
   never silently skipped. `tests/macos.rs` is ignored too, and CI's `macos` job runs it with
   `just test-macos` on a GitHub runner that sshes to itself (Y-661). It kills the tmux server, so
   it never targets the owner's Mac.
+- `jobs.rs`'s real `systemctl --user` test is ignored too, because CI has no user bus. Run it with
+  `just test-systemd-user` on a machine with a user manager (Y-706).
 - **Produce the state, do not describe it.** A test that hand-builds a dead pane cannot see I-47;
   one that really runs `kill -9` can.
 - `portable-pty` is a **dependency**, reached by `pty.rs` alone. Y-128 measured `just appliance-size`

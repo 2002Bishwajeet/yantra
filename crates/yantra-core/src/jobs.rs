@@ -219,23 +219,25 @@ fn local(props: &BTreeMap<String, String>, key: &str) -> Option<String> {
 
 fn judge(props: &BTreeMap<String, String>) -> LastResult {
     let get = |key: &str| props.get(key).map_or("", String::as_str);
-    // A unit that never ran also reads Result=success.
-    if get("ExecMainStartTimestamp").is_empty() {
-        return LastResult::Never;
-    }
     if matches!(get("ActiveState"), "activating" | "active" | "reloading") {
         return LastResult::Running;
     }
-    match get("Result") {
-        "success" => LastResult::Succeeded,
-        result => LastResult::Failed {
+    // A failed ExecStartPre= leaves ExecMainStartTimestamp empty, so failure is read first.
+    let result = get("Result");
+    if get("ActiveState") == "failed" || !matches!(result, "" | "success") {
+        return LastResult::Failed {
             result: result.to_owned(),
             // 1 is CLD_EXITED: ExecMainStatus is then an exit status, not a signal.
             status: (get("ExecMainCode") == "1")
                 .then(|| get("ExecMainStatus").parse().ok())
                 .flatten(),
-        },
+        };
     }
+    // A unit that never ran also reads Result=success.
+    if get("ExecMainStartTimestamp").is_empty() {
+        return LastResult::Never;
+    }
+    LastResult::Succeeded
 }
 
 fn state_path(dir: &Path, service: &str) -> PathBuf {
@@ -345,6 +347,21 @@ mod tests {
                 status: None
             }
         );
+        // Measured on the host, systemd 262: `ExecStartPre=/bin/false` fails before the main
+        // process starts.
+        assert_eq!(
+            judge(&props(&[
+                ("ActiveState", "failed"),
+                ("Result", "exit-code"),
+                ("ExecMainCode", "0"),
+                ("ExecMainStatus", "0"),
+                ("ExecMainStartTimestamp", ""),
+            ])),
+            LastResult::Failed {
+                result: "exit-code".to_owned(),
+                status: None
+            }
+        );
         assert_eq!(
             judge(&ran("failed", "timeout", "0", "0")),
             LastResult::Failed {
@@ -423,62 +440,65 @@ mod tests {
         }
     }
 
-    /// §B3: the real user manager, not a fixture.
-    #[tokio::test]
-    async fn a_failed_job_reads_as_failed_with_its_exit_status() {
-        let reachable = std::process::Command::new("systemctl")
-            .args(["--user", "list-timers"])
-            .output()
-            .is_ok_and(|out| out.status.success());
-        if !reachable {
-            assert!(
-                std::env::var_os("YANTRA_REQUIRE_SYSTEMD_USER").is_none(),
-                "YANTRA_REQUIRE_SYSTEMD_USER is set and `systemctl --user` cannot reach a user bus"
-            );
-            eprintln!("skipped: `systemctl --user` cannot reach a user bus");
-            return;
-        }
+    fn systemctl(args: &[&str]) -> std::process::ExitStatus {
+        std::process::Command::new("systemctl")
+            .arg("--user")
+            .args(args)
+            .status()
+            .expect("systemctl runs")
+    }
 
+    /// Installs a timer that fires in 2099 and a oneshot service with `service`
+    /// as its `[Service]` body, then starts the service once.
+    fn install(dir: &Path, label: &str, service: &str) -> Units {
+        let units = Units {
+            dir: dir.to_owned(),
+            name: format!("y706-test-{label}-{}", std::process::id()),
+        };
+        let timer = format!("{}.timer", units.name);
+        let unit = format!("{}.service", units.name);
+        std::fs::write(dir.join(&timer), "[Timer]\nOnCalendar=2099-01-01\n")
+            .expect("write the timer");
+        std::fs::write(
+            dir.join(&unit),
+            format!("[Service]\nType=oneshot\n{service}"),
+        )
+        .expect("write the service");
+        assert!(systemctl(&["daemon-reload"]).success());
+        assert!(systemctl(&["start", &timer]).success());
+        assert!(!systemctl(&["start", &unit]).success(), "{unit} fails");
+        units
+    }
+
+    /// §B3: the real user manager, not a fixture. Ignored so that it fails
+    /// where it runs and never skips: `just test-systemd-user`.
+    #[tokio::test]
+    #[ignore = "needs a systemd user manager: just test-systemd-user"]
+    async fn a_failed_job_reads_as_failed_with_its_exit_status() {
         use etcetera::BaseStrategy as _;
         let dir = etcetera::choose_base_strategy()
             .expect("a home directory")
             .config_dir()
             .join("systemd/user");
         std::fs::create_dir_all(&dir).expect("the user unit directory");
-        let units = Units {
-            dir,
-            name: format!("y706-test-{}", std::process::id()),
-        };
-        let timer = format!("{}.timer", units.name);
-        let service = format!("{}.service", units.name);
-        std::fs::write(units.dir.join(&timer), "[Timer]\nOnCalendar=2099-01-01\n")
-            .expect("write the timer");
-        std::fs::write(
-            units.dir.join(&service),
-            "[Service]\nType=oneshot\nExecStart=/bin/false\n",
-        )
-        .expect("write the service");
-
-        let systemctl = |args: &[&str]| {
-            std::process::Command::new("systemctl")
-                .arg("--user")
-                .args(args)
-                .status()
-                .expect("systemctl runs")
-        };
-        assert!(systemctl(&["daemon-reload"]).success());
-        assert!(systemctl(&["start", &timer]).success());
-        assert!(
-            !systemctl(&["start", &service]).success(),
-            "/bin/false fails"
+        let main = install(&dir, "main", "ExecStart=/bin/false\n");
+        let pre = install(
+            &dir,
+            "pre",
+            "ExecStartPre=/bin/false\nExecStart=/bin/true\n",
         );
 
         let jobs = list().await.expect("the timers list");
-        let job = jobs
-            .iter()
-            .find(|job| job.timer == timer)
-            .expect("the throwaway timer is listed");
-        assert_eq!(job.service, service);
+        let find = |units: &Units| {
+            let timer = format!("{}.timer", units.name);
+            jobs.iter()
+                .find(|job| job.timer == timer)
+                .expect("the throwaway timer is listed")
+                .clone()
+        };
+
+        let job = find(&main);
+        assert_eq!(job.service, format!("{}.service", main.name));
         assert_eq!(
             job.last_result,
             LastResult::Failed {
@@ -492,6 +512,15 @@ mod tests {
                 .is_some_and(|next| next.contains("2099-01-01")),
             "next run: {:?}",
             job.next_local
+        );
+
+        // The main process never started, and the job still reads as failed.
+        assert_eq!(
+            find(&pre).last_result,
+            LastResult::Failed {
+                result: "exit-code".to_owned(),
+                status: None
+            }
         );
     }
 }
