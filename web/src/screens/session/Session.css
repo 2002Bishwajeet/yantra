@@ -60,6 +60,11 @@
   justify-content: flex-end;
 }
 
+/* Y-498: beside the tabs, a long title truncates rather than drop Commit onto a second line. */
+[data-shell]:not([data-shell="phone"]) .session__chatbar .chat__crumbs {
+  flex: 1 1 0;
+}
+
 .session__read {
   margin-left: auto;
   font-size: var(--md-sys-typescale-body-small-size);

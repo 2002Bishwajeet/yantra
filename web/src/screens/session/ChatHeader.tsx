@@ -8,13 +8,14 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { ChevronDown, Diff, Plus, RefreshCw } from 'lucide-react'
+import { ChevronDown, Diff, Plus, RefreshCw, SquareTerminal } from 'lucide-react'
 import { useThreads } from '@/api/mutations'
 import { useThreadStates } from '@/api/queries'
 import { useTick } from '@/useTick'
 import { Button } from '@/m3/button/Button'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { IconButton } from '@/m3/icon-button/IconButton'
 import { State } from '@/m3/mark/Mark'
 import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuSeparator, MenuTrigger } from '@/m3/menu/Menu'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -34,6 +35,9 @@ export type ChatHeaderProps = {
   diffs: number
   diff: { open: boolean; onToggle: () => void; onRefresh: () => void }
   diffRef: RefObject<HTMLButtonElement | null>
+  /** Y-498: the drawer with a shell in the thread's worktree. */
+  terminal: { open: boolean; onToggle: () => void }
+  terminalRef: RefObject<HTMLButtonElement | null>
   /** The polite note a comment added from the diff leaves. */
   added: boolean
   /** The page's tab bar. Undefined draws the header in place; null draws nothing, for a tab that is not Chat. */
@@ -45,7 +49,7 @@ export type ChatHeaderProps = {
 /** Y-633: the Chat tab's top line. The threads read on mount and on Refresh, and never poll:
  *  each read is an ssh to the machine and a call to GitHub (Y-489). */
 export function ChatHeader(props: ChatHeaderProps) {
-  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, added, into, onFix } = props
+  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, terminal, terminalRef, added, into, onFix } = props
   const active = thread ?? urlThread ?? null
   const threads = useThreads(workspace)
   const { mutate } = threads
@@ -78,6 +82,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   const pr = thread ? shown?.find((one) => one.id === thread)?.pr : undefined
   const title = current ? threadTitle(current) : active ? 'Thread' : 'New thread'
   const groupId = useId()
+  const noTerminal = useId()
 
   if (into === null) return null
 
@@ -187,6 +192,19 @@ export function ChatHeader(props: ChatHeaderProps) {
           </MenuPopup>
         </Menu>
       </nav>
+      {/* An icon, as T3 Code draws it: a labelled button wraps the desktop header onto two lines. */}
+      <IconButton
+        aria-describedby={thread ? undefined : noTerminal}
+        aria-pressed={terminal.open}
+        disabled={!thread}
+        focusableWhenDisabled
+        label="Terminal"
+        onClick={terminal.onToggle}
+        ref={terminalRef}
+        variant={terminal.open ? 'tonal' : 'standard'}
+      >
+        <SquareTerminal />
+      </IconButton>
       <Button
         aria-pressed={diff.open}
         icon={<Diff />}
@@ -215,6 +233,11 @@ export function ChatHeader(props: ChatHeaderProps) {
         thread={thread}
         workspace={workspace}
       />
+      {thread ? null : (
+        <span className="m3-sr-only" id={noTerminal}>
+          The terminal opens in the thread's worktree, which the first turn makes.
+        </span>
+      )}
       <span aria-live="polite" className="chat__added">
         {added ? 'Comment added to your message.' : ''}
       </span>

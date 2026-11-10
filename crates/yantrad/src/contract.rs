@@ -104,6 +104,7 @@ import type {
   ThreadPrOpened,
   ThreadPushed,
   ThreadState,
+  ThreadTerminal,
   Transcript,
   UpdateProgress,
   Workspace,

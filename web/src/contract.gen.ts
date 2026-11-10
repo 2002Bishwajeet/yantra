@@ -55,6 +55,7 @@ import type {
   ThreadPrOpened,
   ThreadPushed,
   ThreadState,
+  ThreadTerminal,
   Transcript,
   UpdateProgress,
   Workspace,
@@ -990,6 +991,11 @@ export const threadPrMerged = {
   "number": 497,
   "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
 } satisfies ThreadPrMerged
+
+export const threadTerminal = {
+  "machine": "cachyos-g14",
+  "session": "yantra-term-site-0a1b2c3d4e5f6a7b"
+} satisfies ThreadTerminal
 
 export const cloning = {
   "machine": "cachyos-g14",

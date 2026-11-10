@@ -10,7 +10,7 @@ use common::{SshFixture, USER};
 use yantra_core::acp::Harness;
 use yantra_core::keep::{self, Keeper, Limits, Started};
 use yantra_core::ssh::{Exec, Machine, Os, Ssh};
-use yantra_core::tmux::Tmux;
+use yantra_core::tmux::{self, Tmux};
 use yantra_core::workspace::Workspace;
 use yantra_core::{github, logs, thread, tokens, up};
 
@@ -413,6 +413,97 @@ async fn removing_a_thread_ends_its_keeper_and_its_journals() -> Result<()> {
             .is_empty(),
         "no agent outlives its thread"
     );
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Y-498: a thread's terminal is one tmux session in its worktree. A second
+/// open attaches, a shell the owner exited is made again, a Mac with no tmux
+/// server is refused, and removing the thread kills the session.
+#[tokio::test]
+async fn a_thread_terminal_opens_in_the_worktree_and_remove_kills_it() -> Result<()> {
+    let Some(fixture) = SshFixture::start()? else {
+        return Ok(());
+    };
+    let dir = state_dir("thr-term")?;
+    let ssh = Ssh::new(Machine {
+        host: fixture.host().to_owned(),
+        user: Some(USER.to_owned()),
+        port: Some(fixture.port()),
+        identity: Some(fixture.key_path()),
+        state_dir: dir.clone(),
+    })?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    let repo = "/home/yantra/terms";
+    fixture.run(&format!(
+        "mkdir -p {repo} && cd {repo} && git init -q && echo one > README \
+         && git add README && git -c user.name=t -c user.email=t@example.com \
+         commit -qm one"
+    ))?;
+    let workspace = Workspace {
+        name: "terms".to_owned(),
+        machine: "fixture".to_owned(),
+        repo: repo.into(),
+        startup: None,
+    };
+    let place = thread::open(&ssh, &workspace).await?;
+    let sessions = || -> Result<String> {
+        Ok(fixture
+            .run("tmux list-sessions -F '#{session_name}' 2>/dev/null || true")?
+            .trim()
+            .to_owned())
+    };
+
+    // ADR-0018 §1: no server yet, so a Mac is refused and none is started.
+    let refused = thread::terminal(&ssh, &tmux, &place, Os::MacOs, "fixture").await;
+    assert!(
+        matches!(
+            &refused,
+            Err(thread::Failed::Up(up::Error::NoLoginServer { .. }))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(sessions()?, "", "no server was started");
+
+    let (name, first) = thread::terminal(&ssh, &tmux, &place, Os::Other, "fixture").await?;
+    assert_eq!(name, format!("yantra-term-terms-{}", thread::name(&place)));
+    assert!(first.was_created(), "{first:?}");
+    let (again, second) = thread::terminal(&ssh, &tmux, &place, Os::Other, "fixture").await?;
+    assert_eq!(again, name);
+    assert!(matches!(second, tmux::Opened::Attached(_)), "{second:?}");
+    assert_eq!(second.session().session_id, first.session().session_id);
+    assert_eq!(sessions()?, name, "one session");
+    let pane = |format: &str| -> Result<String> {
+        Ok(fixture
+            .run(&format!("tmux display-message -p -t '={name}:' '{format}'"))?
+            .trim()
+            .to_owned())
+    };
+    assert_eq!(pane("#{pane_current_path}")?, place.worktree);
+
+    // The owner types `exit`: remain-on-exit keeps a dead pane, and the next
+    // open gives a live shell.
+    fixture.run(&format!(
+        "tmux send-keys -t '{}' exit Enter",
+        first.session().pane_id
+    ))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while pane("#{pane_dead}")? != "1" {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the shell never exited"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let (_, third) = thread::terminal(&ssh, &tmux, &place, Os::Other, "fixture").await?;
+    assert!(third.was_created(), "{third:?}");
+    assert_eq!(
+        pane("#{pane_dead} #{pane_current_path}")?,
+        format!("0 {}", place.worktree)
+    );
+
+    thread::remove(&ssh, &place).await?;
+    assert_eq!(sessions()?, "", "the terminal goes with its thread");
     std::fs::remove_dir_all(&dir)?;
     Ok(())
 }

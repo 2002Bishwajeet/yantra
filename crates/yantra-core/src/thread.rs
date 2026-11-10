@@ -26,10 +26,15 @@ pub use crate::delegate::{Error, Place, Summary};
 use crate::github::{self, Github, Issue, IssueRef, PullState, Token};
 use crate::keep::{self, Keeper};
 use crate::logs::{self, Transcript};
-use crate::ssh::{self, Exec, Ssh};
+use crate::ssh::{self, Exec, Os, Ssh};
 use crate::tmux::{self, Tmux, sq};
 use crate::tokens::{self, Spend};
+use crate::up;
 use crate::workspace::{self, Workspace};
+
+/// The start of a thread's terminal session name (Y-498). No workspace may
+/// take it, since a workspace's session is its name.
+pub const TERMINAL: &str = "yantra-term-";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
@@ -341,6 +346,16 @@ pub enum Failed {
     #[error(transparent)]
     Github(#[from] github::Error),
 
+    #[error("the workspace has no thread {id}")]
+    NoThread { id: String },
+
+    #[error(transparent)]
+    Tmux(#[from] tmux::Error),
+
+    /// ADR-0018 §1: a Mac with no tmux server, which a terminal will not start.
+    #[error(transparent)]
+    Up(#[from] up::Error),
+
     #[error("could not determine a directory for ssh control sockets")]
     NoStateDir,
 }
@@ -593,12 +608,80 @@ pub async fn claude_session<E: Exec>(exec: &E, place: &Place) -> Result<Option<S
 
 const CLAUDE_SESSION: &str = "yantraClaudeSession";
 
-/// Kills the keeper, then removes the worktree, branch, checkpoints, journals and images: the
-/// only path that deletes a thread. A keeper that will not go keeps all of it.
+/// The tmux session of the thread's terminal, by the parse [`Keeper::of`] uses.
+pub fn terminal_session(place: &Place) -> Option<String> {
+    Keeper::of(place).map(|keeper| terminal_of(&keeper))
+}
+
+fn terminal_of(keeper: &Keeper) -> String {
+    format!("{TERMINAL}{}-{}", keeper.workspace(), keeper.thread())
+}
+
+/// Opens the thread's terminal session in its worktree, or attaches to it (I-1).
+/// `ensure` sets `remain-on-exit`, so a shell the owner exited leaves a dead pane,
+/// and that session is made again. `os` is a parameter so a Linux container can
+/// drive the Mac refusal.
+pub async fn terminal<E: Exec>(
+    exec: &E,
+    tmux: &Tmux,
+    place: &Place,
+    os: Os,
+    machine: &str,
+) -> Result<(String, tmux::Opened), Failed> {
+    let session = terminal_session(place).ok_or_else(|| Failed::NoThread {
+        id: place.id.clone(),
+    })?;
+    up::require_login_server(exec, tmux, os, machine).await?;
+    let opened = tmux.ensure(exec, &session, &place.worktree, None).await?;
+    if opened.was_created()
+        || !tmux
+            .pane(exec, &session)
+            .await?
+            .is_some_and(|pane| pane.dead)
+    {
+        return Ok((session, opened));
+    }
+    tmux.kill(exec, &session).await?;
+    let opened = tmux.ensure(exec, &session, &place.worktree, None).await?;
+    Ok((session, opened))
+}
+
+/// Where a thread's terminal runs: the address of the session socket.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadTerminal {
+    pub machine: String,
+    pub session: String,
+}
+
+/// [`terminal`] for thread `id` of workspace `name`.
+pub async fn terminal_for(name: &str, id: &str) -> Result<ThreadTerminal, Failed> {
+    let workspace = workspace::load(name)?;
+    let ssh = reach(&workspace)?;
+    let place = list(&ssh, &workspace)
+        .await?
+        .into_iter()
+        .find(|place| self::name(place) == id)
+        .ok_or_else(|| Failed::NoThread { id: id.to_owned() })?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    let os = ssh::os(&ssh).await.map_err(Error::Ssh)?;
+    let (session, _) = terminal(&ssh, &tmux, &place, os, &workspace.machine).await?;
+    Ok(ThreadTerminal {
+        machine: workspace.machine,
+        session,
+    })
+}
+
+/// Kills the terminal and the keeper, then removes the worktree, branch, checkpoints, journals
+/// and images: the only path that deletes a thread. A session that will not go keeps all of it.
 pub async fn remove<E: Exec>(exec: &E, place: &Place) -> Result<(), Error> {
     if let Some(keeper) = Keeper::of(place) {
         match Tmux::resolve(exec).await {
-            Ok(tmux) => keep::kill(exec, &tmux, &keeper).await?,
+            Ok(tmux) => {
+                tmux.kill(exec, &terminal_of(&keeper))
+                    .await
+                    .map_err(keep::Error::from)?;
+                keep::kill(exec, &tmux, &keeper).await?;
+            }
             // A machine with no tmux runs no keeper.
             Err(tmux::Error::NotFound { .. }) => {}
             Err(error) => return Err(keep::Error::from(error).into()),
@@ -658,6 +741,7 @@ pub async fn status<E: Exec>(exec: &E, place: &Place) -> Result<Status, Error> {
 mod tests {
     use super::*;
     use crate::ssh;
+    use crate::tmux::fake::{Mac, Server};
     use std::path::PathBuf;
     use std::sync::{Mutex, PoisonError};
 
@@ -882,6 +966,7 @@ mod tests {
     }
 
     const KILL: &str = "'/usr/bin/tmux' kill-session -t '=yantra-keep-web-11111111'";
+    const TERMINAL_KILL: &str = "'/usr/bin/tmux' kill-session -t '=yantra-term-web-11111111'";
 
     fn found() -> ssh::Output {
         out(0, b"/usr/bin/tmux\n", "")
@@ -901,15 +986,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remove_kills_the_keeper_then_runs_the_removal_and_names_a_refusal() {
-        let machine = Machine::answering(vec![found(), out(0, b"", ""), out(0, b"", "")]);
+    async fn remove_kills_the_terminal_and_the_keeper_then_runs_the_removal() {
+        let machine = Machine::answering(vec![
+            found(),
+            out(0, b"", ""),
+            out(0, b"", ""),
+            out(0, b"", ""),
+        ]);
         remove(&machine, &place()).await.expect("removed");
         let asked = machine.asked();
-        assert_eq!(asked.len(), 3, "{asked:?}");
+        assert_eq!(asked.len(), 4, "{asked:?}");
         assert!(asked[0].contains("command -v tmux"));
         assert_eq!(
             asked[1..],
             [
+                TERMINAL_KILL.to_owned(),
                 KILL.to_owned(),
                 format!(
                     "{{ [ ! -e '{WORKTREE}' ] \
@@ -929,6 +1020,7 @@ mod tests {
         let refused = Machine::answering(vec![
             found(),
             out(0, b"", ""),
+            out(0, b"", ""),
             out(128, b"", "fatal: not a working tree\n"),
         ]);
         assert!(matches!(
@@ -936,19 +1028,58 @@ mod tests {
             Err(Error::Worktree { stderr }) if stderr == "fatal: not a working tree"
         ));
 
-        // A keeper that stays keeps its journals too.
-        let kept = Machine::answering(vec![found(), out(1, b"", "permission denied\n")]);
+        // A terminal or a keeper that stays keeps the whole thread.
+        let terminal = Machine::answering(vec![found(), out(1, b"", "permission denied\n")]);
+        assert!(matches!(
+            remove(&terminal, &place()).await,
+            Err(Error::Keeper(_))
+        ));
+        assert_eq!(terminal.asked().len(), 2, "nothing else is asked");
+        let kept = Machine::answering(vec![
+            found(),
+            out(0, b"", ""),
+            out(1, b"", "permission denied\n"),
+        ]);
         assert!(matches!(
             remove(&kept, &place()).await,
             Err(Error::Keeper(_))
         ));
-        assert_eq!(kept.asked().len(), 2, "nothing is removed");
+        assert_eq!(kept.asked().len(), 3, "nothing is removed");
 
-        // A machine with no tmux has no keeper to kill.
+        // A machine with no tmux has no session to kill.
         let bare = Machine::answering(vec![out(1, b"", ""), out(0, b"", "")]);
         remove(&bare, &place()).await.expect("removed");
         assert_eq!(bare.asked().len(), 2, "the probe, then the removal");
         assert!(bare.asked()[1].contains("worktree remove --force"));
+    }
+
+    #[test]
+    fn a_threads_terminal_is_named_for_its_workspace_and_id() {
+        assert_eq!(
+            terminal_session(&place()).as_deref(),
+            Some("yantra-term-web-11111111")
+        );
+        let mut task = place();
+        task.id = "11111111".to_owned();
+        assert_eq!(terminal_session(&task), None, "a task is not a thread");
+    }
+
+    /// ADR-0018 §1: a Mac whose LaunchAgent starts no tmux server is refused
+    /// before any session.
+    #[tokio::test]
+    async fn a_mac_with_no_tmux_server_opens_no_terminal() {
+        let mac = Mac::new(Server::None, 3);
+        let tmux = Tmux::resolve(&mac).await.expect("a tmux");
+        let refused = terminal(&mac, &tmux, &place(), Os::MacOs, "mac").await;
+        assert!(
+            matches!(
+                &refused,
+                Err(Failed::Up(up::Error::NoLoginServer { machine })) if machine == "mac"
+            ),
+            "{refused:?}"
+        );
+        assert!(mac.asked_for("launchctl"));
+        assert!(!mac.asked_for("new-session"));
     }
 
     /// Y-542: a machine that cannot say whether tmux runs a keeper keeps

@@ -62,6 +62,9 @@ const CLONE_PROGRESS = [
   'Receiving objects:  62% (747/1204)\r',
 ].join('')
 
+// Y-498: a thread's shell, in the thread's worktree.
+const SHELL = '\x1b[32mbiswa@cachyos-g14\x1b[0m:\x1b[34m~/.yantra/worktrees/chat/yantra-web/1a2b3c4d\x1b[0m$ '
+
 const scenarios = new URL('./scenarios/', import.meta.url)
 
 // Y-583: no avatar by default, so no baseline fetches from the network.
@@ -582,6 +585,17 @@ const routes = [
         return [404, `\`${name}\` does not hold ${sent.issue}`]
       }
       return [200, { ...contract.threadOpened, thread: THREAD, issue: sent.issue }]
+    },
+  ],
+  // Y-498: write.rs `thread_terminal` opens or attaches the thread's tmux session.
+  [
+    'POST',
+    /^\/api\/workspaces\/([^/]+)\/threads\/([^/]+)\/terminal$/,
+    (s, [name, thread]) => {
+      const one = findWorkspace(s, name)
+      if (!one) return [404, notFound(name)]
+      if (thread !== THREAD) return [404, `the workspace has no thread ${thread}`]
+      return [200, { machine: one.machine, session: `yantra-term-${name}-${thread}` }]
     },
   ],
   [
@@ -1139,7 +1153,8 @@ server.on('upgrade', (request, socket, head) => {
     ? findWorkspace(state, decodeURIComponent(workspace[1]))
       ? null
       : notFound(decodeURIComponent(workspace[1]))
-    : sessionsOf(state, decodeURIComponent(session[1]))?.sessions?.some(
+    : decodeURIComponent(session[2]).startsWith('yantra-term-') ||
+        sessionsOf(state, decodeURIComponent(session[1]))?.sessions?.some(
           (t) => t.name === decodeURIComponent(session[2]),
         )
       ? null
@@ -1172,7 +1187,8 @@ server.on('upgrade', (request, socket, head) => {
           return
         }
         const name = session ? decodeURIComponent(session[2]) : ''
-        ws.send(Buffer.from(name.startsWith('clone-') ? CLONE_PROGRESS : TRUST_PROMPT), {
+        const shown = name.startsWith('clone-') ? CLONE_PROGRESS : name.startsWith('yantra-term-') ? SHELL : TRUST_PROMPT
+        ws.send(Buffer.from(shown), {
           binary: true,
         })
         return

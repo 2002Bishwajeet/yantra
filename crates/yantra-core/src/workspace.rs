@@ -87,9 +87,10 @@ pub enum Error {
 
     /// The prefix names a Chat keeper's tmux session (ADR-0035 decision 1).
     #[error(
-        "`{name}` is not a usable workspace name: names that start with `{}` are Yantra's own \
-         (looked at {})",
+        "`{name}` is not a usable workspace name: names that start with `{}` or `{}` are \
+         Yantra's own (looked at {})",
         crate::keep::PREFIX,
+        crate::thread::TERMINAL,
         path.display()
     )]
     Reserved { name: String, path: PathBuf },
@@ -578,7 +579,7 @@ fn validate_name(dir: &Path, name: &str) -> Result<(), Error> {
             path: path(),
         });
     }
-    if crate::keep::is_keeper(name) {
+    if crate::keep::is_keeper(name) || name.starts_with(crate::thread::TERMINAL) {
         return Err(Error::Reserved {
             name: name.to_owned(),
             path: path(),
@@ -1289,6 +1290,14 @@ mod tests {
             validate_name(&dir, "yantra-kept").is_ok(),
             "only the whole prefix is Yantra's"
         );
+        // Y-498: a thread's terminal session would collide with this workspace's.
+        let terminal = create_in(&dir, "yantra-term-web", "m", Path::new("/r"), None);
+        assert!(
+            matches!(&terminal, Err(Error::Reserved { .. })),
+            "{terminal:?}"
+        );
+        let said = terminal.expect_err("refused").to_string();
+        assert!(said.contains("`yantra-keep-` or `yantra-term-`"), "{said}");
         assert!(matches!(
             create_in(&dir, "fine", "  ", Path::new("/r"), None),
             Err(Error::Empty { field: "machine" })

@@ -391,6 +391,14 @@ enum ChatAction {
         #[arg(long)]
         yes: bool,
     },
+    /// Attach to a shell in the thread's worktree, opening it the first time.
+    /// The agent works in the same tree
+    Terminal {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// The thread's id, as `yantra chat ls` prints it
+        thread: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -669,6 +677,9 @@ async fn main() -> ExitCode {
                     yes,
                 },
         }) => chat_rm(&workspace, &thread, yes).await,
+        Some(Command::Chat {
+            action: ChatAction::Terminal { workspace, thread },
+        }) => chat_terminal(&workspace, &thread).await,
         Some(Command::Commit {
             workspace,
             thread,
@@ -3434,6 +3445,36 @@ async fn attach(name: &str) -> ExitCode {
     )
 }
 
+/// `attach`'s path for a thread's terminal session (Y-498). Asked first, so no
+/// session is opened for a caller with no terminal.
+async fn chat_terminal(workspace: &str, thread: &str) -> ExitCode {
+    if !std::io::stdin().is_terminal() {
+        eprintln!("yantra: chat terminal needs a terminal — nothing would read the shell");
+        return ExitCode::FAILURE;
+    }
+    let opened = match thread::terminal_for(workspace, thread).await {
+        Ok(opened) => opened,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    let plan = match attach::plan_on(&opened.machine, &opened.session, &local_term()).await {
+        Ok(plan) => plan,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Chosen::Substituted { wanted } = &plan.term {
+        println!("{}", downgrade_notice(&plan.machine, wanted));
+    }
+    hand_over(
+        &plan.machine,
+        &attach::remote_command(plan.tmux.path(), &plan.session, plan.term.term()),
+    )
+}
+
 /// The library never prints (ADR-0005), so rendering the chain is the CLI's job.
 /// `source` matters here: the useful detail is usually a level or two down.
 fn report_error(err: &dyn std::error::Error) {
@@ -5480,6 +5521,22 @@ mod tests {
             remove_question("site", "0a1b"),
             "Remove thread 0a1b of site: its worktree, its branch and every uncommitted change? [y/N] "
         );
+    }
+
+    #[test]
+    fn chat_terminal_takes_a_workspace_and_a_thread() {
+        let parsed =
+            Cli::try_parse_from(["yantra", "chat", "terminal", "site", "0a1b"]).expect("parses");
+        assert!(
+            matches!(
+                &parsed.command,
+                Some(Command::Chat {
+                    action: ChatAction::Terminal { workspace, thread },
+                }) if workspace == "site" && thread == "0a1b"
+            ),
+            "{parsed:?}"
+        );
+        assert!(Cli::try_parse_from(["yantra", "chat", "terminal", "site"]).is_err());
     }
 
     #[test]
