@@ -53,10 +53,13 @@
 //! and the turn runs as `supervised` whatever its mode, so the daemon accepts
 //! nothing for it and the keeper's `mode` file says `supervised`. A room wake
 //! is never a plan turn.
-//! **A `turn` may name a [`Model`] and an [`Effort`]** (Y-564). A Claude
-//! keeper starts with them as `--model` and `--effort`, and a later turn that
-//! changes one sets it on the live process (ADR-0041 decision 5). An ACP turn
-//! ignores them.
+//! **A `turn` may name a [`Model`], an [`Effort`] and a [`ContextLength`]**
+//! (Y-564, Y-663). A Claude keeper starts with them as `--model`, `--effort`
+//! and `--autocompact`, and a later turn that changes one sets it on the live
+//! process (ADR-0041 decision 5). An ACP turn ignores the model and effort. A
+//! Codex keeper starts with the length of the turn that starts it, as
+//! `model_auto_compact_token_limit`; a later change does not reach a running
+//! `codex-acp`. Gemini, Grok and opencode ignore the length.
 //!
 //! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
@@ -101,8 +104,8 @@ use tokio::sync::{OnceCell, broadcast, mpsc, oneshot};
 use tokio::time::MissedTickBehavior;
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
-    ContentDelta, Decision, Effort, Event, Interaction, Model, PermissionMode, RequestOption,
-    Scope, StopReason, StreamKind, ThreadEvent, TurnDiff, TurnState,
+    ContentDelta, ContextLength, Decision, Effort, Event, Interaction, Model, PermissionMode,
+    RequestOption, Scope, StopReason, StreamKind, ThreadEvent, TurnDiff, TurnState,
 };
 use yantra_core::checkpoint::{self, BranchDiff, Diff};
 use yantra_core::claude::{self, Events, Said, Session};
@@ -287,6 +290,10 @@ enum Frame {
         #[serde(default)]
         #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
         effort: Option<Effort>,
+        /// The tokens a thread fills before it compacts, only when picked.
+        #[serde(default, rename = "contextLength")]
+        #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
+        context: Option<ContextLength>,
     },
     Answer {
         #[serde(rename = "requestId")]
@@ -441,7 +448,9 @@ struct Next {
     interaction: Interaction,
     model: Option<Model>,
     effort: Option<Effort>,
-    /// A room's turn, which keeps the model and effort the thread runs with.
+    context: Option<ContextLength>,
+    /// A room's turn, which keeps the model, effort and context length the
+    /// thread runs with.
     room: bool,
 }
 
@@ -453,12 +462,13 @@ impl Next {
             interaction: self.interaction,
             model: self.model.as_ref(),
             effort: self.effort,
+            context: self.context,
         }
     }
 }
 
 /// The held turns as one: their texts joined with a blank line, with the last one's modes,
-/// model and effort.
+/// model, effort and context length.
 fn joined(mut next: Vec<Next>) -> Option<Next> {
     let last = next.pop()?;
     let mut texts: Vec<String> = next.into_iter().map(|next| next.text).collect();
@@ -651,11 +661,12 @@ trait Machine: Send + Sync + 'static {
         place: &Place,
         title: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
-    /// Starts `harness` in a keeper.
+    /// Starts `harness` in a keeper that compacts at `context`, for Codex.
     fn start_acp(
         &self,
         place: &Place,
         harness: Harness,
+        context: Option<ContextLength>,
     ) -> impl Future<Output = Result<Started<KeptAgent>, String>> + Send;
     /// Reads back the thread's keeper, or `None` when there is none.
     fn adopt(
@@ -827,6 +838,7 @@ impl Machine for Fleet {
             first.interaction,
             first.model,
             first.effort,
+            first.context,
             mcp.as_ref(),
             resumed.as_deref(),
         );
@@ -894,6 +906,7 @@ impl Machine for Fleet {
         &self,
         place: &Place,
         harness: Harness,
+        context: Option<ContextLength>,
     ) -> Result<Started<KeptAgent>, String> {
         let keeper = keeper_of(place)?;
         let tmux = self.tmux().await?;
@@ -902,7 +915,7 @@ impl Machine for Fleet {
             &self.ssh,
             tmux,
             &keeper,
-            &harness.kept_command(&place.worktree),
+            &harness.kept_command(&place.worktree, context),
             &run,
             Limits::default(),
         )
@@ -914,7 +927,7 @@ impl Machine for Fleet {
         let reader = keep::follow(self.ssh.clone(), tmux.clone(), keeper.clone(), pane, 0);
         let writer = keep::feed(self.ssh.clone(), tmux.clone(), keeper.clone(), &run, 0);
         let said = self.said(&keeper);
-        let (agent, events) = Agent::kept(harness, reader, writer, &run, said);
+        let (agent, events) = Agent::kept(harness, reader, writer, &run, context, said);
         Ok(Started::Running(KeptAgent { agent, events, run }))
     }
 
@@ -2058,6 +2071,7 @@ async fn heard_frame<M: Machine, P: Peer>(
             interaction,
             model,
             effort,
+            context,
         }) => {
             let asked = harness.as_deref().map(harness_named).transpose();
             let theirs = here.as_ref().map(|here| here.harness);
@@ -2095,6 +2109,7 @@ async fn heard_frame<M: Machine, P: Peer>(
                         interaction,
                         model,
                         effort,
+                        context,
                         room: false,
                     };
                     let next = match &live {
@@ -2566,7 +2581,16 @@ async fn attach<M: Machine, P: Peer>(
             None
         }
         (None, Some(harness)) => {
-            match connect(machine, name, &here.place, harness, here.session.clone()).await {
+            match connect(
+                machine,
+                name,
+                &here.place,
+                harness,
+                here.session.clone(),
+                None,
+            )
+            .await
+            {
                 Ok((_, Some(receiver))) => {
                     if !peer.say(&machine.registry().queue_of(&here.place.id)).await {
                         return None;
@@ -2753,7 +2777,7 @@ async fn begin<M: Machine, P: Peer>(
 ) -> bool {
     let here = match here {
         Some(here) => here,
-        None => match open(machine, name, early, pick).await {
+        None => match open(machine, name, early, pick, next.context).await {
             Ok((opened, subscribed)) => {
                 if !peer.say(&opened.started(None)).await {
                     return false;
@@ -2827,6 +2851,7 @@ async fn open<M: Machine>(
     name: &str,
     early: &mut Option<String>,
     pick: Option<Harness>,
+    context: Option<ContextLength>,
 ) -> Result<(Here, Option<Sub>), Failure> {
     let id = match early.take().map_or_else(thread::new_id, Ok) {
         Ok(id) => id,
@@ -2847,7 +2872,7 @@ async fn open<M: Machine>(
             None,
         ));
     };
-    let connected = connect(machine, name, &place, harness, None)
+    let connected = connect(machine, name, &place, harness, None, context)
         .await
         .and_then(|(session, receiver)| {
             Ok((session, subscribing(machine.as_ref(), &place, receiver)?))
@@ -2907,6 +2932,7 @@ async fn start_or_hold<M: Machine>(
             interaction: next.interaction,
             model: next.model.clone(),
             effort: next.effort,
+            context: next.context,
             room: next.room,
         };
         let turned = match here.harness {
@@ -3025,7 +3051,12 @@ async fn acp_turn<M: Machine>(
     name: &str,
     here: &Here,
     harness: Harness,
-    Next { text, mode, .. }: Next,
+    Next {
+        text,
+        mode,
+        context,
+        ..
+    }: Next,
     unsubscribed: bool,
 ) -> Result<Turned<Option<Follow>>, Failure> {
     let mut subscribed = None;
@@ -3047,8 +3078,15 @@ async fn acp_turn<M: Machine>(
             live
         }
         None => {
-            let (_, receiver) =
-                connect(machine, name, &here.place, harness, here.session.clone()).await?;
+            let (_, receiver) = connect(
+                machine,
+                name,
+                &here.place,
+                harness,
+                here.session.clone(),
+                context,
+            )
+            .await?;
             let gone = || failure(Kind::Unreachable, "the agent's keeper went away");
             let live = machine.registry().live(&here.place.id).ok_or_else(gone)?;
             subscribed = Some(match receiver {
@@ -3069,6 +3107,7 @@ async fn acp_turn<M: Machine>(
         interaction: Interaction::Build,
         model: None,
         effort: None,
+        context: None,
         room: false,
     }));
     Ok(Turned::Started(subscribed))
@@ -3082,13 +3121,14 @@ async fn connect<M: Machine>(
     place: &Place,
     harness: Harness,
     session: Option<String>,
+    context: Option<ContextLength>,
 ) -> Result<(String, Option<broadcast::Receiver<Sent>>), Failure> {
     let Some(mut claim) = Claim::wait(machine, place).await? else {
         return Ok((session.unwrap_or_default(), None));
     };
     let started = tokio::time::timeout(
         CONNECT_WITHIN,
-        start_session(machine, name, place, harness, session, &mut claim),
+        start_session(machine, name, place, harness, session, context, &mut claim),
     )
     .await;
     match started {
@@ -3113,9 +3153,10 @@ async fn start_session<M: Machine>(
     place: &Place,
     harness: Harness,
     session: Option<String>,
+    context: Option<ContextLength>,
     claim: &mut Claim<M>,
 ) -> Result<(String, Option<broadcast::Receiver<Sent>>), Failure> {
-    match machine.start_acp(place, harness).await {
+    match machine.start_acp(place, harness, context).await {
         Ok(Started::Running(kept)) => {
             claim.started = true;
             let (session, receiver) =
@@ -3426,7 +3467,7 @@ async fn keep_claude<M: Machine>(
 }
 
 /// Sends a turn the thread is marked busy with to Claude: its mode, the prompt
-/// the browser draws, and the prompt. A room's turn keeps the model and effort. A keeper whose stdin has gone holds the
+/// the browser draws, and the prompt. A room's turn keeps the model, effort and context length. A keeper whose stdin has gone holds the
 /// turn for the next one.
 async fn send_turn<M: Machine>(
     machine: &M,
@@ -3437,7 +3478,7 @@ async fn send_turn<M: Machine>(
     mut turn: Next,
 ) {
     if turn.room {
-        (turn.model, turn.effort) = claude.session.picked();
+        (turn.model, turn.effort, turn.context) = claude.session.picked();
     }
     if let Err(said) = machine.write_mode(place, turn.mode).await {
         tracing::warn!("chat {name}: the mode was not written: {said}");
@@ -3520,6 +3561,7 @@ async fn claude_next<M: Machine>(
         interaction: Interaction::Build,
         model: None,
         effort: None,
+        context: None,
         room: true,
     };
     send_turn(machine, name, place, live, claude, turn).await;
@@ -3988,6 +4030,7 @@ fn wake_on<M: Machine>(
                 interaction: Interaction::Build,
                 model: None,
                 effort: None,
+                context: None,
                 room: true,
             };
             match claude_turn(&machine, &name, &place, turn, false).await {
@@ -4433,6 +4476,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    context: None,
                     room: false,
                 }],
             ))
@@ -4458,6 +4502,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    context: None,
                 }),
                 frame(Frame::Turn {
                     text: "and the docs".to_owned(),
@@ -4466,6 +4511,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Plan,
                     model: None,
                     effort: None,
+                    context: None,
                 }),
                 frame(Frame::Turn {
                     text: "think it through".to_owned(),
@@ -4474,6 +4520,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Build,
                     model: Model::try_from("opus".to_owned()).ok(),
                     effort: Some(Effort::High),
+                    context: ContextLength::try_from(400_000).ok(),
                 }),
                 frame(Frame::Answer {
                     request_id: "r1".to_owned(),
@@ -4746,6 +4793,8 @@ mod tests {
         runs: Mutex<u32>,
         turns: Mutex<Vec<Claude>>,
         agents: Mutex<Vec<Acp>>,
+        /// The context length each ACP keeper was started with.
+        contexts: Mutex<Vec<Option<ContextLength>>>,
         opened: Mutex<usize>,
         removed: Mutex<usize>,
         remembered: Mutex<Vec<(Harness, String)>>,
@@ -4914,6 +4963,7 @@ mod tests {
                 first.interaction,
                 first.model,
                 first.effort,
+                first.context,
                 None,
                 None,
             ));
@@ -4986,6 +5036,7 @@ mod tests {
             &self,
             _: &Place,
             harness: Harness,
+            context: Option<ContextLength>,
         ) -> Result<Started<KeptAgent>, String> {
             if self.start_acp_fails {
                 return Err("ssh: could not start the agent".to_owned());
@@ -4994,7 +5045,8 @@ mod tests {
                 return Ok(Started::Busy);
             };
             lock(&self.agents).push(Acp(end));
-            let (agent, events) = Agent::kept(harness, reader, writer, &run, said());
+            lock(&self.contexts).push(context);
+            let (agent, events) = Agent::kept(harness, reader, writer, &run, context, said());
             Ok(Started::Running(KeptAgent { agent, events, run }))
         }
 
@@ -5401,6 +5453,8 @@ mod tests {
             json!({"type": "answer", "requestId": "r1", "decision": "accept"}),
             json!({"type": "turn", "text": "hi", "model": "opus; touch /tmp/pwned"}),
             json!({"type": "turn", "text": "hi", "effort": "ultra"}),
+            json!({"type": "turn", "text": "hi", "contextLength": 50_000}),
+            json!({"type": "turn", "text": "hi", "contextLength": "1m; touch /tmp/pwned"}),
         ] {
             let said = tab.next_after(frame).await;
             assert_eq!(said["type"], "error", "{said}");
@@ -5424,6 +5478,7 @@ mod tests {
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    context: None,
                 },
             ),
             (
@@ -5435,6 +5490,7 @@ mod tests {
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    context: None,
                 },
             ),
             (
@@ -5446,6 +5502,7 @@ mod tests {
                     interaction: Interaction::Plan,
                     model: None,
                     effort: None,
+                    context: None,
                 },
             ),
             (
@@ -5465,6 +5522,19 @@ mod tests {
                     interaction: Interaction::Build,
                     model: Model::try_from("claude-opus-5-5".to_owned()).ok(),
                     effort: Some(Effort::Xhigh),
+                    context: None,
+                },
+            ),
+            (
+                r#"{"type":"turn","text":"hi","harness":"codex","contextLength":1000000}"#,
+                Frame::Turn {
+                    text: "hi".to_owned(),
+                    harness: Some("codex".to_owned()),
+                    mode: PermissionMode::Supervised,
+                    interaction: Interaction::Build,
+                    model: None,
+                    effort: None,
+                    context: ContextLength::try_from(1_000_000).ok(),
                 },
             ),
             (r#"{"type":"cancel"}"#, Frame::Cancel),
@@ -8360,6 +8430,38 @@ mod tests {
         );
     }
 
+    /// Y-663: a Claude keeper starts with the context length its first frame
+    /// names, and a later turn that changes it sets it on the live process.
+    #[tokio::test]
+    async fn a_claude_turn_compacts_at_the_context_length_it_names() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test", "contextLength": 256_000}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        assert!(
+            lock(&script.commands)[0].contains("--autocompact 256000 -p"),
+            "{}",
+            lock(&script.commands)[0]
+        );
+        claude.say(ended()).await;
+        through(&mut tab, "turn.completed").await;
+
+        tab.send(json!({"type": "turn", "text": "and the docs", "contextLength": 1_000_000}));
+        assert_eq!(
+            claude.heard().await.expect("a line")["request"],
+            json!({"subtype": "apply_flag_settings",
+                "settings": {"autoCompactWindow": 1_000_000}})
+        );
+        assert_eq!(
+            prompt_of(&claude.heard().await.expect("a line")),
+            "and the docs"
+        );
+        assert_eq!(lock(&script.commands).len(), 1, "one process");
+    }
+
     /// Y-564, ADR-0041 decision 5: a later turn in another model or effort
     /// sets it on the live process before its line, and starts no other.
     #[tokio::test]
@@ -8387,15 +8489,16 @@ mod tests {
         assert_eq!(lock(&script.commands).len(), 1, "one process");
     }
 
-    /// Y-564: a room's turn, queued behind the person's or on an idle
-    /// thread, runs in the model and effort the thread runs with.
+    /// Y-564, Y-663: a room's turn, queued behind the person's or on an idle
+    /// thread, runs in the model, effort and context length the thread runs
+    /// with, so it sends no change before its line.
     #[tokio::test]
     async fn a_room_prompt_keeps_the_picked_model_and_effort() {
         let script = Arc::new(Script::default());
         let (mut tab, _served) = connect(Arc::clone(&script), None);
         tab.send(
             json!({"type": "turn", "text": "fix the test", "mode": "full-access",
-                        "model": "opus", "effort": "max"}),
+                        "model": "opus", "effort": "max", "contextLength": 400_000}),
         );
         tab.next().await;
         tab.next().await;
@@ -8487,6 +8590,29 @@ mod tests {
         assert_eq!(agent.heard().await["method"], "session/prompt");
         assert_eq!(tab.next().await["type"], "turn.started");
         assert!(lock(&script.commands).is_empty(), "no Claude turn started");
+    }
+
+    /// Y-663: a Codex keeper starts with the context length of the turn that
+    /// opens the thread.
+    #[tokio::test]
+    async fn a_codex_keeper_starts_with_the_context_length_of_the_first_turn() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(
+            json!({"type": "turn", "text": "list the files", "harness": "codex",
+                        "contextLength": 400_000}),
+        );
+        let mut agent = script.agent().await;
+        agent.initialized().await;
+        let new = agent.heard().await;
+        agent
+            .reply(&new, json!({"sessionId": SESSION, "configOptions": []}))
+            .await;
+        assert_eq!(tab.next().await["type"], "thread.started");
+        assert_eq!(
+            *lock(&script.contexts),
+            [ContextLength::try_from(400_000).ok()]
+        );
     }
 
     #[tokio::test]
@@ -8968,6 +9094,7 @@ mod tests {
             interaction: Interaction::default(),
             model: None,
             effort: None,
+            context: None,
             room: false,
         }
     }

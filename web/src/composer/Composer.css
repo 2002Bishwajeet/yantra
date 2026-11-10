@@ -158,7 +158,8 @@
   flex: 1;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
+  /* A wrapped row sits 16 px below, so a 32 px control's 48 px hit area stays off the row under it. */
+  gap: 16px 2px;
   min-width: 0;
   /* The scroll box clips, so it holds the 8 px a 32 px control's hit area reaches past it. */
   margin: -8px;

@@ -363,12 +363,16 @@ off for any other harness. On a Claude thread,
 [`ModelPicker.tsx`](src/screens/session/ModelPicker.tsx) and
 [`EffortPicker.tsx`](src/screens/session/EffortPicker.tsx) pick Claude's model
 and effort, and each is kept per thread the same way (Y-564). A change
-reaches the running Claude process before the next turn. Each turn runs
+reaches the running Claude process before the next turn.
+[`ContextPicker.tsx`](src/screens/session/ContextPicker.tsx) picks the tokens a
+Claude or Codex thread fills before it compacts, from the lengths the model
+allows, and is kept per thread too (Y-663). Codex reads it only on the turn
+that starts its agent, so the picker locks after the first turn. Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
 harness. The composer under it is [`src/composer/`](src/composer/Composer.tsx),
 one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
-Attach, harness, permission, model and effort controls, a context ring that turns red above 90%,
+Attach, harness, permission, model, effort and context-length controls, a context ring that turns red above 90%,
 the agent's plan on the card's top edge, a Send button or a Stop with Queue beside it, a draft kept
 per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
 Settings → General. Ten things about the code:

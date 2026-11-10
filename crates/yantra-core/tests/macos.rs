@@ -386,6 +386,7 @@ async fn stub_turn(lab: &Lab, repo: &str) -> Result<()> {
         None,
         None,
         None,
+        None,
     );
     let run = keep::run_id()?;
     let Started::Running { pane } = keep::start(
@@ -420,6 +421,7 @@ async fn stub_turn(lab: &Lab, repo: &str) -> Result<()> {
             interaction: Interaction::Build,
             model: None,
             effort: None,
+            context: None,
         },
         said,
     );

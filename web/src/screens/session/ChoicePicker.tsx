@@ -10,7 +10,7 @@ import { Check, type LucideIcon } from 'lucide-react'
 import { Chevron, Control, Icon, Label } from '@/composer/Control'
 import { Menu, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
 
-export type ChoicePickerProps<T extends string> = {
+export type ChoicePickerProps<T extends string | number> = {
   name: string
   icon: LucideIcon
   options: readonly { value: T | null; label: string }[]
@@ -19,11 +19,12 @@ export type ChoicePickerProps<T extends string> = {
   onChange: (value: T | null) => void
 }
 
-// A radio value is a string, so Default, which sends no flag, needs a name of its own.
+// A radio value is a string, so Default, which sends no flag, needs a name of its own,
+// and a number such as a context length is matched by its text.
 const DEFAULT = 'default'
 
 /** One of Claude's settings for the next turn (Y-564): "Model: Opus". */
-export function ChoicePicker<T extends string>(props: ChoicePickerProps<T>) {
+export function ChoicePicker<T extends string | number>(props: ChoicePickerProps<T>) {
   const { name, icon, options, value, disabled, onChange } = props
   const label = options.find((one) => one.value === value)?.label ?? 'Default'
   return (
@@ -35,8 +36,8 @@ export function ChoicePicker<T extends string>(props: ChoicePickerProps<T>) {
       </MenuTrigger>
       <MenuPopup align="start" aria-label={name} side="top">
         <Base.RadioGroup
-          onValueChange={(picked) => onChange(picked === DEFAULT ? null : (picked as T))}
-          value={value ?? DEFAULT}
+          onValueChange={(picked) => onChange(options.find((one) => String(one.value ?? DEFAULT) === picked)?.value ?? null)}
+          value={String(value ?? DEFAULT)}
         >
           {options.map((one) => (
             <Base.RadioItem
@@ -44,7 +45,7 @@ export function ChoicePicker<T extends string>(props: ChoicePickerProps<T>) {
               className="m3-menu-item m3-interactive"
               closeOnClick
               key={one.label}
-              value={one.value ?? DEFAULT}
+              value={String(one.value ?? DEFAULT)}
             >
               <span className="m3-menu-item__icon" aria-hidden="true">
                 <Base.RadioItemIndicator>

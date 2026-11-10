@@ -77,6 +77,27 @@ export const EFFORTS: readonly { effort: Effort | null; label: string }[] = [
   { effort: 'max', label: 'Max' },
 ]
 
+/** The tokens a thread fills before it compacts (Y-663): Claude's `--autocompact`
+ *  or Codex's `model_auto_compact_token_limit`. `null` sends none, so the agent picks. */
+export type ContextLength = 256_000 | 400_000 | 512_000 | 1_000_000
+
+export const CONTEXT_LENGTHS: readonly { length: ContextLength | null; label: string }[] = [
+  { length: null, label: 'Default' },
+  { length: 256_000, label: '256K' },
+  { length: 400_000, label: '400K' },
+  { length: 512_000, label: '512K' },
+  { length: 1_000_000, label: '1M' },
+]
+
+/** The lengths a turn may pick. Haiku's window is 200K, so it keeps Claude's
+ *  default; Codex is offered no more than the window it last reported. Gemini,
+ *  Grok and opencode take no length, so they get no picker (an empty list). */
+export function lengthsFor(harness: Harness | null, model: ClaudeModel | null, reported?: number) {
+  if (harness === 'claude') return model === 'haiku' ? CONTEXT_LENGTHS.slice(0, 1) : CONTEXT_LENGTHS
+  if (harness !== 'codex') return []
+  return CONTEXT_LENGTHS.filter(({ length }) => length === null || reported === undefined || length <= reported)
+}
+
 export type StreamKind = 'assistant_text' | 'reasoning_text' | 'user_text'
 
 export type ItemType = 'command_execution' | 'file_change' | 'web_search' | 'dynamic_tool_call'
@@ -187,7 +208,8 @@ export type ChatQuery = { thread?: string; after?: string }
 export type ChatFrame =
   /** `harness` is read only on the turn that opens a thread. `mode` and
    *  `interaction` hold for this turn; absent, they are supervised and build.
-   *  A Claude turn reads `model` and `effort`; an ACP one ignores them. */
+   *  A Claude turn reads `model` and `effort`; an ACP one ignores them.
+   *  `contextLength` reaches Claude, and Codex on the turn that starts it. */
   | {
       type: 'turn'
       text: string
@@ -196,6 +218,7 @@ export type ChatFrame =
       interaction?: Interaction
       model?: string
       effort?: Effort
+      contextLength?: number
     }
   | { type: 'answer'; requestId: string; decision: Decision; answers?: Record<string, string[]> | null }
   /** Stops the turn; background tasks run on. */
