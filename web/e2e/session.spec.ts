@@ -128,9 +128,17 @@ test.describe('the session screen, chat first', () => {
   test('a short link in a chat turn is 44 px in both directions', async ({ page, size }) => {
     test.skip(size !== 'phone', 'the 44 px rule is the phone rule')
     await page.goto(`${PATH}?thread=${THREAD}`)
-    const box = await page.getByRole('link', { name: '#663' }).boundingBox()
-    expect(box?.width).toBeGreaterThanOrEqual(44)
-    expect(box?.height).toBeGreaterThanOrEqual(44)
+    const reach = await page.getByRole('link', { name: '#663' }).evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      const after = getComputedStyle(el, '::after')
+      // The ::after offsets are negative when it reaches outside the link's own box.
+      return {
+        width: rect.width - Math.min(0, parseFloat(after.left)) - Math.min(0, parseFloat(after.right)),
+        height: rect.height - Math.min(0, parseFloat(after.top)) - Math.min(0, parseFloat(after.bottom)),
+      }
+    })
+    expect(reach.width).toBeGreaterThanOrEqual(44)
+    expect(reach.height).toBeGreaterThanOrEqual(44)
   })
 
   test('a thread the workspace does not have is refused by name', async ({ page }) => {
