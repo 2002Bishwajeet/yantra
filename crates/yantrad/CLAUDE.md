@@ -463,6 +463,11 @@ notifications.
 from (Y-589). A terminal already runs on the machine it would name, so a CLI verb would answer a
 question nobody asks.
 
+**`POST /api/carry` and `POST /api/carry/{id}` are the third** (Y-652). A dashboard on `:7717` hands
+its browser keys, drafts among them, to itself on `:8443`, because the two origins share no storage.
+[`carry.rs`](src/carry.rs) holds at most 8 slots of 5 minutes in `Fleet`. A take leaves the slot until it expires, because
+`:7717` has already removed its copy and a lost answer must not lose the drafts. Nothing reaches a disk or a log, because a draft is the owner's words.
+
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own
 untagged node is refused. *Which* address that is, is ADR-0017's — see the proxy section below.

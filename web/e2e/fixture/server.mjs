@@ -24,6 +24,7 @@
 // each read once with a 502 and then answers it, and refuses each terminal
 // target once with a text frame before accepting it. `broken` is an overlay
 // of bodies that do not match the contract, keyed by path.
+import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { WebSocketServer } from 'ws'
@@ -276,7 +277,32 @@ const noRoom = (name) => `no room ${name}: it was never made, or yantrad has res
 /** Route table: method, path pattern, handler. A handler answers
  *  `[status, body]` — a string is `text/plain`, an object JSON — or `[status]`
  *  for an empty body. */
+// Y-652: carry.rs, in memory, and a take leaves the slot. Not per scenario, because the
+// two origins of one move share no scenario cookie.
+const carried = new Map()
+const strings = (sent) =>
+  typeof sent === 'object' && sent !== null && !Array.isArray(sent) && Object.values(sent).every((v) => typeof v === 'string')
+
 const routes = [
+  [
+    'POST',
+    /^\/api\/carry$/,
+    (_, __, sent) => {
+      if (!strings(sent)) return [400, { error: 'the body is not an object of strings' }]
+      const id = randomBytes(16).toString('hex')
+      carried.set(id, sent)
+      return [200, { id }]
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/carry\/([^/]+)$/,
+    (_, [id]) => {
+      const kept = carried.get(id)
+      if (!kept) return [404, { error: 'nothing is carried under that id' }]
+      return [200, kept]
+    },
+  ],
   // `arrives` is a node that joins the tailnet a while after the first look,
   // which is what Add a device's first beat waits for (Y-390).
   [

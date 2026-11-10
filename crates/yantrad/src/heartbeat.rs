@@ -97,6 +97,8 @@ pub struct Fleet {
     /// Woken by a channel switch, so the release look reads the new channel
     /// now and not within the hour (Y-662).
     pub look_at_release: Arc<tokio::sync::Notify>,
+    /// What a page on `:7717` hands to itself on `:8443` (Y-652), in memory only.
+    pub carry: crate::carry::Slots,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -153,6 +155,7 @@ impl Default for Fleet {
             pulls: crate::watch::Pulls::default(),
             look_at_agents: Arc::default(),
             look_at_release: Arc::default(),
+            carry: crate::carry::Slots::default(),
         }
     }
 }

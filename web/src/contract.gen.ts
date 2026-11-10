@@ -9,6 +9,7 @@ import type {
   About,
   Attention,
   Broken,
+  Carried,
   ChatAttached,
   ChatBranchDiff,
   ChatFailure,
@@ -639,6 +640,7 @@ export const failed = {
 export const about = {
   "built": "2026-09-06",
   "channel": "stable",
+  "https": "https://<node>.<tailnet>.ts.net:8443",
   "listening_on": [
     "100.64.0.1:7717",
     "[fd7a:115c:a1e0::1]:7717"
@@ -677,6 +679,14 @@ export const sshIdentity = {
   "path": "/home/<user>/.ssh/id_yantra",
   "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra"
 } satisfies SshIdentity
+
+export const carried = {
+  "id": "0123456789abcdef0123456789abcdef"
+} satisfies Carried
+
+export const carriedKeys = {
+  "yantra.chat.draft.site": "a draft"
+} satisfies Record<string, string>
 
 export const here = {
   "machine": "iphone"

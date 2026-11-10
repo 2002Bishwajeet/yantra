@@ -379,6 +379,9 @@ export type About = {
   // `listen_on`'s set exactly, as `host:port`.
   listening_on: string[]
   tailnet: string | null
+  // Y-652: `https://<node>:8443`, the `tailscale serve` origin where the mic
+  // works. Null when `tailnet` is. It does not prove serve runs.
+  https: string | null
   // Whether this process started with a relay. A relay saved since is the
   // next start's (ADR-0021). Never the URL or the token.
   relay: boolean
@@ -429,6 +432,12 @@ export type SshIdentity = {
  *  look to read. A help, never a step. */
 export type Here = {
   machine: string | null
+}
+
+/** `POST /api/carry` (Y-652): the slot a page on :7717 left its keys in, for
+ *  the page on :8443 to take with `POST /api/carry/{id}` until it expires. */
+export type Carried = {
+  id: string
 }
 
 /** `GET /api/notifications` — `Looked<Event[]>`, newest first, at most fifty,
