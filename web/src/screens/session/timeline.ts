@@ -8,6 +8,7 @@ import type {
   SlashCommand,
   ThreadEvent,
   TurnCompleted,
+  TurnState,
 } from '@/api/thread'
 
 export type Message = {
@@ -16,11 +17,14 @@ export type Message = {
   /** `agent` is whichever harness the thread speaks to. */
   who: 'you' | 'agent' | 'thinking'
   text: string
+  /** The count of `turn.started` folded when the message began; a work log groups by it. */
+  turn: number
 }
 
 export type Tool = {
   kind: 'tool'
   id: string
+  turn: number
   itemType: ItemType
   status: ItemStatus
   title: string | null
@@ -59,6 +63,10 @@ export type Timeline = {
   commands: SlashCommand[]
   /** `sent` is the frame on its way, before the agent says it started. */
   turn: 'idle' | 'sent' | 'running' | 'stopping'
+  /** How many turns have started. Wake and queued turns count too, each opens with its own `turn.started`. */
+  turns: number
+  /** How each finished turn ended, by turn number, with the time the agent measured. */
+  worked: Record<number, { state: TurnState; durationMs?: number }>
   /** How the last turn ended, until the next one starts. */
   ended: TurnCompleted | null
   /** What the person sent while a turn ran, which the daemon sends when it ends (Y-561). */
@@ -76,6 +84,8 @@ export const empty: Timeline = {
   plan: [],
   commands: [],
   turn: 'idle',
+  turns: 0,
+  worked: {},
   ended: null,
   queued: [],
   background: [],
@@ -117,19 +127,33 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
     case 'thread.started':
       return { ...timeline, thread: event.payload.thread, harness: event.payload.harness }
     case 'turn.started':
-      return { ...timeline, turn: timeline.turn === 'stopping' ? 'stopping' : 'running', ended: null, plan: [] }
-    case 'turn.completed':
-      return { ...timeline, turn: 'idle', requests: [], ended: event.payload }
+      return {
+        ...timeline,
+        turn: timeline.turn === 'stopping' ? 'stopping' : 'running',
+        turns: timeline.turns + 1,
+        ended: null,
+        plan: [],
+      }
+    case 'turn.completed': {
+      const { state, durationMs } = event.payload
+      return {
+        ...timeline,
+        turn: 'idle',
+        requests: [],
+        ended: event.payload,
+        worked: { ...timeline.worked, [timeline.turns]: { state, durationMs } },
+      }
+    }
     case 'thread.token-usage.updated':
       return { ...timeline, usage: { used: event.payload.usedTokens, max: event.payload.maxTokens } }
     case 'content.delta': {
       const { streamKind, delta, itemId } = event.payload
-      return { ...timeline, entries: said(timeline.entries, WHO[streamKind], delta, itemId) }
+      return { ...timeline, entries: said(timeline.entries, WHO[streamKind], delta, itemId, timeline.turns) }
     }
     case 'item.started':
     case 'item.updated':
     case 'item.completed':
-      return { ...timeline, entries: tool(timeline.entries, event.payload) }
+      return { ...timeline, entries: tool(timeline.entries, event.payload, timeline.turns) }
     case 'request.opened':
       return { ...timeline, requests: [...timeline.requests, event.payload] }
     case 'turn.diff.updated': {
@@ -177,7 +201,7 @@ function fold(timeline: Timeline, event: ThreadEvent): Timeline {
 
 /** A delta joins the message it names, or the last message when it names
  *  none and the same voice is still speaking. */
-function said(entries: Entry[], who: Message['who'], delta: string, itemId?: string): Entry[] {
+function said(entries: Entry[], who: Message['who'], delta: string, itemId: string | undefined, turn: number): Entry[] {
   const last = entries[entries.length - 1]
   const at =
     itemId === undefined
@@ -186,7 +210,7 @@ function said(entries: Entry[], who: Message['who'], delta: string, itemId?: str
         : -1
       : entries.findIndex((one) => one.kind === 'message' && one.id === itemId)
   if (at === -1) {
-    return [...entries, { kind: 'message', id: itemId ?? `said:${entries.length}`, who, text: delta }]
+    return [...entries, { kind: 'message', id: itemId ?? `said:${entries.length}`, who, text: delta, turn }]
   }
   // The daemon makes a prompt (`user:<run>…`) whole and without a cursor, so
   // a reopen may send it again (ADR-0035 decision 8); a second copy repeats it.
@@ -195,7 +219,7 @@ function said(entries: Entry[], who: Message['who'], delta: string, itemId?: str
   return entries.with(at, { ...found, text: found.text + delta })
 }
 
-function tool(entries: Entry[], item: ChatItem): Entry[] {
+function tool(entries: Entry[], item: ChatItem, turn: number): Entry[] {
   const at = entries.findIndex((one) => one.kind === 'tool' && one.id === item.itemId)
   if (at === -1) {
     return [
@@ -203,6 +227,7 @@ function tool(entries: Entry[], item: ChatItem): Entry[] {
       {
         kind: 'tool',
         id: item.itemId,
+        turn,
         itemType: item.itemType ?? 'dynamic_tool_call',
         status: item.status ?? 'inProgress',
         title: item.title ?? null,
