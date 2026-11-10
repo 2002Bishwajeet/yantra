@@ -38,7 +38,9 @@ const PUSH_PR = (row) => `git push --force-with-lease -u origin ${branchOf(row)}
 
 // Owner, 2026-11-09 (Y-694): CI is the gate. The local gate ran one row at a time and repeated CI: Y-649 spent 64 min in it, CI takes 6.
 // merge-guard, not \`gh pr checks --watch\`: the latter exits with "no checks reported" in the seconds after a push, and ignores the required names.
-const GATE = (row) => `Run the Then commands below in the worktree first. Then push the branch and open its PR: ${PUSH_PR(row)} Then wait for CI with \`bash ${MERGE_GUARD} <pr number>\`. It waits until every check on the pushed commit completes, and exits 0 only when all are green and the required checks are present.`
+// Y-703: the Then commands run on an idle tailnet machine through gate.sh, so they need the pushed commit.
+const GATE_SH = `${REPO}/.claude/workflows/gate.sh`
+const GATE = (row) => `Push the branch and open its PR first: ${PUSH_PR(row)} Then run the Then commands below and wait for CI, both in one background shell as the next lines say. \`bash ${MERGE_GUARD} <pr number>\` waits until every check on the pushed commit completes, and exits 0 only when all are green and the required checks are present.`
 
 const RULES = (wt) => `
 Rules for this run (CLAUDE.md §B7, the build loop):
@@ -93,7 +95,7 @@ const PLAN_SCHEMA = {
     park: { type: 'boolean' },
     parkReason: { type: 'string' },
     plan: { type: 'string' },
-    extraChecks: { type: 'array', items: { type: 'string' }, description: 'commands that prove the done condition and that CI does not run. They run on this box before the push, so none may need podman or Playwright; a test in a CI suite needs no entry. Each must run as written: `yantrad` is binary-only, so use `--bin yantrad` and never `--lib`, and a nextest filter must match a test (check with `cargo nextest list`). Leave it empty when CI already proves the row.' },
+    extraChecks: { type: 'array', items: { type: 'string' }, description: 'commands that prove the done condition and that CI does not run. They run after the push through gate.sh, on an idle tailnet machine or on this box, so none may need podman or Playwright; a test in a CI suite needs no entry. Each must run as written: `yantrad` is binary-only, so use `--bin yantrad` and never `--lib`, and a nextest filter must match a test (check with `cargo nextest list`). Leave it empty when CI already proves the row.' },
   },
   required: ['park', 'plan', 'extraChecks'],
 }
@@ -106,6 +108,7 @@ const VERIFY_SCHEMA = {
     failures: { type: 'string', description: 'the failing command and the last 60 lines of its output' },
     flaky: { type: 'array', items: { type: 'string' }, description: 'tests that failed on CI, are in files that `git diff --name-only origin/main...HEAD` does not list, and passed when the failed jobs reran' },
     fixedChecks: { type: 'array', items: { type: 'string' }, description: 'only when a Then command is itself wrong (an unknown target, a filter that matches no test): every Then command, corrected' },
+    machine: { type: 'string', description: 'what follows "gate-machine:" in the log, or "none" when the log has no such line' },
   },
   required: ['finished', 'pass', 'failures'],
 }
@@ -173,7 +176,7 @@ const CLEANUP = `Afterwards remove only the test containers: those with label ya
 // Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
 // Y-493 parked because the agent read the log tail while the gate still ran, so the run must end in a sentinel line.
 const WAIT = (gateLog) => `Wait with Monitor and an until-loop on \`grep -q '^GATE_EXIT=' ${gateLog}\`, because a foreground sleep is blocked. Set timeout_ms to 1800000 on the Monitor call. When the Monitor expires and the GATE_EXIT line does not exist, arm it again. Judge pass from GATE_EXIT and the failing tests, never from a partial tail. If you must return before the line exists, return finished=false: the run sends another agent to wait.`
-const GATE_HOW = (gateLog) => `CI can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then run the merge guard in a background shell: \`( bash ${MERGE_GUARD} <pr number> ) > ${gateLog} 2>&1; echo "GATE_EXIT=$?" >> ${gateLog}\`. ${WAIT(gateLog)}`
+const GATE_HOW = (wt, gateLog) => `CI can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then run the Then commands and the merge guard in a background shell: \`( bash ${GATE_SH} run ${wt} '<the Then commands, joined by &&>' && bash ${MERGE_GUARD} <pr number> ) > ${gateLog} 2>&1; echo "GATE_EXIT=$?" >> ${gateLog}\`. Leave out the gate.sh part when Then says nothing more. gate.sh sends the commands to an idle machine on the tailnet, or runs them here when none is idle, and its first line names the machine. ${WAIT(gateLog)}`
 
 // A counter, not the clock, names the log: a prompt that changes on every run defeats the resume cache.
 const gateRuns = {}
@@ -203,7 +206,7 @@ async function verifyAndFix(row, wt, plan, label, attempts) {
       `Run the CI gate for ${row.id} in ${wt}, fix what fails, and report whether it passes at the end.
 Gate: ${GATE(row)}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
-${GATE_HOW(gateLog)} Each rerun of the gate writes to the same log: truncate it first.
+${GATE_HOW(wt, gateLog)} Each rerun of the gate writes to the same log: truncate it first.
 If a check fails, read its failed job log, find the cause, fix the code, run the fast local checks for it, commit, and run the gate again: it pushes the fix. Stop after ${attempts} gate runs.
 ${FLAKY} Do not change code for a flaky test.
 A screenshot that the row's change was meant to alter: regenerate it with \`just web-e2e --update-snapshots=changed <spec>\` and commit the images. A screenshot it was not meant to alter is a regression: fix the code.
@@ -221,7 +224,7 @@ async function verify(row, wt, plan, label) {
 Gate: ${GATE(row)}
 Then: ${plan.extraChecks.join(' && ') || 'nothing more'}
 If a Then command fails before any test runs because the command is wrong, not the code, correct it, run the corrected one, judge pass on that, and return the corrected list as fixedChecks.
-${GATE_HOW(gateLog)}
+${GATE_HOW(wt, gateLog)}
 ${FLAKY}`,
       { label: `verify:${row.id}:${label}`, phase: 'Build', schema: VERIFY_SCHEMA, model: 'sonnet', effort: 'low' },
     ),
@@ -237,17 +240,24 @@ When CI failed, find the run with \`gh pr checks ${branchOf(row)}\` and read its
   )
 }
 
+const gateMachine = {}
+const noteMachine = (row, v) => {
+  if (v?.machine && v.machine !== 'none') gateMachine[row.id] = v.machine
+}
+
 async function verifyUntilGreen(row, wt, plan, rounds) {
   if (DRY) return (log(`${row.id}: dry run, so no push and no CI gate`), true)
   const selfFix = row.kind === 'web' || row.kind === 'docs'
   if (selfFix) {
     const v = await verifyAndFix(row, wt, plan, 'g', rounds)
+    noteMachine(row, v)
     if (v?.fixedChecks?.length) plan.extraChecks = v.fixedChecks
     if (v?.flaky?.length) log(`${row.id}: retried outside its diff, passed alone: ${v.flaky.join(', ')}`)
     return !!(v && v.pass)
   }
   for (let i = 1; i <= rounds; i++) {
     const v = await verify(row, wt, plan, String(i))
+    noteMachine(row, v)
     // A wrong check is the plan's bug, and no code fix can make it pass.
     if (v?.fixedChecks?.length) plan.extraChecks = v.fixedChecks
     if (v?.flaky?.length) log(`${row.id}: retried outside its diff, passed alone: ${v.flaky.join(', ')}`)
@@ -261,16 +271,18 @@ async function verifyUntilGreen(row, wt, plan, rounds) {
 // Y-660: the gate runs against the fixture, so a visible row is also walked on the real product, and a machine row
 // also runs on the real Mac. walk.sh holds the paths that decide which, and its guard refuses the merge without it.
 const WALK = `${REPO}/.claude/workflows/walk.sh`
+// Y-674's walk was cut off on 2026-11-10 mid vite build: a Monitor with no timeout_ms expires after 5 minutes.
+const WALK_WAIT = (log) => `Wait with Monitor and an until-loop on \`grep -q '^WALK_EXIT=' ${log}\`, with timeout_ms 1800000. When the Monitor expires and the line does not exist, arm it again. Never return while it runs.`
 async function walk(row, wt) {
   return serialWalk(() =>
     agent(
       `Walk ${row.id} in ${wt} on the real product. Do not change any tracked file.
 1. Run \`bash ${WALK} needs ${wt}\`. Return its lines as needs. If it prints nothing, return needs=[], shots=[], mac=not-needed and stop.
-2. Run \`bash ${WALK} up ${wt}\`. It builds the branch's yantrad and dashboard and serves them against the real fleet on a spare port. Run it in a background shell and wait with Monitor, because the build can take longer than a Bash call.
+2. Run \`bash ${WALK} up ${wt}\`. It builds the branch's yantrad and dashboard and serves them against the real fleet on a spare port. A cold build takes longer than a Bash call, so run \`mkdir -p ${wt}/.walk && rm -f ${wt}/.walk/up.log\`, then in a background shell \`( bash ${WALK} up ${wt} ) > ${wt}/.walk/up.log 2>&1; echo "WALK_EXIT=$?" >> ${wt}/.walk/up.log\`. ${WALK_WAIT(`${wt}/.walk/up.log`)} Go on only when WALK_EXIT=0.
 3. Read \`git diff origin/main...HEAD\` and web/src/router.ts, and choose the routes that show what the row changed. For a machine row, choose the screens that show that path: the fleet, the machine's page, or the Chat. Run \`bash ${WALK} shoot ${wt} <route>...\`. Only open pages; never press a control that writes, because the machines are real.
 4. Read every PNG and TXT file it lists with the Read tool, and read ${wt}/.walk/shots/errors.txt. Describe each screen in seen.
 5. Always run \`bash ${WALK} down ${wt}\`, also after a failure.
-6. If needs has machine, run \`bash ${WALK} mac ${wt}\` in a background shell and wait with Monitor. Exit 0 is pass, exit 2 is unreachable, any other exit is fail. Put the tail of ${wt}/.walk/test-mac.log in failures. Else mac=not-needed.
+6. If needs has machine, run \`( bash ${WALK} mac ${wt} ) > ${wt}/.walk/mac.log 2>&1; echo "WALK_EXIT=$?" >> ${wt}/.walk/mac.log\` in a background shell. ${WALK_WAIT(`${wt}/.walk/mac.log`)} WALK_EXIT=0 is pass, WALK_EXIT=2 is unreachable, any other value is fail. Put the tail of ${wt}/.walk/test-mac.log in failures. Else mac=not-needed.
 ${CLEANUP}`,
       { label: `walk:${row.id}`, phase: 'Build', schema: WALK_SCHEMA, model: 'sonnet', effort: 'low' },
     ),
@@ -299,7 +311,7 @@ const shown = (w) =>
 async function runRow(row) {
   const branch = branchOf(row)
   const wt = `${WT_ROOT}/${branch}`
-  const park = (reason) => ({ id: row.id, title: row.title, status: 'parked', reason, branch })
+  const park = (reason) => ({ id: row.id, title: row.title, status: 'parked', reason, branch, gateMachine: gateMachine[row.id] || 'none' })
 
   // A retried row was parked on review findings, and only the report remembers them.
   const retried = RETRY.includes(row.id) ? `\nThe owner asked to retry this parked row. Read why it was parked in the reports in ${REPO}/.claude/build-loop/, and fix those findings first.` : ''
@@ -381,7 +393,7 @@ ${REVIEW_RULE}`,
   }
   if (s && s.status === 'behind') s = await ship()
   if (!s) return park('the shipper died')
-  return { id: row.id, title: row.title, status: s.status, pr: s.pr || '', reason: s.failures || '', branch }
+  return { id: row.id, title: row.title, status: s.status, pr: s.pr || '', reason: s.failures || '', branch, gateMachine: gateMachine[row.id] || 'none' }
 }
 
 const attempted = new Set()
@@ -419,7 +431,7 @@ phase('Report')
 await agent(
   `Write ${REPORT} (create the folder if needed). If it exists, an earlier run today wrote it: keep its text and append this run under a \`## Another run\` heading. It is the owner's morning report for the build loop on ${TODAY}. Plain prose, CLAUDE.md §A6.
 Open with one line: how many rows merged, stayed open and parked.
-Then a table: row, title, outcome, PR, and for parked rows the reason and the branch that holds the work.
+Then a table: row, title, outcome, PR, the machine that ran its gate (gateMachine), and for parked rows the reason and the branch that holds the work.
 Then the rows triage skipped, one line each.
 Results: ${JSON.stringify(results)}
 Skipped: ${JSON.stringify([...skipped].map(([id, reason]) => ({ id, reason })))}`,
