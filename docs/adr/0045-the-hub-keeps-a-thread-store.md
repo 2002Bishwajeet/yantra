@@ -157,3 +157,7 @@ Accessed 2026-11-09.
   `crates/yantrad/yantrad.service`.
 - XDG Base Directory Specification, `$XDG_STATE_HOME`:
   <https://specifications.freedesktop.org/basedir-spec/latest/>.
+
+> **ADR-0045, decision 2, 2026-11-10 (Y-698):** a home thread's row has no workspace, no
+> branch and no worktree path. Those three fields may be empty, and the machine names the thread
+> ([ADR-0046](0046-the-owner-types-sudo-in-an-owner-terminal.md) decision 1).

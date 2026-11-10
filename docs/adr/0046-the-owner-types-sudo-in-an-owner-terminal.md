@@ -1,7 +1,7 @@
 # ADR-0046 — The owner types sudo in an owner terminal, and a home chat has no workspace
 
 - **Date:** 2026-11-10
-- **Status:** Proposed ([Y-698](../../tracker.md)). The owner accepts or changes it.
+- **Status:** Accepted by the owner, 2026-11-10 ([Y-698](../../tracker.md)).
 - **Owner's ask, 2026-11-10:** *"On the Yantra box I also want a feature to spawn a new Claude
   session in the home directory, because sometimes I just want to converse normally. And what are
   the steps so that I can give the agent sudo, or run sudo commands myself, from the chat client or
@@ -10,7 +10,7 @@
   one-off terminal run only a command an install left. Decision 2 below adds a second one-off route.
 - **Proposes dated amendments to** [ADR-0026](0026-the-chat-is-a-stream-json-bridge-in-the-daemon.md)
   decision 3 and [ADR-0045](0045-the-hub-keeps-a-thread-store.md) decision 2. Their text is in
-  *Amendments to write on acceptance* below.
+  *Amendments written on acceptance* below.
 - **Keeps** the owner's decisions of 2026-11-04 ([Y-628](../../tracker.md)) and 2026-10-31: every
   agent runs in a non-sudo account, and on the box each agent has its own non-sudo user.
 - **Reads against** [ADR-0044](0044-a-write-needs-the-owners-passkey.md) (a write needs the owner's
@@ -203,7 +203,7 @@ trusted.
 - **A separate directory for each home thread**, such as `~/.yantra/home/<id>`. Rejected: the owner
   asked for the home folder, and a conversation does not need a tree of its own.
 
-## Amendments to write on acceptance
+## Amendments written on acceptance
 
 > **ADR-0026, decision 3, dated on acceptance (Y-698):** the session-addressed form is built for a
 > home chat as `GET /api/machines/{machine}/chat`
