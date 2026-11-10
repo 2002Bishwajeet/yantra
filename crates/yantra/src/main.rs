@@ -1131,7 +1131,7 @@ async fn up(name: &str, agent: Option<AgentArg>) -> ExitCode {
                 "  attach: {}",
                 attach_hint(
                     machine,
-                    report.tmux.path(),
+                    &report.tmux.command(),
                     &session.name,
                     report.term.term()
                 )
@@ -1175,7 +1175,7 @@ async fn resume(name: &str) -> ExitCode {
                 "  attach: {}",
                 attach_hint(
                     machine,
-                    report.tmux.path(),
+                    &report.tmux.command(),
                     &report.workspace.name,
                     report.term.term()
                 )
@@ -3441,7 +3441,7 @@ async fn attach(name: &str) -> ExitCode {
     }
     hand_over(
         machine,
-        &attach::remote_command(plan.tmux.path(), &plan.session, plan.term.term()),
+        &attach::remote_command(&plan.tmux.command(), &plan.session, plan.term.term()),
     )
 }
 
@@ -4415,10 +4415,15 @@ mod tests {
     /// Verified against the MacBook; each missing part breaks it there.
     #[test]
     fn the_attach_hint_survives_a_remote_machine() {
-        let hint = attach_hint("mac", "/opt/homebrew/bin/tmux", "demo", "xterm-256color");
+        let hint = attach_hint(
+            "mac",
+            "'/opt/homebrew/bin/tmux' -L yantra -N",
+            "demo",
+            "xterm-256color",
+        );
         assert_eq!(
             hint,
-            "ssh mac -t \"TERM=xterm-256color /opt/homebrew/bin/tmux attach -t '=demo'\""
+            "ssh mac -t \"TERM=xterm-256color '/opt/homebrew/bin/tmux' -L yantra -N attach -t '=demo'\""
         );
     }
 

@@ -29,7 +29,7 @@ use yantra_core::workspace::Workspace;
 use yantra_core::{doctor, probe, terminfo, thread};
 
 /// The LaunchAgent `login_server.sh` writes.
-const LABEL: &str = "io.github.2002bishwajeet.yantra-tmux";
+const LABEL: &str = "io.github.2002bishwajeet.yantra-tmux-server";
 
 /// Answers one prompt the way `claude -p --output-format stream-json` does,
 /// then waits for its stdin to close. It keeps the prompt and its cwd.
@@ -197,6 +197,37 @@ async fn the_keeper_outlives_its_ssh_and_its_reader_ends_with_the_pane() -> Resu
     Ok(())
 }
 
+/// Y-667: a keeper killed while its pane lives leaves the `-D` server with no
+/// session, and the reader still ends.
+#[tokio::test]
+#[ignore = "needs a disposable Mac; set YANTRA_MAC_RUNNER (CI's macos job does)"]
+async fn the_reader_ends_when_the_last_session_is_killed() -> Result<()> {
+    let lab = Lab::start("empty").await?;
+    let tmux = lab.tmux.command();
+    lab.run(&format!(
+        "{tmux} ls -F '#{{session_id}}' 2>/dev/null | while read -r s; do \
+         {tmux} kill-session -t \"$s\"; done; true"
+    ))
+    .await?;
+    let keeper = Keeper::new("ci", "2b3c4d5e6f7a8b9c");
+    let pane = lab
+        .start_keeper(&keeper, "exec sleep 600", Limits::default())
+        .await?;
+    let reader = keep::follow(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), pane, 0);
+    keep::kill(&lab.ssh, &lab.tmux, &keeper).await?;
+    ensure!(
+        lab.tmux.running(&lab.ssh).await?,
+        "the yantra server ended with its last session"
+    );
+    let ended = tokio::time::timeout(Duration::from_secs(20), async {
+        let mut lines = BufReader::new(reader).lines();
+        while let Ok(Some(_)) = lines.next_line().await {}
+    })
+    .await;
+    ensure!(ended.is_ok(), "the reader ended on the empty server");
+    Ok(())
+}
+
 /// Lines appended to `in` reach the agent, and a shut writer ends it.
 #[tokio::test]
 #[ignore = "needs a disposable Mac; set YANTRA_MAC_RUNNER (CI's macos job does)"]
@@ -272,6 +303,58 @@ async fn both_keeper_limits_fire_on_the_mac() -> Result<()> {
 #[ignore = "needs a disposable Mac; set YANTRA_MAC_RUNNER (CI's macos job does)"]
 async fn a_chat_turn_runs_through_the_keeper_on_the_mac() -> Result<()> {
     let lab = Lab::start("chat").await?;
+    stub_turn(&lab, "/private/tmp/ym-chat-repo").await
+}
+
+/// I-56 closed: a Chat turn reaches no gate of its own, so with no server at
+/// all `keep::start` must have the LaunchAgent start one, in the login session.
+#[tokio::test]
+#[ignore = "needs a disposable Mac; set YANTRA_MAC_RUNNER (CI's macos job does)"]
+async fn a_chat_turn_with_no_login_server_starts_the_launch_agent() -> Result<()> {
+    let lab = Lab::start("nogate").await?;
+    lab.run(&format!(
+        "launchctl bootout gui/$(id -u)/{LABEL} 2>/dev/null; {} kill-server 2>/dev/null; true",
+        lab.tmux.command()
+    ))
+    .await?;
+    ensure!(
+        !lab.tmux.running(&lab.ssh).await?,
+        "the yantra server outlived the bootout"
+    );
+    stub_turn(&lab, "/private/tmp/ym-nogate-repo").await?;
+    let (job, server) = login_server_pids(&lab).await?;
+    ensure!(job.is_some(), "the LaunchAgent is not running");
+    ensure!(
+        job == server,
+        "the yantra server is pid {server:?} and the job is pid {job:?}, so the server is not \
+         the login session's"
+    );
+    Ok(())
+}
+
+/// The pid `launchctl` gives the job, and the yantra server's pid, once they
+/// agree or after 10 s. KeepAlive may be restarting a server that emptied.
+async fn login_server_pids(lab: &Lab) -> Result<(Option<u32>, Option<u32>)> {
+    let ask = format!(
+        "echo \"$(launchctl print gui/$(id -u)/{LABEL} 2>/dev/null | awk '$1 == \"pid\" {{ print $3 }}')\"\n\
+         echo \"$({} display-message -p '#{{pid}}' 2>/dev/null)\"",
+        lab.tmux.command()
+    );
+    let mut pids = (None, None);
+    for _ in 0..10 {
+        let said = lab.run(&ask).await?;
+        let mut lines = said.lines().map(|line| line.trim().parse().ok());
+        pids = (lines.next().flatten(), lines.next().flatten());
+        if pids.0.is_some() && pids.0 == pids.1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    Ok(pids)
+}
+
+/// A turn of the stub `claude` in a thread of a new repository at `repo`.
+async fn stub_turn(lab: &Lab, repo: &str) -> Result<()> {
     let stub = lab
         .run("[ -e \"$HOME/.local/bin/claude\" ] && echo there || true")
         .await?;
@@ -279,7 +362,6 @@ async fn a_chat_turn_runs_through_the_keeper_on_the_mac() -> Result<()> {
         stub.trim().is_empty(),
         "~/.local/bin/claude exists on YANTRA_MAC_RUNNER, so this is not a disposable Mac"
     );
-    let repo = "/private/tmp/ym-chat-repo";
     lab.run(&format!(
         "rm -rf {repo} && mkdir -p {repo} && cd {repo} && git init -q && echo one > README \
          && git add README && git -c user.name=t -c user.email=t@example.com commit -qm one \
@@ -447,7 +529,7 @@ async fn doctor_asks_every_question_on_the_mac() -> Result<()> {
 #[ignore = "needs a disposable Mac; set YANTRA_MAC_RUNNER (CI's macos job does)"]
 async fn the_launch_agent_starts_the_tmux_server() -> Result<()> {
     let lab = Lab::start("launchd").await?;
-    let tmux = format!("'{}'", lab.tmux.path());
+    let tmux = lab.tmux.command();
     lab.run(&format!("{tmux} kill-server 2>/dev/null; true"))
         .await?;
     let started = lab.tmux.login_server(&lab.ssh).await;

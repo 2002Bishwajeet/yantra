@@ -17,7 +17,7 @@ import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
 
 /** doctor.rs `no_login_server`, word for word. */
 const NO_SERVER =
-  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain, so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
+  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain, so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux -L yantra new-session -d`'
 
 describe('the check name table', () => {
   it('names each of doctor’s thirteen checks the way a person says it', () => {
@@ -81,7 +81,7 @@ describe('the check name table', () => {
   /** Y-619: on a Mac with no login tmux server, both keychain checks are
    *  fixed in Terminal there, and neither is a sign-in. */
   it('gives a Mac with no login tmux server the Terminal command, not a sign-in', () => {
-    const terminal = { by: 'command', command: 'tmux new-session -d', where: 'terminal' }
+    const terminal = { by: 'command', command: 'tmux -L yantra new-session -d', where: 'terminal' }
     expect(fixOf({ check: 'login-session', detail: NO_SERVER }, 'mbp')).toEqual(terminal)
     expect(fixOf({ check: 'provider-auth', detail: NO_SERVER }, 'mbp')).toEqual(terminal)
     expect(fixOf({ check: 'provider-auth', detail: 'gh found no credential there' }, 'mbp')).toEqual({
@@ -108,7 +108,11 @@ describe('the check name table', () => {
     ['doctor.rs', NO_SERVER],
   ])('knows the %s sentence for a missing login tmux server', (_, said) => {
     expect(noLoginServer(said)).toBe(true)
-    expect(said).toContain(LOGIN_SERVER_COMMAND)
+  })
+
+  /** Y-667: Yantra asks only the `yantra` server, so the copied command must start that one. */
+  it('copies the command doctor.rs gives', () => {
+    expect(NO_SERVER).toContain(`\`${LOGIN_SERVER_COMMAND}\``)
   })
 
   it('does not take another refusal for a missing login tmux server', () => {

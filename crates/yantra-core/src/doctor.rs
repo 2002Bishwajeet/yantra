@@ -90,7 +90,7 @@ fn no_login_server(check: &'static str) -> Check {
         format!(
             "{NO_LOGIN_SERVER}. Panes in a server started over ssh cannot read the login \
              keychain, so Yantra starts one in the login session when a \
-             session starts. Start one in Terminal there: `tmux new-session -d`"
+             session starts. Start one in Terminal there: `tmux -L yantra new-session -d`"
         ),
     )
 }
@@ -598,7 +598,7 @@ async fn asked_inside<E: Exec>(
         // run-shell ends in `exit 0`, so the status crosses as a mark on stdout.
         let command = format!("{} auth status >/dev/null 2>&1 && echo {FOUND}", sq(path));
         let out = exec
-            .exec(&tmux::run_shell(tmux.path(), &command))
+            .exec(&tmux::run_shell(&tmux.command(), &command))
             .await
             .map_err(|err| could_not(&err))?;
         if !out.success() {
@@ -970,7 +970,7 @@ async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Erro
         None => None,
     };
     let command = match (inside, os) {
-        (Some(tmux), _) => tmux::run_shell(tmux.path(), &probe),
+        (Some(tmux), _) => tmux::run_shell(&tmux.command(), &probe),
         (None, Os::Other) => probe,
         (None, Os::MacOs) => {
             return unknown(
@@ -1625,7 +1625,7 @@ mod tests {
             assert_eq!(found.state, State::Absent, "{name}: {}", found.detail);
             assert!(found.detail.contains(NO_LOGIN_SERVER), "{}", found.detail);
             assert!(
-                found.detail.contains("`tmux new-session -d`"),
+                found.detail.contains("`tmux -L yantra new-session -d`"),
                 "{}",
                 found.detail
             );

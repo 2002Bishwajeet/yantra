@@ -670,7 +670,7 @@ fn ending(tmux: &Tmux, keeper: &Keeper, run: &str, said: &str) -> String {
         keeper.dir(),
         sq(run),
         sq(said),
-        sq(tmux.path()),
+        tmux.command(),
         sq(&format!("={}", keeper.session()))
     )
 }
@@ -781,8 +781,10 @@ async fn read_once(
 }
 
 /// The far loop ends the `tail` only on a dead pane or one tmux cannot find;
-/// any other answer, such as a tmux that failed to fork, is asked again.
-/// The pattern opens with `(`, as `agent::probe`'s does (Y-634, Y-635).
+/// any other answer, such as a tmux that failed to fork, is asked again. The
+/// Mac's `-D` server outlives its last session and then answers with an empty
+/// line, or `no current target`. The pattern opens with `(`, as
+/// `agent::probe`'s does (Y-634, Y-635).
 pub(crate) fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> String {
     format!(
         "cd {dir} || {{ echo {ENDED} >&2; exit 1; }}\n\
@@ -791,14 +793,14 @@ pub(crate) fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> Stri
          while sleep 2; do\n\
          \x20 kill -0 \"$t\" 2>/dev/null || exit 1\n\
          \x20 case \"$({tmux} display-message -p -t {pane} '#{{pane_dead}}' 2>&1)\" in\n\
-         \x20 (1|*\"can't find\"*|*\"no server running\"*|*\"error connecting to\"*\"No such file\"*) break ;;\n\
+         \x20 (1|''|*\"can't find\"*|*\"no current target\"*|*\"no server running\"*|*\"error connecting to\"*\"No such file\"*) break ;;\n\
          \x20 esac\n\
          done\n\
          kill \"$t\" 2>/dev/null\n\
          echo {ENDED} >&2\n",
         dir = keeper.dir(),
         from = at + 1,
-        tmux = sq(tmux.path()),
+        tmux = tmux.command(),
         pane = sq(pane),
     )
 }
@@ -1090,10 +1092,9 @@ mod tests {
     }
 
     /// The far reader under the host's `/bin/sh`, against a tmux that first
-    /// answers nonsense, then `0`, then that it cannot find the pane. Only the
-    /// last ends the `tail`.
-    #[tokio::test]
-    async fn the_far_reader_ends_only_on_a_dead_or_missing_pane() {
+    /// answers nonsense, then `0`, then `last`. It returns how often tmux was
+    /// asked once the reader ended.
+    async fn far_reader_asks(last: &str) -> usize {
         use std::os::unix::fs::PermissionsExt as _;
         let scratch = Scratch::new("reader");
         std::fs::write(scratch.path("out"), b"").expect("out");
@@ -1103,7 +1104,7 @@ mod tests {
             format!(
                 "#!/bin/sh\necho x >>{calls}\ncase $(wc -l <{calls}) in\n\
                  *1) echo 'server exited unexpectedly' >&2 ;;\n*2) echo 0 ;;\n\
-                 *) echo \"can't find pane: %9\" >&2; exit 1 ;;\nesac\n",
+                 *) {last} ;;\nesac\n",
                 calls = sq(&scratch.path("calls").to_string_lossy())
             ),
         )
@@ -1123,11 +1124,23 @@ mod tests {
             .output()
             .expect("sh runs");
         assert!(String::from_utf8_lossy(&out.stderr).contains(ENDED));
-        assert_eq!(
-            scratch.read("calls").lines().count(),
-            3,
-            "asked three times"
-        );
+        scratch.read("calls").lines().count()
+    }
+
+    /// Only a dead or missing pane ends the `tail`.
+    #[tokio::test]
+    async fn the_far_reader_ends_only_on_a_dead_or_missing_pane() {
+        let missing = "echo \"can't find pane: %9\" >&2; exit 1";
+        assert_eq!(far_reader_asks(missing).await, 3, "asked three times");
+    }
+
+    /// The Mac's `-D` server outlives a keeper killed while its pane lived, and
+    /// tmux 3.8 then prints an empty line and exits 0 (Y-667).
+    #[tokio::test]
+    async fn the_far_reader_ends_on_a_server_with_no_session() {
+        assert_eq!(far_reader_asks("echo").await, 3);
+        let none = "echo 'no current target' >&2; exit 1";
+        assert_eq!(far_reader_asks(none).await, 3);
     }
 
     #[test]
@@ -1287,6 +1300,38 @@ mod tests {
             state_dir: "/nonexistent".into(),
         })
         .expect("a short control path")
+    }
+
+    /// I-56: a Chat turn on a Mac with no login server goes through `ensure`,
+    /// which starts the LaunchAgent before it creates the keeper's session.
+    #[tokio::test]
+    async fn a_keeper_on_a_mac_with_no_server_starts_the_launch_agent() {
+        use crate::tmux::fake::{Mac, Server};
+        let mac = Mac::new(Server::None, 0);
+        let tmux = Tmux::resolve(&mac).await.expect("a tmux");
+        let started = start(
+            &mac,
+            &tmux,
+            &Keeper::new("w", "t"),
+            "claude",
+            "r1",
+            Limits::default(),
+        )
+        .await
+        .expect("started");
+        assert!(matches!(started, Started::Running { .. }));
+        let asked = mac.asked();
+        let script = asked
+            .iter()
+            .position(|command| command.contains("\nlogin_server '"))
+            .expect("the LaunchAgent was asked for");
+        assert!(asked[script + 1].contains("new-session"), "{asked:?}");
+        for command in asked.iter().filter(|command| command.contains("tmux' ")) {
+            assert!(
+                command.starts_with("'/opt/homebrew/bin/tmux' -L yantra -N "),
+                "{command}"
+            );
+        }
     }
 
     async fn some_tmux() -> Tmux {

@@ -251,7 +251,7 @@ impl Claude {
     /// [ADR-0018]: ../../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md
     pub async fn auth<E: Exec>(&self, exec: &E, tmux: &Tmux, os: Os) -> Result<Auth, Error> {
         let out = exec
-            .exec(&auth_command(&self.path, tmux.path(), os))
+            .exec(&auth_command(&self.path, &tmux.command(), os))
             .await?;
         let status: Status = serde_json::from_slice(&out.stdout).map_err(|_| Error::Unreadable)?;
         Ok(Auth {
@@ -563,7 +563,7 @@ mod tests {
     }
 
     /// ADR-0018 §5, as an exact string because every part of it is load-bearing:
-    /// the tmux path is absolute (I-34), the whole ask is one `run-shell`
+    /// the tmux path is absolute (I-34), the server is Yantra's, the whole ask is one `run-shell`
     /// argument, and the `exit 0` is what keeps tmux's own `'…' returned 1` off
     /// the stdout this JSON is parsed out of.
     #[test]
@@ -571,10 +571,10 @@ mod tests {
         assert_eq!(
             auth_command(
                 "/Users/u/.local/bin/claude",
-                "/opt/homebrew/bin/tmux",
+                "'/opt/homebrew/bin/tmux' -L yantra -N",
                 Os::MacOs
             ),
-            "'/opt/homebrew/bin/tmux' run-shell \
+            "'/opt/homebrew/bin/tmux' -L yantra -N run-shell \
              ''\\''/Users/u/.local/bin/claude'\\'' auth status; exit 0'"
         );
         assert_eq!(

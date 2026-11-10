@@ -100,7 +100,7 @@ pub async fn ensure_session<E: Exec>(
 /// The command to run on `machine`, as one argument for the remote shell.
 ///
 /// Shared with the hint [`crate::up`] prints, so what a user copies and what
-/// `attach` runs can never drift apart.
+/// `attach` runs can never drift apart. `tmux` is [`Tmux::command`].
 pub fn remote_command(tmux: &str, session: &str, term: &str) -> String {
     format!(
         "TERM={term} {tmux} attach -t {}",
@@ -121,10 +121,14 @@ mod tests {
 
     #[test]
     fn the_session_is_addressed_exactly_and_survives_zsh() {
-        let command = remote_command("/opt/homebrew/bin/tmux", "yantra", "xterm-ghostty");
+        let command = remote_command(
+            "'/opt/homebrew/bin/tmux' -L yantra -N",
+            "yantra",
+            "xterm-ghostty",
+        );
         assert_eq!(
             command,
-            "TERM=xterm-ghostty /opt/homebrew/bin/tmux attach -t '=yantra'"
+            "TERM=xterm-ghostty '/opt/homebrew/bin/tmux' -L yantra -N attach -t '=yantra'"
         );
     }
 }

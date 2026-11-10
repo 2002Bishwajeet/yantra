@@ -285,12 +285,12 @@ mac_tmux() {
     fi
     # A server that ran before the job may not be in the login session.
     before=no
-    "$tmux" ls >/dev/null 2>&1 && before=yes
+    "$tmux" -L yantra -N ls >/dev/null 2>&1 && before=yes
     status=0
     login_server "$tmux" || status=$?
     case "$status:$before" in
-    (0:no) say "tmux runs in your login session, from $plist." ;;
-    (0:yes) say "tmux's LaunchAgent is $plist. A tmux server was already running, so the LaunchAgent starts the next one when it stops." ;;
+    (0:no) say "Yantra's tmux server (tmux -L yantra) runs in your login session, from $plist." ;;
+    (0:yes) say "tmux's LaunchAgent is $plist. Yantra's tmux server (tmux -L yantra) was already running, so the LaunchAgent starts the next one when it stops." ;;
     (3:*) say "no one is logged in at this Mac's screen, so tmux's LaunchAgent waits until a session starts." ;;
     (*) say "tmux's LaunchAgent did not start a server. Yantra tries again when a session starts." ;;
     esac

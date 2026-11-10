@@ -10,14 +10,17 @@
 //!
 //! ```text
 //! YANTRA_MAC=<ssh destination> \
-//!   cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture
+//!   cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture --test-threads 1
 //! ```
+//!
+//! One at a time, because some of them end the server the others use.
 //!
 //! **Two of these need a person at that machine first**: Y-139's transcript
 //! measurement and Y-151's gate both want a tmux server started from a GUI
 //! login, and both refuse without one. Their own doc comments say why and what
-//! to run. Y-632's and Y-640's need the owner logged in at the screen, and end
-//! every tmux session there.
+//! to run. Y-632's, Y-640's and Y-667's need the owner logged in at the screen,
+//! and end every session on Yantra's `-L yantra` server there. The owner's own
+//! tmux, on the default socket, is never touched.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -31,6 +34,9 @@ use yantra_core::{doctor, up, workspace};
 
 /// Long enough to be nobody's real workspace, and legal under `validate_name`.
 const E2E: &str = "yantra-manual-e2e";
+
+/// The LaunchAgent `login_server.sh` writes.
+const LABEL: &str = "io.github.2002bishwajeet.yantra-tmux-server";
 
 /// Y-139's session, legal under `validate_name` (I-2).
 const Q12: &str = "yantra-q12";
@@ -99,7 +105,7 @@ async fn up_opens_a_remote_session_and_the_second_run_attaches() -> anyhow::Resu
 
     let first = up::up(E2E, terminfo::FALLBACK, None).await?;
     // Registered before the assertions, so a failing one still tidies up.
-    leaves.session = Some((dest, first.tmux.path().to_owned()));
+    leaves.session = Some((dest, first.tmux.command()));
     println!(
         "opened {} via {} on {}",
         first.opened.session().session_id,
@@ -179,7 +185,7 @@ async fn the_terminal_probe_tells_real_macos_apart() -> anyhow::Result<()> {
 
 /// Y-619 on the real Mac: once a login session started the tmux server, both
 /// keychain checks pass. Start it first at the Mac, in Terminal:
-/// `tmux new-session -d`.
+/// `tmux -L yantra new-session -d`.
 #[tokio::test]
 #[ignore = "needs the real MacBook and a tmux server started from a GUI login; set YANTRA_MAC=user@host"]
 async fn doctor_passes_on_the_mac_once_the_login_server_runs() -> anyhow::Result<()> {
@@ -234,7 +240,7 @@ async fn doctor_passes_on_the_mac_once_the_login_server_runs() -> anyhow::Result
 /// running:
 ///
 /// ```text
-/// tmux new-session -d -s yantra-gui
+/// tmux -L yantra new-session -d -s yantra-gui
 /// ```
 ///
 /// [ADR-0018]: ../../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md
@@ -268,7 +274,7 @@ async fn the_gate_finds_a_credential_in_the_server_where_ssh_finds_none() -> any
          — a server started here forks panes in launchd's `Background` domain, which is where the \
          login keychain is unreadable (I-44), so the run would measure the failure it exists to \
          avoid. Start it at the Mac's own keyboard, in Terminal.app: \
-         `tmux new-session -d -s yantra-gui`, and leave it running."
+         `tmux -L yantra new-session -d -s yantra-gui`, and leave it running."
     );
 
     let over_ssh = claude.auth(&ssh, &tmux, Os::Other).await?;
@@ -301,7 +307,7 @@ async fn the_gate_finds_a_credential_in_the_server_where_ssh_finds_none() -> any
 /// through the LaunchAgent and opens a session in it, and that server's panes
 /// find the credential. Needs the owner logged in at the Mac's screen.
 ///
-/// **It runs `tmux kill-server`, so every tmux session on that Mac ends.** It
+/// **It kills Yantra's `-L yantra` server, so every session on it ends.** It
 /// leaves the LaunchAgent loaded and its server running.
 #[tokio::test]
 #[ignore = "needs the real MacBook with the owner logged in at its screen, and kills its tmux server; set YANTRA_MAC=user@host"]
@@ -318,13 +324,13 @@ async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<
     let tmux = Tmux::resolve(&ssh).await?;
     let claude = Claude::resolve(&ssh).await?;
 
-    ssh.exec(&format!("'{}' kill-server", tmux.path())).await?;
+    ssh.exec(&format!("{} kill-server", tmux.command())).await?;
     anyhow::ensure!(
         !tmux.running(&ssh).await?,
         "the server outlived kill-server"
     );
 
-    let _leaves = Leaves::session_only(&dest, tmux.path(), E2E);
+    let _leaves = Leaves::session_only(&dest, &tmux.command(), E2E);
     let ws = workspace::Workspace {
         name: E2E.to_owned(),
         machine: dest.clone(),
@@ -338,7 +344,9 @@ async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<
     );
 
     let plist = ssh
-        .exec("test -f \"$HOME/Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux.plist\"")
+        .exec(&format!(
+            "test -f \"$HOME/Library/LaunchAgents/{LABEL}.plist\""
+        ))
         .await?;
     anyhow::ensure!(
         plist.success(),
@@ -364,7 +372,7 @@ async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<
 /// `doctor` reports `hooks` present, and `node` and `claude-mem` resolve in it.
 /// Needs the owner logged in at the Mac's screen.
 ///
-/// **It runs `tmux kill-server`, so every tmux session on that Mac ends.** It
+/// **It kills Yantra's `-L yantra` server, so every session on it ends.** It
 /// leaves the LaunchAgent loaded and its server running.
 #[tokio::test]
 #[ignore = "needs the real MacBook with the owner logged in at its screen, and kills its tmux server; set YANTRA_MAC=user@host"]
@@ -391,13 +399,13 @@ async fn the_agents_hooks_find_their_commands_on_the_mac() -> anyhow::Result<()>
         .filter(|dir| dir.starts_with('/'))
         .ok_or_else(|| anyhow::anyhow!("the login shell finds no node: {node:?}"))?;
 
-    ssh.exec(&format!("'{}' kill-server", tmux.path())).await?;
+    ssh.exec(&format!("{} kill-server", tmux.command())).await?;
     anyhow::ensure!(
         !tmux.running(&ssh).await?,
         "the server outlived kill-server"
     );
 
-    let _leaves = Leaves::session_only(&dest, tmux.path(), E2E);
+    let _leaves = Leaves::session_only(&dest, &tmux.command(), E2E);
     let ws = workspace::Workspace {
         name: E2E.to_owned(),
         machine: dest.clone(),
@@ -407,7 +415,7 @@ async fn the_agents_hooks_find_their_commands_on_the_mac() -> anyhow::Result<()>
     up::open(&ssh, &tmux, &ws, None, Os::MacOs).await?;
 
     let plist = ssh
-        .exec("cat \"$HOME/Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux.plist\"")
+        .exec(&format!("cat \"$HOME/Library/LaunchAgents/{LABEL}.plist\""))
         .await?;
     let plist = String::from_utf8_lossy(&plist.stdout);
     println!("{plist}");
@@ -431,8 +439,8 @@ async fn the_agents_hooks_find_their_commands_on_the_mac() -> anyhow::Result<()>
 
     let inside = ssh
         .exec(&format!(
-            "'{}' run-shell 'command -v node && command -v claude-mem; exit 0'",
-            tmux.path()
+            "{} run-shell 'command -v node && command -v claude-mem; exit 0'",
+            tmux.command()
         ))
         .await?;
     let inside = String::from_utf8_lossy(&inside.stdout);
@@ -477,7 +485,7 @@ const Q12_SEND_EVERY: Duration = Duration::from_secs(25);
 /// At the Mac's own keyboard, in Terminal.app, leaving it running:
 ///
 /// ```text
-/// tmux new-session -d -s yantra-gui
+/// tmux -L yantra new-session -d -s yantra-gui
 /// ```
 ///
 /// then from the machine holding the repo: `just test-mac <machine>`.
@@ -519,13 +527,14 @@ async fn the_transcript_advances_while_the_session_stays_detached() -> anyhow::R
         tmux.running(&ssh).await?,
         "no tmux server on {dest}, so this harness would have to start the server itself — \
          which is the other experiment, and the one I-44 blocks. Start it at the Mac's own \
-         keyboard, in Terminal.app: `tmux new-session -d -s yantra-gui`, and leave it running."
+         keyboard, in Terminal.app: `tmux -L yantra new-session -d -s yantra-gui`, and leave \
+         it running."
     );
 
     let claude = Claude::resolve(&ssh).await?;
     ssh.exec(&format!("mkdir -p '{Q12_REPO}'")).await?;
 
-    let _leaves = Leaves::session_only(&dest, tmux.path(), Q12);
+    let _leaves = Leaves::session_only(&dest, &tmux.command(), Q12);
     let opened = tmux.ensure(&ssh, Q12, Q12_REPO, None).await?;
     let pane = opened.session().pane_id.clone();
 
@@ -584,10 +593,10 @@ async fn the_transcript_advances_while_the_session_stays_detached() -> anyhow::R
             // is a keystroke and not text, which is why `-l` is on the first
             // alone, and the pause is for a TUI that reads its own input.
             ssh.exec(&format!(
-                "'{tmux_path}' send-keys -t '{pane}' -l '{prompt}'\n\
+                "{tmux} send-keys -t '{pane}' -l '{prompt}'\n\
                  sleep 1\n\
-                 '{tmux_path}' send-keys -t '{pane}' Enter\n",
-                tmux_path = tmux.path(),
+                 {tmux} send-keys -t '{pane}' Enter\n",
+                tmux = tmux.command(),
                 prompt = Q12_PROMPTS[sent],
             ))
             .await?;
@@ -743,16 +752,11 @@ fn fresh_session_id() -> anyhow::Result<String> {
 /// `claude` in a keeper, read and written through it. Y-634 broke every one
 /// for 29 days while each suite stayed green.
 ///
-/// It skips when the tmux server's panes find no credential (I-44): start the
-/// server at the Mac's screen, or let `up` start it through the LaunchAgent.
+/// It starts the server through the LaunchAgent when there is none, and skips
+/// when that server's panes find no credential (I-44).
 #[tokio::test]
 #[ignore = "needs the real MacBook with claude signed in; set YANTRA_MAC=user@host"]
 async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
-    use yantra_core::chat::{Event, Interaction, PermissionMode, StreamKind, TurnState};
-    use yantra_core::claude::{self, Prompt, Session};
-    use yantra_core::keep::{self, File, Keeper, Limits, Started};
-    use yantra_core::thread;
-
     let dest = std::env::var("YANTRA_MAC")?;
     let ssh = Ssh::new(Machine {
         host: dest.clone(),
@@ -764,6 +768,10 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
     anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
     let tmux = Tmux::resolve(&ssh).await?;
     let claude = Claude::resolve(&ssh).await?;
+    anyhow::ensure!(
+        tmux.login_server(&ssh).await?,
+        "no one is logged in at {dest}'s screen"
+    );
     let auth = claude.auth(&ssh, &tmux, Os::MacOs).await?;
     if !auth.logged_in {
         println!(
@@ -774,7 +782,76 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let repo = "/private/tmp/yantra-y661";
+    real_turn(&ssh, &tmux, &dest, "y661", "/private/tmp/yantra-y661").await
+}
+
+/// **Y-667's done condition**: with no login server at all, a Chat turn has
+/// `keep::start` start the LaunchAgent, and the real `claude` answers from the
+/// server it starts. That server's pid is the job's, so it runs in the login
+/// session. Needs the owner logged in at the Mac's screen.
+///
+/// **It boots out Yantra's LaunchAgent, so every session on Yantra's
+/// `-L yantra` server ends.** The owner's default-socket tmux is not touched.
+/// It fails, and never skips, when the turn does not complete.
+#[tokio::test]
+#[ignore = "needs the real MacBook with the owner logged in at its screen, and ends Yantra's tmux sessions there; set YANTRA_MAC=user@host"]
+async fn a_chat_turn_with_no_login_server_starts_the_launch_agent_on_the_mac() -> anyhow::Result<()>
+{
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest.clone(),
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y667"),
+    })?;
+    anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
+    let tmux = Tmux::resolve(&ssh).await?;
+
+    ssh.exec(&format!(
+        "launchctl bootout gui/$(id -u)/{LABEL} 2>/dev/null; {} kill-server 2>/dev/null; true",
+        tmux.command()
+    ))
+    .await?;
+    anyhow::ensure!(
+        !tmux.running(&ssh).await?,
+        "Yantra's server outlived the bootout"
+    );
+    real_turn(&ssh, &tmux, &dest, "y667", "/private/tmp/yantra-y667").await?;
+
+    // The `-D` server outlives its last session, so it is still the job's.
+    let pids = ssh
+        .exec(&format!(
+            "echo \"$(launchctl print gui/$(id -u)/{LABEL} 2>/dev/null | awk '$1 == \"pid\" {{ print $3 }}')\"\n\
+             echo \"$({} display-message -p '#{{pid}}' 2>/dev/null)\"",
+            tmux.command()
+        ))
+        .await?;
+    let pids = String::from_utf8_lossy(&pids.stdout).into_owned();
+    let mut pids = pids.lines().map(str::trim);
+    let (job, server) = (pids.next().unwrap_or(""), pids.next().unwrap_or(""));
+    println!("the job is pid {job:?}, Yantra's server is pid {server:?}");
+    anyhow::ensure!(!job.is_empty(), "the LaunchAgent is not running");
+    anyhow::ensure!(
+        job == server,
+        "Yantra's server is not the job's, so it is not the login session's"
+    );
+    Ok(())
+}
+
+/// A turn of the real `claude` in a thread of a new repository at `repo`.
+async fn real_turn(
+    ssh: &Ssh,
+    tmux: &Tmux,
+    dest: &str,
+    name: &str,
+    repo: &str,
+) -> anyhow::Result<()> {
+    use yantra_core::chat::{Event, Interaction, PermissionMode, StreamKind, TurnState};
+    use yantra_core::claude::{self, Prompt, Session};
+    use yantra_core::keep::{self, File, Keeper, Limits, Started};
+    use yantra_core::thread;
+
     let made = ssh
         .exec(&format!(
             "rm -rf {repo} && mkdir -p {repo} && cd {repo} && git init -q && echo one > README \
@@ -783,12 +860,12 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
         .await?;
     anyhow::ensure!(made.success(), "{}", String::from_utf8_lossy(&made.stderr));
     let ws = workspace::Workspace {
-        name: "y661".to_owned(),
-        machine: dest.clone(),
+        name: name.to_owned(),
+        machine: dest.to_owned(),
         repo: PathBuf::from(repo),
         startup: None,
     };
-    let place = thread::open(&ssh, &ws).await?;
+    let place = thread::open(ssh, &ws).await?;
     let keeper = Keeper::of(&place).ok_or_else(|| anyhow::anyhow!("a chat place has a keeper"))?;
     let agent = claude::command(
         &place.worktree,
@@ -802,7 +879,7 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
     );
     let run = keep::run_id()?;
     let Started::Running { pane } =
-        keep::start(&ssh, &tmux, &keeper, &agent, &run, Limits::default()).await?
+        keep::start(ssh, tmux, &keeper, &agent, &run, Limits::default()).await?
     else {
         anyhow::bail!("the thread's keeper was already running");
     };
@@ -844,8 +921,8 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
         None
     })
     .await;
-    keep::kill(&ssh, &tmux, &keeper).await?;
-    let _ = thread::remove(&ssh, &place).await;
+    keep::kill(ssh, tmux, &keeper).await?;
+    let _ = thread::remove(ssh, &place).await;
     let done = done?.ok_or_else(|| anyhow::anyhow!("the events ended before turn.completed"))?;
     println!("{done:?}: {text}");
     anyhow::ensure!(
@@ -865,7 +942,7 @@ struct Leaves {
     /// Absent for a test that never wrote one — Y-139 drives tmux directly,
     /// because the gate `up` runs cannot pass on that machine (I-44).
     workspace_file: Option<PathBuf>,
-    /// The ssh destination and the absolute tmux path, once `up` has found one.
+    /// The ssh destination and the [`Tmux::command`], once `up` has found one.
     session: Option<(String, String)>,
     name: &'static str,
 }

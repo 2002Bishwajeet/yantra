@@ -138,7 +138,8 @@ pub struct MergedPr {
 }
 
 /// A commit message for everything the worktree changed, untracked files
-/// too, by `claude -p` on the machine. `tmux` is a Mac's [`login_server`].
+/// too, by `claude -p` on the machine. `tmux` is a Mac's [`login_server`],
+/// or [`Tmux::command`] where one runs.
 pub async fn draft<E: Exec>(exec: &E, place: &Place, tmux: Option<&str>) -> Result<String, Error> {
     let out = run(exec, &draft_command(place), tmux).await?;
     match out.status {
@@ -152,8 +153,8 @@ pub async fn draft<E: Exec>(exec: &E, place: &Place, tmux: Option<&str>) -> Resu
     }
 }
 
-/// Runs `script` within [`TIME_LIMIT_SECS`], inside the tmux server at `tmux`
-/// when there is one.
+/// Runs `script` within [`TIME_LIMIT_SECS`], inside the tmux server `tmux`
+/// names when there is one.
 async fn run<E: Exec>(exec: &E, script: &str, tmux: Option<&str>) -> Result<ssh::Output, Error> {
     let script = bounded(script, TIME_LIMIT_SECS);
     Ok(match tmux {
@@ -767,8 +768,8 @@ async fn reach(name: &str) -> Result<(Workspace, Ssh), Failed> {
     Ok((workspace, ssh))
 }
 
-/// The tmux server a Mac drafts and pushes in, or `None` elsewhere: over ssh
-/// a Mac cannot read the login keychain (I-44, ADR-0018 §5).
+/// The [`Tmux::command`] of the server a Mac drafts and pushes in, or `None`
+/// elsewhere: over ssh a Mac cannot read the login keychain (I-44, ADR-0018 §5).
 async fn login_server<E: Exec>(exec: &E) -> Result<Option<String>, Failed> {
     if ssh::os(exec).await.map_err(Error::Ssh)? != Os::MacOs {
         return Ok(None);
@@ -777,7 +778,7 @@ async fn login_server<E: Exec>(exec: &E) -> Result<Option<String>, Failed> {
     if !tmux.login_server(exec).await? {
         return Err(Error::NoLoginServer.into());
     }
-    Ok(Some(tmux.path().to_owned()))
+    Ok(Some(tmux.command()))
 }
 
 async fn find_listed(name: &str, id: &str) -> Result<(Ssh, thread::Listed), Failed> {
@@ -948,7 +949,7 @@ mod tests {
     fn serverless_mac(script: i32) -> Machine {
         Machine::answering(vec![
             out(0, "Darwin\n", ""),
-            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "Darwin\n/opt/homebrew/bin/tmux\n", ""),
             out(1, "", "no server running on /private/tmp/tmux-501/default"),
             out(script, "", "launchctl said no"),
         ])
@@ -958,7 +959,10 @@ mod tests {
     async fn a_mac_with_no_server_drafts_in_the_one_the_launch_agent_starts() {
         let mac = serverless_mac(0);
         let tmux = login_server(&mac).await.expect("a server");
-        assert_eq!(tmux.as_deref(), Some("/opt/homebrew/bin/tmux"));
+        assert_eq!(
+            tmux.as_deref(),
+            Some("'/opt/homebrew/bin/tmux' -L yantra -N")
+        );
         assert!(mac.asked()[3].ends_with("\nlogin_server '/opt/homebrew/bin/tmux'\n"));
     }
 
@@ -979,7 +983,7 @@ mod tests {
     async fn a_mac_holding_a_session_sends_no_launchctl() {
         let mac = Machine::answering(vec![
             out(0, "Darwin\n", ""),
-            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "Darwin\n/opt/homebrew/bin/tmux\n", ""),
             out(0, "main: 1 windows\n", ""),
         ]);
         assert!(login_server(&mac).await.expect("a server").is_some());
@@ -992,7 +996,7 @@ mod tests {
     async fn a_mac_with_an_empty_server_is_sent_the_script() {
         let mac = Machine::answering(vec![
             out(0, "Darwin\n", ""),
-            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "Darwin\n/opt/homebrew/bin/tmux\n", ""),
             out(0, "", ""),
             out(1, "", "launchctl said no"),
             out(0, "", ""),
@@ -1002,7 +1006,7 @@ mod tests {
 
         let mac = Machine::answering(vec![
             out(0, "Darwin\n", ""),
-            out(0, "/opt/homebrew/bin/tmux\n", ""),
+            out(0, "Darwin\n/opt/homebrew/bin/tmux\n", ""),
             out(0, "", ""),
             out(1, "", "launchctl said no"),
             out(1, "", "no server running on /private/tmp/tmux-501/default"),
@@ -1334,7 +1338,7 @@ mod tests {
     /// their status and stderr come back on stdout; Linux asks over ssh.
     #[tokio::test]
     async fn a_mac_drafts_and_pushes_inside_the_tmux_server() {
-        const TMUX: &str = "/opt/homebrew/bin/tmux";
+        const TMUX: &str = "'/opt/homebrew/bin/tmux' -L yantra -N";
         let json = r#"{"is_error":false,"structured_output":{"subject":"Add x","body":""}}"#;
         let machine = Machine::answering(vec![
             out(0, &format!("{json}\n{STATUS_MARK}0\n"), ""),
@@ -1359,7 +1363,7 @@ mod tests {
         let inside = |script: &str| run_shell(TMUX, &carried(&bounded(script, TIME_LIMIT_SECS)));
         assert_eq!(asked[0], inside(&draft_command(&place())));
         assert_eq!(asked[1], inside(&push_command(&place(), None)));
-        assert!(asked[0].starts_with("'/opt/homebrew/bin/tmux' run-shell '"));
+        assert!(asked[0].starts_with("'/opt/homebrew/bin/tmux' -L yantra -N run-shell '"));
     }
 
     /// What tmux says when it could not run the command at all.
