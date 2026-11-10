@@ -23,6 +23,11 @@ export function grant(connection: Connection | undefined, readiness: Reading<Che
 
 export const REFUSED = 'GitHub refused the grant'
 
+/** Why a sign-in ended with no grant: the OAuth App opted in to token expiry. */
+export const EXPIRING =
+  'GitHub issued a token that expires after 8 hours, and Yantra needs one that does not. In your OAuth App’s settings on github.com, under Optional features, opt out of user-to-server token expiration, then sign in again.'
+export const APP_SETTINGS = 'https://github.com/settings/developers'
+
 /** "Signed in as X", or "Signed in" while the login is unread. */
 export const signedIn = (login: string | null) => (login ? `Signed in as ${login}` : 'Signed in')
 

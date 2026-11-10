@@ -1851,6 +1851,7 @@ fn from_github(error: &github::Error) -> StatusCode {
         github::Error::NoClientId
         | github::Error::Expired
         | github::Error::Denied
+        | github::Error::Expiring
         | github::Error::Rejected { .. }
         | github::Error::NotAVersion { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     }

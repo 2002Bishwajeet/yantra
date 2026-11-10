@@ -25,6 +25,8 @@ pub struct Held {
     pub scopes: Vec<String>,
     /// A device flow is waiting for a code to be entered at github.com.
     pub pending: bool,
+    /// The last flow ended because GitHub issued a token that expires (Y-695).
+    pub expiring: bool,
 }
 
 /// Beside the beats rather than inside the snapshot, for the same reason they
@@ -84,6 +86,7 @@ impl Grant {
             return false;
         }
         held.pending = true;
+        held.expiring = false;
         true
     }
 
@@ -94,12 +97,15 @@ impl Grant {
             avatar_url: account.avatar_url,
             scopes: grant.scopes,
             pending: false,
+            expiring: false,
         };
         self.changed.notify_waiters();
     }
 
-    async fn abandon(&self) {
-        self.held.write().await.pending = false;
+    async fn abandon(&self, expiring: bool) {
+        let mut held = self.held.write().await;
+        held.pending = false;
+        held.expiring = expiring;
     }
 
     pub async fn clear(&self) {
@@ -159,7 +165,7 @@ pub async fn sign_in(
         }
         Err(error) => {
             tracing::warn!("github sign-in did not complete: {error}");
-            grant.abandon().await;
+            grant.abandon(matches!(error, Error::Expiring)).await;
         }
     }
 }
@@ -183,11 +189,28 @@ mod tests {
         assert!(grant.begin().await);
         assert!(!grant.begin().await);
 
-        grant.abandon().await;
+        grant.abandon(false).await;
         assert!(grant.begin().await);
 
         grant.clear().await;
         assert!(!grant.read().await.pending);
+    }
+
+    /// Settings learns why the flow ended, and the next attempt starts clean.
+    #[tokio::test]
+    async fn an_expiring_token_is_remembered_until_the_next_sign_in() {
+        let grant = Grant::default();
+        assert!(grant.begin().await);
+        grant.abandon(true).await;
+        let held = grant.read().await;
+        assert!(held.expiring && !held.pending);
+
+        assert!(grant.begin().await);
+        assert!(!grant.read().await.expiring);
+
+        grant.abandon(true).await;
+        grant.clear().await;
+        assert!(!grant.read().await.expiring);
     }
 
     /// A waiter already waiting is woken by a set and by a clear, which is

@@ -14,8 +14,8 @@
 #![cfg(target_os = "macos")]
 #![allow(clippy::expect_used)]
 
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -560,5 +560,267 @@ async fn the_launch_agent_starts_the_tmux_server() -> Result<()> {
         path.split(':').any(|dir| dir == "/opt/homebrew/bin"),
         "the server's panes miss Homebrew: {path}"
     );
+    Ok(())
+}
+
+/// The LaunchAgent `install.sh` writes for the agent, the label join.sh uses.
+const AGENT_LABEL: &str = "io.github.2002bishwajeet.yantra-agent";
+
+/// Copies the release file the URL names from `$YANTRA_TEST_RELEASE`, so
+/// `install.sh` runs whole with no network.
+const CURL_STUB: &str = r#"#!/bin/sh
+out=
+while [ "$#" -gt 0 ]; do
+    case "$1" in -o) out=$2; shift ;; esac
+    url=$1
+    shift
+done
+cp "$YANTRA_TEST_RELEASE/${url##*/}" "$out"
+"#;
+
+/// A fake release for `install.sh`: both Mac archives, each holding a
+/// `yantra-agent` that writes the `YANTRA_DAEMON` it was started with to `seen`.
+struct Release {
+    root: PathBuf,
+    uid: String,
+}
+
+impl Release {
+    const VERSION: &'static str = "9.9.9";
+
+    fn new() -> Result<Self> {
+        let root = std::env::temp_dir().join("yantra-y502");
+        let _ = std::fs::remove_dir_all(&root);
+        let release = root.join("release");
+        std::fs::create_dir_all(&release)?;
+        std::fs::create_dir_all(root.join("bin"))?;
+        let agent = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$YANTRA_DAEMON\" >'{}'\nexec sleep 600\n",
+            root.join("seen").display()
+        );
+        for target in ["aarch64-apple-darwin", "x86_64-apple-darwin"] {
+            let name = format!("yantra-{}-{target}", Self::VERSION);
+            std::fs::create_dir_all(root.join(&name))?;
+            executable(&root.join(&name).join("yantra-agent"), &agent)?;
+            succeed(
+                Command::new("tar")
+                    .arg("-C")
+                    .arg(&root)
+                    .arg("-czf")
+                    .arg(release.join(format!("{name}.tar.gz")))
+                    .arg(&name),
+            )?;
+        }
+        succeed(
+            Command::new("sh")
+                .args(["-c", "shasum -a 256 *.tar.gz >SHA256SUMS"])
+                .current_dir(&release),
+        )?;
+        executable(&root.join("bin/curl"), CURL_STUB)?;
+        let uid = succeed(Command::new("id").arg("-u"))?.trim().to_owned();
+        Ok(Self { root, uid })
+    }
+
+    fn home(&self, name: &str) -> Result<PathBuf> {
+        let home = self.root.join(name);
+        std::fs::create_dir_all(&home)?;
+        Ok(home)
+    }
+
+    fn install(&self, home: &Path, daemon: Option<&str>, args: &[&str]) -> Result<Output> {
+        let mut command = Command::new("/bin/bash");
+        command
+            .arg(install_sh())
+            .args(args)
+            .env("HOME", home)
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin:/usr/sbin:/sbin",
+                    self.root.join("bin").display()
+                ),
+            )
+            .env("YANTRA_VERSION", Self::VERSION)
+            .env("YANTRA_TEST_RELEASE", self.root.join("release"))
+            .env_remove("YANTRA_DAEMON")
+            .stdin(Stdio::null());
+        if let Some(daemon) = daemon {
+            command.env("YANTRA_DAEMON", daemon);
+        }
+        Ok(command.output()?)
+    }
+
+    fn loaded(&self) -> Result<bool> {
+        Ok(Command::new("launchctl")
+            .arg("print")
+            .arg(format!("gui/{}/{AGENT_LABEL}", self.uid))
+            .output()?
+            .status
+            .success())
+    }
+
+    fn bootout(&self) {
+        let _ = Command::new("launchctl")
+            .arg("bootout")
+            .arg(format!("gui/{}/{AGENT_LABEL}", self.uid))
+            .output();
+    }
+
+    /// Waits for the stub agent to write `want`, the address launchd gave it.
+    fn until_seen(&self, want: &str) -> Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut seen = String::new();
+        while Instant::now() < deadline {
+            seen = std::fs::read_to_string(self.root.join("seen")).unwrap_or_default();
+            if seen.trim() == want {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        bail!("the agent never saw YANTRA_DAEMON={want}; it saw {seen:?}")
+    }
+}
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.bootout();
+    }
+}
+
+fn install_sh() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../install.sh")
+}
+
+fn executable(path: &Path, body: &str) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::write(path, body)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
+    Ok(())
+}
+
+fn succeed(command: &mut Command) -> Result<String> {
+    let out = command.output()?;
+    ensure!(
+        out.status.success(),
+        "{command:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn said(out: &Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+/// Y-502: `install.sh` on a Mac installs the agent alone as a LaunchAgent that
+/// reads `~/.config/yantra/agent.env`, and a second run attaches (§B4). On a
+/// Mac that joined, it keeps the address join.sh's LaunchAgent held.
+#[test]
+#[ignore = "needs a disposable Mac: it loads the agent's LaunchAgent (CI's macos job does)"]
+fn install_sh_installs_the_agent_on_a_mac() -> Result<()> {
+    let release = Release::new()?;
+    release.bootout();
+
+    let refused = Command::new("sudo")
+        .args(["-n", "/bin/bash"])
+        .arg(install_sh())
+        .stdin(Stdio::null())
+        .output()?;
+    ensure!(
+        !refused.status.success() && said(&refused).contains("not as root"),
+        "a run as root was not refused: {}",
+        said(&refused)
+    );
+    let fresh = release.home("fresh")?;
+    let nightly = release.install(&fresh, Some("100.64.0.5:7717"), &["--channel", "nightly"])?;
+    ensure!(
+        !nightly.status.success() && said(&nightly).contains("nightly"),
+        "--channel nightly was not refused: {}",
+        said(&nightly)
+    );
+
+    let out = release.install(&fresh, None, &[])?;
+    ensure!(out.status.success(), "install.sh failed: {}", said(&out));
+    let env = std::fs::read_to_string(fresh.join(".config/yantra/agent.env"))?;
+    ensure!(env.contains("#YANTRA_DAEMON="), "no placeholder: {env}");
+    ensure!(!release.loaded()?, "the agent loaded with no daemon named");
+
+    let home = release.home("home")?;
+    let plist = home.join(format!("Library/LaunchAgents/{AGENT_LABEL}.plist"));
+    let env_file = home.join(".config/yantra/agent.env");
+    let out = release.install(&home, Some("100.64.0.5:7717"), &[])?;
+    ensure!(out.status.success(), "install.sh failed: {}", said(&out));
+    ensure!(
+        said(&out).contains("reports to 100.64.0.5:7717"),
+        "{}",
+        said(&out)
+    );
+    ensure!(home.join(".local/bin/yantra-agent").is_file(), "no binary");
+    ensure!(
+        std::fs::read_to_string(&env_file)?.contains("\nYANTRA_DAEMON=100.64.0.5:7717\n"),
+        "agent.env does not name the daemon"
+    );
+    succeed(Command::new("plutil").arg("-lint").arg(&plist))?;
+    ensure!(release.loaded()?, "the LaunchAgent is not loaded");
+    release.until_seen("100.64.0.5:7717")?;
+
+    let edited = "YANTRA_DAEMON=100.64.0.6:7717\n";
+    std::fs::write(&env_file, edited)?;
+    std::fs::write(&plist, "")?;
+    let _ = std::fs::remove_file(release.root.join("seen"));
+    let out = release.install(&home, Some("100.64.0.5:7717"), &[])?;
+    ensure!(
+        out.status.success(),
+        "the second run failed: {}",
+        said(&out)
+    );
+    ensure!(
+        std::fs::read_to_string(&env_file)? == edited,
+        "the second run rewrote agent.env"
+    );
+    succeed(Command::new("plutil").arg("-lint").arg(&plist))?;
+    ensure!(release.loaded()?, "the second run left the agent unloaded");
+    release.until_seen("100.64.0.6:7717")?;
+
+    // A Mac that joined: join.sh's LaunchAgent holds the address and no agent.env exists.
+    release.bootout();
+    let joined = release.home("joined")?;
+    let plist = joined.join(format!("Library/LaunchAgents/{AGENT_LABEL}.plist"));
+    std::fs::create_dir_all(plist.parent().context("a plist has a directory")?)?;
+    std::fs::write(
+        &plist,
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
+             <key>Label</key><string>{AGENT_LABEL}</string>\
+             <key>ProgramArguments</key><array><string>/bin/sleep</string><string>600</string></array>\
+             <key>EnvironmentVariables</key><dict><key>YANTRA_DAEMON</key><string>100.64.0.7:7717</string></dict>\
+             <key>RunAtLoad</key><true/></dict></plist>\n"
+        ),
+    )?;
+    succeed(
+        Command::new("launchctl")
+            .arg("bootstrap")
+            .arg(format!("gui/{}", release.uid))
+            .arg(&plist),
+    )?;
+    let _ = std::fs::remove_file(release.root.join("seen"));
+    let out = release.install(&joined, None, &[])?;
+    ensure!(
+        out.status.success(),
+        "the run on a joined Mac failed: {}",
+        said(&out)
+    );
+    ensure!(
+        std::fs::read_to_string(joined.join(".config/yantra/agent.env"))?
+            .contains("\nYANTRA_DAEMON=100.64.0.7:7717\n"),
+        "agent.env lost the address the join command wrote: {}",
+        said(&out)
+    );
+    ensure!(release.loaded()?, "the joined Mac's agent is not loaded");
+    release.until_seen("100.64.0.7:7717")?;
     Ok(())
 }
