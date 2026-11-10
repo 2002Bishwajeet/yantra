@@ -51,16 +51,17 @@ function SignedIn(props: { login: string | null; asked: boolean }) {
   )
 }
 
-/** A read that did not answer draws nothing: the list above it still works. An empty answer
- *  still links the grant page, because GitHub cannot name every organisation that hides. */
+/** The grant link always shows, because GitHub cannot name every organisation that hides. A read
+ *  that did not answer draws no note: the list above it still works. */
 function Hidden(props: { clientId: string | null }) {
   const hidden = useHiddenOrgs()
-  if (hidden.looked !== 'ok') return null
   return (
     <div className="ns__hidden">
-      <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-        {hiddenNote(hidden.data)}
-      </Text>
+      {hidden.looked === 'ok' ? (
+        <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
+          {hiddenNote(hidden.data)}
+        </Text>
+      ) : null}
       <a className="ns__link ns__grant" href={grantPage(props.clientId)} rel="noreferrer" target="_blank">
         Grant access on GitHub
       </a>

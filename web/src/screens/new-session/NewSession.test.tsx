@@ -299,13 +299,20 @@ describe('step 2, where the code comes from', () => {
     ['failed', [200, { looked: 'failed', age_seconds: 0, error: 'GitHub answered 502 to /user/orgs' }]],
     ['never', [200, { looked: 'never' }]],
     ['refused', [500, 'boom']],
-  ])('draws nothing extra when the hidden read is %s, and keeps the rows', async (_, reply) => {
-    await toRepos({ 'GET /api/repos/hidden': reply })
+  ])('keeps the rows and the grant link, with no note, when the hidden read is %s', async (_, reply) => {
+    await toRepos({
+      'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.abc123' }],
+      'GET /api/repos/hidden': reply,
+    })
     expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
     // The answer has arrived; give it the frame it needs to draw anything.
     await new Promise((done) => setTimeout(done, 50))
     expect(screen.queryByText(/restricts OAuth apps/)).toBeNull()
-    expect(screen.queryByRole('link', { name: 'Grant access on GitHub' })).toBeNull()
+    expect(screen.queryByText(/private, Yantra cannot name it|it is not in this list/)).toBeNull()
+    const link = await screen.findByRole('link', { name: 'Grant access on GitHub' })
+    await waitFor(() =>
+      expect(link.getAttribute('href')).toBe('https://github.com/settings/connections/applications/Iv1.abc123'),
+    )
   })
 
   it('browses the machine, and makes a folder where there is none', async () => {
