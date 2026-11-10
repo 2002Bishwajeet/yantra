@@ -110,13 +110,19 @@
 .settings__select {
   box-sizing: border-box;
   min-height: 40px;
-  padding: 0 12px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 32px 0 12px;
+  text-overflow: ellipsis;
+  appearance: none;
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E")
+    no-repeat right 12px center / 10px 6px;
   border: 1px solid var(--md-sys-color-outline);
   border-radius: var(--md-sys-shape-corner-full);
   font: var(--md-sys-typescale-label-large);
   letter-spacing: var(--md-sys-typescale-label-large-tracking);
   color: var(--md-sys-color-on-surface);
-  background: transparent;
 }
 
 @media (pointer: coarse) {
@@ -187,7 +193,6 @@
 .settings__connect .m3-copyable {
   align-self: stretch;
 }
-
 
 /* About. */
 
