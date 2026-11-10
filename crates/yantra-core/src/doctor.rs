@@ -90,7 +90,7 @@ fn no_login_server(check: &'static str) -> Check {
         format!(
             "{NO_LOGIN_SERVER}. Panes in a server started over ssh cannot read the login \
              keychain, so Yantra starts one in the login session when a \
-             session starts. Start one in Terminal there: `tmux new-session -d`"
+             session starts. Start one in Terminal there: `tmux -L yantra new-session -d`"
         ),
     )
 }
@@ -1625,7 +1625,7 @@ mod tests {
             assert_eq!(found.state, State::Absent, "{name}: {}", found.detail);
             assert!(found.detail.contains(NO_LOGIN_SERVER), "{}", found.detail);
             assert!(
-                found.detail.contains("`tmux new-session -d`"),
+                found.detail.contains("`tmux -L yantra new-session -d`"),
                 "{}",
                 found.detail
             );

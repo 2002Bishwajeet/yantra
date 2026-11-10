@@ -42,7 +42,7 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
   },
   noLogin: {
     title: 'The Mac has no login tmux server',
-    next: 'Start one on the Mac with `tmux new-session -d`, then try again.',
+    next: 'Start one on the Mac with `tmux -L yantra new-session -d`, then try again.',
   },
   draftClaude: {
     title: 'The draft failed',

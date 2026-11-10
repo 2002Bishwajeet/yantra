@@ -34,7 +34,7 @@ const stopped = (at: number, commands: string[]): Event => ({
 
 /** doctor.rs `no_login_server`, word for word. */
 const NO_SERVER =
-  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain, so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux new-session -d`'
+  'no tmux server from a login session is running on this Mac. Panes in a server started over ssh cannot read the login keychain, so Yantra starts one in the login session when a session starts. Start one in Terminal there: `tmux -L yantra new-session -d`'
 
 /** yantrad's words for `ssh::Error::Transport` and a tmux error (Y-585). */
 const SSH = 'ssh to pi failed before the command reported a status:'

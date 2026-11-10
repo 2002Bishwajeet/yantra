@@ -540,7 +540,7 @@ describe('a Mac with no login tmux server (Y-631)', () => {
     expect(screen.getByText(/In Terminal on cachyos-g14, run this, then Try again/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
     press(/Copy the Terminal command/)
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('tmux new-session -d'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('tmux -L yantra new-session -d'))
     expect(await screen.findByRole('button', { name: /Copied the Terminal command/ })).toBeTruthy()
   })
 

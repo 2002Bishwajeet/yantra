@@ -197,6 +197,37 @@ async fn the_keeper_outlives_its_ssh_and_its_reader_ends_with_the_pane() -> Resu
     Ok(())
 }
 
+/// Y-667: a keeper killed while its pane lives leaves the `-D` server with no
+/// session, and the reader still ends.
+#[tokio::test]
+#[ignore = "needs a disposable Mac; set YANTRA_MAC_RUNNER (CI's macos job does)"]
+async fn the_reader_ends_when_the_last_session_is_killed() -> Result<()> {
+    let lab = Lab::start("empty").await?;
+    let tmux = lab.tmux.command();
+    lab.run(&format!(
+        "{tmux} ls -F '#{{session_id}}' 2>/dev/null | while read -r s; do \
+         {tmux} kill-session -t \"$s\"; done; true"
+    ))
+    .await?;
+    let keeper = Keeper::new("ci", "2b3c4d5e6f7a8b9c");
+    let pane = lab
+        .start_keeper(&keeper, "exec sleep 600", Limits::default())
+        .await?;
+    let reader = keep::follow(lab.ssh.clone(), lab.tmux.clone(), keeper.clone(), pane, 0);
+    keep::kill(&lab.ssh, &lab.tmux, &keeper).await?;
+    ensure!(
+        lab.tmux.running(&lab.ssh).await?,
+        "the yantra server ended with its last session"
+    );
+    let ended = tokio::time::timeout(Duration::from_secs(20), async {
+        let mut lines = BufReader::new(reader).lines();
+        while let Ok(Some(_)) = lines.next_line().await {}
+    })
+    .await;
+    ensure!(ended.is_ok(), "the reader ended on the empty server");
+    Ok(())
+}
+
 /// Lines appended to `in` reach the agent, and a shut writer ends it.
 #[tokio::test]
 #[ignore = "needs a disposable Mac; set YANTRA_MAC_RUNNER (CI's macos job does)"]

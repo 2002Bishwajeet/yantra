@@ -78,8 +78,9 @@ export const CHECK_IDS: readonly string[] = Object.keys(CHECKS)
 
 export const nameOf = (check: string): string => CHECKS[check]?.name ?? check
 
-/** What a person types in Terminal on a Mac to start the login tmux server (I-44). */
-export const LOGIN_SERVER_COMMAND = 'tmux new-session -d'
+/** What a person types in Terminal on a Mac to start the login tmux server (I-44).
+ *  Yantra asks only the server named `yantra` (Y-667). */
+export const LOGIN_SERVER_COMMAND = 'tmux -L yantra new-session -d'
 
 /** Every daemon sentence for this one refusal: doctor.rs `NO_LOGIN_SERVER` (said by
  *  `login-session` and `provider-auth`), up.rs, clone.rs and commit.rs. */
