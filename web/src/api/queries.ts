@@ -309,6 +309,10 @@ export const githubReadinessQuery = () =>
 export const reposQuery = () =>
   swept<Repo[]>(keys.repos(), '/api/repos', ATTENTION_SWEEP_MS, SLOW_POLL_MS)
 
+/** Y-629: the organisations that own none of `/api/repos`, read on its sweep. */
+export const hiddenOrgsQuery = () =>
+  swept<string[]>(keys.hiddenOrgs(), '/api/repos/hidden', ATTENTION_SWEEP_MS, SLOW_POLL_MS)
+
 /** Y-343. An in-memory ring buffer, polled like the fleet: cheap, and it is
  *  what a bell counts. api.ts has it as `Looked<Event[]>` now; the guard
  *  reads the envelope's word until this type follows. */

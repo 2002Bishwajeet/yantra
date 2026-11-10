@@ -453,6 +453,14 @@ export const repos = {
   "looked": "ok"
 } satisfies Looked<Repo[]>
 
+export const hiddenOrgs = {
+  "age_seconds": 0,
+  "data": [
+    "acme-corp"
+  ],
+  "looked": "ok"
+} satisfies Looked<string[]>
+
 export const github = {
   "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4",
   "client_id": null,

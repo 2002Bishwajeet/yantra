@@ -78,6 +78,8 @@ const fleet: Answers = {
   'GET /api/github': [200, contract.github],
   'GET /api/readiness/github': [200, contract.githubReadiness],
   'GET /api/repos': [200, contract.repos],
+  // Nothing hidden unless a walk is about it (Y-629).
+  'GET /api/repos/hidden': [200, { ...contract.hiddenOrgs, data: [] }],
   'POST /api/machines/cachyos-g14/dirs': (sent) => [200, listing(String(sent.path ?? HOME))],
   'POST /api/viewing': [204],
   'POST /api/placement': [200, contract.placement],

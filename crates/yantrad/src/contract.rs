@@ -174,6 +174,11 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             read(&fleet, "/attention").await,
         ),
         ("repos", "Looked<Repo[]>", read(&fleet, "/repos").await),
+        (
+            "hiddenOrgs",
+            "Looked<string[]>",
+            read(&fleet, "/repos/hidden").await,
+        ),
         ("github", "Connection", read(&fleet, "/github").await),
         (
             "githubReadiness",
@@ -374,6 +379,7 @@ async fn fleet() -> Fleet {
                 default_branch: "main".into(),
             },
         ])))),
+        hidden: Some(Arc::new(Reading::new(Ok(vec!["acme-corp".into()])))),
     });
     // Y-582: bound to n-1's address, so n-1 is the hub.
     let fleet = Fleet {

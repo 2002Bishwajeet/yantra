@@ -27,6 +27,7 @@ API the CLI cannot reach.
 | `POST /api/github/login` | `yantra github login` |
 | `DELETE /api/github` | `yantra github logout` |
 | `GET /api/repos` | `yantra ls repos` |
+| `GET /api/repos/hidden` | — |
 | `POST /api/workspaces` | `yantra new` |
 | `PATCH /api/workspaces/{name}` | `yantra edit` |
 | `POST /api/workspaces/{name}/up` | `yantra up` |
@@ -161,6 +162,7 @@ acts on, and the two must not read alike.
 daemon polls, and `GET /api/github` says when the grant is live — `connected`, the login, the profile
 image URL, the scopes, whether a sign-in is pending and `expiring` when the last one got a token that expires, never the token. `DELETE /api/github` removes it. `GET /api/repos`
 is every repository the grant can see, swept every five minutes and filtered in the browser.
+`GET /api/repos/hidden` names each organisation that owns none of them (Y-629). It reads `GET /user/orgs` and the public memberships from `GET /users/{login}/orgs`, because GitHub can leave out an organisation that restricts the app. A private membership in such an organisation stays unnamed.
 
 **It is polled every five minutes rather than every thirty seconds**, which is the one read that
 departs from the fleet's interval. The fleet poll pays for itself by keeping the ssh masters warm;

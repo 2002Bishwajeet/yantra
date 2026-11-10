@@ -639,6 +639,31 @@ impl Github {
         .await
     }
 
+    /// The login of every organisation the account belongs to, as far as the
+    /// grant can tell. An organisation that restricts OAuth apps can be missing
+    /// from `/user/orgs`, so the public memberships are added; a private
+    /// membership in such an organisation stays unknown.
+    pub async fn orgs(&self, token: &Token) -> Result<Vec<String>, Error> {
+        let login = self.account(token).await?.login;
+        let api = self.api.clone();
+        let token = token.clone();
+        blocking(move || {
+            let mut orgs = logins(format!("{api}/user/orgs"), &token, "/user/orgs")?;
+            let public = logins(
+                format!("{api}/users/{login}/orgs"),
+                &token,
+                "/users/{login}/orgs",
+            )?;
+            for org in public {
+                if !orgs.iter().any(|seen| seen.eq_ignore_ascii_case(&org)) {
+                    orgs.push(org);
+                }
+            }
+            Ok(orgs)
+        })
+        .await
+    }
+
     /// The issue's title and body. A pull request answers this route too, and
     /// is refused: a thread starts from an issue.
     pub async fn issue(&self, token: &Token, issue: &IssueRef) -> Result<Issue, Error> {
@@ -1359,6 +1384,48 @@ fn rel(header: &str, wanted: &str) -> Option<String> {
     })
 }
 
+/// The organisations that own none of `repos`, sorted. An organisation that
+/// restricts OAuth apps hides every repository from the grant, public ones too,
+/// and GitHub gives no probe for that — so an empty organisation is named too.
+pub fn hidden(orgs: &[String], repos: &[Repo]) -> Vec<String> {
+    let mut hidden: Vec<String> = orgs
+        .iter()
+        .filter(|org| {
+            !repos.iter().any(|repo| {
+                repo.full_name
+                    .split_once('/')
+                    .is_some_and(|(owner, _)| owner.eq_ignore_ascii_case(org))
+            })
+        })
+        .cloned()
+        .collect();
+    hidden.sort();
+    hidden
+}
+
+/// Every `login` in a paged list of organisations.
+fn logins(first: String, token: &Token, what: &'static str) -> Result<Vec<String>, Error> {
+    #[derive(serde::Deserialize)]
+    struct Org {
+        login: String,
+    }
+    let mut logins = Vec::new();
+    let mut next = Some((first, vec![("per_page", "100")]));
+    let mut pages = 0;
+    while let Some((url, query)) = next.take() {
+        pages += 1;
+        if pages > MAX_PAGES {
+            break;
+        }
+        let mut response = get(&url, token, &query).map_err(unreachable)?;
+        ok(&response, what)?;
+        next = next_link(&response).map(|url| (url, Vec::new()));
+        let page: Vec<Org> = read_json(&mut response, "the organisation list")?;
+        logins.extend(page.into_iter().map(|org| org.login));
+    }
+    Ok(logins)
+}
+
 fn next_link(response: &Response) -> Option<String> {
     rel(link(response)?, "next")
 }
@@ -1834,6 +1901,57 @@ pub(crate) mod tests {
             "{}",
             seen[1]
         );
+    }
+
+    /// The organisations follow `Link` as the repositories do, and the public
+    /// memberships are added: GitHub can leave an organisation that restricts
+    /// OAuth apps out of `/user/orgs` (Y-629). A name already seen, in any
+    /// case, is not added twice.
+    #[tokio::test]
+    async fn orgs_add_the_public_memberships_to_every_page_of_the_grants() {
+        let (listener, address) = listen();
+        let link =
+            format!("Link: <http://{address}/user/orgs?page=2&per_page=100>; rel=\"next\"\r\n");
+        let served = serve(
+            listener,
+            vec![
+                reply("200 OK", r#"{"login":"me"}"#),
+                ("200 OK", link, r#"[{"login":"Acme","id":1}]"#.to_owned()),
+                reply("200 OK", r#"[{"login":"utopia-php"}]"#),
+                reply("200 OK", r#"[{"login":"acme"},{"login":"Restricted"}]"#),
+            ],
+        );
+
+        let orgs = at(address).orgs(&token()).await.expect("four answers");
+
+        assert_eq!(orgs, ["Acme", "utopia-php", "Restricted"]);
+        let seen = served.join().expect("the listener thread");
+        for (request, line) in seen.iter().zip([
+            "GET /user HTTP/1.1",
+            "GET /user/orgs?per_page=100 HTTP/1.1",
+            "GET /user/orgs?page=2&per_page=100 HTTP/1.1",
+            "GET /users/me/orgs?per_page=100 HTTP/1.1",
+        ]) {
+            assert!(request.starts_with(line), "{request}");
+        }
+    }
+
+    /// An organisation that owns a repository is seen, whatever its case; one
+    /// that owns none is named, in order.
+    #[test]
+    fn hidden_names_the_organisations_that_own_no_repository() {
+        let repo = |full_name: &str| Repo {
+            full_name: full_name.into(),
+            private: false,
+            language: None,
+            pushed_at: None,
+            clone_url: String::new(),
+            default_branch: "main".into(),
+        };
+        let orgs = ["zeta", "Acme", "seen", "beta"].map(String::from);
+        let repos = [repo("SEEN/a"), repo("me/zeta"), repo("acme-labs/b")];
+
+        assert_eq!(hidden(&orgs, &repos), ["Acme", "beta", "zeta"]);
     }
 
     /// The inbox: two searches and a count read off `Link` with one item per

@@ -5,7 +5,7 @@ import { aListed, aMachine, aWorkspace, looked } from '@/api/fixtures'
 import type { Readiness } from '@/api'
 import { writePrefs } from '@/shell/prefs'
 import { READY } from '@/lib/ready'
-import { type Answers, HOME, listing, mountNew, resize, unmountNew } from './harness'
+import { type Answer, type Answers, HOME, listing, mountNew, resize, unmountNew } from './harness'
 
 afterEach(() => {
   cleanup()
@@ -250,6 +250,69 @@ describe('step 2, where the code comes from', () => {
     expect(await screen.findByText('The repositories could not be read.')).toBeTruthy()
     expect(screen.getByRole('status').textContent).toBe('')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
+  })
+
+  /** Y-629: an organisation whose repositories the grant cannot see is named. */
+  async function toRepos(answers: Answers) {
+    const asked = mountNew('desktop', '/new', answers)
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    await screen.findByRole('list', { name: 'Repositories' })
+    await waitFor(() => expect(asked).toContain('GET /api/repos/hidden'))
+  }
+
+  it('names the organisations it sees no repository from, and links the grant page', async () => {
+    await toRepos({
+      'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.abc123' }],
+      'GET /api/repos/hidden': [200, { ...contract.hiddenOrgs, data: ['acme-corp', 'utopia-php'] }],
+    })
+    expect(
+      await screen.findByText(
+        'Yantra sees no repository from acme-corp, utopia-php. An organisation that restricts OAuth apps hides them. If your membership in one is private, it is not in this list.',
+      ),
+    ).toBeTruthy()
+    const link = screen.getByRole('link', { name: 'Grant access on GitHub' })
+    expect(link.getAttribute('href')).toBe('https://github.com/settings/connections/applications/Iv1.abc123')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noreferrer')
+  })
+
+  it('links every authorised app when the client id is unknown', async () => {
+    await toRepos({
+      'GET /api/github': [200, { ...contract.github, client_id: null }],
+      'GET /api/repos/hidden': [200, contract.hiddenOrgs],
+    })
+    expect((await screen.findByRole('link', { name: 'Grant access on GitHub' })).getAttribute('href')).toBe(
+      'https://github.com/settings/applications',
+    )
+  })
+
+  it('still links the grant page when it can name no organisation', async () => {
+    await toRepos({ 'GET /api/repos/hidden': [200, { ...contract.hiddenOrgs, data: [] }] })
+    expect(await screen.findByText(/If your membership there is private, Yantra cannot name it\./)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Grant access on GitHub' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
+  })
+
+  it.each<[string, Answer]>([
+    ['failed', [200, { looked: 'failed', age_seconds: 0, error: 'GitHub answered 502 to /user/orgs' }]],
+    ['never', [200, { looked: 'never' }]],
+    ['refused', [500, 'boom']],
+  ])('keeps the rows and the grant link, with no note, when the hidden read is %s', async (_, reply) => {
+    await toRepos({
+      'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.abc123' }],
+      'GET /api/repos/hidden': reply,
+    })
+    expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
+    // The answer has arrived; give it the frame it needs to draw anything.
+    await new Promise((done) => setTimeout(done, 50))
+    expect(screen.queryByText(/restricts OAuth apps/)).toBeNull()
+    expect(screen.queryByText(/private, Yantra cannot name it|it is not in this list/)).toBeNull()
+    const link = await screen.findByRole('link', { name: 'Grant access on GitHub' })
+    await waitFor(() =>
+      expect(link.getAttribute('href')).toBe('https://github.com/settings/connections/applications/Iv1.abc123'),
+    )
   })
 
   it('browses the machine, and makes a folder where there is none', async () => {
