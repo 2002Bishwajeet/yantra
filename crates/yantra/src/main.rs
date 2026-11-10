@@ -2999,6 +2999,9 @@ async fn github_login() -> ExitCode {
         Ok(grant) => grant,
         Err(err) => {
             report_error(&err);
+            if matches!(err, github::Error::Expiring) {
+                eprintln!("{}", expiring_note());
+            }
             return ExitCode::FAILURE;
         }
     };
@@ -3027,6 +3030,13 @@ async fn github_login() -> ExitCode {
         "        `sudo systemctl restart yantrad`, or sign in from the dashboard to skip the restart."
     );
     ExitCode::SUCCESS
+}
+
+/// Where the opt-out is, because GitHub's settings page does not say which
+/// switch issued the expiring token (Y-695).
+fn expiring_note() -> &'static str {
+    "\x20 note: open github.com/settings/developers, pick the app, and under Optional features\n\
+     \x20       opt out of user-to-server token expiration. Nothing was written."
 }
 
 /// The line leaves the file and nothing else in it moves. Exit 0 whether or
@@ -3500,6 +3510,17 @@ mod tests {
     #[test]
     fn the_command_tree_is_well_formed() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn the_expiring_note_names_the_opt_out() {
+        let note = expiring_note();
+        assert!(note.contains("github.com/settings/developers"), "{note}");
+        assert!(note.contains("Optional features"), "{note}");
+        assert!(
+            note.contains("opt out of user-to-server token expiration"),
+            "{note}"
+        );
     }
 
     #[test]

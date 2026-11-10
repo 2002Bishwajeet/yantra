@@ -1003,7 +1003,8 @@ impl Item {
 
 /// `scopes` is GitHub's own list from the grant that made it, and empty for a
 /// grant read from the environment — nothing asks GitHub what a token may do.
-/// `pending` is a device flow waiting for its code to be typed.
+/// `pending` is a device flow waiting for its code to be typed. `expiring`
+/// says the last flow ended because GitHub issued a token that expires.
 ///
 /// `client_id` and `client_id_custom` say which OAuth App a sign-in would use
 /// — `null`/`false` is a deployment with none configured — and never what the
@@ -1017,6 +1018,7 @@ struct Connection {
     avatar_url: Option<String>,
     scopes: Vec<String>,
     pending: bool,
+    expiring: bool,
     client_id: Option<String>,
     client_id_custom: bool,
 }
@@ -1029,6 +1031,7 @@ impl Connection {
             avatar_url: held.avatar_url.clone(),
             scopes: held.scopes.clone(),
             pending: held.pending,
+            expiring: held.expiring,
             client_id: client_id.as_ref().map(|(id, _)| id.clone()),
             client_id_custom: matches!(
                 client_id.map(|(_, source)| source),
@@ -2080,6 +2083,7 @@ pub(crate) mod tests {
         assert_eq!(none["avatar_url"], Value::Null, "{none}");
         assert_eq!(none["scopes"], json!([]), "{none}");
         assert_eq!(none["pending"], false, "{none}");
+        assert_eq!(none["expiring"], false, "{none}");
         // `client_id` mirrors this process's own environment (Y-393), which a
         // test does not control — so it is compared to itself, not a fixed
         // value, to stay green on a machine that happens to export it.
@@ -2112,6 +2116,18 @@ pub(crate) mod tests {
         );
         assert_eq!(held["pending"], false, "{held}");
         assert!(!held.to_string().contains("gho_"), "{held}");
+    }
+
+    /// Settings reads why the last sign-in ended (Y-695).
+    #[test]
+    fn the_connection_says_the_last_sign_in_got_an_expiring_token() {
+        let held = crate::github::Held {
+            expiring: true,
+            ..crate::github::Held::default()
+        };
+        let served = serde_json::to_value(Connection::of(&held, None)).expect("serialises");
+        assert_eq!(served["expiring"], true, "{served}");
+        assert_eq!(served["pending"], false, "{served}");
     }
 
     /// The check that is about this host, served under its own name and its own

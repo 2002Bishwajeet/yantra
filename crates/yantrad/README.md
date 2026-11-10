@@ -156,7 +156,7 @@ acts on, and the two must not read alike.
 
 `POST /api/github/login` starts that device flow and answers the code to type at github.com; the
 daemon polls, and `GET /api/github` says when the grant is live — `connected`, the login, the profile
-image URL, the scopes and whether a sign-in is pending, never the token. `DELETE /api/github` removes it. `GET /api/repos`
+image URL, the scopes, whether a sign-in is pending and `expiring` when the last one got a token that expires, never the token. `DELETE /api/github` removes it. `GET /api/repos`
 is every repository the grant can see, swept every five minutes and filtered in the browser.
 
 **It is polled every five minutes rather than every thirty seconds**, which is the one read that

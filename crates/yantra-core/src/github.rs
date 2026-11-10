@@ -5,7 +5,9 @@
 //! expire, it issues no refresh token, and it is the one credential a daemon
 //! that restarts can hold without a timer (R13 §2.1). [`Token`] never prints
 //! itself, no error below carries it, and nothing here writes it anywhere —
-//! [`crate::notify::write_github`] is the one place it lands on disk.
+//! [`crate::notify::write_github`] is the one place it lands on disk. An app
+//! that opted in to token expiration answers with `expires_in` and a refresh
+//! token instead, and the flow refuses that grant as [`Error::Expiring`].
 //!
 //! **The OAuth App is the owner's, unless a self-hoster registers their own.**
 //! Its client id is not a secret, and the device flow needs no client secret,
@@ -426,6 +428,11 @@ pub enum Error {
 
     #[error("the sign-in was refused at github.com")]
     Denied,
+
+    #[error(
+        "GitHub issued a token that expires — open the OAuth App's settings on github.com, opt out of user-to-server token expiration under Optional features, then sign in again"
+    )]
+    Expiring,
 
     #[error("GitHub refused the device flow: {error}")]
     Rejected { error: String },
@@ -1010,6 +1017,9 @@ fn classify(answer: TokenAnswer) -> Result<Polled, Error> {
         (Some(error), _) => Err(Error::Rejected {
             error: error.to_owned(),
         }),
+        (None, Some(_)) if answer.expires_in.is_some() || answer.refresh_token.is_some() => {
+            Err(Error::Expiring)
+        }
         (None, Some(token)) => Ok(Polled::Granted(Grant {
             token: Token(token),
             scopes: answer
@@ -1034,6 +1044,10 @@ struct TokenAnswer {
     access_token: Option<String>,
     scope: Option<String>,
     error: Option<String>,
+    /// Read only to refuse the grant: ADR-0023 holds a token that does not expire.
+    expires_in: Option<u64>,
+    /// A secret: never printed, logged or put in an error.
+    refresh_token: Option<String>,
 }
 
 /// `user`, `labels` and the rest of the answer are not named, so they are
@@ -1389,6 +1403,8 @@ pub(crate) mod tests {
     const PENDING: &str = r#"{"error":"authorization_pending","error_description":"The authorization request is still pending.","error_uri":"https://docs.github.com/developers/apps/authorizing-oauth-apps#error-codes-for-the-device-flow"}"#;
     const SLOW: &str = r#"{"error":"slow_down","error_description":"Too many requests have been made in the same timeframe.","interval":10}"#;
     const GRANTED: &str = r#"{"access_token":"gho_16C7e42F292c6912E7710c838347Ae178B4a","token_type":"bearer","scope":"repo,read:org,notifications"}"#;
+    /// What an app that opted in to token expiration answers (Y-695).
+    const EXPIRING: &str = r#"{"access_token":"ghu_16C7e42F292c6912E7710c838347Ae178B4a","expires_in":28800,"refresh_token":"ghr_1B4a2e77838347a7E420ce178F2E7c6912E169246c34E1ccbF66C46812d16D5B1A9Dc86A1498","refresh_token_expires_in":15811200,"scope":"repo,read:org,notifications","token_type":"bearer"}"#;
 
     fn answer(json: &str) -> TokenAnswer {
         serde_json::from_str(json).expect("captured JSON parses")
@@ -1435,6 +1451,30 @@ pub(crate) mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// ADR-0023 needs a token that does not expire, so either sign of expiry
+    /// refuses the grant, and the refusal carries neither token.
+    #[test]
+    fn a_token_that_expires_is_refused() {
+        let refused = classify(answer(EXPIRING)).expect_err("an expiring token is refused");
+        assert!(matches!(refused, Error::Expiring), "{refused}");
+        let shown = format!("{refused} {refused:?}");
+        assert!(
+            !shown.contains("ghu_") && !shown.contains("ghr_"),
+            "{shown}"
+        );
+        assert!(matches!(
+            classify(answer(r#"{"access_token":"ghu_x","expires_in":28800}"#)),
+            Err(Error::Expiring)
+        ));
+        assert!(matches!(
+            classify(answer(
+                r#"{"access_token":"ghu_x","refresh_token":"ghr_x"}"#
+            )),
+            Err(Error::Expiring)
+        ));
+        assert!(matches!(classify(answer(GRANTED)), Ok(Polled::Granted(_))));
     }
 
     /// GitHub says *add five seconds*, and says it once; the interval stays
@@ -1659,6 +1699,19 @@ pub(crate) mod tests {
             .expect_err("refused");
 
         assert!(matches!(denied, Error::Denied), "{denied}");
+    }
+
+    #[tokio::test]
+    async fn a_token_that_expires_ends_the_wait() {
+        let (listener, address) = listen();
+        let _served = serve(listener, vec![reply("200 OK", EXPIRING)]);
+
+        let expiring = at(address)
+            .wait("Iv1.abc", &device(60))
+            .await
+            .expect_err("refused");
+
+        assert!(matches!(expiring, Error::Expiring), "{expiring}");
     }
 
     /// The token goes out as a bearer, the API version is pinned, and `login`

@@ -233,7 +233,7 @@ export function useGithubLogin() {
     mutationFn: () => fetchJson<Device>('/api/github/login', { method: 'POST' }),
     // Until the next poll, a grant held from before is not the new sign-in.
     onSuccess: () =>
-      client.setQueryData<Connection>(keys.github(), (held) => (held ? { ...held, pending: true } : held)),
+      client.setQueryData<Connection>(keys.github(), (held) => (held ? { ...held, pending: true, expiring: false } : held)),
   })
 }
 
