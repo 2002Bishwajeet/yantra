@@ -248,7 +248,7 @@ function ClientIdSheet(props: {
         <TextField autoComplete="off" label="Client ID" name="id" placeholder="Iv1.…" required type="text" />
         <Text render={<p />} scale="body-small" tone="variant">
           Register one at{' '}
-          <a href="https://github.com/settings/applications/new" rel="noreferrer" target="_blank">
+          <a className="m3-hit" href="https://github.com/settings/applications/new" rel="noreferrer" target="_blank">
             github.com/settings/applications/new
           </a>
           , with Device Flow enabled and "Expire user access tokens" unticked.

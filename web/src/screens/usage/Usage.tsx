@@ -286,7 +286,7 @@ export function Usage() {
       ) : list.length === 0 ? (
         <Card className="usage__card">
           <EmptyState title="No spend yet">
-            Money is read from a workspace's transcript, and <Link to="/new">New session</Link>{' '}
+            Money is read from a workspace's transcript, and <Link className="m3-hit" to="/new">New session</Link>{' '}
             makes the first one.
           </EmptyState>
         </Card>

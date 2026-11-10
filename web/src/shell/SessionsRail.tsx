@@ -101,7 +101,7 @@ export function SessionsRail() {
       ) : (
         <p className="rail__note">Sessions have not been read yet.</p>
       )}
-      <Link className="rail__all" to="/fleet">
+      <Link className="rail__all m3-hit" to="/fleet">
         All sessions →
       </Link>
     </aside>

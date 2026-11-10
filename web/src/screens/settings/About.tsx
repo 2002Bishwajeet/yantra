@@ -149,7 +149,7 @@ function Release(props: {
   // The nightly's tag names no version, and it moves with each merge.
   const tag = channel === 'nightly' ? 'nightly' : `v${version}`
   return (
-    <a href={`https://github.com/2002Bishwajeet/yantra/releases/tag/${tag}`} rel="noreferrer" target="_blank">
+    <a className="m3-hit" href={`https://github.com/2002Bishwajeet/yantra/releases/tag/${tag}`} rel="noreferrer" target="_blank">
       <Mono>v{version} is out</Mono>
     </a>
   )

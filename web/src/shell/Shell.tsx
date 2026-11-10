@@ -225,7 +225,7 @@ function BellButton() {
 function DesktopBar() {
   return (
     <header className="shell__bar">
-      <Link className="shell__wordmark" to="/">
+      <Link className="shell__wordmark m3-hit" to="/">
         <img alt="" className="shell__mark" height="28" src="/yantra-mark.svg" width="28" />
         Yantra
       </Link>

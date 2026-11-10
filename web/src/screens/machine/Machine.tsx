@@ -125,7 +125,7 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
         </div>
       ) : rows.length === 0 ? (
         <EmptyState title="No workspace lives here">
-          <Link to="/new">New session</Link> puts one on {machine}
+          <Link className="m3-hit" to="/new">New session</Link> puts one on {machine}
         </EmptyState>
       ) : (
         <ul className="machine__rows">
@@ -136,7 +136,7 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
                 <div className="machine__row">
                   <Tile name={workspace.name} />
                   <span className="machine__text">
-                    <Link className="machine__name" params={{ name: workspace.name }} to="/w/$name">
+                    <Link className="machine__name m3-hit" params={{ name: workspace.name }} to="/w/$name">
                       {workspace.name}
                     </Link>
                     <Mono className="machine__where m3-clip">{workspace.repo}</Mono>

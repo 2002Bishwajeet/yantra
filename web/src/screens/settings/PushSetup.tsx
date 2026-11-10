@@ -97,10 +97,10 @@ export function PushSetup(props: { open: boolean; onOpenChange: (open: boolean) 
               Install it on the phone that gets the alerts.
             </Text>
             <div className="push-setup__stores">
-              <a href={APP_STORE} rel="noreferrer" target="_blank">
+              <a className="m3-hit" href={APP_STORE} rel="noreferrer" target="_blank">
                 ntfy for iPhone · App Store
               </a>
-              <a href={GOOGLE_PLAY} rel="noreferrer" target="_blank">
+              <a className="m3-hit" href={GOOGLE_PLAY} rel="noreferrer" target="_blank">
                 ntfy for Android · Google Play
               </a>
             </div>
@@ -137,7 +137,7 @@ export function PushSetup(props: { open: boolean; onOpenChange: (open: boolean) 
                   <Text render={<p />} scale="body-small" tone="variant">
                     Scan it with the phone, open the link there, or copy the URL into the app.
                   </Text>
-                  <a href={link}>Open the topic</a>
+                  <a className="m3-hit" href={link}>Open the topic</a>
                   <Copyable text={link} what="the topic URL" />
                 </div>
               </div>

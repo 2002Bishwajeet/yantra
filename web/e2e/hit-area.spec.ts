@@ -1,29 +1,19 @@
-import { route } from "./lib/routes";
+import { ROUTES } from "./lib/routes";
 import { expect, scenario, test } from "./lib/test";
 
 /** Y-674 (#663, research note 25 F5): every tappable element on the phone reaches 44 px in both directions. */
 const MIN = 44;
 
-const PATHS = [
-  { path: route("dashboard").path },
-  { path: route("fleet").path },
-  { path: route("machines").path },
-  { path: route("notifications").path },
-  { path: route("session").path },
-  { path: route("session-terminal").path },
-  { path: route("add-device").path, scenario: "adding" as const },
-];
-
 const TAPPABLE =
   "a[href], button, summary, [role=button], [role=tab], [role=radio], [role=switch], [role=checkbox], [role=option], [role=menuitem]";
 
-for (const one of PATHS) {
-  test(`every tappable element on ${one.path} is 44 px`, async ({
+for (const one of ROUTES) {
+  test(`every tappable element on ${one.id} (${one.path}) is 44 px`, async ({
     page,
     size,
   }) => {
     test.skip(size !== "phone", "the 44 px rule is the phone rule");
-    await scenario(page, one.scenario ?? "busy");
+    await scenario(page, ("scenario" in one && one.scenario) || "busy");
     await page.goto(one.path);
     await expect(page.locator(".m3-page").first()).toBeVisible();
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0);

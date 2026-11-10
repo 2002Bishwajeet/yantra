@@ -44,7 +44,7 @@ function SignedIn(props: { login: string | null; asked: boolean }) {
         github.com · {props.login ?? 'signed in'} · signed in to Yantra ·{' '}
         {props.asked ? 'private repositories included' : 'GitHub not asked yet'}
       </Text>
-      <Link className="ns__link" params={{ category: 'providers' }} to="/settings/$category">
+      <Link className="ns__link m3-hit" params={{ category: 'providers' }} to="/settings/$category">
         Use another account
       </Link>
     </p>

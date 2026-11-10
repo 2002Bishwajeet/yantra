@@ -38,7 +38,7 @@ export function ReachFailure(props: {
         {kind === 'unjoined' ? (
           <>
             {' '}
-            <Link to="/machines/add">Add a device</Link> shows it for each platform.
+            <Link className="m3-hit" to="/machines/add">Add a device</Link> shows it for each platform.
           </>
         ) : null}
       </Text>
