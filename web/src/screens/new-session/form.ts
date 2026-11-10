@@ -1,4 +1,4 @@
-import type { Machine, Readiness, Repo } from '@/api'
+import type { Machine, Readiness, Repo, Workspace } from '@/api'
 import { USABLE_NAME } from '@/lib/name'
 import { trimSlash } from '@/lib/path'
 import type { Step } from '@/router'
@@ -180,4 +180,11 @@ export function sourceHint(values: Values, home: string | null, listed = true): 
   if (source.here === 'no') return `Will clone into ${path}`
   if (source.here === 'yes') return `On ${values.machine} at ${path}`
   return `Not checked. Will try ${path}`
+}
+
+/** The workspace that already works in the chosen folder on the chosen machine. */
+export function knownWorkspace(values: Values, workspaces: Workspace[]): Workspace | null {
+  if (!values.source) return null
+  const path = trimSlash(values.source.path)
+  return workspaces.find((one) => one.machine === values.machine && trimSlash(one.repo) === path) ?? null
 }

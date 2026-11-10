@@ -19,6 +19,10 @@ describe('index.html', () => {
     expect(html).toMatch(/<meta name="viewport"[^>]*viewport-fit=cover/)
   })
 
+  it('lets the keyboard resize the layout viewport', () => {
+    expect(html).toMatch(/<meta name="viewport"[^>]*viewport-fit=cover[^>]*interactive-widget=resizes-content/)
+  })
+
   it('has exactly one theme-color meta per scheme', () => {
     expect(html.match(/<meta\s+name="theme-color"/g)).toHaveLength(2)
     expect(metas.map((m) => m[1]).sort()).toEqual(['dark', 'light'])
@@ -39,6 +43,18 @@ describe('index.html', () => {
 
   it('rewrites the metas in the explicit-theme branch', () => {
     expect(html).toMatch(/data-scheme[\s\S]*p\.theme[\s\S]*not all/)
+  })
+})
+
+describe('manifest.webmanifest', () => {
+  const manifest = JSON.parse(readFileSync(resolve(process.cwd(), 'public/manifest.webmanifest'), 'utf8'))
+  const surface = css.match(/--md-sys-color-surface:\s*light-dark\((#[0-9A-Fa-f]{6}),\s*(#[0-9A-Fa-f]{6})\)/)!
+
+  it('colours the splash and the title bar like the light surface, and like the dark one under color_scheme.dark', () => {
+    const [, light, dark] = surface
+    const night = manifest.user_preferences.color_scheme.dark
+    expect([manifest.background_color, manifest.theme_color]).toEqual([light!.toUpperCase(), light!.toUpperCase()])
+    expect([night.background_color, night.theme_color]).toEqual([dark!.toUpperCase(), dark!.toUpperCase()])
   })
 })
 
