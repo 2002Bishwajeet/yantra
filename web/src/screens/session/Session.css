@@ -259,6 +259,81 @@
   border-radius: var(--md-sys-shape-corner-large);
 }
 
+.chat__work {
+  padding: 0;
+  gap: 0;
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.chat__work-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px var(--m3-row-padding);
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: var(--md-sys-color-on-surface);
+  font: var(--md-sys-typescale-label-large);
+  text-align: start;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chat__work-toggle:active {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.chat__work-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat__work-count {
+  color: var(--md-sys-color-on-surface-variant);
+  font: var(--md-sys-typescale-label-medium);
+  white-space: nowrap;
+}
+
+.chat__work-chevron {
+  flex: none;
+  transition: transform 150ms ease-out;
+}
+
+.chat__work-toggle[aria-expanded='true'] .chat__work-chevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat__work-chevron {
+    transition: none;
+  }
+}
+
+.chat__work-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px var(--m3-row-padding) var(--m3-row-padding);
+}
+
+.chat__work-body[hidden] {
+  display: none;
+}
+
+.chat__call {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
 .chat__tool-head {
   display: flex;
   align-items: center;

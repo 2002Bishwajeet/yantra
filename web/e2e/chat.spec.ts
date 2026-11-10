@@ -131,6 +131,7 @@ test.describe('the chat, across views, tabs and reloads', () => {
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
     await expect(asking(page)).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: /^Worked/ }).click()
     await page.getByText('Output').click()
     await expect(page.getByText('test result: ok')).toBeVisible()
   })

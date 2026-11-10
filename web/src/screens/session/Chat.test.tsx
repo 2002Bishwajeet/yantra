@@ -480,16 +480,65 @@ describe('the chat', () => {
     expect(document.querySelector('img')).toBeNull()
   })
 
-  it('draws a tool as a card with its status, command and output', async () => {
-    await open()
-    say(of('item.started'))
-    const card = await settled(() => screen.getByText('cargo test').closest('article')!)
-    expect(within(card).getByText('Command')).toBeTruthy()
-    expect(within(card).getByText('running')).toBeTruthy()
+  describe('the work log', () => {
+    const ended = (payload: object) => say({ ...of('turn.completed'), payload })
+    const row = () => screen.getByRole('button', { name: /^(Working|Worked|You stopped)/ })
 
-    say(of('item.completed'))
-    await settled(() => expect(within(card).getByText('done')).toBeTruthy())
-    expect(within(card).getByText('test result: ok')).toBeTruthy()
+    it('keeps the running turn open on its call, then shuts to one row that opens to the call and its output', async () => {
+      await open()
+      say(of('turn.started'))
+      say(of('item.started'))
+      const log = await settled(() => screen.getByText('cargo test').closest('article')!)
+      expect(row().getAttribute('aria-expanded')).toBe('true')
+      expect(within(log).getByText('Command')).toBeTruthy()
+      expect(within(log).getByText('running')).toBeTruthy()
+
+      say(of('item.completed'))
+      await settled(() => expect(within(log).getByText('done')).toBeTruthy())
+
+      ended({ state: 'completed', stopReason: 'end_turn', durationMs: 4000 })
+      await settled(() => expect(row().textContent).toContain('Worked for 4s'))
+      expect(row().textContent).toContain('1 call')
+      expect(row().getAttribute('aria-expanded')).toBe('false')
+      expect(screen.getByText('cargo test').closest('[hidden]')).not.toBeNull()
+
+      fireEvent.click(row())
+      expect(row().getAttribute('aria-expanded')).toBe('true')
+      expect(row().getAttribute('aria-controls')).toBe(screen.getByText('cargo test').closest('.chat__work-body')!.id)
+      expect(screen.getByText('cargo test').closest('[hidden]')).toBeNull()
+      fireEvent.click(screen.getByText('Output'))
+      expect(screen.getByText('test result: ok')).toBeTruthy()
+    })
+
+    it('says Worked when the agent gave no duration', async () => {
+      await open()
+      say(of('turn.started'))
+      say(of('item.completed'))
+      ended({ state: 'completed', stopReason: 'end_turn' })
+      await settled(() => expect(row().textContent).toMatch(/^Worked(?! for)/))
+    })
+
+    it('says how long a stopped turn ran, or that it stopped', async () => {
+      await open()
+      say(of('turn.started'))
+      say(of('item.completed'))
+      ended({ state: 'cancelled', stopReason: 'cancelled', durationMs: 7000 })
+      await settled(() => expect(row().textContent).toContain('You stopped after 7s'))
+
+      say(of('turn.started'))
+      say({ ...of('item.completed'), payload: { ...of('item.completed').payload, itemId: 'toolu_2' } })
+      ended({ state: 'cancelled', stopReason: 'cancelled' })
+      await settled(() => expect(screen.getByRole('button', { name: /You stopped this response/ })).toBeTruthy())
+    })
+
+    it('shows a failed call as failed inside the row', async () => {
+      await open()
+      say(of('turn.started'))
+      say(of('item.started'))
+      say({ ...of('item.completed'), payload: { ...of('item.completed').payload, status: 'failed' } })
+      const log = await settled(() => screen.getByText('cargo test').closest('article')!)
+      expect(within(log).getByText('failed')).toBeTruthy()
+    })
   })
 
   const approve = async (decision: 'accept' | 'acceptAlways' | 'decline') => {

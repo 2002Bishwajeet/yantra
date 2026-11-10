@@ -512,6 +512,7 @@ fn key(id: &Value) -> String {
 
 fn failed(error: &Error) -> chat::TurnCompleted {
     chat::TurnCompleted {
+        duration_ms: None,
         state: chat::TurnState::Failed,
         stop_reason: None,
         message: Some(error.to_string()),
@@ -541,11 +542,13 @@ fn completed(answer: &Result<Value, Error>) -> chat::TurnCompleted {
     };
     match reason {
         Ok(chat::StopReason::Cancelled) => chat::TurnCompleted {
+            duration_ms: None,
             state: chat::TurnState::Cancelled,
             stop_reason: Some(chat::StopReason::Cancelled),
             message: None,
         },
         Ok(reason) => chat::TurnCompleted {
+            duration_ms: None,
             state: chat::TurnState::Completed,
             stop_reason: Some(reason),
             message: None,
@@ -1959,6 +1962,7 @@ mod tests {
         assert_eq!(
             next(&mut events).await.event,
             Event::TurnCompleted(TurnCompleted {
+                duration_ms: None,
                 state: TurnState::Cancelled,
                 stop_reason: Some(StopReason::Cancelled),
                 message: None,
@@ -1980,6 +1984,7 @@ mod tests {
         assert_eq!(
             next(&mut events).await.event,
             Event::TurnCompleted(TurnCompleted {
+                duration_ms: None,
                 state: TurnState::Failed,
                 stop_reason: None,
                 message: Some("the agent refused: Internal error (-32603)".to_owned()),
@@ -2001,6 +2006,7 @@ mod tests {
         assert_eq!(
             next(&mut events).await.event,
             Event::TurnCompleted(TurnCompleted {
+                duration_ms: None,
                 state: TurnState::Completed,
                 stop_reason: Some(StopReason::EndTurn),
                 message: None,
@@ -2056,6 +2062,7 @@ mod tests {
         assert!(matches!(
             next(&mut events).await.event,
             Event::TurnCompleted(TurnCompleted {
+                duration_ms: None,
                 state: TurnState::Failed,
                 ..
             })
@@ -2511,6 +2518,7 @@ mod tests {
                 thread_id: SESSION.to_owned(),
                 cursor: Some(format!("{RUN}:{}:0", out.len() + answer.len())),
                 event: Event::TurnCompleted(TurnCompleted {
+                    duration_ms: None,
                     state: TurnState::Completed,
                     stop_reason: Some(StopReason::EndTurn),
                     message: None,
