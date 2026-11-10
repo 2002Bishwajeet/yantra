@@ -17,6 +17,15 @@ for (const one of ROUTES) {
     await page.goto(one.path);
     await expect(page.locator(".m3-page").first()).toBeVisible();
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0);
+    // The phone FAB scales in, and a box measured mid-animation reads small.
+    await page.evaluate(() =>
+      Promise.all(
+        document
+          .getAnimations()
+          .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map((a) => a.finished.catch(() => undefined)),
+      ),
+    );
 
     const offenders = await page.evaluate(
       ({ selector, min }) => {
