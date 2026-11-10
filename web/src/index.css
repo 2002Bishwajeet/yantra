@@ -18,6 +18,13 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Y-677: iOS zooms the page when an input under 16 px takes focus. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
 a,
 button,
 summary,
