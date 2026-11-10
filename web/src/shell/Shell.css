@@ -211,9 +211,9 @@
   overscroll-behavior: none;
 }
 
-/* WCAG 2.4.11: the navigation bar and the FAB above it are fixed, so `main` both leaves room under its
-   last control and scrolls one clear of them — which New session's sticky footer, shorter than the pair,
-   gets as well. Scroll padding binds to the scroller, so it sits on `main` here. */
+/* WCAG 2.4.11: the navigation bar is fixed, so `main` leaves room under its last control and scrolls one
+   clear of it — which New session's sticky footer gets as well. Scroll padding binds to the scroller, so it
+   sits on `main` here. */
 [data-shell="phone"] .shell__main {
   flex: 1;
   min-height: 0;
@@ -224,6 +224,14 @@
   padding: 0 var(--m3-gutter) calc(136px + env(safe-area-inset-bottom, 0px));
 }
 
+/* Y-673: a route with a FAB docks it. `main` ends above the FAB (64 bar + 16 gap + 56 FAB + 8 air), so
+   content never scrolls under it and the FAB keeps its place and size. */
+[data-shell="phone"]:has(> .shell__fab) .shell__main {
+  margin-bottom: calc(144px + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: 24px;
+  padding-bottom: 24px;
+}
+
 [data-shell="phone"] .shell__main h1 {
   display: none;
 }
@@ -232,11 +240,6 @@
   position: fixed;
   inset: auto 0 0;
   z-index: 5;
-}
-
-/* How far in from the right edge the extended FAB reaches; content that must stay readable reserves it. */
-:root {
-  --shell-fab-reach: 168px;
 }
 
 .shell__fab {
