@@ -66,13 +66,12 @@ export async function toSecure(page: Page = window, timeoutMs = 3000): Promise<S
   const carried = Object.keys(keys).length
   let to = `${https}${pathname}${search}${hash}`
   if (carried > 0) {
-    let id: string
     try {
-      ;({ id } = await fetchJson<Carried>('/api/carry', { method: 'POST', ...json(keys) }, fields('id')))
+      const { id } = await fetchJson<Carried>('/api/carry', { method: 'POST', ...json(keys) }, fields('id'))
+      to = `${https}${pathname}${search}${CARRY}${id}&${encodeURIComponent(hash)}`
     } catch (error) {
       return { kind: 'carry-failed', error: asApiError(error) }
     }
-    to = `${https}${pathname}${search}${CARRY}${id}&${encodeURIComponent(hash)}`
     // Moved, not copied: a copy here would come back over a newer value on a later visit.
     try {
       for (const key of Object.keys(keys)) page.localStorage.removeItem(key)
