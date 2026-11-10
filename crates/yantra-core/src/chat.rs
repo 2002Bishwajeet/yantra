@@ -234,8 +234,27 @@ pub struct RequestOpened {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub options: Vec<RequestOption>,
+    /// What the agent asks, for a request that is a question to the person.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<Question>,
     #[serde(skip)]
     pub scope: Scope,
+}
+
+/// One question of an agent's `AskUserQuestion`, with the choices it offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Question {
+    pub question: String,
+    pub header: String,
+    pub options: Vec<QuestionOption>,
+    pub multi_select: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct QuestionOption {
+    pub label: String,
+    pub description: String,
 }
 
 /// What a request reaches, which decides the modes that may answer it
@@ -482,12 +501,36 @@ mod tests {
             title: Some("touch made.txt".to_owned()),
             detail: None,
             options: vec![],
+            questions: vec![],
             scope: Scope::Other,
         }));
         assert_eq!(
             opened["payload"],
             json!({"requestId": "r", "requestType": "exec_command_approval",
                    "title": "touch made.txt", "options": []})
+        );
+        let asked = wire(Event::RequestOpened(RequestOpened {
+            request_id: "q".to_owned(),
+            request_type: RequestType::DynamicToolCall,
+            item_id: None,
+            title: None,
+            detail: None,
+            options: vec![],
+            questions: vec![Question {
+                question: "Which?".to_owned(),
+                header: "Pick".to_owned(),
+                options: vec![QuestionOption {
+                    label: "A".to_owned(),
+                    description: "the first".to_owned(),
+                }],
+                multi_select: true,
+            }],
+            scope: Scope::Question,
+        }));
+        assert_eq!(
+            asked["payload"]["questions"],
+            json!([{"question": "Which?", "header": "Pick", "multiSelect": true,
+                    "options": [{"label": "A", "description": "the first"}]}])
         );
     }
 

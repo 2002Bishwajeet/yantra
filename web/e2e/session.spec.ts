@@ -63,11 +63,11 @@ test.describe('the session screen, chat first', () => {
     await expect(page.locator('.m3-page-header')).toContainText('waiting for trust')
   })
 
-  test("streams a turn, and draws Claude's request with three answers", async ({ page }) => {
+  test("streams a turn, and draws Claude's request with its answers at the composer", async ({ page }) => {
     await turn(page)
     await expect(page.getByText('Running the tests.')).toBeVisible()
     await expect(page.getByText('cargo test').first()).toBeVisible()
-    for (const name of ['Accept', 'Accept always', 'Decline']) {
+    for (const name of ['Approve', 'Decline', 'More answers']) {
       await expect(page.getByRole('button', { name, exact: true })).toBeVisible()
     }
     await expect(page.getByRole('status')).toHaveText('Claude is waiting for your answer.')
@@ -75,9 +75,9 @@ test.describe('the session screen, chat first', () => {
     await expect(page).toHaveURL(new RegExp(`thread=${THREAD}`))
   })
 
-  test('Accept answers the request, and the turn ends with its output and usage', async ({ page }) => {
+  test('Approve answers the request, and the turn ends with its output and usage', async ({ page }) => {
     await turn(page)
-    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
 
     await expect(asking(page)).toHaveCount(0)
     await expect(page.getByRole('status')).toHaveText('Claude finished.')

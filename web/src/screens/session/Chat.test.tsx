@@ -541,38 +541,148 @@ describe('the chat', () => {
     })
   })
 
-  it.each([
-    ['Accept', 'accept'],
-    ['Accept always', 'acceptAlways'],
-    ['Decline', 'decline'],
-  ] as const)('sends %s as its decision, and the card goes when it is resolved', async (label, decision) => {
-    await open()
-    say(of('request.opened'))
-    await settled(() => expect(screen.getByText('Claude asks to run')).toBeTruthy())
-    expect(screen.getByText('Run the unit tests')).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toBe('Claude is waiting for your answer.')
-    // The placeholder says it on screen, so the line is read out and not drawn twice.
-    expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(true)
-    type('look')
-    expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(false)
-    type('')
+  const approve = async (decision: 'accept' | 'acceptAlways' | 'decline') => {
+    if (decision === 'acceptAlways') {
+      fireEvent.click(screen.getByRole('button', { name: 'More answers' }))
+      fireEvent.click(await settled(() => screen.getByRole('menuitem', { name: 'Always allow this session' })))
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: decision === 'accept' ? 'Approve' : 'Decline' }))
+    }
+  }
 
-    fireEvent.click(screen.getByRole('button', { name: label }))
-    await settled(() => expect(frames()).toEqual([{ type: 'answer', requestId: 'r1', decision }]))
+  it.each(['accept', 'acceptAlways', 'decline'] as const)(
+    'answers an approval at the composer with %s, and the panel goes when it is resolved',
+    async (decision) => {
+      await open()
+      say(of('request.opened'))
+      await settled(() => expect(screen.getByText('Claude asks to run')).toBeTruthy())
+      expect(screen.getByText('Run the unit tests')).toBeTruthy()
+      // The panel is inside the composer's form, above the field.
+      const panel = screen.getByRole('region', { name: 'Waiting for your answer' })
+      expect(panel.closest('form.composer')).toBeTruthy()
+      expect(screen.getByRole('status').textContent).toBe('Claude is waiting for your answer.')
+      // The placeholder says it on screen, so the line is read out and not drawn twice.
+      expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(true)
+      type('look')
+      expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(false)
+      type('')
 
-    say({ ...of('request.resolved'), payload: { requestId: 'r1', requestType: 'exec_command_approval', decision } })
-    await settled(() => expect(screen.queryByText('Claude asks to run')).toBeNull())
-  })
+      await approve(decision)
+      await settled(() => expect(frames()).toEqual([{ type: 'answer', requestId: 'r1', decision }]))
+
+      say({ ...of('request.resolved'), payload: { requestId: 'r1', requestType: 'exec_command_approval', decision } })
+      await settled(() => expect(screen.queryByText('Claude asks to run')).toBeNull())
+    },
+  )
 
   it('takes one answer per request, so a double tap sends one frame', async () => {
     await open()
     say(of('request.opened'))
-    const accept = await settled(() => screen.getByRole('button', { name: 'Accept' }))
+    const accept = await settled(() => screen.getByRole('button', { name: 'Approve' }))
     fireEvent.click(accept)
     fireEvent.click(accept)
     await settled(() => expect(frames()).toHaveLength(1))
     expect(accept).toHaveProperty('disabled', true)
     expect(screen.getByRole('button', { name: 'Decline' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'More answers' })).toHaveProperty('disabled', true)
+  })
+
+  it('shows a refused answer through the error surface and turns the controls back on', async () => {
+    await open()
+    say(of('request.opened'))
+    fireEvent.click(await settled(() => screen.getByRole('button', { name: 'Approve' })))
+    await settled(() => expect(frames()).toHaveLength(1))
+    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
+
+    say({ type: 'error', kind: 'badFrame', said: 'no permission request `r1` is waiting for an answer' })
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('no permission request `r1` is waiting for an answer')
+    expect(screen.getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', false)
+  })
+
+  it('says so when the socket is shut and keeps the controls on', async () => {
+    await open()
+    say(of('request.opened'))
+    const accept = await settled(() => screen.getByRole('button', { name: 'Approve' }))
+    server.hangUp()
+    await settled(() => expect(screen.getByRole('status').textContent).not.toBe(''))
+    fireEvent.click(accept)
+    await settled(() => expect(screen.getByRole('alert').textContent).toContain('the answer was not sent'))
+    expect(accept).toHaveProperty('disabled', false)
+  })
+
+  const asking = (questions: unknown[]) => {
+    const opened = of('request.opened') as Extract<ThreadEvent, { type: 'request.opened' }>
+    return {
+      ...opened,
+      payload: { ...opened.payload, requestType: 'dynamic_tool_call', options: opened.payload.options.slice(2), questions },
+    }
+  }
+  const db = {
+    question: 'Which database?',
+    header: 'Database',
+    multiSelect: false,
+    options: [
+      { label: 'Postgres', description: 'The default' },
+      { label: 'SQLite', description: 'One file' },
+    ],
+  }
+  const parts = {
+    question: 'Which parts?',
+    header: 'Parts',
+    multiSelect: true,
+    options: [
+      { label: 'API', description: 'The server' },
+      { label: 'UI', description: 'The browser' },
+      { label: 'Docs', description: '' },
+    ],
+  }
+
+  it.each(['Postgres', 'SQLite'])('answers a question with the option %s', async (label) => {
+    await open()
+    say(asking([db]))
+    await settled(() => expect(screen.getByText('Claude asks a question')).toBeTruthy())
+    expect(screen.queryByText('Claude asks to use a tool')).toBeNull()
+    expect(screen.getByText('Which database?')).toBeTruthy()
+    // Nothing is chosen, so there is nothing to submit.
+    expect(screen.getByRole('button', { name: 'Submit' })).toHaveProperty('disabled', true)
+    fireEvent.click(screen.getByRole('radio', { name: new RegExp(label) }))
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+    await settled(() =>
+      expect(frames()).toEqual([
+        { type: 'answer', requestId: 'r1', decision: 'accept', answers: { 'Which database?': [label] } },
+      ]),
+    )
+  })
+
+  it('walks a multi-select question one step at a time and sends every label chosen', async () => {
+    await open()
+    say(asking([db, parts]))
+    await settled(() => screen.getByText('Which database?'))
+    fireEvent.click(screen.getByRole('radio', { name: /SQLite/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    expect(screen.queryByText('Which database?')).toBeNull()
+    fireEvent.click(screen.getByRole('checkbox', { name: /API/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Docs/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
+    await settled(() =>
+      expect(frames()).toEqual([
+        {
+          type: 'answer',
+          requestId: 'r1',
+          decision: 'accept',
+          answers: { 'Which database?': ['SQLite'], 'Which parts?': ['API', 'Docs'] },
+        },
+      ]),
+    )
+    expect(screen.getByRole('button', { name: 'Submit' })).toHaveProperty('disabled', true)
+  })
+
+  it('declines a question without answers', async () => {
+    await open()
+    say(asking([db]))
+    fireEvent.click(await settled(() => screen.getByRole('button', { name: 'Decline' })))
+    await settled(() => expect(frames()).toEqual([{ type: 'answer', requestId: 'r1', decision: 'decline' }]))
   })
 
   it('keeps Stop through a badFrame, because a bad frame never ends a turn', async () => {
@@ -1290,13 +1400,13 @@ describe('the branch diff', () => {
     expect(screen.getByRole('alert').textContent).toContain(chatCheckpointFailed.said)
   })
 
-  it('keeps the agent’s permission request in view while the diff hides the conversation', async () => {
+  it('keeps the agent’s permission request in the composer while the diff hides the conversation', async () => {
     await asked()
     say(of('request.opened'))
-    const asking = await settled(() => screen.getByRole('region', { name: 'Waiting for your answer' }))
-    expect(within(asking).getByText('Run the unit tests')).toBeTruthy()
+    const panel = await settled(() => screen.getByRole('region', { name: 'Waiting for your answer' }))
+    expect(within(panel).getByText('Run the unit tests')).toBeTruthy()
     expect(document.querySelector('.chat__turns')?.hasAttribute('hidden')).toBe(true)
-    fireEvent.click(within(asking).getByRole('button', { name: 'Accept' }))
+    fireEvent.click(within(panel).getByRole('button', { name: 'Approve' }))
     await settled(() => expect(frames().at(-1)).toMatchObject({ type: 'answer', requestId: 'r1' }))
   })
 
