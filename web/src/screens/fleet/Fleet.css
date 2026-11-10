@@ -366,12 +366,12 @@
   flex-basis: 100%;
 }
 
-/* WCAG 2.5.8: two links on stacked lines are each 24 px tall. */
+/* Two links on stacked lines would overlap their 48 px overlays, so each is 44 px tall instead. */
 [data-shell="tablet"] .fleet__meta > a,
 [data-shell="phone"] .fleet__meta > a {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
+  min-height: 44px;
 }
 
 [data-shell="tablet"] .fleet__meta > .fleet__machine ~ *::before,

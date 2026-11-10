@@ -31,7 +31,7 @@ export function Github(props: { attention: Reading<Attention> }) {
           On GitHub
         </Text>
         {attention.looked === 'ok' && attention.data.notifications > 0 ? (
-          <a className="github__unread" href="https://github.com/notifications" rel="noreferrer" target="_blank">
+          <a className="github__unread m3-hit" href="https://github.com/notifications" rel="noreferrer" target="_blank">
             Open {attention.data.notifications} on GitHub
             <ArrowUpRight aria-hidden="true" />
           </a>

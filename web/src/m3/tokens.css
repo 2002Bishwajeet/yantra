@@ -601,6 +601,18 @@
   inset: min(0px, calc((100% - var(--md-sys-hit-area)) / 2));
 }
 
+/* The hit area alone, for a plain link: no state layer, no cursor. Not for an
+   element that is already `.m3-interactive`, which draws the same `::after`. */
+.m3-hit {
+  position: relative;
+}
+
+.m3-hit::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((100% - var(--md-sys-hit-area)) / 2));
+}
+
 @media (hover: hover) and (pointer: fine) {
   .m3-interactive:hover::before {
     opacity: var(--md-sys-state-hover-state-layer-opacity);
