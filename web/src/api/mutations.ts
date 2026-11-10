@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type {
   Change,
+  Channel,
   Cloning,
   Create,
   Connection,
@@ -275,6 +276,17 @@ export function useClearGithubClientId() {
 export function useApplyUpdate() {
   return useMutation<void, ApiError, void>({
     mutationFn: () => fetchJson<void>('/api/update', { method: 'POST' }),
+  })
+}
+
+/** Y-662: `PUT /api/update/channel` → 204. The daemon rewrites the channel the
+ *  update unit reads and wakes its release look, so About is read again. A 409
+ *  is a box whose updater has not yet made the channel file. */
+export function useSetChannel() {
+  const client = useQueryClient()
+  return useMutation<void, ApiError, Channel>({
+    mutationFn: (channel) => fetchJson<void>('/api/update/channel', { method: 'PUT', ...json({ channel }) }),
+    onSettled: () => client.invalidateQueries({ queryKey: keys.about(), exact: true }),
   })
 }
 

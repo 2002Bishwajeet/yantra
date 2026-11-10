@@ -47,7 +47,7 @@ mod why;
 #[derive(Debug, Parser)]
 #[command(
     name = "yantra",
-    version,
+    version = yantra_core::about::VERSION,
     about = "a personal developer control plane",
     after_help = "Workspaces live in ~/.config/yantra/workspaces/<name>.toml"
 )]
@@ -288,6 +288,11 @@ enum Command {
         /// Only say whether a newer release is published; install nothing
         #[arg(long)]
         check: bool,
+        /// stable or nightly. Without --check it is written to
+        /// /etc/yantra/channel and kept for later updates; by default the
+        /// box keeps the channel it has, and a new box is on stable
+        #[arg(long)]
+        channel: Option<update::Channel>,
     },
     /// Serve MCP on stdin and stdout, so a main agent can delegate tasks
     /// through yantrad (ADR-0033)
@@ -671,10 +676,24 @@ async fn main() -> ExitCode {
         Some(Command::SshIdentity { .. }) => ssh_identity(),
         Some(Command::JoinScript) => join_script().await,
         Some(Command::About) => about(),
-        Some(Command::Update { check: true }) => {
-            update_check_with(&Github::default(), github::from_env().as_ref()).await
+        Some(Command::Update {
+            check: true,
+            channel,
+        }) => {
+            let channel =
+                match channel.map_or_else(|| update::channel(Path::new(update::CHANNEL)), Ok) {
+                    Ok(channel) => channel,
+                    Err(err) => {
+                        report_error(&err);
+                        return ExitCode::FAILURE;
+                    }
+                };
+            update_check_with(&Github::default(), channel, github::from_env().as_ref()).await
         }
-        Some(Command::Update { check: false }) => update_apply().await,
+        Some(Command::Update {
+            check: false,
+            channel,
+        }) => update_apply(channel).await,
         Some(Command::Mcp { daemon }) => serve_mcp(daemon).await,
         Some(Command::Room {
             action: RoomAction::Resume { room, daemon },
@@ -1832,10 +1851,14 @@ fn render_about() -> String {
 
 /// ADR-0027 §2's check, in-process like every other verb (ADR-0012). `main`
 /// passes the grant from this shell when there is one; `None` asks anonymously.
-async fn update_check_with(github: &Github, token: Option<&github::Token>) -> ExitCode {
-    match github.latest_release(token).await {
+async fn update_check_with(
+    github: &Github,
+    channel: update::Channel,
+    token: Option<&github::Token>,
+) -> ExitCode {
+    match github.latest_release(channel, token).await {
         Ok(release) => {
-            print!("{}", render_update(&release));
+            print!("{}", render_update(channel, &release));
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -1846,8 +1869,17 @@ async fn update_check_with(github: &Github, token: Option<&github::Token>) -> Ex
 }
 
 /// ADR-0027 §3: the same unit the daemon's trigger starts, waited for. While
-/// it runs, the unit's own progress file says how far it got (Y-612).
-async fn update_apply() -> ExitCode {
+/// it runs, the unit's own progress file says how far it got (Y-612). A
+/// channel is written first, because the unit takes no argument (Y-662).
+async fn update_apply(channel: Option<update::Channel>) -> ExitCode {
+    if let Some(channel) = channel {
+        if let Err(err) = update::set_channel(Path::new(update::CHANNEL), channel) {
+            report_error(&err);
+            eprint!("{}", update_next(&err));
+            return ExitCode::FAILURE;
+        }
+        eprintln!("channel: {channel}, in {}", update::CHANNEL);
+    }
     let dir = Path::new(update::PROGRESS);
     let applying = update::apply();
     tokio::pin!(applying);
@@ -1932,6 +1964,9 @@ fn update_next(err: &update::Error) -> &'static str {
             "  run it as root: sudo systemctl start yantra-update.service\n"
         }
         update::Error::Failed { .. } => "  read why: journalctl -u yantra-update --no-pager\n",
+        update::Error::ChannelUnwritable { .. } | update::Error::NotAChannel { .. } => {
+            "  as root it can be written: sudo yantra update --channel stable\n"
+        }
         update::Error::NotInstalled { .. }
         | update::Error::Io(_)
         | update::Error::Unreadable { .. }
@@ -1940,14 +1975,14 @@ fn update_next(err: &update::Error) -> &'static str {
     }
 }
 
-fn render_update(published: &github::Release) -> String {
+fn render_update(channel: update::Channel, published: &github::Release) -> String {
     let verdict = if yantra_core::about::newer(published) {
         "newer"
     } else {
         "current"
     };
     format!(
-        "running:   {}\npublished: {}\n{verdict}\n",
+        "channel:   {channel}\nrunning:   {}\npublished: {}\n{verdict}\n",
         yantra_core::about::VERSION,
         published.version
     )
@@ -4828,14 +4863,44 @@ mod tests {
             Cli::try_parse_from(["yantra", "update", "--check"])
                 .expect("`update --check` parses")
                 .command,
-            Some(Command::Update { check: true })
+            Some(Command::Update {
+                check: true,
+                channel: None
+            })
         ));
         assert!(matches!(
             Cli::try_parse_from(["yantra", "update"])
                 .expect("`update` parses")
                 .command,
-            Some(Command::Update { check: false })
+            Some(Command::Update {
+                check: false,
+                channel: None
+            })
         ));
+    }
+
+    /// Y-662: `--channel` takes the two words and nothing else.
+    #[test]
+    fn update_takes_a_channel_by_name() {
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "update", "--channel", "nightly"])
+                .expect("`update --channel nightly` parses")
+                .command,
+            Some(Command::Update {
+                check: false,
+                channel: Some(update::Channel::Nightly)
+            })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "update", "--check", "--channel", "stable"])
+                .expect("`update --check --channel stable` parses")
+                .command,
+            Some(Command::Update {
+                check: true,
+                channel: Some(update::Channel::Stable)
+            })
+        ));
+        assert!(Cli::try_parse_from(["yantra", "update", "--channel", "beta"]).is_err());
     }
 
     /// Each refusal names the next command: root for a caller without it,
@@ -4913,16 +4978,22 @@ mod tests {
 
     #[test]
     fn update_check_names_both_versions_and_the_verdict() {
-        let newer = render_update(&github::Release::parse("999.0.0").expect("a version"));
+        let newer = render_update(
+            update::Channel::Stable,
+            &github::Release::parse("999.0.0").expect("a version"),
+        );
         assert_eq!(
             newer,
             format!(
-                "running:   {}\npublished: 999.0.0\nnewer\n",
+                "channel:   stable\nrunning:   {}\npublished: 999.0.0\nnewer\n",
                 env!("CARGO_PKG_VERSION")
             )
         );
-        let current =
-            render_update(&github::Release::parse(env!("CARGO_PKG_VERSION")).expect("a version"));
+        let current = render_update(
+            update::Channel::Nightly,
+            &github::Release::parse(env!("CARGO_PKG_VERSION")).expect("a version"),
+        );
+        assert!(current.starts_with("channel:   nightly\n"), "{current}");
         assert!(current.ends_with("\ncurrent\n"), "{current}");
     }
 
@@ -4933,7 +5004,10 @@ mod tests {
         drop(listener);
         let github = Github::at(&format!("http://{address}"), &format!("http://{address}"));
 
-        assert_eq!(update_check_with(&github, None).await, ExitCode::FAILURE);
+        assert_eq!(
+            update_check_with(&github, update::Channel::Stable, None).await,
+            ExitCode::FAILURE
+        );
     }
 
     /// Which of the two happened is the sentence, and both name the session

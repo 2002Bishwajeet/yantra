@@ -173,6 +173,18 @@ unresolvable() {
     rm -f "$WWW/repos/$1/releases/latest"
 }
 
+# The publication served as the rolling nightly as well (Y-662): under the
+# `nightly` tag, whose only version is in the title and the archives' names.
+# The other target's archive is listed first, so a resolver must pick its own.
+nightly() {
+    local repo=$1 version=$2
+    mkdir -p "$WWW/repos/$repo/releases/tags"
+    rm -rf "$WWW/$repo/releases/download/nightly"
+    cp -r "$(downloads "$repo" "$version")" "$WWW/$repo/releases/download/nightly"
+    printf '{"tag_name":"nightly","name":"v%s","prerelease":true,"assets":[{"name":"yantra-%s-%s.tar.gz"},{"name":"yantra-%s-%s.tar.gz"},{"name":"SHA256SUMS"}]}\n' \
+        "$version" "$version" "$other" "$version" "$target" > "$WWW/repos/$repo/releases/tags/nightly"
+}
+
 corrupt() {
     local repo=$1 version=$2
     printf x | dd of="$(downloads "$repo" "$version")/$(staged "$version").tar.gz" \

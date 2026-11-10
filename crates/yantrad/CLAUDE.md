@@ -122,9 +122,13 @@ repository list, a class on the same slow clock, and **the search box filters it
 a typed box polls, and a read handler never awaits the network.
 
 **The newest release is a class too** (Y-367, [ADR-0027](../../docs/adr/0027-the-appliance-pulls-its-own-update.md) §2).
-`GET /api/about` serves it as `published`, and `refresh.rs` reads `/releases/latest` once an hour,
-with the grant when there is one and anonymously when there is not. A failed read is `failed`, and
-the page never draws it as *current*.
+`GET /api/about` serves it as `published`, and `refresh.rs` reads it once an hour, with the grant
+when there is one and anonymously when there is not. A failed read is `failed`, and the page never
+draws it as *current*. **The channel decides which release** (Y-662, ADR-0027's 2026-11-10
+amendment): `/etc/yantra/channel` names `stable`, read through `/releases/latest`, or `nightly`,
+read off the `nightly` release's title. About serves it as `channel`. `PUT /api/update/channel` in
+`write.rs`, on the gate, rewrites that one word in place and wakes the release look. It never names
+a version.
 
 **It is a class on the refresh sweep, not a handler that runs `doctor`.** Twelve checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.

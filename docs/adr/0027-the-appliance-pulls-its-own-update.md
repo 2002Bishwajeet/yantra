@@ -290,3 +290,37 @@ once the moved-tag problem bites.
 >
 > **What changed is upstream of the reasoning:** the QA walk-through measured the manual path on
 > 2026-09-11, and the owner judged it too costly.
+
+> **§3 and §4 widened for two release channels, recorded 2026-11-10 (Y-662).** The owner decided
+> on 2026-11-08 that a release does not wait for the box, the Mac or the iPhone, and that Yantra
+> ships channels instead. The owner accepted this amendment on 2026-11-10.
+>
+> 1. **Two channels.** *Stable* is the `v*` tag flow, read through `/releases/latest` and marked
+>    latest. *Nightly* is one rolling pre-release with the tag `nightly`. `release.yml` moves that
+>    tag on each push to `main` and replaces its assets. A nightly builds the two Linux musl targets
+>    only and skips the rehearse job. Its version is `<next patch>-nightly.<UTC commit time>.<sha7>`,
+>    for example `0.10.4-nightly.20261110143205.abc1234`. The version is in the release title and in
+>    the archive names, because the tag names none. Semver orders it after the last release and
+>    before the next one.
+> 2. **The channel is a one-word file, `/etc/yantra/channel`.** It holds `stable` or `nightly`, no
+>    secret and no fleet state. `install.sh` creates it, owned by the daemon's account and mode
+>    `0644`. Settings rewrites it in place through `PUT /api/update/channel`, on ADR-0016's gate.
+>    `/etc/yantra` is root's, so that account cannot swap the file for a link. The root unit reads
+>    it, so **the trigger still carries nothing**. The daemon's account can choose a channel and
+>    still cannot choose a version.
+> 3. **The unit never goes back a version.** `install.sh` records what it installed in
+>    `/var/lib/yantra/installed`. Run by `yantra-update.service`, it refuses a release older than
+>    that, so a switch from nightly back to stable waits for a newer stable release. Only a person
+>    who runs the script by hand (`sudo yantra-update --channel stable`) goes back. §3's protection
+>    against naming an old version therefore holds against the daemon's account.
+> 4. **The revisit trigger in this ADR fires, and that is known.** *A tag that moves, or a release
+>    asset that is replaced* is what the nightly does on every merge. For a nightly, `SHA256SUMS`
+>    proves only that the archive is intact and matches the run that uploaded it. The version in each
+>    archive name keeps the archive and its checksum line together. An installer caught while the
+>    assets are replaced fetches an archive that `SHA256SUMS` does not list, and installs nothing.
+>    The stable channel keeps §4 exactly as written.
+> 5. **The daemon reads one more endpoint**, `/releases/tags/nightly`, for its title. It uses the same
+>    grant and the same hourly look. A channel switch wakes that look.
+>
+> **What changed upstream of the reasoning:** the owner stopped gating a release on hardware walks.
+> A box that wants each merge now opts in to the nightly; a box that does not want it sees nothing new.

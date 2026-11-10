@@ -377,6 +377,7 @@ async fn fleet() -> Fleet {
             trigger: PathBuf::new(),
             updater: PathBuf::new(),
             progress: PathBuf::new(),
+            channel: PathBuf::new(),
         }),
         ..fleet
     };

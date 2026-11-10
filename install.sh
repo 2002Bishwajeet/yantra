@@ -20,6 +20,12 @@
 #
 #     curl -fsSL <url>/install.sh | YANTRA_ACCOUNT=<account> bash -s -- --yes
 #
+# `--channel nightly` installs the build of the latest merge to main, and
+# `--channel stable`, the default, the latest tagged release (Y-662). The choice
+# is kept in /etc/yantra/channel, and later updates follow it:
+#
+#     curl -fsSL <url>/install.sh | bash -s -- --channel nightly
+#
 # `--uninstall` reverses it (Y-407):
 #
 #     curl -fsSL <url>/install.sh | bash -s -- --uninstall
@@ -37,6 +43,8 @@ REPO=2002Bishwajeet/yantra
 BIN_DIR=/usr/local/bin
 AGENT_ENV=/etc/yantra/agent.env
 DAEMON_ENV=/etc/yantra/daemon.env
+CHANNEL_FILE=/etc/yantra/channel
+INSTALLED=/var/lib/yantra/installed
 PORT=7717
 HTTPS_PORT=8443
 
@@ -119,13 +127,35 @@ if [ "${YANTRA_YES:-}" = 1 ]; then
     yes=yes
 fi
 uninstalling=no
-for arg in "$@"; do
-    case "$arg" in
+channel=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
     --yes) yes=yes ;;
     --uninstall) uninstalling=yes ;;
-    *) fail "$arg is not an option. The options are --yes and --uninstall." ;;
+    --channel=*) channel=${1#--channel=} ;;
+    --channel)
+        [ "$#" -ge 2 ] || fail "--channel needs stable or nightly"
+        channel=$2
+        shift
+        ;;
+    *) fail "$1 is not an option. The options are --yes, --channel stable|nightly and --uninstall." ;;
     esac
+    shift
 done
+case "$channel" in
+"" | stable | nightly) ;;
+*) fail "$channel is not a channel. Name stable or nightly." ;;
+esac
+# A person names the channel; the unit never does, so it reads the one kept.
+channel_named=$channel
+if [ -z "$channel" ] && [ -e "$CHANNEL_FILE" ]; then
+    channel=$(tr -d '[:space:]' <"$CHANNEL_FILE")
+    case "$channel" in
+    stable | nightly) ;;
+    *) fail "$CHANNEL_FILE names no channel — nothing was installed. Write stable or nightly in it" ;;
+    esac
+fi
+channel=${channel:-stable}
 
 answering=no
 if [ "$interactive" = yes ] || [ "$yes" = yes ]; then
@@ -172,6 +202,7 @@ uninstall() {
     as_root systemctl daemon-reload
     as_root rm -f "$BIN_DIR/yantra" "$BIN_DIR/yantrad" "$BIN_DIR/yantra-agent" "$BIN_DIR/yantra-update" \
         "$BIN_DIR/yantra.prev" "$BIN_DIR/yantrad.prev" "$BIN_DIR/yantra-agent.prev"
+    as_root rm -rf "${INSTALLED%/*}"
 
     local removed="the services, the units, the three binaries, the updater and the previous binaries" kept=""
 
@@ -276,11 +307,14 @@ fi
 # arrived intact from the release it names. Nothing here proves that release is
 # the one the owner meant — what is left is trust in the repository and in
 # whoever can publish to it.
+# Stable reads /releases/latest. Nightly reads the rolling `nightly` release,
+# whose tag names no version, so the version is read off this target's archive.
 latest_version() {
-    local answer status tag
+    local answer status tag path=latest
+    [ "$channel" = nightly ] && path=tags/nightly
     answer=$(curl -sSL --proto '=https' --tlsv1.2 -w '\n%{http_code}' \
         -H 'Accept: application/vnd.github+json' \
-        "https://api.github.com/repos/$REPO/releases/latest") ||
+        "https://api.github.com/repos/$REPO/releases/$path") ||
         fail "GitHub is unreachable, so no version was resolved and nothing was installed — name one with YANTRA_VERSION"
     status=${answer##*$'\n'}
     case "$status" in
@@ -290,27 +324,74 @@ latest_version() {
         # script sends no token (ADR-0027 §4).
         fail "GitHub answered $status: the rate limit for an unauthenticated call. Nothing was installed — retry later, or name a version with YANTRA_VERSION"
         ;;
-    *) fail "GitHub answered $status for the release list — nothing was installed. Name a version with YANTRA_VERSION" ;;
+    *) fail "GitHub answered $status for the $channel release — nothing was installed. Name a version with YANTRA_VERSION" ;;
     esac
-    tag=$(printf '%s' "${answer%$'\n'*}" |
-        grep -o '"tag_name" *: *"[^"]*"' | head -n 1 | cut -d '"' -f 4)
-    [ -n "$tag" ] ||
-        fail "GitHub's release list named no tag_name — nothing was installed"
+    answer=${answer%$'\n'*}
+    if [ "$channel" = nightly ]; then
+        tag=$(printf '%s' "$answer" |
+            grep -o "\"name\" *: *\"yantra-[^\"]*-$target\.tar\.gz\"" | head -n 1 |
+            cut -d '"' -f 4 | sed -e 's/^yantra-//' -e "s/-$target\.tar\.gz\$//")
+        [ -n "$tag" ] ||
+            fail "the nightly release carries no archive for $target — nothing was installed"
+    else
+        tag=$(printf '%s' "$answer" |
+            grep -o '"tag_name" *: *"[^"]*"' | head -n 1 | cut -d '"' -f 4)
+        [ -n "$tag" ] ||
+            fail "GitHub's release list named no tag_name — nothing was installed"
+    fi
     printf '%s\n' "${tag#v}"
 }
 
+# `MAJOR MINOR PATCH RANK STAMP`, so semver's order is a numeric sort: a
+# nightly (rank 0) sorts below the release of its own number (rank 1).
+order() {
+    local core=${1%%-*} pre='' stamp=0 rank=1
+    case "$1" in *-*) pre=${1#*-} rank=0 ;; esac
+    case "$pre" in nightly.*)
+        stamp=${pre#nightly.}
+        stamp=${stamp%%.*}
+        ;;
+    esac
+    case "$stamp" in '' | *[!0-9]*) stamp=0 ;; esac
+    local IFS=.
+    # shellcheck disable=SC2086
+    set -- $core
+    printf '%d %d %d %d %d\n' "${1:-0}" "${2:-0}" "${3:-0}" "$rank" "$stamp"
+}
+
+# Whether $1 sorts below $2.
+older() {
+    local a b
+    a=$(order "$1")
+    b=$(order "$2")
+    [ "$a" != "$b" ] && [ "$(printf '%s\n%s\n' "$a" "$b" | sort -k1,1n -k2,2n -k3,3n -k4,4n -k5,5n | head -n 1)" = "$a" ]
+}
+
 VERSION="${YANTRA_VERSION:-$(latest_version)}"
+
+# Y-662: the unit installs what a channel names, and the daemon's account can
+# switch the channel. So the unit refuses to go back a version; only a person
+# running this script does that.
+if [ -n "$state" ] && [ -r "$INSTALLED" ]; then
+    installed=$(tr -d '[:space:]' <"$INSTALLED")
+    if [ -n "$installed" ] && older "$VERSION" "$installed"; then
+        fail "the $channel release v$VERSION is older than v$installed, which is installed — nothing was installed. To go back, run as root: yantra-update --channel $channel"
+    fi
+fi
 
 archive="yantra-$VERSION-$target.tar.gz"
 work=$(mktemp -d)
 # The unit downloads where yantrad can count the bytes received.
 here=${state:-$work}
 
-echo "install: yantra v$VERSION, $target"
+echo "install: yantra v$VERSION, $target, $channel"
 
 fetch() { curl -fsSL --proto '=https' --tlsv1.2 -o "$1" "$2"; }
 
 download="https://github.com/$REPO/releases/download/v$VERSION"
+if [ "$channel" = nightly ] && [ -z "${YANTRA_VERSION:-}" ]; then
+    download="https://github.com/$REPO/releases/download/nightly"
+fi
 total=
 if [ -n "$state" ]; then
     # Only for the progress, so a host that names no length costs nothing.
@@ -471,6 +552,19 @@ for binary in yantrad yantra yantra-agent; do
     fi
     as_root mv -f "$BIN_DIR/$binary.new" "$BIN_DIR/$binary"
 done
+as_root install -d -m 755 "${INSTALLED%/*}"
+printf '%s\n' "$VERSION" | as_root tee "$INSTALLED.new" >/dev/null
+as_root mv -f "$INSTALLED.new" "$INSTALLED"
+
+# Y-662: yantrad's account rewrites this file in place from Settings, and the
+# unit reads it. /etc/yantra is root's, so that account cannot swap it for a link.
+as_root install -d /etc/yantra
+if [ -n "$channel_named" ] || [ ! -e "$CHANNEL_FILE" ]; then
+    printf '%s\n' "$channel" | as_root tee "$CHANNEL_FILE" >/dev/null
+fi
+as_root chown yantra:yantra "$CHANNEL_FILE"
+as_root chmod 644 "$CHANNEL_FILE"
+
 # Y-612: the unit keeps a failed run's status, so a recovery at a terminal
 # clears it, or About reports that failure beside the version installed here.
 if [ -z "$state" ] && [ -d /run/yantra-update ]; then
