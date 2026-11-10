@@ -221,3 +221,8 @@ drawn and tested without a fleet.
 > named `yantra-keep-…`, so the turn outlives its ssh pipe. It is still never the TUI's pane, and
 > nothing types into a pane. The agent's three streams are files and a fifo, so I-22 holds for
 > the reason this decision gives. Decision 2 is unchanged: one `claude -p` for each turn.
+
+> **ADR-0026, decision 3, 2026-11-10 (Y-698):** the session-addressed form is built for a
+> home chat as `GET /api/machines/{machine}/chat`
+> ([ADR-0046](0046-the-owner-types-sudo-in-an-owner-terminal.md) decision 1). A home thread has no
+> working tree that a TUI shares, so decision 8's interlock does not apply to it.

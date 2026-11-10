@@ -75,3 +75,7 @@ That leaves one question open: **what may such a terminal run?** Three facts bou
 - **The command string on the socket.** Refused above: it makes the route a remote shell that
   shows nothing.
 - **A tmux session running the command.** Refused: `tmux` may be what is missing.
+
+> **ADR-0030, Consequences, 2026-11-10 (Y-698):** a second one-off route opens a login shell
+> as the owner's admin account. It takes no command string, so this ADR's rule holds for it
+> ([ADR-0046](0046-the-owner-types-sudo-in-an-owner-terminal.md) decision 2).
