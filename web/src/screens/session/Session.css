@@ -240,12 +240,14 @@
   white-space: pre;
 }
 
+.chat__markdown a::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, calc((100% - var(--md-sys-hit-area)) / 2));
+}
+
 .chat__markdown a {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--md-sys-hit-area);
-  min-width: var(--md-sys-hit-area);
-  justify-content: center;
+  position: relative;
   color: var(--md-sys-color-primary);
   text-decoration: underline;
 }
