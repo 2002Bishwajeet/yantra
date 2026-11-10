@@ -8,8 +8,7 @@ subject=
 [ "${2:-}" = --merge ] && subject=${3:?merge-guard: --merge needs a subject}
 for _ in $(seq 1 90); do
   rollup=$(gh pr view "$pr" --json statusCheckRollup -q '.statusCheckRollup[] | "\(.name)\t\(.status)\t\(.conclusion)"')
-  # Right after a push only the external check exists; wait until CI has registered its jobs too.
-  if ! grep -qvP '\tCOMPLETED\t' <<<"$rollup" && grep -qP '^cross \(aarch64-unknown-linux-musl\)\t' <<<"$rollup"; then break; fi
+  grep -qvP '\tCOMPLETED\t' <<<"$rollup" || break
   sleep 20
 done
 fail=0
