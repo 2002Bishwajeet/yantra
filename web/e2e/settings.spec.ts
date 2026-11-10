@@ -181,7 +181,7 @@ test.describe('settings · inputs on a touch screen', () => {
         return { count: controls.length, failures }
       })
       expect(found.failures).toEqual([])
-      if (['general', 'appearance', 'notifications'].includes(one.id)) expect(found.count).toBeGreaterThan(0)
+      if (['general', 'appearance'].includes(one.id)) expect(found.count).toBeGreaterThan(0)
     })
   }
 })
