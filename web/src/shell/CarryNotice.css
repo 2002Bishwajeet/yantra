@@ -1,0 +1,8 @@
+.carry-notice {
+  position: fixed;
+  inset-inline: calc(16px + var(--m3-safe-left)) calc(16px + var(--m3-safe-right));
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  z-index: 20;
+  max-width: var(--m3-measure);
+  margin-inline: auto;
+}

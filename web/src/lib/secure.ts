@@ -90,10 +90,34 @@ export type Arrived =
   | { kind: 'lost' }
   | { kind: 'failed'; error: ApiError }
 
+type Session = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+
 export type Landing = {
   location: Pick<Location, 'pathname' | 'search' | 'hash'>
   history: Pick<History, 'replaceState'>
   localStorage: Store
+  sessionStorage: Session
+}
+
+// The id outlives the address in this tab until the take settles, so a reload
+// retries a take that failed rather than losing the keys the daemon still holds.
+const PENDING = 'yantra.carry'
+
+function pending(session: Session): string | null {
+  try {
+    return session.getItem(PENDING)
+  } catch {
+    return null
+  }
+}
+
+function hold(session: Session, id: string | null) {
+  try {
+    if (id === null) session.removeItem(PENDING)
+    else session.setItem(PENDING, id)
+  } catch {
+    // A tab that refuses session storage cannot retry; the owner is still told.
+  }
 }
 
 const anObject: Shape = (body) =>
@@ -108,24 +132,34 @@ function restored(encoded: string): string {
 }
 
 /** The other half of `toSecure`, run before the first render so every screen
- *  reads the carried keys. A carried key replaces the one held here: the owner
+ *  reads the carried keys. A take that fails keeps its id for this tab, and a
+ *  reload asks again. A carried key replaces the one held here: the owner
  *  comes from the page that set it last. */
 export async function arrive(page: Landing = window): Promise<Arrived> {
   const { pathname, search, hash } = page.location
-  if (!hash.startsWith(CARRY)) return { kind: 'none' }
-  const rest = hash.slice(CARRY.length)
-  const split = rest.indexOf('&')
-  const id = split < 0 ? rest : rest.slice(0, split)
-  // Out of the address first, so a reload or a shared link never asks again.
-  page.history.replaceState(null, '', `${pathname}${search}${split < 0 ? '' : restored(rest.slice(split + 1))}`)
+  let id: string | null
+  if (hash.startsWith(CARRY)) {
+    const rest = hash.slice(CARRY.length)
+    const split = rest.indexOf('&')
+    id = split < 0 ? rest : rest.slice(0, split)
+    if (ID.test(id)) hold(page.sessionStorage, id)
+    // Out of the address, so a shared link never asks again.
+    page.history.replaceState(null, '', `${pathname}${search}${split < 0 ? '' : restored(rest.slice(split + 1))}`)
+  } else {
+    id = pending(page.sessionStorage)
+    if (id === null) return { kind: 'none' }
+  }
   if (!ID.test(id)) return { kind: 'lost' }
   let keys: Record<string, unknown>
   try {
     keys = await fetchJson<Record<string, unknown>>(`/api/carry/${id}`, { method: 'POST' }, anObject)
   } catch (error) {
     const failure = asApiError(error)
-    return failure.kind === 'missing' ? { kind: 'lost' } : { kind: 'failed', error: failure }
+    if (failure.kind !== 'missing') return { kind: 'failed', error: failure }
+    hold(page.sessionStorage, null)
+    return { kind: 'lost' }
   }
+  hold(page.sessionStorage, null)
   let written = 0
   try {
     for (const [key, value] of Object.entries(keys)) {
@@ -142,17 +176,18 @@ export async function arrive(page: Landing = window): Promise<Arrived> {
 /** Renders only after the move is decided, so nothing typed on :7717 is left
  *  behind in the 300 ms before a draft is written. */
 export async function boot(
-  render: () => void,
+  render: (landed: Arrived) => void,
   move: () => Promise<Secure> = toSecure,
   land: () => Promise<Arrived> = arrive,
 ): Promise<Secure> {
   let secure: Secure | null = null
+  let landed: Arrived = { kind: 'none' }
   try {
-    await land()
+    landed = await land()
     secure = await move()
   } finally {
     // A step that threw still leaves a page to work on.
-    if (secure?.kind !== 'moved') render()
+    if (secure?.kind !== 'moved') render(landed)
   }
   return secure
 }

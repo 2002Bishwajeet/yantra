@@ -332,11 +332,13 @@ button, in the workspace header and above an unclaimed session's terminal.
   has its own `localStorage`. The page on `:7717` posts prefs, the editor, plan
   mode and drafts to `POST /api/carry`, and the daemon holds them in memory for
   5 minutes. The moved-to URL carries only `#yantra-carry=<id>&<hash>`, because
-  the browser keeps that URL in its history. On `:8443` the page removes the
-  fragment, takes the keys once with `POST /api/carry/{id}`, and lets them
-  replace what `:8443` holds: the owner comes from the page that set them last.
-  A carry that fails keeps the page on `:7717`, and a lost one renders `:8443`
-  without the keys. A permission mode stays on `:7717`, because a link must not
+  the browser keeps that URL in its history. On `:8443` the page moves the id
+  from the fragment to this tab's `sessionStorage`, takes the keys once with
+  `POST /api/carry/{id}`, and lets them replace what `:8443` holds: the owner
+  comes from the page that set them last. A take that fails keeps the id, so a
+  reload asks again while the daemon holds the keys. A carry that fails keeps
+  the page on `:7717`. A take that fails or is lost renders `:8443` with a
+  snackbar that says so ([`shell/CarryNotice.tsx`](src/shell/CarryNotice.tsx)). A permission mode stays on `:7717`, because a link must not
   choose one. The page renders only after the move is decided, so nothing is
   typed on `:7717` in the meantime.
 - **Each way a press ends is its own sentence**: a refused permission, no

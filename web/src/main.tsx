@@ -3,12 +3,14 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { onCaughtError } from './shell/caught'
-import { boot } from './lib/secure'
+import { boot, type Arrived } from './lib/secure'
+import { CarryNotice } from './shell/CarryNotice'
 
-const render = () =>
+const render = (landed: Arrived = { kind: 'none' }) =>
   createRoot(document.getElementById('root')!, { onCaughtError }).render(
     <StrictMode>
       <App />
+      <CarryNotice landed={landed} />
     </StrictMode>,
   )
 

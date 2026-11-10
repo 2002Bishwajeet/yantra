@@ -39,14 +39,15 @@ function page(isSecureContext = false, kept: Record<string, string> = {}) {
   return { ...here, replace, held: localStorage.held }
 }
 
-function landing(hash: string, localStorage: Landing['localStorage'] = store()) {
+function landing(hash: string, localStorage: Landing['localStorage'] = store(), session = store()) {
   const replaceState = vi.fn()
   const here: Landing = {
     location: { pathname: '/machines/pi', search: '?tab=talk', hash },
     history: { replaceState },
     localStorage,
+    sessionStorage: session,
   }
-  return { ...here, replaceState }
+  return { ...here, replaceState, session: session.held }
 }
 
 type Answer = (init?: RequestInit) => Promise<Response>
@@ -270,15 +271,60 @@ describe('arrive', () => {
 
   it.each([
     ['the take rejects', rejects, 'network'],
+    ['the take answers 503', taking(503, 'tailscale whois did not answer'), 'refused'],
     ['the take is refused', taking(403, 'node n-2 is on this tailnet but is not yours'), 'refused'],
     ['the take is not an object', taking(200, ['yantra.editor']), 'contract'],
-  ])('fails, typed, when %s', async (_, take, kind) => {
+  ])('fails, typed, when %s, and keeps the id so a reload asks again', async (_, take, kind) => {
     stub({ take })
     const kept = store()
-    const result = await arrive(landing(carried(), kept))
+    const there = landing(carried('#mic'), kept)
+    const result = await arrive(there)
     expect(result.kind).toBe('failed')
     expect(result.kind === 'failed' && result.error.kind).toBe(kind)
     expect(kept.held.size).toBe(0)
+    expect(there.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/machines/pi?tab=talk#mic')
+    expect(there.session.get('yantra.carry')).toBe(ID)
+  })
+
+  it('takes the keys on the reload after a take that failed, then forgets the id', async () => {
+    let first = true
+    stub({
+      take: () => {
+        if (!first) return Promise.resolve(answer(200, { 'yantra.chat.draft.t-1': 'half a thought' }))
+        first = false
+        return rejects()
+      },
+    })
+    const session = store()
+    expect(await arrive(landing(carried(), store(), session))).toMatchObject({ kind: 'failed' })
+
+    const kept = store()
+    const reloaded = landing('#mic', kept, session)
+    expect(await arrive(reloaded)).toEqual({ kind: 'arrived', kept: 1 })
+    expect(kept.held.get('yantra.chat.draft.t-1')).toBe('half a thought')
+    expect(reloaded.replaceState).not.toHaveBeenCalled()
+    expect(session.held.size).toBe(0)
+    expect(await arrive(landing('#mic', store(), session))).toEqual({ kind: 'none' })
+  })
+
+  it('forgets the id once the daemon no longer holds the slot', async () => {
+    stub({ take: taking(404, { error: 'nothing is carried under that id' }) })
+    const session = store({ 'yantra.carry': ID })
+    expect(await arrive(landing('', store(), session))).toEqual({ kind: 'lost' })
+    expect(session.held.size).toBe(0)
+  })
+
+  it('still takes the keys when the tab refuses session storage', async () => {
+    stub({ take: taking(200, { 'yantra.editor': 'zed' }) })
+    const refusing = store()
+    refusing.setItem = () => {
+      throw new DOMException('denied', 'SecurityError')
+    }
+    refusing.getItem = () => {
+      throw new DOMException('denied', 'SecurityError')
+    }
+    expect(await arrive(landing(carried(), store(), refusing))).toEqual({ kind: 'arrived', kept: 1 })
+    expect(await arrive(landing('', store(), refusing))).toEqual({ kind: 'none' })
   })
 
   it('starts with what it has when the store refuses writes', async () => {
@@ -320,11 +366,12 @@ describe('boot', () => {
     }
     await boot(render, stays, landing)
     expect(order).toEqual(['land', 'move', 'render'])
+    expect(render).toHaveBeenCalledWith(landed)
   })
 
   it('renders even when the move throws', async () => {
     const render = vi.fn()
     await expect(boot(render, () => Promise.reject(new Error('boom')), land)).rejects.toThrow('boom')
-    expect(render).toHaveBeenCalledOnce()
+    expect(render).toHaveBeenCalledExactlyOnceWith({ kind: 'none' })
   })
 })
