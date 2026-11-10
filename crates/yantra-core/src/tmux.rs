@@ -497,7 +497,7 @@ impl Tmux {
             .await?;
         let stderr = String::from_utf8_lossy(&out.stderr);
         // No server at all means no session either, which is the state asked for.
-        if out.success() || stderr.contains("can't find session") || no_server(&stderr) {
+        if out.success() || no_such_session(&stderr) || no_server(&stderr) {
             return Ok(());
         }
         Err(Error::Command {
@@ -564,9 +564,12 @@ impl Tmux {
 /// **`can't find window` is the spelling that actually happens** (Y-084): with a
 /// server up, tmux resolves `list-panes -s -t '=name'` as a window target and
 /// names *that* in the refusal, on 3.7b and 3.5a alike. Both are matched because
-/// either one means the session is not there.
+/// either one means the session is not there. A server with no session at all
+/// says `no current target`, and the Mac's `-D` server outlives its last one.
 fn no_such_session(stderr: &str) -> bool {
-    stderr.contains("can't find session") || stderr.contains("can't find window")
+    stderr.contains("can't find session")
+        || stderr.contains("can't find window")
+        || stderr.contains("no current target")
 }
 
 /// tmux prints two different things for "no server", picked by errno:
@@ -803,6 +806,18 @@ mod tests {
             "error connecting to /tmp/tmux-1000/y54perm (Permission denied)"
         ));
         assert!(!no_server("some future tmux phrasing"));
+    }
+
+    /// tmux 3.8, on a server whose last session was killed: the Mac's `-D`
+    /// server stays up, and both calls must read that as an absent session.
+    #[tokio::test]
+    async fn a_server_with_no_session_has_no_pane_and_nothing_to_kill() {
+        let empty = fake::Refuses("no current target");
+        assert!(tmux().pane(&empty, "w").await.expect("read").is_none());
+        tmux().kill(&empty, "w").await.expect("killed");
+        let refused = fake::Refuses("error connecting to /x (Permission denied)");
+        assert!(tmux().pane(&refused, "w").await.is_err());
+        assert!(tmux().kill(&refused, "w").await.is_err());
     }
 
     #[test]
@@ -1341,6 +1356,19 @@ pub(crate) mod fake {
 
     /// Prints `.0` to every command.
     pub(crate) struct Said(pub(crate) &'static str);
+
+    /// Fails every command with `.0` on stderr.
+    pub(crate) struct Refuses(pub(crate) &'static str);
+
+    impl Exec for Refuses {
+        async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
+            Ok(ssh::Output {
+                status: 1,
+                stdout: Vec::new(),
+                stderr: self.0.as_bytes().to_vec(),
+            })
+        }
+    }
 
     impl Exec for Said {
         async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
