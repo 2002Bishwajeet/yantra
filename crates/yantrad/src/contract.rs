@@ -88,6 +88,7 @@ import type {
   Repo,
   Resumed,
   Room,
+  RoomEvents,
   RoomPosted,
   RoomRemoved,
   RoomSummary,

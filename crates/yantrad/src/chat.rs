@@ -100,7 +100,7 @@ use axum::http::{HeaderMap, Uri};
 use axum::response::Response;
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{OnceCell, broadcast, mpsc, oneshot};
+use tokio::sync::{OnceCell, broadcast, mpsc, oneshot, watch};
 use tokio::time::MissedTickBehavior;
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
@@ -1197,6 +1197,8 @@ pub struct Registry {
     waits: Option<mpsc::UnboundedSender<Wait>>,
     /// Where a Claude turn reaches the room tools (ADR-0038 decision 2).
     daemon: Option<SocketAddr>,
+    /// Bumped when a held thread's turn or tool changes, for room presence.
+    changed: watch::Sender<u64>,
 }
 
 #[derive(Default)]
@@ -1264,6 +1266,7 @@ impl Registry {
             held: Arc::default(),
             waits: Some(waits),
             daemon: None,
+            changed: watch::Sender::default(),
         }
     }
 
@@ -1309,6 +1312,22 @@ impl Registry {
                 Some((short.to_owned(), doing))
             })
             .collect()
+    }
+
+    /// Whether thread `thread` of `workspace` runs a turn, and its tool. `None`
+    /// is a thread this daemon holds no keeper for. Read from memory.
+    pub fn activity(&self, workspace: &str, thread: &str) -> Option<room::Activity> {
+        let live = self.live(&format!("chat/{workspace}/{thread}"))?;
+        let state = live.lock();
+        Some(room::Activity {
+            busy: state.busy,
+            tool: state.tool.as_ref().map(|(_, tool)| tool.clone()),
+        })
+    }
+
+    /// Changes each time [`Self::activity`] may answer otherwise.
+    pub fn changed(&self) -> watch::Receiver<u64> {
+        self.changed.subscribe()
     }
 
     /// Whether a turn runs, starts, keeps its checkpoint or reverts in thread
@@ -1384,6 +1403,8 @@ impl Registry {
             return false;
         }
         held.lives.insert(live.id.clone(), Arc::clone(live));
+        live.lock().changed = Some(self.changed.clone());
+        bump(&self.changed);
         for waiter in held.waiters.remove(&live.id).unwrap_or_default() {
             if let Some((_, _, receiver)) = live.subscribe() {
                 let _ = waiter.send(Ok(receiver));
@@ -1510,6 +1531,7 @@ impl Registry {
             return Vec::new();
         }
         state.busy = true;
+        state.bump();
         held.queued.remove(&live.id).unwrap_or_default()
     }
 
@@ -1526,6 +1548,7 @@ impl Registry {
             return (Vec::new(), Vec::new());
         }
         held.lives.remove(&live.id);
+        bump(&self.changed);
         let next = held.drain_next(live);
         (held.queued.remove(&live.id).unwrap_or_default(), next)
     }
@@ -1676,13 +1699,35 @@ struct Published {
     /// The last turn's `turn.diff.updated`, until the next turn starts or a
     /// revert puts its files back (ADR-0035 decision 8).
     diff: Option<ThreadEvent>,
+    /// The item the running turn is in, and what it is, for room presence.
+    tool: Option<(String, String)>,
+    /// [`Registry::changed`], once the registry holds this keeper.
+    changed: Option<watch::Sender<u64>>,
 }
 
 impl Published {
     fn set_busy(&mut self, busy: bool) {
         self.busy = busy;
         self.since = busy.then(SystemTime::now);
+        self.bump();
     }
+
+    fn set_tool(&mut self, tool: Option<(String, String)>) {
+        if self.tool != tool {
+            self.tool = tool;
+            self.bump();
+        }
+    }
+
+    fn bump(&self) {
+        if let Some(changed) = &self.changed {
+            bump(changed);
+        }
+    }
+}
+
+fn bump(changed: &watch::Sender<u64>) {
+    changed.send_modify(|count| *count += 1);
 }
 
 impl Live {
@@ -1707,6 +1752,8 @@ impl Live {
                 prompts: 0,
                 ended: None,
                 diff: None,
+                tool: None,
+                changed: None,
             }),
         });
         (live, received)
@@ -1771,14 +1818,41 @@ impl Live {
     fn event(&self, event: &ThreadEvent) {
         match &event.event {
             Event::TurnCompleted(_) if event.cursor.is_none() => {
-                self.lock().ended = Some(event.clone());
+                let mut state = self.lock();
+                state.ended = Some(event.clone());
+                state.set_tool(None);
             }
             Event::TurnStarted => {
                 let mut state = self.lock();
                 state.ended = None;
                 state.diff = None;
+                state.set_tool(None);
             }
-            Event::TurnCompleted(_) => self.lock().ended = None,
+            Event::TurnCompleted(_) => {
+                let mut state = self.lock();
+                state.ended = None;
+                state.set_tool(None);
+            }
+            Event::ItemStarted(item) => {
+                let what = item.title.clone().or_else(|| {
+                    item.item_type
+                        .and_then(|kind| serde_json::to_value(kind).ok())
+                        .and_then(|kind| kind.as_str().map(str::to_owned))
+                });
+                if let Some(what) = what {
+                    self.lock().set_tool(Some((item.item_id.clone(), what)));
+                }
+            }
+            Event::ItemCompleted(item) => {
+                let mut state = self.lock();
+                if state
+                    .tool
+                    .as_ref()
+                    .is_some_and(|(id, _)| *id == item.item_id)
+                {
+                    state.set_tool(None);
+                }
+            }
             Event::TurnDiffUpdated(_) => self.lock().diff = Some(event.clone()),
             _ => {}
         }
@@ -5731,6 +5805,70 @@ mod tests {
         assert!(adopted.busy());
     }
 
+    #[test]
+    fn a_held_threads_activity_follows_its_turn_and_tool_and_bumps_the_watch() {
+        use yantra_core::chat::{Item, ItemType};
+        let registry = Registry::default();
+        let mut changed = registry.changed();
+        assert_eq!(registry.activity("web", THREAD), None, "not held");
+        registry.hold_for_test(&format!("chat/web/{THREAD}"), true);
+        assert!(changed.has_changed().expect("held"), "the hold bumps");
+        changed.mark_unchanged();
+        let busy = |tool: Option<&str>| {
+            Some(room::Activity {
+                busy: true,
+                tool: tool.map(str::to_owned),
+            })
+        };
+        assert_eq!(registry.activity("web", THREAD), busy(None));
+
+        let live = registry.live(&format!("chat/web/{THREAD}")).expect("held");
+        let item = |id: &str, title: Option<&str>| Item {
+            item_id: id.to_owned(),
+            item_type: Some(ItemType::CommandExecution),
+            status: None,
+            title: title.map(str::to_owned),
+            output: None,
+            changes: vec![],
+        };
+        let at = |event| ThreadEvent {
+            thread_id: THREAD.to_owned(),
+            cursor: None,
+            event,
+        };
+        live.event(&at(Event::ItemStarted(item("t1", Some("cargo test")))));
+        assert_eq!(registry.activity("web", THREAD), busy(Some("cargo test")));
+        assert!(changed.has_changed().expect("held"));
+        changed.mark_unchanged();
+
+        live.event(&at(Event::ItemCompleted(item("t0", None))));
+        assert_eq!(
+            registry.activity("web", THREAD),
+            busy(Some("cargo test")),
+            "another item's end leaves the tool"
+        );
+        live.event(&at(Event::ItemCompleted(item("t1", None))));
+        assert_eq!(registry.activity("web", THREAD), busy(None));
+        live.event(&at(Event::ItemStarted(item("t2", None))));
+        assert_eq!(
+            registry.activity("web", THREAD),
+            busy(Some("command_execution")),
+            "an item with no title is named by its type"
+        );
+        changed.mark_unchanged();
+
+        live.set_busy(false);
+        assert!(changed.has_changed().expect("held"));
+        live.event(&at(Event::TurnStarted));
+        assert_eq!(
+            registry.activity("web", THREAD),
+            Some(room::Activity {
+                busy: false,
+                tool: None
+            })
+        );
+    }
+
     #[tokio::test]
     async fn the_first_turn_picks_the_harness_and_the_thread_keeps_it() {
         let script = Arc::new(Script::default());
@@ -8746,7 +8884,7 @@ mod tests {
         };
         let closing = watch::Sender::new(false);
         rooms
-            .read(&me, "r1", Duration::ZERO, &closing)
+            .read(&me, "beta", "r1", Duration::ZERO, &closing)
             .await
             .expect("joins");
 
@@ -8766,7 +8904,7 @@ mod tests {
             .await;
         let read = tokio::time::timeout(
             Duration::from_secs(5),
-            rooms.read(&me, "r1", Duration::from_secs(50), &closing),
+            rooms.read(&me, "beta", "r1", Duration::from_secs(50), &closing),
         )
         .await
         .expect("the give-back ends the wait")

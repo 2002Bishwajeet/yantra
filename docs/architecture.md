@@ -70,8 +70,9 @@ on a machine where `yantrad` was never started. **Nine verbs are the exceptions.
 (Y-435) is the main agent's MCP server, and it calls `yantrad`'s `/api/tasks` to delegate work to
 another harness in its own git worktree
 ([ADR-0033](adr/0033-other-harnesses-speak-acp-and-claude-delegates.md)). It also forwards
-`room_send` and `room_read` to `/api/mcp`, where agents on two machines talk in a room
-([ADR-0038](adr/0038-rooms-and-guest-devices.md), Y-534). `yantra room new`, `ls`, `show`, `edit` and `rm`
+the four room tools, `room_send`, `room_read`, `room_info` and `room_status`, to `/api/mcp`,
+where agents on two machines talk in a room and show their presence
+([ADR-0038](adr/0038-rooms-and-guest-devices.md), Y-534, Y-551). `yantra room new`, `ls`, `show`, `edit` and `rm`
 define, list, read, edit and end a room there
 ([ADR-0039](adr/0039-a-room-is-a-shared-project.md), Y-550). `yantra room resume` lifts a room's
 pause, and `yantra room post` writes into a room as the owner (Y-536). `yantra why` (Y-452) reads

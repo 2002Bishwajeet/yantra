@@ -463,7 +463,8 @@ const PLAN_CAPTURED: &str = "The client captured your proposed plan. Stop here a
 
 /// Named apart from a `yantra` stdio server a person may have added by hand.
 const ROOM_SERVER: &str = "yantra-room";
-const ROOM_TOOLS: &str = "mcp__yantra-room__room_send,mcp__yantra-room__room_read";
+const ROOM_TOOLS: &str = "mcp__yantra-room__room_send,mcp__yantra-room__room_read,\
+mcp__yantra-room__room_info,mcp__yantra-room__room_status";
 
 /// Where a Chat turn reaches `yantrad`'s room tools, and the thread it names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2630,7 +2631,8 @@ mod tests {
                 "exec \"$c\" --add-dir {IMAGES} --mcp-config '{{\"mcpServers\":{{\"yantra-room\":\
                  {{\"headers\":{{\"X-Yantra-Thread\":\"web/1a2b3c4d\"}},\"type\":\"http\",\
                  \"url\":\"http://100.64.0.1:7717/api/mcp\"}}}}}}' \
-                 --allowedTools mcp__yantra-room__room_send,mcp__yantra-room__room_read \
+                 --allowedTools mcp__yantra-room__room_send,mcp__yantra-room__room_read,\
+                 mcp__yantra-room__room_info,mcp__yantra-room__room_status \
                  --permission-mode default -p"
             )),
             "{script}"
@@ -2658,6 +2660,20 @@ mod tests {
             "the quote ends nothing and the JSON stays one string: {script}"
         );
         assert_eq!(script.matches("--mcp-config").count(), 1, "{script}");
+    }
+
+    /// A woken turn runs in a capped mode, so a room tool left off the list
+    /// stalls it on a prompt the owner may never see.
+    #[test]
+    fn every_room_tool_is_allowed_without_a_prompt() {
+        let allowed: Vec<&str> = ROOM_TOOLS.split(',').collect();
+        for tool in crate::room::TOOLS {
+            assert!(
+                allowed.contains(&format!("mcp__{ROOM_SERVER}__{tool}").as_str()),
+                "{tool} is not in {ROOM_TOOLS}"
+            );
+        }
+        assert_eq!(allowed.len(), crate::room::TOOLS.len(), "{ROOM_TOOLS}");
     }
 
     /// Claude's acceptEdits still asks about an edit outside its directories,

@@ -39,6 +39,7 @@ import type {
   Repo,
   Resumed,
   Room,
+  RoomEvents,
   RoomPosted,
   RoomRemoved,
   RoomSummary,
@@ -1459,9 +1460,59 @@ export const room = {
   "messages": 3,
   "name": "design-review",
   "paused": true,
+  "presence": [
+    {
+      "doing": "cargo test",
+      "label": "cachyos-g14 · chat 1a2b3c4d",
+      "state": "working",
+      "thread": true
+    },
+    {
+      "label": "mac",
+      "state": "listening",
+      "thread": false
+    },
+    {
+      "label": "pixel",
+      "state": "away",
+      "thread": false
+    }
+  ],
   "spent": 20,
   "workspace": "web"
 } satisfies Room
+
+export const roomEvents = {
+  "last": 21,
+  "messages": [
+    {
+      "at": 1800000120,
+      "budget": 1,
+      "from": "mac",
+      "kind": "text",
+      "seq": 21,
+      "text": "The form is done."
+    }
+  ],
+  "presence": [
+    {
+      "doing": "cargo test",
+      "label": "cachyos-g14 · chat 1a2b3c4d",
+      "state": "working",
+      "thread": true
+    },
+    {
+      "label": "mac",
+      "state": "listening",
+      "thread": false
+    },
+    {
+      "label": "pixel",
+      "state": "away",
+      "thread": false
+    }
+  ]
+} satisfies RoomEvents
 
 export const roomPosted = {
   "delivered": 2,

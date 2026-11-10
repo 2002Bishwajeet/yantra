@@ -850,8 +850,8 @@ The rules from before the keeper still hold:
 ## The route that holds rooms
 
 `POST /api/mcp` ([`mcp.rs`](src/mcp.rs), Y-534,
-[ADR-0038](../../docs/adr/0038-rooms-and-guest-devices.md)) serves `room_send` and `room_read`
-to live agents, and [`room.rs`](src/room.rs) holds the rooms in `Fleet::rooms`.
+[ADR-0038](../../docs/adr/0038-rooms-and-guest-devices.md)) serves the four room tools,
+`room_send`, `room_read`, `room_info` and `room_status` (Y-551), to live agents, and [`room.rs`](src/room.rs) holds the rooms in `Fleet::rooms`.
 [`yantra_core::room`](../yantra-core/src/room.rs) decides every rule; this crate holds the store,
 the wait and the wakes.
 
@@ -874,10 +874,17 @@ the wait and the wakes.
 - **A Chat turn gets the server by `--mcp-config`.** `chat::Registry` holds
   `join::daemon_address` of the bound set, which is the address `agent.env` already reaches, and
   each Claude turn names its own thread in the header. The server is `yantra-room`, apart from a
-  `yantra` stdio server a person may have added. `--allowedTools` lets a woken turn use both tools
-  without a prompt.
+  `yantra` stdio server a person may have added. `--allowedTools` lets a woken turn use all four tools
+  without a prompt, and a test keeps that list equal to `room::TOOLS`.
 - **`room_read` waits in memory, never on ssh**, up to 50 s on a `watch` that every message bumps.
   It answers an `isError` result when the daemon begins to shut down.
+- **`room_info` and `room_status` read and write memory only** (Y-551). `room_info` answers the
+  room and each member with its presence as JSON text. `room_status` takes one line of at most 120
+  characters and answers `{"ok":true}`. Both refuse a room this daemon does not hold.
+- **Each member has a presence**: listening while a `room_read` waits, working, idle, or away
+  after 90 s with no call. An away member stays a member. For an owner thread,
+  `chat::Registry::activity` says whether a turn runs and which tool it uses, and that wins over
+  the thread's own calls.
 - **`room_send` never awaits ssh.** It takes each member thread's unseen messages under the
   store's lock and queues them for that thread. **One task per thread** sends its queue to
   `chat::wake`, one wake at a time, so a thread gets its messages in seq order. The wake finds the
@@ -899,7 +906,13 @@ the wait and the wakes.
 - **The dashboard reads rooms through `GET /api/rooms` and `GET /api/rooms/{room}`** (Y-536). Both
   are behind `allowed()`, both read memory, and both drop expired members first. Each summary
   carries the room's `workspace`, `brief` and `base`, `null` for a room an agent made, and each
-  message a `kind`, `text` or `system`.
+  message a `kind`, `text` or `system`. One room also carries its members as `presence` (Y-551).
+- **`GET /api/rooms/{room}/events?after=<seq>&wait=<s>` is the dashboard's long-poll** (Y-551),
+  behind `allowed()`. It answers `{messages, presence, last}` at once when a message after `after`
+  exists. Otherwise it answers when a message arrives, presence changes or `wait` runs out. It
+  waits on the room's `watch`, on `chat::Registry::changed`, and until the next member turns away.
+  A `wait` above 50 is **400**, a room it does not hold **404**, and a daemon that shuts down
+  **503**.
 - **A room may have a definition** (Y-550, [ADR-0039](../../docs/adr/0039-a-room-is-a-shared-project.md)
   decision 2): `~/.config/yantra/rooms/<name>.toml`, through
   [`room_file`](../yantra-core/src/room_file.rs). `POST /api/rooms` takes

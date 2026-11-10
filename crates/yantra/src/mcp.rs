@@ -593,10 +593,14 @@ mod tests {
                 "cancel_task",
                 "remove_task",
                 "room_send",
-                "room_read"
+                "room_read",
+                "room_info",
+                "room_status"
             ]
         );
-        assert_eq!(answers[1]["result"]["tools"][7], room::tools()[0]);
+        for n in 0..room::TOOLS.len() {
+            assert_eq!(answers[1]["result"]["tools"][7 + n], room::tools()[n]);
+        }
         let tools = &answers[1]["result"]["tools"];
         assert_eq!(tools[3]["inputSchema"]["required"], json!(["id", "prompt"]));
         assert_eq!(
@@ -885,6 +889,39 @@ mod tests {
         )
         .await;
         assert_eq!(answers[0]["error"]["code"], INVALID_PARAMS, "{answers:?}");
+    }
+
+    #[tokio::test]
+    async fn room_info_and_room_status_are_checked_here_and_forwarded_to_the_daemon() {
+        let daemon = fake_daemon().await;
+        for (name, arguments) in [
+            ("room_info", json!({"room": "r1"})),
+            (
+                "room_status",
+                json!({"room": "r1", "doing": "editing src/auth.rs"}),
+            ),
+        ] {
+            let answer = one_call(daemon.clone(), name, arguments.clone()).await;
+            assert_eq!(answer["isError"], false, "{answer}");
+            let heard: Value = serde_json::from_str(text(&answer)).expect("JSON");
+            assert_eq!(
+                heard["heard"]["params"],
+                json!({"name": name, "arguments": arguments})
+            );
+        }
+        for arguments in [
+            json!({"room": "r1", "doing": "one\ntwo"}),
+            json!({"room": "r1", "doing": "x".repeat(room::STATUS_LIMIT + 1)}),
+            json!({"room": "r1"}),
+        ] {
+            let answers = exchange(
+                daemon.clone(),
+                vec![json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                            "params": {"name": "room_status", "arguments": arguments}})],
+            )
+            .await;
+            assert_eq!(answers[0]["error"]["code"], INVALID_PARAMS, "{answers:?}");
+        }
     }
 
     #[tokio::test]

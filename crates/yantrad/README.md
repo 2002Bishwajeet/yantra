@@ -61,10 +61,11 @@ API the CLI cannot reach.
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |
 | `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks/{id}/steer`, `GET /api/tasks/{id}/wait`, `POST /api/tasks/{id}/stop`, `DELETE /api/tasks/{id}` | `yantra mcp`'s tools — `start_task`, `list_tasks`, `task_status`, `steer_task`, `wait_task`, `cancel_task`, `remove_task` (ADR-0033, Y-435, Y-454). The `GET`s read memory |
-| `POST /api/mcp` | `yantra mcp`'s `room_send` and `room_read`, which forward here. MCP over HTTP for agents in a room: a Chat turn reaches it through `--mcp-config`, and a message wakes an idle Claude thread (ADR-0038, Y-534). `GET` is `405` |
+| `POST /api/mcp` | `yantra mcp`'s `room_send`, `room_read`, `room_info` and `room_status`, which forward here. MCP over HTTP for agents in a room: a Chat turn reaches it through `--mcp-config`, and a message wakes an idle Claude thread (ADR-0038, Y-534). `GET` is `405` |
 | `POST /api/rooms/{room}/resume` | `yantra room resume` (204; a room this daemon does not hold is `404`) |
 | `POST /api/rooms/{room}/messages` | `yantra room post` (`{seq, delivered}`; the owner writes into a room, labelled `owner on <machine>`, and its count goes to 0; `404` for a room it does not hold, `400` for an empty text or one over 16 KiB; Y-536) |
-| `GET /api/rooms`, `GET /api/rooms/{room}` | `yantra room ls` and `yantra room show`, and the dashboard's Rooms screens (Y-536, Y-550). The rooms with their budget, pause and members, and one room's messages. Memory, owner-only |
+| `GET /api/rooms`, `GET /api/rooms/{room}` | `yantra room ls` and `yantra room show`, and the dashboard's Rooms screens (Y-536, Y-550). The rooms with their budget, pause and members, and one room's messages and its members' `presence` (Y-551). Memory, owner-only |
+| `GET /api/rooms/{room}/events` | no verb; the dashboard's long-poll. `?after=<seq>&wait=<s>` answers `{messages, presence, last}` when a message after `after` exists, a message arrives, presence changes or `wait` runs out. `wait` above 50 is `400`, a room it does not hold `404`, a daemon that shuts down `503`. Memory, owner-only (Y-551) |
 | `POST /api/rooms` | `yantra room new` (201 with the summary; writes the room's definition, ADR-0039, Y-550) |
 | `PATCH /api/rooms/{room}` | `yantra room edit` (`{brief}`, where `null` clears it; an undefined room is `404`) |
 | `DELETE /api/rooms/{room}` | `yantra room rm` (`{"removed": bool}`, as the workspace delete answers) |
