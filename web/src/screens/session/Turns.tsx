@@ -181,7 +181,7 @@ export function Waiting(props: { name: string; subject: string | null }) {
           'Claude is asking for a decision'
         )}{' '}
         · answer on the{' '}
-        <Link params={{ name }} replace search={{ view: 'terminal' }} to="/w/$name">
+        <Link className="m3-hit" params={{ name }} replace search={{ view: 'terminal' }} to="/w/$name">
           Terminal tab
         </Link>
       </Text>

@@ -141,7 +141,7 @@ export function Machines() {
           ) : (
             <Card>
               <EmptyState title={hub ? 'No other machine yet' : 'No machine can run a session yet'}>
-                <Link to="/machines/add">Add a device</Link>
+                <Link className="m3-hit" to="/machines/add">Add a device</Link>
               </EmptyState>
             </Card>
           )

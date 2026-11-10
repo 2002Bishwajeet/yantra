@@ -36,16 +36,6 @@ for (const one of PATHS) {
           const rect = el.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) continue;
           if (getComputedStyle(el).visibility === "hidden") continue;
-          // WCAG 2.5.8 "inline": a link inside running text is exempt.
-          if (el.tagName === "A" && el.parentElement?.matches("p, li")) {
-            const text = [...el.parentElement.childNodes].some(
-              (node) =>
-                node !== el &&
-                node.nodeType === Node.TEXT_NODE &&
-                node.textContent?.trim(),
-            );
-            if (text) continue;
-          }
           let [left, top, right, bottom] = [
             rect.left,
             rect.top,

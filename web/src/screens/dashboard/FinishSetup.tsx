@@ -27,7 +27,7 @@ function Unfinished(props: { now: number }) {
     <Card aria-labelledby={heading} className="dash__setup" surface="high">
       <div className="dash__setup-head">
         <Text emphasized id={heading} render={<h2 />} scale="title-large">
-          <Link className="dash__setup-link" to="/setup">
+          <Link className="dash__setup-link m3-hit" to="/setup">
             Finish setup
           </Link>
         </Text>

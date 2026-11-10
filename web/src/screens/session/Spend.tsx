@@ -156,7 +156,7 @@ export function Spend(props: SpendProps) {
 
   const read = asked.asked === 'read' ? at(asked.at, now) : null
   const machine = (
-    <Link params={{ machine: workspace.machine }} to="/m/$machine">
+    <Link className="m3-hit" params={{ machine: workspace.machine }} to="/m/$machine">
       {workspace.machine}
     </Link>
   )

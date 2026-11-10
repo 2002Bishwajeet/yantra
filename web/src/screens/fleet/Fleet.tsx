@@ -161,7 +161,7 @@ export function Fleet() {
           empty={
             listed.looked === 'ok' && listed.data.length === 0 ? (
               <EmptyState title="No workspaces yet">
-                <Link to="/new">New session</Link> makes one.
+                <Link className="m3-hit" to="/new">New session</Link> makes one.
               </EmptyState>
             ) : null
           }

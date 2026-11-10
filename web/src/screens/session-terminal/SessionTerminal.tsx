@@ -56,7 +56,7 @@ export function SessionTerminal() {
         <div className="session-terminal__meta">
           <Text render={<p />} scale="body-small" tone="variant">
             <Mono>{session}</Mono> is a tmux session on{' '}
-            <Link params={{ machine }} to="/m/$machine">
+            <Link className="m3-hit" params={{ machine }} to="/m/$machine">
               {machine}
             </Link>{' '}
             that no workspace claims
