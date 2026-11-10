@@ -62,7 +62,7 @@ function Hidden(props: { clientId: string | null }) {
           {hiddenNote(hidden.data)}
         </Text>
       ) : null}
-      <a className="ns__link ns__grant" href={grantPage(props.clientId)} rel="noreferrer" target="_blank">
+      <a className="ns__link ns__grant m3-hit" href={grantPage(props.clientId)} rel="noreferrer" target="_blank">
         Grant access on GitHub
       </a>
     </div>
