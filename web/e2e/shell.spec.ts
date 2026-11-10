@@ -201,9 +201,10 @@ test.describe('the shell on busy', () => {
       }
     })
     await page.keyboard.press('ControlOrMeta+k')
+    // Two issues in the fixture, so Start from issue lists twice, then Diff, Commit, Push, Open PR and Merge.
     const dialog = page.getByRole('dialog', { name: 'Search' })
     const commands = dialog.getByRole('group', { name: 'Commands' })
-    await expect(commands.getByRole('option')).toHaveCount(6)
+    await expect(commands.getByRole('option')).toHaveCount(7)
     await dialog.getByRole('combobox').fill('merge')
     await page.keyboard.press('Enter')
     await expect(page.getByRole('dialog', { name: 'Merge PR #497' })).toBeVisible()
