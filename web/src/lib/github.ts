@@ -28,9 +28,13 @@ export const grantPage = (clientId: string | null) =>
     ? `https://github.com/settings/connections/applications/${encodeURIComponent(clientId)}`
     : 'https://github.com/settings/applications'
 
-/** True when the organisation hides its repositories and when it has none, so it claims neither. */
+/** True when the organisation hides its repositories and when it has none, so it claims neither.
+ *  GitHub cannot name a private membership in an organisation that restricts the app, so the
+ *  note never claims to be complete. */
 export const hiddenNote = (orgs: string[]) =>
-  `Yantra sees no repository from ${orgs.join(', ')}. An organisation that restricts OAuth apps hides them.`
+  orgs.length === 0
+    ? 'An organisation that restricts OAuth apps hides its repositories from Yantra. If your membership there is private, Yantra cannot name it.'
+    : `Yantra sees no repository from ${orgs.join(', ')}. An organisation that restricts OAuth apps hides them. If your membership in one is private, it is not in this list.`
 
 export const REFUSED = 'GitHub refused the grant'
 

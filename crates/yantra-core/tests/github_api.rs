@@ -11,6 +11,9 @@
 //! keep passing through an API change that renamed all of it.
 //!
 //! Run with `YANTRA_GITHUB_TOKEN` set to a grant `yantra github login` made.
+//! Set `YANTRA_RESTRICTED_ORG` to an organisation with a *public* membership
+//! that restricts Yantra's app, and the test proves New session names it
+//! (Y-629). A private membership in such an organisation cannot be named.
 
 // A failing assertion is this file's whole output; the workspace lint targets
 // library code, where the same call would take the daemon down.
@@ -40,6 +43,20 @@ async fn the_real_api_answers_in_the_shapes_this_crate_reads() {
             repo.clone_url
         );
         assert!(!repo.default_branch.is_empty());
+    }
+
+    let orgs = api.orgs(&token).await.expect("the two organisation reads");
+    for org in &orgs {
+        assert!(
+            !org.is_empty() && !org.contains('/'),
+            "an organisation login is one path segment, got {org:?}"
+        );
+    }
+    if let Ok(restricted) = std::env::var("YANTRA_RESTRICTED_ORG") {
+        assert!(
+            github::hidden(&orgs, &repos).contains(&restricted),
+            "{restricted} should be named as hidden, got {orgs:?}"
+        );
     }
 
     // Emptiness is a real answer — an owner with nothing waiting is not a

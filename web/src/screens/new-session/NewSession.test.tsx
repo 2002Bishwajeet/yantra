@@ -269,7 +269,7 @@ describe('step 2, where the code comes from', () => {
     })
     expect(
       await screen.findByText(
-        'Yantra sees no repository from acme-corp, utopia-php. An organisation that restricts OAuth apps hides them.',
+        'Yantra sees no repository from acme-corp, utopia-php. An organisation that restricts OAuth apps hides them. If your membership in one is private, it is not in this list.',
       ),
     ).toBeTruthy()
     const link = screen.getByRole('link', { name: 'Grant access on GitHub' })
@@ -288,9 +288,15 @@ describe('step 2, where the code comes from', () => {
     )
   })
 
+  it('still links the grant page when it can name no organisation', async () => {
+    await toRepos({ 'GET /api/repos/hidden': [200, { ...contract.hiddenOrgs, data: [] }] })
+    expect(await screen.findByText(/If your membership there is private, Yantra cannot name it\./)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Grant access on GitHub' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
+  })
+
   it.each<[string, Answer]>([
     ['failed', [200, { looked: 'failed', age_seconds: 0, error: 'GitHub answered 502 to /user/orgs' }]],
-    ['empty', [200, { ...contract.hiddenOrgs, data: [] }]],
     ['never', [200, { looked: 'never' }]],
     ['refused', [500, 'boom']],
   ])('draws nothing extra when the hidden read is %s, and keeps the rows', async (_, reply) => {
@@ -298,7 +304,7 @@ describe('step 2, where the code comes from', () => {
     expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
     // The answer has arrived; give it the frame it needs to draw anything.
     await new Promise((done) => setTimeout(done, 50))
-    expect(screen.queryByText(/Yantra sees no repository/)).toBeNull()
+    expect(screen.queryByText(/restricts OAuth apps/)).toBeNull()
     expect(screen.queryByRole('link', { name: 'Grant access on GitHub' })).toBeNull()
   })
 

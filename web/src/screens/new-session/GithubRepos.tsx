@@ -51,10 +51,11 @@ function SignedIn(props: { login: string | null; asked: boolean }) {
   )
 }
 
-/** A read that did not answer draws nothing: the list above it still works. */
+/** A read that did not answer draws nothing: the list above it still works. An empty answer
+ *  still links the grant page, because GitHub cannot name every organisation that hides. */
 function Hidden(props: { clientId: string | null }) {
   const hidden = useHiddenOrgs()
-  if (hidden.looked !== 'ok' || hidden.data.length === 0) return null
+  if (hidden.looked !== 'ok') return null
   return (
     <div className="ns__hidden">
       <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
