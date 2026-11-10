@@ -338,6 +338,7 @@ It needs no root, and it refuses to run as root. It writes the binary to `~/.loc
 and a LaunchAgent to `~/Library/LaunchAgents/io.github.2002bishwajeet.yantra-agent.plist`. launchd
 has no `EnvironmentFile=`, so the LaunchAgent starts the agent through `sh`, which reads
 `~/.config/yantra/agent.env` first. The script writes that file only when it is missing, as on Linux.
+With no `YANTRA_DAEMON` set, it takes the address from the LaunchAgent the join command wrote.
 It loads the LaunchAgent only when the file names a daemon. A second run rewrites the LaunchAgent and
 restarts the agent; it does not add a second one. Nightly builds carry no macOS archive, so
 `--channel nightly` is refused. `--uninstall` is refused too, and it prints the two commands that
@@ -469,7 +470,8 @@ account's config. **If a block already names the machine, it is kept**, and the 
 that block logs in as a different account. The agent's unit is `DynamicUser=yes`, so a joined
 machine gains no account for it. On a Mac, the join command still writes the address into the
 LaunchAgent itself, and writes no `agent.env`. A run of `install.sh` there
-([On a Mac](#on-a-mac)) replaces that LaunchAgent with the one that reads `agent.env`.
+([On a Mac](#on-a-mac)) moves that address into a new `agent.env` and replaces the LaunchAgent with
+the one that reads it.
 
 **The box itself needs no join command** (Y-598). `yantrad` lists this box's sessions over ssh, so
 [step 9](#what-it-does-at-a-terminal) of the install does here what the join command does elsewhere,

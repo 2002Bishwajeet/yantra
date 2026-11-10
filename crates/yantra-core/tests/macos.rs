@@ -717,7 +717,8 @@ fn said(out: &Output) -> String {
 }
 
 /// Y-502: `install.sh` on a Mac installs the agent alone as a LaunchAgent that
-/// reads `~/.config/yantra/agent.env`, and a second run attaches (§B4).
+/// reads `~/.config/yantra/agent.env`, and a second run attaches (§B4). On a
+/// Mac that joined, it keeps the address join.sh's LaunchAgent held.
 #[test]
 #[ignore = "needs a disposable Mac: it loads the agent's LaunchAgent (CI's macos job does)"]
 fn install_sh_installs_the_agent_on_a_mac() -> Result<()> {
@@ -784,5 +785,42 @@ fn install_sh_installs_the_agent_on_a_mac() -> Result<()> {
     succeed(Command::new("plutil").arg("-lint").arg(&plist))?;
     ensure!(release.loaded()?, "the second run left the agent unloaded");
     release.until_seen("100.64.0.6:7717")?;
+
+    // A Mac that joined: join.sh's LaunchAgent holds the address and no agent.env exists.
+    release.bootout();
+    let joined = release.home("joined")?;
+    let plist = joined.join(format!("Library/LaunchAgents/{AGENT_LABEL}.plist"));
+    std::fs::create_dir_all(plist.parent().context("a plist has a directory")?)?;
+    std::fs::write(
+        &plist,
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
+             <key>Label</key><string>{AGENT_LABEL}</string>\
+             <key>ProgramArguments</key><array><string>/bin/sleep</string><string>600</string></array>\
+             <key>EnvironmentVariables</key><dict><key>YANTRA_DAEMON</key><string>100.64.0.7:7717</string></dict>\
+             <key>RunAtLoad</key><true/></dict></plist>\n"
+        ),
+    )?;
+    succeed(
+        Command::new("launchctl")
+            .arg("bootstrap")
+            .arg(format!("gui/{}", release.uid))
+            .arg(&plist),
+    )?;
+    let _ = std::fs::remove_file(release.root.join("seen"));
+    let out = release.install(&joined, None, &[])?;
+    ensure!(
+        out.status.success(),
+        "the run on a joined Mac failed: {}",
+        said(&out)
+    );
+    ensure!(
+        std::fs::read_to_string(joined.join(".config/yantra/agent.env"))?
+            .contains("\nYANTRA_DAEMON=100.64.0.7:7717\n"),
+        "agent.env lost the address the join command wrote: {}",
+        said(&out)
+    );
+    ensure!(release.loaded()?, "the joined Mac's agent is not loaded");
+    release.until_seen("100.64.0.7:7717")?;
     Ok(())
 }

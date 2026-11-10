@@ -188,8 +188,13 @@ mac() {
     if [ -e "$env" ]; then
         echo "install: $env was already here and was left alone."
     else
-        local line="#YANTRA_DAEMON=100.x.x.x:$PORT"
-        [ -n "${YANTRA_DAEMON:-}" ] && line="YANTRA_DAEMON=$YANTRA_DAEMON"
+        local daemon=${YANTRA_DAEMON:-} line="#YANTRA_DAEMON=100.x.x.x:$PORT"
+        # join.sh's LaunchAgent holds the address itself and writes no agent.env.
+        if [ -z "$daemon" ] && [ -e "$plist" ]; then
+            daemon=$(plutil -extract EnvironmentVariables.YANTRA_DAEMON raw -o - "$plist" 2>/dev/null) || daemon=
+            [ -z "$daemon" ] || echo "install: kept the daemon address $daemon from the LaunchAgent the join command wrote."
+        fi
+        [ -n "$daemon" ] && line="YANTRA_DAEMON=$daemon"
         cat >"$env" <<ENV
 # The address of the machine running yantrad, and the agent's whole
 # configuration (ADR-0013 §4). An address, never a MagicDNS name.
