@@ -59,6 +59,11 @@ test-ci *args:
 test-mac machine *args:
     YANTRA_MAC={{machine}} cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture --test-threads 1 {{args}}
 
+# Y-706's check against the real systemd user manager of this machine. CI's
+# runner has no user bus, so the test is ignored, and here it fails rather than skips.
+test-systemd-user:
+    cargo nextest run -p yantra-core --lib --run-ignored only -E 'test(/^jobs::/)'
+
 # CI's macos job (Y-661): every remote script under the Mac's own bash 3.2, sh
 # and dash, and tests/macos.rs over ssh to `machine`, in one run so a failure
 # in one still runs the other. tests/macos.rs kills the machine's tmux server,

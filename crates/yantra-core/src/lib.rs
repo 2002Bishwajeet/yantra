@@ -34,6 +34,7 @@ pub mod identity;
 pub mod image;
 pub mod install;
 pub mod inventory;
+pub mod jobs;
 pub mod join;
 pub mod keep;
 pub mod layout;

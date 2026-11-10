@@ -80,6 +80,7 @@ just test          # skips the container tests if podman is missing
 just test-ci       # fails instead of skipping — what CI runs
 just test-mac <machine>   # the handful that need a real remote machine
 just test-macos <machine> # CI's macos job: a disposable Mac, never the owner's
+just test-systemd-user    # yantra jobs against this machine's real systemctl --user
 ```
 
 ## More
