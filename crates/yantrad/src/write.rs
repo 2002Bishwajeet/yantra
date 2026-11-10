@@ -1,12 +1,13 @@
 //! The routes that **act**, and the identity that authorises them
 //! ([ADR-0016](../../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)).
 //!
-//! **The caller's address is not always the TCP peer**
-//! ([ADR-0017](../../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)):
-//! when the peer is one of this daemon's own bind addresses the connection was
-//! opened here by a proxy, and `X-Forwarded-For` is the caller. That condition
-//! and nothing else — reaching 7717 directly, a caller can write the header,
-//! and there the peer is its own address rather than ours.
+//! **The kernel proves the local hop, and no address is trusted for where it
+//! points** ([ADR-0042](../../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)).
+//! On TCP the peer is the caller, and a peer that is one of this daemon's own
+//! addresses is refused: any account on this machine could have opened it. On
+//! the Unix socket `SO_PEERCRED` names the account. uid 0 is `tailscale serve`,
+//! whose `X-Forwarded-For` is the caller; the daemon's own account or a member
+//! of the `yantra` group is this machine; any other account may only join itself.
 //!
 //! Until Y-112 the API answered 405 to every write and the dashboard handed
 //! over a command to paste into a terminal, which from a phone is worth
@@ -24,10 +25,14 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
+use axum::extract::connect_info::Connected;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
+use axum::serve::IncomingStream;
+use nix::unistd::{Gid, Group, Uid, User};
+use tokio::net::{TcpListener, UnixListener};
 use yantra_core::github;
 use yantra_core::install;
 use yantra_core::inventory::{self, Caller, Inventory};
@@ -50,22 +55,73 @@ use crate::refresh::Model;
 /// [ADR-0017]: ../../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md
 const FORWARDED_FOR: &str = "x-forwarded-for";
 
-/// Who to ask about a caller, and the addresses this daemon bound.
+/// The group whose members are this machine's owner on the socket (ADR-0042 §3).
+const GROUP: &str = "yantra";
+
+/// Who opened the connection, as the listener that accepted it can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Peer {
+    Tcp(SocketAddr),
+    /// The uid `SO_PEERCRED` (`getpeereid` on macOS) names, or `None` when it
+    /// failed, which refuses every route.
+    Unix(Option<u32>),
+}
+
+impl From<SocketAddr> for Peer {
+    fn from(address: SocketAddr) -> Self {
+        Self::Tcp(address)
+    }
+}
+
+impl Connected<IncomingStream<'_, TcpListener>> for Peer {
+    fn connect_info(stream: IncomingStream<'_, TcpListener>) -> Self {
+        Self::Tcp(*stream.remote_addr())
+    }
+}
+
+impl Connected<IncomingStream<'_, UnixListener>> for Peer {
+    fn connect_info(stream: IncomingStream<'_, UnixListener>) -> Self {
+        Self::Unix(stream.io().peer_cred().ok().map(|cred| cred.uid()))
+    }
+}
+
+/// What a peer is once its account is looked up: the input to the one pure
+/// decision, [`Authoriser::caller_address`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Hop {
+    Tcp(IpAddr),
+    /// uid 0 on the socket: `tailscale serve`, as `tailscaled` runs as root.
+    Serve,
+    /// The daemon's own account or a member of [`GROUP`], so the caller is
+    /// this machine.
+    Owner,
+    /// Any other account, by name.
+    Other(String),
+    /// No credentials, or a lookup that failed.
+    Unknown,
+}
+
+/// Who to ask about a caller, the addresses this daemon bound, its own account
+/// and the socket a refusal names.
 ///
-/// The second is ADR-0017 §2's whole test for whether a forwarded address may
-/// be believed, and it is `listen_on`'s set exactly — not "a private address",
-/// not any local interface, and never loopback, which is never bound.
+/// `bound` is `listen_on`'s set exactly. A TCP peer in it is refused, and a
+/// forwarded address in it is refused, because each is this machine and the
+/// account behind it is unknown.
 #[derive(Clone)]
 pub struct Authoriser<I> {
     inventory: I,
     bound: Arc<[IpAddr]>,
+    me: u32,
+    socket: Arc<std::path::Path>,
 }
 
 impl<I: Inventory> Authoriser<I> {
-    pub fn new(inventory: I, bound: &[SocketAddr]) -> Self {
+    pub fn new(inventory: I, bound: &[SocketAddr], socket: &std::path::Path) -> Self {
         Self {
             inventory,
             bound: bound.iter().map(SocketAddr::ip).collect(),
+            me: nix::unistd::geteuid().as_raw(),
+            socket: socket.into(),
         }
     }
 
@@ -74,32 +130,103 @@ impl<I: Inventory> Authoriser<I> {
         &self.inventory
     }
 
-    /// ADR-0017 §1. The TCP peer is the caller, unless the peer is one of our
-    /// own bind addresses: nothing off this machine can open a connection that
-    /// appears to come from one, so a request that does was opened here by a
-    /// proxy that terminated the caller's and wrote its address down.
-    ///
-    /// §3: one address or refuse. An absent header is not a refusal — it means
-    /// nothing proxied this, and the peer stands as it does on 7717.
-    fn caller_address(&self, peer: IpAddr, headers: &HeaderMap) -> Result<IpAddr, Refused> {
-        if !self.bound.contains(&peer) {
-            return Ok(peer);
+    /// The lookup. Only another account costs one, off the worker (I-13).
+    async fn hop(&self, peer: &Peer) -> Hop {
+        match *peer {
+            Peer::Tcp(from) => Hop::Tcp(from.ip()),
+            Peer::Unix(None) => Hop::Unknown,
+            Peer::Unix(Some(0)) => Hop::Serve,
+            Peer::Unix(Some(uid)) if uid == self.me => Hop::Owner,
+            Peer::Unix(Some(uid)) => tokio::task::spawn_blocking(move || account(uid))
+                .await
+                .unwrap_or(Hop::Unknown),
         }
-        let mut forwarded = headers.get_all(FORWARDED_FOR).iter();
-        let Some(only) = forwarded.next() else {
-            return Ok(peer);
-        };
-        if forwarded.next().is_some() {
-            return Err(Refused::Forwarded(
-                "a proxy on this machine forwarded more than one address, and `tailscale serve` writes exactly one",
-            ));
+    }
+
+    /// ADR-0042 decisions 3 to 5, and ADR-0017 §3 for the header's shape.
+    fn caller_address(&self, hop: &Hop, headers: &HeaderMap) -> Result<IpAddr, Refused> {
+        match hop {
+            Hop::Tcp(from) if self.bound.contains(from) => {
+                Err(Refused::OwnAddress(self.socket.clone()))
+            }
+            Hop::Tcp(from) => Ok(*from),
+            Hop::Serve => {
+                let from = forwarded(headers)?
+                    .ok_or(Refused::Hop("`tailscale serve` forwarded no address"))?;
+                if self.bound.contains(&from) {
+                    return Err(Refused::Hop(
+                        "`tailscale serve` forwarded this machine's own address, so the account that called is unknown",
+                    ));
+                }
+                Ok(from)
+            }
+            Hop::Owner => self.bound.first().copied().ok_or(Refused::Hop(
+                "this daemon bound no address to name this machine by",
+            )),
+            Hop::Other(name) => Err(Refused::Account(Some(name.clone()))),
+            Hop::Unknown => Err(Refused::Account(None)),
         }
-        only.to_str()
-            .ok()
-            .and_then(|address| address.trim().parse().ok())
-            .ok_or(Refused::Forwarded(
-                "a proxy on this machine forwarded something that is not one address, and `tailscale serve` writes exactly one",
-            ))
+    }
+
+    /// ADR-0016 §2 on the address [`Self::caller_address`] picks. Every branch
+    /// that cannot *prove* the caller is this owner's own untagged node refuses.
+    async fn judge(&self, hop: &Hop, headers: &HeaderMap) -> Result<Caller, Refused> {
+        let from = self.caller_address(hop, headers)?;
+        let caller = self
+            .inventory
+            .whois(from)
+            .await
+            .map_err(Refused::CannotAsk)?
+            .ok_or(Refused::NotAPeer(from))?;
+
+        if !caller.tags.is_empty() {
+            return Err(Refused::Tagged(caller.tags));
+        }
+        let owner = self.inventory.owner().await.map_err(Refused::CannotAsk)?;
+        if caller.user != owner {
+            return Err(Refused::NotYours(caller.node));
+        }
+        Ok(caller)
+    }
+}
+
+/// `None` for an absent header; one address, or refuse (ADR-0017 §3).
+fn forwarded(headers: &HeaderMap) -> Result<Option<IpAddr>, Refused> {
+    let mut forwarded = headers.get_all(FORWARDED_FOR).iter();
+    let Some(only) = forwarded.next() else {
+        return Ok(None);
+    };
+    if forwarded.next().is_some() {
+        return Err(Refused::Forwarded(
+            "`tailscale serve` forwarded more than one address, and it writes exactly one",
+        ));
+    }
+    only.to_str()
+        .ok()
+        .and_then(|address| address.trim().parse().ok())
+        .map(Some)
+        .ok_or(Refused::Forwarded(
+            "`tailscale serve` forwarded something that is not one address, and it writes exactly one",
+        ))
+}
+
+/// Any lookup error refuses: the account is then [`Hop::Unknown`].
+fn account(uid: u32) -> Hop {
+    let Ok(Some(user)) = User::from_uid(Uid::from_raw(uid)) else {
+        return Hop::Unknown;
+    };
+    match Group::from_name(GROUP) {
+        Ok(group) => classify(user.name, user.gid, group.as_ref()),
+        Err(_) => Hop::Unknown,
+    }
+}
+
+/// Membership is the primary gid or the group's member list.
+fn classify(name: String, gid: Gid, group: Option<&Group>) -> Hop {
+    if group.is_some_and(|group| group.gid == gid || group.mem.contains(&name)) {
+        Hop::Owner
+    } else {
+        Hop::Other(name)
     }
 }
 
@@ -240,35 +367,35 @@ struct Remembered<I> {
     fleet: Fleet,
 }
 
-/// ADR-0016 §2, on the address ADR-0017 §1 picks. Every branch that cannot
-/// *prove* the caller is this owner's own untagged node refuses, which is the
-/// same shape `listen_on` already has: the only default available is the
-/// permissive one.
+/// Every route that acts calls this, and only the two join routes call
+/// [`joining`] in its place.
 pub(crate) async fn allowed<I: Inventory>(
     authoriser: &Authoriser<I>,
-    peer: IpAddr,
+    peer: &Peer,
     headers: &HeaderMap,
 ) -> Result<Caller, Refused> {
-    let from = authoriser.caller_address(peer, headers)?;
-    let caller = authoriser
-        .inventory
-        .whois(from)
-        .await
-        .map_err(Refused::CannotAsk)?
-        .ok_or(Refused::NotAPeer(from))?;
+    let hop = authoriser.hop(peer).await;
+    authoriser.judge(&hop, headers).await
+}
 
-    if !caller.tags.is_empty() {
-        return Err(Refused::Tagged(caller.tags));
+/// [`allowed`], except that another account on the socket may join itself
+/// (ADR-0042 §3): `GET /join` names no `user`, and `POST /api/join` must name
+/// that account. It is then this machine, as the owner's account is.
+pub(crate) async fn joining<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    peer: &Peer,
+    headers: &HeaderMap,
+    user: Option<&str>,
+) -> Result<Caller, Refused> {
+    let hop = admit(authoriser.hop(peer).await, user);
+    authoriser.judge(&hop, headers).await
+}
+
+fn admit(hop: Hop, user: Option<&str>) -> Hop {
+    match hop {
+        Hop::Other(name) if user.is_none_or(|user| user == name) => Hop::Owner,
+        hop => hop,
     }
-    let owner = authoriser
-        .inventory
-        .owner()
-        .await
-        .map_err(Refused::CannotAsk)?;
-    if caller.user != owner {
-        return Err(Refused::NotYours(caller.node));
-    }
-    Ok(caller)
 }
 
 /// `GET /api/here`: the tailnet machine the request came from, so the page can
@@ -283,10 +410,10 @@ pub(crate) struct Here {
 
 async fn here<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Here>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let looked = state.fleet.model.read().await.machines.clone();
     let machines = match looked.as_deref().map(|reading| reading.value()) {
         None => {
@@ -352,11 +479,11 @@ struct Create {
 
 async fn make<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Json(create): Json<Create>,
 ) -> Result<(StatusCode, Json<Made>), Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     tracing::info!("new {} for {}", create.name, caller.node);
 
     let workspace = workspace::create(
@@ -401,11 +528,11 @@ fn from_create(error: &workspace::Error) -> StatusCode {
 /// [ADR-0020]: ../../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md
 async fn unusable<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Broken>, Refused> {
-    allowed(&authoriser, from.ip(), &headers).await?;
+    allowed(&authoriser, &from, &headers).await?;
 
     let broken = workspace::broken(&name).map_err(|error| Refused::Verb {
         status: from_repair(&error),
@@ -431,12 +558,12 @@ async fn unusable<I: Inventory + Clone + Send + Sync + 'static>(
 /// [ADR-0020]: ../../../docs/adr/0020-a-raw-write-only-from-broken-to-valid.md
 async fn mend<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     Json(sent): Json<Repair>,
 ) -> Result<Json<Made>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     tracing::info!("repair {name} for {}", caller.node);
 
     let repaired = workspace::repair(&name, &sent.text).map_err(|error| Refused::Verb {
@@ -507,12 +634,12 @@ impl From<Change> for workspace::Changes {
 
 async fn change<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     Json(change): Json<Change>,
 ) -> Result<Json<Made>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     if !change.names_a_field() {
         return Err(Refused::Verb {
             status: StatusCode::BAD_REQUEST,
@@ -548,12 +675,12 @@ fn from_edit(error: &edit::Error) -> StatusCode {
 
 async fn open<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     body: Option<Json<Start>>,
 ) -> Result<Json<Opened>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let agent = body
         .and_then(|Json(start)| start.agent)
         .map(up::Agent::from);
@@ -582,11 +709,11 @@ async fn open<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Stopped>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     tracing::info!("down {name} for {}", caller.node);
 
     let report = down::down(&name).await.map_err(|error| Refused::Verb {
@@ -616,12 +743,12 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn ask<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(machine): Path<String>,
     Json(asked): Json<Asked>,
 ) -> Result<Json<Found>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     tracing::info!("probe {machine} for {}", caller.node);
 
     let found = probe::probe(&machine, &asked.path)
@@ -666,12 +793,12 @@ async fn ask<I: Inventory + Clone + Send + Sync + 'static>(
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn walk<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(machine): Path<String>,
     body: Option<Json<Walked>>,
 ) -> Result<Json<Listing>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let Walked { path, make } = body.map(|Json(walked)| walked).unwrap_or_default();
 
     let listing = match make {
@@ -726,12 +853,12 @@ fn from_dirs(error: &dirs::Error) -> StatusCode {
 /// [ADR-0023]: ../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md
 async fn fetch<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(machine): Path<String>,
     Json(asked): Json<Fetch>,
 ) -> Result<(StatusCode, Json<Cloning>), Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let plan = clone::plan(&asked.url, &asked.path).map_err(|error| Refused::Verb {
         status: from_clone(&error),
         said: chain(&error),
@@ -824,12 +951,12 @@ const INSTALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(15 * 
 /// [ADR-0028]: ../../../docs/adr/0028-yantra-installs-the-bare-minimum-on-a-machine.md
 async fn put_basics<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Installer<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(machine): Path<String>,
     uri: Uri,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     // The name is a request value, and it reaches `ssh`'s argv (ADR-0009).
     install::check_machine(&machine).map_err(|error| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
@@ -930,7 +1057,7 @@ fn from_install(error: &install::Error) -> &'static str {
 /// person taps it and nothing polls it, which is both halves of the ADR's test.
 ///
 /// **It costs an ssh round trip, and an asleep machine costs all ten seconds of
-/// `ConnectTimeout` before it answers.** What it answers then is thirteen
+/// `ConnectTimeout` before it answers.** What it answers then is fourteen
 /// *unknown* checks and never a 500: [`doctor::machine`] cannot fail, because a
 /// machine that could not be asked is not a machine that failed (R-23). A name
 /// nothing answers to reads the same way, and deliberately — ADR-0009 leaves
@@ -940,11 +1067,11 @@ fn from_install(error: &install::Error) -> &'static str {
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Answer<Checked>>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     tracing::info!("doctor {name} for {}", caller.node);
 
     let report = doctor::machine(&name, term()).await;
@@ -1009,11 +1136,11 @@ fn status_of(error: &notify::NotWritten) -> StatusCode {
 
 async fn relay<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Json(publish): Json<Publish>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     tracing::info!("relay written for {}", caller.node);
 
     let file = std::path::Path::new(notify::RELAY_FILE);
@@ -1085,10 +1212,10 @@ impl Device {
 /// [ADR-0023]: ../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md
 async fn login<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Device>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let client_id = github::client_id().ok_or_else(|| Refused::Verb {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         said: github::Error::NoClientId.to_string(),
@@ -1131,10 +1258,10 @@ async fn login<I: Inventory + Clone + Send + Sync + 'static>(
 /// at the next start.
 async fn logout<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     {
         let _write = state.fleet.env.lock().await;
         notify::write_github(std::path::Path::new(notify::RELAY_FILE), None).map_err(|error| {
@@ -1165,11 +1292,11 @@ struct ClientId {
 
 async fn set_client_id<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Json(sent): Json<ClientId>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let file = std::path::Path::new(notify::RELAY_FILE);
     {
         let _write = state.fleet.env.lock().await;
@@ -1186,10 +1313,10 @@ async fn set_client_id<I: Inventory + Clone + Send + Sync + 'static>(
 /// the state asked for (I-30), so this succeeds whether or not one was there.
 async fn clear_client_id<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let file = std::path::Path::new(notify::RELAY_FILE);
     {
         let _write = state.fleet.env.lock().await;
@@ -1210,10 +1337,10 @@ async fn clear_client_id<I: Inventory + Clone + Send + Sync + 'static>(
 /// [ADR-0027]: ../../../docs/adr/0027-the-appliance-pulls-its-own-update.md
 async fn renew<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let facts = &state.fleet.facts;
     update::request(&facts.trigger, &facts.updater).map_err(|error| Refused::Verb {
         status: from_update(&error),
@@ -1234,11 +1361,11 @@ struct Rechannel {
 /// has not yet made the file is a **409**.
 async fn rechannel<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Json(asked): Json<Rechannel>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let fleet = &state.fleet;
     let path = fleet.facts.channel.clone();
     let written = tokio::task::spawn_blocking(move || update::set_channel(&path, asked.channel))
@@ -1284,10 +1411,10 @@ fn from_update(error: &update::Error) -> StatusCode {
 /// about a viewer needs to survive anything.
 async fn viewing<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<StatusCode, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     *state.fleet.viewers.write().await = Some(std::time::Instant::now());
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1300,10 +1427,10 @@ async fn viewing<I: Inventory + Clone + Send + Sync + 'static>(
 /// [ADR-0029]: ../../../docs/adr/0029-a-machine-joins-itself.md
 async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = joining(&state.authoriser, &from, &headers, None).await?;
     let dir = state.fleet.facts.ssh_dir.clone();
     let one_at_a_time = state.fleet.joins.lock().await;
     // `ssh-keygen` is a subprocess, so off the worker (I-13).
@@ -1326,7 +1453,13 @@ async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
         .map(SocketAddr::ip)
         .collect();
     let script = join::daemon_address(&bound)
-        .and_then(|daemon| join::script(daemon, &prepared.public_key))
+        .and_then(|daemon| {
+            // ADR-0042: a script fetched on the socket reports on it too, but
+            // uid 0 is `serve`, whose caller is another machine with no socket.
+            let socket = matches!(from, Peer::Unix(Some(uid)) if uid != 0)
+                .then_some(&*state.authoriser.socket);
+            join::script(daemon, &prepared.public_key, socket)
+        })
         .map_err(|error| Refused::Verb {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             said: chain(&error),
@@ -1360,11 +1493,11 @@ struct Join {
 /// machine can therefore only join itself.
 async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Json(join): Json<Join>,
 ) -> Result<Json<Joined>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = joining(&state.authoriser, &from, &headers, Some(&join.user)).await?;
     if !identity::usable_user(&join.user) {
         return Err(Refused::Verb {
             status: StatusCode::BAD_REQUEST,
@@ -1451,10 +1584,10 @@ struct Forgotten {
 /// its own, so the join's switch to sshd changes the key this daemon recorded.
 async fn forget_host_key<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Forgotten>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let machine = caller_machine(&state.authoriser, &caller).await?;
     let target = ssh::Machine {
         host: machine.clone(),
@@ -1539,12 +1672,12 @@ struct Joined {
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn spent<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     body: Option<Json<Since>>,
 ) -> Result<Json<Spend>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let Json(Since { since }) = body.unwrap_or_default();
     tracing::info!("tokens {name} for {}", caller.node);
 
@@ -1573,12 +1706,12 @@ async fn spent<I: Inventory + Clone + Send + Sync + 'static>(
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn said<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     body: Option<Json<Window>>,
 ) -> Result<Json<Transcript>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let Json(window) = body.unwrap_or_default();
     tracing::info!("logs {name} for {}", caller.node);
 
@@ -1609,12 +1742,12 @@ struct MentionsAsked {
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn mentions<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     Json(asked): Json<MentionsAsked>,
 ) -> Result<Json<Mentions>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let harness = crate::chat::harness_named(&asked.harness).map_err(|said| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said,
@@ -1655,12 +1788,12 @@ fn from_mention(error: &mention::Error) -> StatusCode {
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn commands<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     Json(asked): Json<MentionsAsked>,
 ) -> Result<Json<Commands>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let harness = crate::chat::harness_named(&asked.harness).map_err(|said| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said,
@@ -1706,11 +1839,11 @@ fn from_command(error: &command::Error) -> StatusCode {
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn threads<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<Thread>>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     tracing::info!("threads {name} for {}", caller.node);
     let token = state.fleet.github.token().await;
     let github = github::Github::default();
@@ -1741,11 +1874,11 @@ async fn threads<I: Inventory + Clone + Send + Sync + 'static>(
 /// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 async fn thread_states<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<ThreadState>>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let mut states: Vec<_> = state
         .fleet
         .chats
@@ -1769,12 +1902,12 @@ struct FromIssue {
 /// decision 4).
 async fn thread_new<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     Json(asked): Json<FromIssue>,
 ) -> Result<Json<ThreadOpened>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let refuse = |error: thread::Failed| Refused::Verb {
         status: from_thread(&error),
         said: chain(&error),
@@ -1802,11 +1935,11 @@ async fn thread_new<I: Inventory + Clone + Send + Sync + 'static>(
 /// shell shares the worktree with the agent, and the Chat says so.
 async fn thread_terminal<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
 ) -> Result<Json<ThreadTerminal>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     tracing::info!("chat terminal {name} {id} for {}", caller.node);
     let opened = thread::terminal_for(&name, &id)
         .await
@@ -1861,11 +1994,11 @@ fn from_github(error: &github::Error) -> StatusCode {
 /// `claude -p` writes on the machine. Neither it nor the diff is logged (Q5).
 async fn drafting<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
 ) -> Result<Json<ThreadMessage>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     idle(&state.fleet.chats, &name, &id)?;
     tracing::info!("commit draft {name} {id} for {}", caller.node);
     let message = commit::draft_for(&name, &id).await.map_err(refuse_commit)?;
@@ -1884,12 +2017,12 @@ struct CommitBody {
 /// machine's own git identity (ADR-0034 decision 2).
 async fn committing<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
     body: Option<Json<CommitBody>>,
 ) -> Result<Json<ThreadCommitted>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     idle(&state.fleet.chats, &name, &id)?;
     let Json(CommitBody { message }) = body.unwrap_or_default();
     tracing::info!("commit {name} {id} for {}", caller.node);
@@ -1906,11 +2039,11 @@ async fn committing<I: Inventory + Clone + Send + Sync + 'static>(
 /// own credential. The answer names the remote, never its URL.
 async fn pushing<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
 ) -> Result<Json<ThreadPushed>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     idle(&state.fleet.chats, &name, &id)?;
     tracing::info!("push {name} {id} for {}", caller.node);
     let pushed = commit::push_for(&name, &id).await.map_err(refuse_commit)?;
@@ -1936,12 +2069,12 @@ struct PrBody {
 /// logged (Q5).
 async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
     body: Option<Json<PrBody>>,
 ) -> Result<Json<ThreadPrOpened>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let Json(PrBody { title, body }) = body.unwrap_or_default();
     let token = state
         .fleet
@@ -1991,12 +2124,12 @@ struct MergeBody {
 /// commits, so the merge takes the head the daemon reads, not one the owner saw.
 async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
     Json(MergeBody { number }): Json<MergeBody>,
 ) -> Result<Json<ThreadPrMerged>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let token = state
         .fleet
         .github
@@ -2018,11 +2151,11 @@ async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
 /// branch go. The keeper's reader ends with its pane, which lets the chat registry drop the thread.
 async fn removing<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     idle(&state.fleet.chats, &name, &id)?;
     tracing::info!("thread remove {name} {id} for {}", caller.node);
     commit::remove_for(&name, &id)
@@ -2091,11 +2224,11 @@ fn from_commit(error: &commit::Failed) -> StatusCode {
 /// tapped a button once. Nothing polls this.
 async fn end<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((machine, session)): Path<(String, String)>,
 ) -> Result<Json<Ended>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     tracing::info!("kill {session} on {machine} for {}", caller.node);
 
     let report = sessions::kill(&machine, &session)
@@ -2119,12 +2252,12 @@ async fn end<I: Inventory + Clone + Send + Sync + 'static>(
 /// `--force`: it skips asking the machine rather than ignoring its answer.
 async fn erase<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     uri: Uri,
 ) -> Result<Json<Removed>, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     tracing::info!("rm {name} for {}", caller.node);
 
     match remove::remove(&name, forced(&uri)).await {
@@ -2151,11 +2284,11 @@ async fn erase<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn again<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Resumed>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     tracing::info!("resume {name} for {}", caller.node);
 
     let report = resume::resume(&name, term())
@@ -3340,6 +3473,13 @@ pub(crate) enum Refused {
     /// something unmeasured is in the local path, and a guess repaired out of
     /// it would be the confident lie R-23 is about.
     Forwarded(&'static str),
+    /// ADR-0042 §5: a TCP peer that is this machine, which names the socket.
+    OwnAddress(Arc<std::path::Path>),
+    /// ADR-0042 §3: the `serve` hop could not name a caller off this machine.
+    Hop(&'static str),
+    /// ADR-0042 §3: an account on the socket that is not this machine's owner,
+    /// by name when it has one.
+    Account(Option<String>),
     /// The last tailnet look is missing or failed, so "which machine" has no
     /// answer yet; 503, because `null` would read as "no machine holds it".
     Unlooked(String),
@@ -3391,6 +3531,26 @@ impl IntoResponse for Refused {
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("could not establish who is calling: {said}"),
             ),
+            Self::OwnAddress(socket) => (
+                StatusCode::FORBIDDEN,
+                format!(
+                    "a request from this machine's own address may not act, because any account here could have sent it. \
+                     From this machine, send it on the socket: curl --unix-socket {socket} http://yantra/…. \
+                     Through HTTPS, point the proxy at the socket: tailscale serve --bg --https=8443 unix:{socket}",
+                    socket = socket.display()
+                ),
+            ),
+            Self::Hop(said) => (StatusCode::FORBIDDEN, said.to_owned()),
+            Self::Account(Some(name)) => (
+                StatusCode::FORBIDDEN,
+                format!(
+                    "the account {name} is not this machine's owner, so it may only join itself"
+                ),
+            ),
+            Self::Account(None) => (
+                StatusCode::FORBIDDEN,
+                "the account on the socket could not be looked up, so it may not act".to_owned(),
+            ),
             Self::Unlooked(said) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("could not name the machine: {said}"),
@@ -3439,13 +3599,27 @@ mod tests {
     /// Bound to nothing, so no peer is ever ours and every test below reads the
     /// address exactly as ADR-0016 wrote it.
     fn direct(fake: Fake) -> Authoriser<Fake> {
-        Authoriser::new(fake, &[])
+        Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock"))
     }
 
-    /// Bound to [`address(1)`], which is where `tailscale serve` proxies to and
-    /// therefore the peer a proxied request arrives from.
-    fn behind_the_proxy(fake: Fake) -> Authoriser<Fake> {
-        Authoriser::new(fake, &[SocketAddr::new(address(1), 7717)])
+    /// Bound to [`address(1)`], so that address is this machine.
+    fn on_this_machine(fake: Fake) -> Authoriser<Fake> {
+        Authoriser::new(
+            fake,
+            &[SocketAddr::new(address(1), 7717)],
+            std::path::Path::new("/run/yantra/yantrad.sock"),
+        )
+    }
+
+    fn tcp(at: IpAddr) -> Peer {
+        Peer::from(SocketAddr::new(at, 61620))
+    }
+
+    /// `tailscaled` runs as root, so uid 0 on the socket is the `serve` hop.
+    const SERVE: Peer = Peer::Unix(Some(0));
+
+    fn daemon_account() -> Peer {
+        Peer::Unix(Some(nix::unistd::geteuid().as_raw()))
     }
 
     fn forwarded(values: &[&str]) -> HeaderMap {
@@ -3492,7 +3666,7 @@ mod tests {
     async fn ask_here(
         authoriser: Authoriser<Fake>,
         fleet: Fleet,
-        peer: IpAddr,
+        peer: Peer,
         headers: &[&str],
     ) -> (StatusCode, serde_json::Value) {
         use axum::body::Body;
@@ -3504,9 +3678,7 @@ mod tests {
             asked = asked.header(FORWARDED_FOR, *value);
         }
         let mut asked = asked.body(Body::empty()).expect("a GET");
-        asked
-            .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::new(peer, 61620)));
+        asked.extensions_mut().insert(ConnectInfo(peer));
         let answer = router::<Fake, ()>(authoriser, fleet)
             .with_state(())
             .oneshot(asked)
@@ -3527,7 +3699,7 @@ mod tests {
         let (status, body) = ask_here(
             direct(mine(2)),
             on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
-            address(2),
+            tcp(address(2)),
             &[],
         )
         .await;
@@ -3539,13 +3711,7 @@ mod tests {
     #[tokio::test]
     async fn here_names_the_forwarded_caller_and_not_the_appliance() {
         let fleet = on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]);
-        let (_, body) = ask_here(
-            behind_the_proxy(mine(2)),
-            fleet,
-            address(1),
-            &["100.64.0.2"],
-        )
-        .await;
+        let (_, body) = ask_here(on_this_machine(mine(2)), fleet, SERVE, &["100.64.0.2"]).await;
 
         assert_eq!(body["machine"], "iphone");
     }
@@ -3556,7 +3722,7 @@ mod tests {
             ("n-impostor", "impostor", &[address(2)]),
             (CALLER_NODE, "iphone", &[address(9)]),
         ]);
-        let (_, body) = ask_here(direct(mine(2)), fleet, address(2), &[]).await;
+        let (_, body) = ask_here(direct(mine(2)), fleet, tcp(address(2)), &[]).await;
 
         assert_eq!(body["machine"], "iphone");
     }
@@ -3566,7 +3732,7 @@ mod tests {
         let (status, body) = ask_here(
             direct(mine(2)),
             on_the_tailnet(&[("n-other", "laptop", &[address(2)])]),
-            address(2),
+            tcp(address(2)),
             &[],
         )
         .await;
@@ -3578,9 +3744,9 @@ mod tests {
     #[tokio::test]
     async fn here_refuses_a_list_of_forwarded_addresses() {
         let (status, _) = ask_here(
-            behind_the_proxy(mine(2)),
+            on_this_machine(mine(2)),
             on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
-            address(1),
+            SERVE,
             &["100.64.0.2, 100.64.0.3"],
         )
         .await;
@@ -3594,7 +3760,7 @@ mod tests {
         let (status, _) = ask_here(
             direct(fake),
             on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(3)])]),
-            address(3),
+            tcp(address(3)),
             &[],
         )
         .await;
@@ -3607,7 +3773,7 @@ mod tests {
         let (status, _) = ask_here(
             direct(tailnet(vec![])),
             on_the_tailnet(&[(CALLER_NODE, "iphone", &[address(2)])]),
-            address(2),
+            tcp(address(2)),
             &[],
         )
         .await;
@@ -3617,7 +3783,7 @@ mod tests {
 
     #[tokio::test]
     async fn here_is_503_before_the_first_tailnet_look() {
-        let (status, _) = ask_here(direct(mine(2)), Fleet::default(), address(2), &[]).await;
+        let (status, _) = ask_here(direct(mine(2)), Fleet::default(), tcp(address(2)), &[]).await;
 
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
@@ -3634,7 +3800,7 @@ mod tests {
                 stderr: "failed to connect to local tailscaled".to_owned(),
             },
         ))));
-        let (status, _) = ask_here(direct(mine(2)), fleet, address(2), &[]).await;
+        let (status, _) = ask_here(direct(mine(2)), fleet, tcp(address(2)), &[]).await;
 
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
@@ -3643,7 +3809,7 @@ mod tests {
     async fn this_owners_untagged_node_is_allowed() {
         let fake = tailnet(vec![(address(2), caller(ME, &[]))]);
 
-        let allowed = allowed(&direct(fake), address(2), &HeaderMap::new())
+        let allowed = allowed(&direct(fake), &tcp(address(2)), &HeaderMap::new())
             .await
             .expect("my own node");
 
@@ -3656,7 +3822,7 @@ mod tests {
     async fn a_node_belonging_to_someone_else_is_refused() {
         let fake = tailnet(vec![(address(3), caller(ME + 1, &[]))]);
 
-        let refused = allowed(&direct(fake), address(3), &HeaderMap::new())
+        let refused = allowed(&direct(fake), &tcp(address(3)), &HeaderMap::new())
             .await
             .expect_err("not this owner");
 
@@ -3670,7 +3836,7 @@ mod tests {
     async fn a_tagged_node_is_refused_even_though_the_owner_matches() {
         let fake = tailnet(vec![(address(4), caller(ME, &["tag:ci"]))]);
 
-        let refused = allowed(&direct(fake), address(4), &HeaderMap::new())
+        let refused = allowed(&direct(fake), &tcp(address(4)), &HeaderMap::new())
             .await
             .expect_err("tagged");
 
@@ -3679,9 +3845,13 @@ mod tests {
 
     #[tokio::test]
     async fn an_address_belonging_to_no_peer_is_refused() {
-        let refused = allowed(&direct(tailnet(vec![])), address(9), &HeaderMap::new())
-            .await
-            .expect_err("nobody holds it");
+        let refused = allowed(
+            &direct(tailnet(vec![])),
+            &tcp(address(9)),
+            &HeaderMap::new(),
+        )
+        .await
+        .expect_err("nobody holds it");
 
         assert!(matches!(refused, Refused::NotAPeer(_)), "{refused:?}");
         assert_eq!(refused.into_response().status(), StatusCode::FORBIDDEN);
@@ -3711,9 +3881,13 @@ mod tests {
             }
         }
 
-        let refused = allowed(&Authoriser::new(Down, &[]), address(2), &HeaderMap::new())
-            .await
-            .expect_err("cannot ask");
+        let refused = allowed(
+            &Authoriser::new(Down, &[], std::path::Path::new("yantrad.sock")),
+            &tcp(address(2)),
+            &HeaderMap::new(),
+        )
+        .await
+        .expect_err("cannot ask");
 
         assert!(matches!(refused, Refused::CannotAsk(_)), "{refused:?}");
         assert_eq!(
@@ -3722,21 +3896,52 @@ mod tests {
         );
     }
 
-    /// ADR-0017 §1, the half that keeps the direct port as ADR-0016 wrote it: a
-    /// caller reaching 7717 can put anything in the header, and its own address
-    /// is the peer rather than ours, so the header is not read. A tagged node
-    /// that could launder itself through one would be the hole widened, not
-    /// closed.
+    /// ADR-0042 §5, the hole with no header at all: this machine's own
+    /// address over TCP is any account here, so it is refused, and the refusal
+    /// names the socket and the `serve` command.
     #[tokio::test]
-    async fn a_forwarded_address_from_a_peer_that_is_not_ours_is_not_the_caller() {
+    async fn this_machines_own_address_over_tcp_is_refused_with_a_forged_header_and_without() {
+        let fake = || {
+            tailnet(vec![
+                (address(1), caller(ME, &[])),
+                (address(2), caller(ME, &[])),
+            ])
+        };
+        for headers in [HeaderMap::new(), forwarded(&["100.64.0.2"])] {
+            let refused = allowed(&on_this_machine(fake()), &tcp(address(1)), &headers)
+                .await
+                .expect_err("any account here could have sent it");
+
+            assert!(matches!(refused, Refused::OwnAddress(_)), "{refused:?}");
+            let answer = refused.into_response();
+            assert_eq!(answer.status(), StatusCode::FORBIDDEN);
+            let said = axum::body::to_bytes(answer.into_body(), 4096)
+                .await
+                .expect("in memory");
+            let said = String::from_utf8_lossy(&said);
+            assert!(
+                said.contains("curl --unix-socket /run/yantra/yantrad.sock"),
+                "{said}"
+            );
+            assert!(
+                said.contains("tailscale serve --bg --https=8443 unix:/run/yantra/yantrad.sock"),
+                "{said}"
+            );
+        }
+    }
+
+    /// ADR-0042 §4: TCP never reads the header, so a tagged node cannot
+    /// launder itself through one.
+    #[tokio::test]
+    async fn a_header_on_tcp_is_never_read() {
         let fake = tailnet(vec![
             (address(2), caller(ME, &[])),
             (address(4), caller(ME, &["tag:ci"])),
         ]);
 
         let refused = allowed(
-            &behind_the_proxy(fake),
-            address(4),
+            &on_this_machine(fake),
+            &tcp(address(4)),
             &forwarded(&["100.64.0.2"]),
         )
         .await
@@ -3745,31 +3950,54 @@ mod tests {
         assert!(matches!(refused, Refused::Tagged(_)), "{refused:?}");
     }
 
-    /// **The acceptance criterion ADR-0017 names**, and the case the proxy
-    /// would otherwise authorise in silence: the peer *is* ours, so the
-    /// forwarded address is the caller — and it resolves to a tagged node.
+    /// ADR-0042 §3: on the `serve` hop an absent header names nobody, and this
+    /// machine's own address names an account nobody knows.
     #[tokio::test]
-    async fn a_forwarded_address_from_one_of_our_own_bind_addresses_is_the_caller() {
-        let fake = tailnet(vec![
-            (address(1), caller(ME, &[])),
-            (address(4), caller(ME, &["tag:ci"])),
-        ]);
+    async fn the_serve_hop_with_no_header_or_this_machines_address_is_refused() {
+        let fake = || tailnet(vec![(address(1), caller(ME, &[]))]);
+        for headers in [HeaderMap::new(), forwarded(&["100.64.0.1"])] {
+            let refused = allowed(&on_this_machine(fake()), &SERVE, &headers)
+                .await
+                .expect_err("not proved");
 
-        let refused = allowed(
-            &behind_the_proxy(fake),
-            address(1),
+            assert!(matches!(refused, Refused::Hop(_)), "{refused:?}");
+            assert_eq!(refused.into_response().status(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    /// **The request through `serve` that still writes**, and the predicate
+    /// judging the forwarded address rather than the hop.
+    #[tokio::test]
+    async fn the_serve_hop_names_the_phone_it_forwarded() {
+        let fake = || {
+            tailnet(vec![
+                (address(1), caller(ME, &[])),
+                (address(2), caller(ME, &[])),
+                (address(4), caller(ME, &["tag:ci"])),
+            ])
+        };
+
+        let phone = allowed(
+            &on_this_machine(fake()),
+            &SERVE,
+            &forwarded(&["100.64.0.2"]),
+        )
+        .await
+        .expect("the owner's phone");
+        assert_eq!(phone.user, ME);
+
+        let tagged = allowed(
+            &on_this_machine(fake()),
+            &SERVE,
             &forwarded(&["100.64.0.4"]),
         )
         .await
-        .expect_err("the proxy is not the caller");
+        .expect_err("tagged");
+        assert!(matches!(tagged, Refused::Tagged(_)), "{tagged:?}");
 
-        assert!(matches!(refused, Refused::Tagged(_)), "{refused:?}");
-
-        // Named in the refusal, so the address that was judged is the forwarded
-        // one and not the peer this daemon would otherwise have believed.
         let stranger = allowed(
-            &behind_the_proxy(tailnet(vec![(address(1), caller(ME, &[]))])),
-            address(1),
+            &on_this_machine(fake()),
+            &SERVE,
             &forwarded(&["100.64.0.9"]),
         )
         .await
@@ -3780,23 +4008,9 @@ mod tests {
         );
     }
 
-    /// ADR-0017 §3. An absent header is not a refusal — it says nothing proxied
-    /// this, which is every request on 7717.
-    #[tokio::test]
-    async fn a_request_from_our_own_bind_address_with_no_header_is_the_peer() {
-        let fake = tailnet(vec![(address(1), caller(ME, &[]))]);
-
-        let allowed = allowed(&behind_the_proxy(fake), address(1), &HeaderMap::new())
-            .await
-            .expect("the local hop, unproxied");
-
-        assert_eq!(allowed.user, ME);
-    }
-
-    /// ADR-0017 §3's other half: `tailscaled` writes exactly one address with
-    /// `Set`, so a list, a second line or a value that is not an address means
-    /// something unmeasured is in the path — refused rather than repaired, and
-    /// **not** by taking one entry out of a list.
+    /// ADR-0017 §3, kept for the `serve` hop: a list, a second line or a value
+    /// that is not an address means something unmeasured is in the path —
+    /// refused rather than repaired, and **not** by taking one entry of a list.
     #[tokio::test]
     async fn a_forwarded_header_that_is_not_one_address_is_refused() {
         let fleet = || {
@@ -3812,7 +4026,7 @@ mod tests {
             forwarded(&[""]),
             forwarded(&["cachyos-g14"]),
         ] {
-            let refused = allowed(&behind_the_proxy(fleet()), address(1), &header)
+            let refused = allowed(&on_this_machine(fleet()), &SERVE, &header)
                 .await
                 .expect_err("one address or refuse");
 
@@ -3823,6 +4037,90 @@ mod tests {
                 "the caller did not write this header, so refusing them names the wrong thing"
             );
         }
+    }
+
+    /// The daemon's own account is this machine, and its header is not read:
+    /// here it names a tagged node, which would be refused.
+    #[tokio::test]
+    async fn the_daemons_own_account_is_this_machine_whatever_it_forwards() {
+        let fake = tailnet(vec![
+            (address(1), caller(ME, &[])),
+            (address(4), caller(ME, &["tag:ci"])),
+        ]);
+
+        let owner = allowed(
+            &on_this_machine(fake),
+            &daemon_account(),
+            &forwarded(&["100.64.0.4"]),
+        )
+        .await
+        .expect("this machine");
+
+        assert_eq!(owner.user, ME);
+    }
+
+    #[test]
+    fn a_member_of_the_yantra_group_is_this_machine_and_anyone_else_is_named() {
+        let group = Group {
+            name: GROUP.to_owned(),
+            passwd: std::ffi::CString::default(),
+            gid: Gid::from_raw(900),
+            mem: vec!["alice".to_owned()],
+        };
+
+        assert_eq!(
+            classify("alice".to_owned(), Gid::from_raw(1000), Some(&group)),
+            Hop::Owner
+        );
+        assert_eq!(
+            classify("yantra".to_owned(), Gid::from_raw(900), Some(&group)),
+            Hop::Owner,
+            "a primary gid is membership too"
+        );
+        assert_eq!(
+            classify("karigar".to_owned(), Gid::from_raw(1001), Some(&group)),
+            Hop::Other("karigar".to_owned())
+        );
+        assert_eq!(
+            classify("karigar".to_owned(), Gid::from_raw(900), None),
+            Hop::Other("karigar".to_owned()),
+            "no group, no members"
+        );
+    }
+
+    /// ADR-0042 §3: any other account, or one the kernel could not name, is
+    /// refused on every route that calls [`allowed`].
+    #[tokio::test]
+    async fn another_account_on_the_socket_is_refused() {
+        let authoriser = on_this_machine(tailnet(vec![(address(1), caller(ME, &[]))]));
+
+        let other = authoriser
+            .caller_address(
+                &Hop::Other("karigar".to_owned()),
+                &forwarded(&["100.64.0.2"]),
+            )
+            .expect_err("only the owner's accounts act");
+        assert!(matches!(&other, Refused::Account(Some(name)) if name == "karigar"));
+        assert_eq!(other.into_response().status(), StatusCode::FORBIDDEN);
+
+        let unnamed = allowed(&authoriser, &Peer::Unix(None), &HeaderMap::new())
+            .await
+            .expect_err("no credentials");
+        assert!(matches!(unnamed, Refused::Account(None)), "{unnamed:?}");
+        assert_eq!(unnamed.into_response().status(), StatusCode::FORBIDDEN);
+    }
+
+    /// ADR-0042 §3: another account may fetch the script and join as itself,
+    /// and as nobody else.
+    #[test]
+    fn another_account_may_join_only_itself() {
+        let karigar = || Hop::Other("karigar".to_owned());
+
+        assert_eq!(admit(karigar(), None), Hop::Owner, "GET /join");
+        assert_eq!(admit(karigar(), Some("karigar")), Hop::Owner);
+        assert_eq!(admit(karigar(), Some("deploy")), karigar());
+        assert_eq!(admit(Hop::Unknown, None), Hop::Unknown);
+        assert_eq!(admit(Hop::Serve, Some("karigar")), Hop::Serve);
     }
 
     #[test]
@@ -4181,9 +4479,7 @@ mod tests {
                 r#"{"name":"site","machine":"mac","repo":"/code/site"}"#,
             ))
             .expect("a POST with a JSON body");
-        write
-            .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+        write.extensions_mut().insert(ConnectInfo(tcp(address(9))));
 
         let made = app.oneshot(write).await.expect("the router is infallible");
         assert_eq!(
@@ -4210,9 +4506,7 @@ mod tests {
         let mut beacon = Request::post("/viewing")
             .body(Body::empty())
             .expect("a POST");
-        beacon
-            .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::new(address(2), 61620)));
+        beacon.extensions_mut().insert(ConnectInfo(tcp(address(2))));
 
         let answered = app.oneshot(beacon).await.expect("the router is infallible");
 
@@ -4236,9 +4530,7 @@ mod tests {
         let mut beacon = Request::post("/viewing")
             .body(Body::empty())
             .expect("a POST");
-        beacon
-            .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::new(address(3), 61620)));
+        beacon.extensions_mut().insert(ConnectInfo(tcp(address(3))));
 
         let answered = app.oneshot(beacon).await.expect("the router is infallible");
 
@@ -4260,8 +4552,7 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(r#"{"url":"https://ntfy.sh/a-topic"}"#))
             .expect("a POST with a JSON body");
-        set.extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+        set.extensions_mut().insert(ConnectInfo(tcp(address(9))));
 
         let answered = app.oneshot(set).await.expect("the router is infallible");
 
@@ -4299,7 +4590,7 @@ mod tests {
                 .expect("a request with no body");
             request
                 .extensions_mut()
-                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                .insert(ConnectInfo(tcp(address(9))));
             let answered = app
                 .clone()
                 .oneshot(request)
@@ -4366,7 +4657,7 @@ mod tests {
                 .expect("a request with no body");
             request
                 .extensions_mut()
-                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                .insert(ConnectInfo(tcp(address(9))));
             request
         };
 
@@ -4424,7 +4715,7 @@ mod tests {
             let mut request = request.expect("a request with no body");
             request
                 .extensions_mut()
-                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                .insert(ConnectInfo(tcp(address(9))));
             let answered = app
                 .clone()
                 .oneshot(request)
@@ -4458,7 +4749,7 @@ mod tests {
             let mut request = request.expect("a request");
             request
                 .extensions_mut()
-                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                .insert(ConnectInfo(tcp(address(9))));
             let answered = app
                 .clone()
                 .oneshot(request)
@@ -4485,7 +4776,10 @@ mod tests {
                 .expect("a request");
             request
                 .extensions_mut()
-                .insert(ConnectInfo(SocketAddr::new(address(last), 61620)));
+                .insert(ConnectInfo(Peer::from(SocketAddr::new(
+                    address(last),
+                    61620,
+                ))));
             request
         };
 
@@ -4538,7 +4832,7 @@ mod tests {
             let mut request = request.expect("a request");
             request
                 .extensions_mut()
-                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                .insert(ConnectInfo(tcp(address(9))));
             let answered = app
                 .clone()
                 .oneshot(request)
@@ -4565,7 +4859,7 @@ mod tests {
                 let mut request = request.expect("a request");
                 request
                     .extensions_mut()
-                    .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                    .insert(ConnectInfo(tcp(address(9))));
                 app.oneshot(request)
                     .await
                     .expect("the router is infallible")
@@ -4611,7 +4905,7 @@ mod tests {
                     .expect("a request");
                 request
                     .extensions_mut()
-                    .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, at], 61620))));
+                    .insert(ConnectInfo(tcp(address(at))));
                 app.oneshot(request)
                     .await
                     .expect("the router is infallible")
@@ -4761,7 +5055,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            .insert(ConnectInfo(tcp(address(9))));
         let answered = app
             .oneshot(request)
             .await
@@ -4790,7 +5084,7 @@ mod tests {
                 let mut request = request.expect("a request");
                 request
                     .extensions_mut()
-                    .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                    .insert(ConnectInfo(tcp(address(9))));
                 let answered = app
                     .oneshot(request)
                     .await
@@ -5011,8 +5305,7 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(r#"{"repo":"/code/site"}"#))
             .expect("a PATCH with a JSON body");
-        edit.extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+        edit.extensions_mut().insert(ConnectInfo(tcp(address(9))));
 
         let refused = app
             .clone()
@@ -5064,9 +5357,7 @@ mod tests {
             "/workspaces/site/logs",
         ] {
             let mut asked = Request::post(path).body(Body::empty()).expect("a POST");
-            asked
-                .extensions_mut()
-                .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+            asked.extensions_mut().insert(ConnectInfo(tcp(address(9))));
 
             let refused = app
                 .clone()
@@ -5133,9 +5424,7 @@ mod tests {
         let mut asked = Request::post("/machines/nowhere.invalid/readiness")
             .body(Body::empty())
             .expect("a POST");
-        asked
-            .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::new(address(2), 61620)));
+        asked.extensions_mut().insert(ConnectInfo(tcp(address(2))));
         let answered = app.oneshot(asked).await.expect("the router is infallible");
         assert_eq!(answered.status(), StatusCode::OK);
 
@@ -5190,9 +5479,7 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body.to_string()))
             .expect("a POST");
-        asked
-            .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::new(address(2), 61620)));
+        asked.extensions_mut().insert(ConnectInfo(tcp(address(2))));
         let response = app.oneshot(asked).await.expect("the router is infallible");
         let status = response.status();
         let body = axum::body::to_bytes(response.into_body(), 4096)
@@ -5281,9 +5568,7 @@ mod tests {
                 r#"{"url":"https://github.com/o/r","path":"/srv/r"}"#,
             ))
             .expect("a POST");
-        asked
-            .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::new(address(9), 61620)));
+        asked.extensions_mut().insert(ConnectInfo(tcp(address(9))));
         let refused = app.oneshot(asked).await.expect("the router is infallible");
         assert_eq!(refused.status(), StatusCode::FORBIDDEN);
 
@@ -5744,7 +6029,7 @@ mod tests {
             router::<J, ()>(authoriser, fleet),
             "POST",
             "/update",
-            address(9),
+            tcp(address(9)),
             "",
         )
         .await;
@@ -5787,7 +6072,11 @@ mod tests {
         }
         let (fleet, trigger) = update_fleet("down", true);
 
-        let (status, _) = ask_update(Authoriser::new(Down, &[]), fleet).await;
+        let (status, _) = ask_update(
+            Authoriser::new(Down, &[], std::path::Path::new("yantrad.sock")),
+            fleet,
+        )
+        .await;
 
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert!(!trigger.exists());
@@ -5853,7 +6142,7 @@ mod tests {
             router::<J, ()>(authoriser, fleet),
             "PUT",
             "/update/channel",
-            address(9),
+            tcp(address(9)),
             body,
         )
         .await;
@@ -5969,7 +6258,7 @@ mod tests {
         router: Router,
         method: &str,
         path: &str,
-        from: IpAddr,
+        from: Peer,
         body: &str,
     ) -> (StatusCode, String, String) {
         use tower::ServiceExt as _;
@@ -5977,7 +6266,7 @@ mod tests {
             .method(method)
             .uri(path)
             .header(axum::http::header::CONTENT_TYPE, "application/json")
-            .extension(ConnectInfo(SocketAddr::new(from, 50_000)))
+            .extension(ConnectInfo(from))
             .body(axum::body::Body::from(body.to_owned()))
             .expect("a request");
         let response = router.oneshot(request).await.expect("infallible");
@@ -6009,7 +6298,7 @@ mod tests {
             joins(&fleet),
             "POST",
             "/join",
-            address(7),
+            tcp(address(7)),
             r#"{"user":"biswa"}"#,
         )
         .await;
@@ -6051,7 +6340,7 @@ mod tests {
             joins(&fleet),
             "POST",
             "/join",
-            address(7),
+            tcp(address(7)),
             r#"{"user":"biswa","machine":"someone-elses-box"}"#,
         )
         .await;
@@ -6069,7 +6358,7 @@ mod tests {
             joins(&fleet),
             "POST",
             "/join",
-            address(7),
+            tcp(address(7)),
             r#"{"user":"biswa\nHost *\n    ProxyCommand touch /tmp/pwned"}"#,
         )
         .await;
@@ -6088,14 +6377,14 @@ mod tests {
             joins(&fleet),
             "POST",
             "/join",
-            address(8),
+            tcp(address(8)),
             r#"{"user":"biswa"}"#,
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
 
         let script = script::<Fake, ()>(direct(joining_tailnet()), fleet.clone());
-        let (status, _, _) = join_send(script, "GET", "/join", address(8), "").await;
+        let (status, _, _) = join_send(script, "GET", "/join", tcp(address(8)), "").await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert!(!dir.exists(), "a refused caller made no key");
     }
@@ -6109,7 +6398,7 @@ mod tests {
         let fleet = join_fleet(&dir);
 
         let script = script::<Fake, ()>(direct(joining_tailnet()), fleet.clone());
-        let (status, kind, body) = join_send(script, "GET", "/join", address(7), "").await;
+        let (status, kind, body) = join_send(script, "GET", "/join", tcp(address(7)), "").await;
 
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(kind.starts_with("text/plain"), "{kind}");
@@ -6117,6 +6406,54 @@ mod tests {
         assert!(body.contains(&format!("KEY='{}'", public.trim())), "{body}");
         assert!(body.contains("DAEMON='100.64.0.1:7717'"), "{body}");
         assert!(body.starts_with("#!/bin/sh"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ADR-0042: the script fetched on the socket by another account posts on
+    /// the socket, as that account; over TCP it names none.
+    #[tokio::test]
+    async fn the_script_fetched_on_the_socket_names_the_socket() {
+        let dir = join_scratch("socket");
+        let fleet = join_fleet(&dir);
+        let at = |fake| {
+            Authoriser::new(
+                fake,
+                &fleet.facts.listening_on,
+                std::path::Path::new("/run/yantra/yantrad.sock"),
+            )
+        };
+        let mut tailnet = joining_tailnet();
+        tailnet.callers.insert(address(1), caller(ME, &[]));
+
+        let served = script::<Fake, ()>(at(tailnet.clone()), fleet.clone());
+        let (status, _, body) = join_send(served, "GET", "/join", daemon_account(), "").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("SOCKET='/run/yantra/yantrad.sock'"), "{body}");
+
+        let served = script::<Fake, ()>(at(tailnet.clone()), fleet.clone());
+        let (status, _, body) = join_send(served, "GET", "/join", tcp(address(7)), "").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("SOCKET=''"), "{body}");
+
+        // `curl …:8443/join | sh` on another machine reaches the socket as root.
+        use tower::ServiceExt as _;
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/join")
+            .header(FORWARDED_FOR, address(7).to_string())
+            .extension(ConnectInfo(SERVE))
+            .body(axum::body::Body::empty())
+            .expect("a request");
+        let response = script::<Fake, ()>(at(tailnet), fleet.clone())
+            .oneshot(request)
+            .await
+            .expect("infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("a body");
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("SOCKET=''"), "{body}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -6129,8 +6466,8 @@ mod tests {
         let script = script::<Fake, ()>(direct(joining_tailnet()), fleet.clone());
 
         let (first, second) = tokio::join!(
-            join_send(script.clone(), "GET", "/join", address(7), ""),
-            join_send(script, "GET", "/join", address(7), ""),
+            join_send(script.clone(), "GET", "/join", tcp(address(7)), ""),
+            join_send(script, "GET", "/join", tcp(address(7)), ""),
         );
 
         assert_eq!(first.0, StatusCode::OK, "{}", first.2);
@@ -6169,7 +6506,7 @@ mod tests {
             router::<Fake, ()>(direct(tailnet), fleet.clone()),
             "POST",
             "/join",
-            address(7),
+            tcp(address(7)),
             r#"{"user":"biswa"}"#,
         )
         .await;
@@ -6202,7 +6539,7 @@ mod tests {
             joins(&fleet),
             "POST",
             "/join/forget-host-key",
-            address(7),
+            tcp(address(7)),
             "",
         )
         .await;
@@ -6235,7 +6572,7 @@ mod tests {
             router::<Fake, ()>(direct(tailnet), fleet.clone()),
             "POST",
             "/join/forget-host-key",
-            address(7),
+            tcp(address(7)),
             "",
         )
         .await;
@@ -6243,7 +6580,7 @@ mod tests {
             joins(&fleet),
             "POST",
             "/join/forget-host-key",
-            address(8),
+            tcp(address(8)),
             "",
         )
         .await;
@@ -6272,7 +6609,7 @@ mod tests {
             joins(&fleet),
             "POST",
             "/join",
-            address(7),
+            tcp(address(7)),
             r#"{"user":"biswa"}"#,
         )
         .await;
@@ -6312,7 +6649,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::new(address(9), 61620)));
+            .insert(ConnectInfo(tcp(address(9))));
         router::<Fake, ()>(direct(fake), Fleet::default())
             .oneshot(request)
             .await
@@ -6401,7 +6738,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::new(address(9), 61620)));
+            .insert(ConnectInfo(tcp(address(9))));
         let response = router::<Fake, ()>(direct(fake), Fleet::default())
             .oneshot(request)
             .await

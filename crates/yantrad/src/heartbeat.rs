@@ -37,6 +37,7 @@ use yantra_core::inventory::MachineInfo;
 use yantra_core::snapshot::Reading;
 
 use crate::refresh::Model;
+use crate::write::Peer;
 
 /// ~30× the largest payload measured across the tailnet, and still bounded;
 /// `labels` is the only field that could grow without one.
@@ -190,9 +191,17 @@ pub fn router() -> Router<Fleet> {
 /// 415 and 422 without a line of code here.
 async fn receive(
     State(fleet): State<Fleet>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     axum::Json(beat): axum::Json<Heartbeat>,
 ) -> Response {
+    // ADR-0013 §5 attributes a beat by its source address, which a socket has not.
+    let Peer::Tcp(from) = from else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "a heartbeat is attributed by its tailnet address, so it is sent over TCP",
+        )
+            .into_response();
+    };
     if let Some(reason) = out_of_range(&beat) {
         return (StatusCode::UNPROCESSABLE_ENTITY, reason).into_response();
     }
@@ -339,10 +348,12 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(body.to_owned()))
             .expect("a POST with a JSON body is a valid request");
-        request.extensions_mut().insert(ConnectInfo(SocketAddr::new(
-            source.parse().expect("a fixture address"),
-            61620,
-        )));
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(Peer::from(SocketAddr::new(
+                source.parse().expect("a fixture address"),
+                61620,
+            ))));
         request
     }
 
@@ -374,6 +385,20 @@ mod tests {
         assert_eq!(reading.value().power, Power::Ac);
         assert!(reading.age() < Duration::from_secs(1));
         assert_eq!(held.len(), 1, "no row for a machine that did not beat");
+    }
+
+    /// A socket has no tailnet address to attribute a beat by, so it is a 400
+    /// rather than the 500 a missing `SocketAddr` would answer.
+    #[tokio::test]
+    async fn a_beat_on_the_socket_is_refused_and_written_nowhere() {
+        let fleet = fleet();
+        let mut request = beat_from("100.64.0.2", BEAT);
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(Peer::Unix(Some(0))));
+        let (status, body) = send(&fleet, request).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(beats(&fleet).await.is_empty());
     }
 
     #[tokio::test]
@@ -531,10 +556,12 @@ mod tests {
         let mut request = Request::post("/heartbeat")
             .body(Body::from(BEAT))
             .expect("a POST with no content type is still a valid request");
-        request.extensions_mut().insert(ConnectInfo(SocketAddr::new(
-            "100.64.0.2".parse().expect("a fixture address"),
-            61620,
-        )));
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(Peer::from(SocketAddr::new(
+                "100.64.0.2".parse().expect("a fixture address"),
+                61620,
+            ))));
         let (status, body) = send(&fleet, request).await;
         assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE, "{body}");
         assert!(beats(&fleet).await.is_empty());

@@ -14,7 +14,6 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -29,7 +28,7 @@ use yantra_core::install;
 use yantra_core::inventory::Inventory;
 use yantra_core::ssh::{self, Machine, Ssh};
 
-use crate::write::{Authoriser, Refused, allowed, chain};
+use crate::write::{Authoriser, Peer, Refused, allowed, chain};
 
 struct Entry {
     machine: String,
@@ -230,11 +229,11 @@ fn refused(error: &delegate::Error) -> Refused {
 
 async fn start<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Delegates<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Json(asked): Json<Start>,
 ) -> Result<(StatusCode, Json<Started>), Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     // The name reaches `ssh`'s argv (ADR-0009).
     install::check_machine(&asked.machine).map_err(|error| bad(error.to_string()))?;
     let harness: Harness = asked.harness.parse().map_err(bad)?;
@@ -279,10 +278,10 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn list<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Delegates<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<Listed>>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let tasks = state.tasks.lock().unwrap_or_else(PoisonError::into_inner);
     Ok(Json(
         tasks
@@ -297,22 +296,22 @@ async fn list<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn read<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Delegates<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Read>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let entry = find(&state.tasks, &id)?;
     Ok(Json(read_out(&id, &entry)))
 }
 
 async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Delegates<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Read>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let entry = find(&state.tasks, &id)?;
     tracing::info!("stop task {id} for {}", caller.node);
     if let Err(error) = entry.task.stop().await {
@@ -323,12 +322,12 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn steer<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Delegates<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Json(asked): Json<Steer>,
 ) -> Result<Json<Read>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     if asked.prompt.trim().is_empty() {
         return Err(bad("a steer needs a prompt".to_owned()));
     }
@@ -343,12 +342,12 @@ async fn steer<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn wait<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Delegates<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(id): Path<String>,
     RawQuery(query): RawQuery,
 ) -> Result<Json<Waited>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let limit = limit(query.as_deref()).map_err(bad)?;
     let entry = find(&state.tasks, &id)?;
     let settled = until_closing(&state.closing, entry.task.wait(limit))
@@ -402,11 +401,11 @@ fn limit(query: Option<&str>) -> Result<Duration, String> {
 
 async fn remove<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Delegates<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Removed>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let entry = find(&state.tasks, &id)?;
     tracing::info!("remove task {id} for {}", caller.node);
     // Kept on failure, so the caller can try the removal again.
@@ -432,6 +431,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Method, Request, header};
     use std::net::IpAddr;
+    use std::net::SocketAddr;
     use tower::ServiceExt as _;
     use yantra_core::inventory::{Caller, Fake};
 
@@ -455,7 +455,7 @@ mod tests {
             owner: ME,
         };
         routes(
-            Authoriser::new(fake, &[]),
+            Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock")),
             locate,
             watch::Sender::new(false),
         )
@@ -486,7 +486,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((from, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((from, 61620)))));
         let response = app
             .oneshot(request)
             .await

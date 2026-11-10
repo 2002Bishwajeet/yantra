@@ -80,3 +80,61 @@ test.describe('under reduce', () => {
     expect(await popup.evaluate(durationOf, 'opacity')).toBe('0.15s')
   })
 })
+
+/** Y-678: a route change runs one view transition, typed by direction. */
+const watchTransitions = (page: Parameters<typeof scenario>[0]) =>
+  page.addInitScript(() => {
+    const seen: string[][] = []
+    Object.assign(window, { transitions: seen })
+    const start = document.startViewTransition?.bind(document)
+    if (!start) return
+    document.startViewTransition = ((arg: unknown) => {
+      seen.push((arg as { types?: string[] }).types ?? [])
+      return start(arg as never)
+    }) as typeof document.startViewTransition
+  })
+const transitions = (page: Parameters<typeof scenario>[0]) =>
+  page.evaluate(() => (window as unknown as { transitions: string[][] }).transitions)
+
+const goMachines = async (page: Parameters<typeof scenario>[0], size: string) => {
+  await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
+  const nav = size === 'phone' ? page.getByRole('navigation', { name: 'Main' }) : page
+  await nav.getByRole('link', { name: 'Machines' }).first().click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Machines' })).toBeVisible()
+}
+
+test.describe('route changes with motion', () => {
+  test.use({ reducedMotion: 'no-preference' })
+
+  test('each change runs one transition and back runs it backwards', async ({ page, size }) => {
+    test.skip(size === 'tablet', 'the phone bar and the desktop links are enough')
+    await scenario(page, 'busy')
+    await watchTransitions(page)
+    await page.goto('/')
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
+    const bar = page.getByRole('navigation', { name: 'Main' })
+    const before = size === 'phone' ? await bar.boundingBox() : null
+    await goMachines(page, size)
+    await page.locator('a[href^="/m/"]').first().click()
+    await expect(page.getByRole('heading', { level: 1 })).not.toHaveText('Machines')
+    await page.goBack()
+    await expect(page.getByRole('heading', { level: 1, name: 'Machines' })).toBeVisible()
+    const seen = await transitions(page)
+    expect(seen).toHaveLength(3)
+    expect(seen.map((types) => types[0])).toEqual(['forward', 'forward', 'back'])
+    // The chrome is its own transition group, so the bar does not slide.
+    if (before) expect(await bar.boundingBox()).toEqual(before)
+  })
+})
+
+test.describe('route changes under reduce', () => {
+  test.use({ reducedMotion: 'reduce' })
+
+  test('no transition runs and the screen still changes', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await watchTransitions(page)
+    await goMachines(page, size)
+    expect(await transitions(page)).toHaveLength(0)
+  })
+})

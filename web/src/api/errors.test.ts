@@ -7,6 +7,7 @@ import {
   attentionQuery,
   dirsQuery,
   githubQuery,
+  hiddenOrgsQuery,
   machineReadinessQuery,
   machinesQuery,
   notificationsQuery,
@@ -130,6 +131,7 @@ const swept = [
   ['attention', attentionQuery()],
   ['status', statusQuery('yantra')],
   ['repos', reposQuery()],
+  ['hidden orgs', hiddenOrgsQuery()],
 ] as const
 
 const asked = [

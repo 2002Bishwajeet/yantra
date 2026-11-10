@@ -93,6 +93,10 @@ cargo run --bin yantrad          # one terminal
 npm --prefix web run dev         # another; open the URL it prints
 ```
 
+A write through the Vite proxy on the daemon's own machine gets **403**. The proxy connects from this
+machine's own address, and any account here could be behind it
+([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md) accepts this cost). Reads still work.
+
 **Looking at the dashboard from anywhere else**, which is what a phone needs — `yantrad` serves the
 built assets itself, from one origin, so there is no CORS and no second process:
 
@@ -225,10 +229,17 @@ A browser needs this for more than the padlock. Service workers do not register 
 context, so the PWA (Y-114) cannot exist over HTTP, and `navigator.clipboard` already fails for the
 same reason.
 
+The proxy reaches the daemon on its socket, `/run/yantra/yantrad.sock`. systemd makes `/run/yantra`
+for the unit. For `cargo run`, make it yourself after each boot, because `/run` is a tmpfs:
+
+```bash
+sudo install -d -o "$USER" /run/yantra
+```
+
 Run the daemon as above, then, **once**:
 
 ```bash
-just https        # tailscale serve --bg --https=8443 "http://$(tailscale ip -4):7717"
+just https        # tailscale serve --bg --https=8443 unix:/run/yantra/yantrad.sock
 ```
 
 Open **`https://<machine>.<tailnet>.ts.net:8443/`** from anything on the tailnet — a phone included.
@@ -245,11 +256,12 @@ just https-off    # tailscale serve --https=8443 off
 tailscale serve status
 ```
 
-Four things about that command are deliberate, and three of them were measured rather than assumed.
+Three things about that command are deliberate, and two of them were measured rather than assumed.
 
-**It proxies to the tailnet address, never `127.0.0.1`.** Y-069 has the daemon bind only the
-addresses Tailscale says this machine holds, and loopback is deliberately not among them, so
-`http://127.0.0.1:7717` is refused by design. `$(tailscale ip -4)` is the target that works.
+**It proxies to the socket, never to an address.** On the socket the kernel names the account that
+connected, and `tailscaled` runs as root. So uid 0 is the proxy, and its `X-Forwarded-For` is the
+caller. Over TCP, a request from this machine's own address is refused, because any account here
+could have sent it ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)).
 
 **Port 8443, not `/`.** `/` on this machine's HTTPS is code-server's and stays that way. A subpath
 would have cost the PWA its service-worker scope — a worker's scope is its path — and made every
@@ -262,10 +274,6 @@ already holds that address and port; `ss -lntp` then still shows the socket belo
 so `tailscaled` never got it and the HTTPS endpoint quietly does not exist. Keeping one meaning per
 port avoids that: 7717 is the daemon's plain-HTTP listener that `yantra-agent` posts heartbeats to,
 8443 is the browser's door.
-
-**The target address is stored, not resolved per request.** `tailscale serve status` shows the
-literal `100.x.x.x` the shell expanded. If this machine's tailnet address ever changes, re-run
-`just https`.
 
 ### What the proxy does to caller identity
 
@@ -283,6 +291,11 @@ this machine looks like and what nothing off it can produce. Everywhere else the
 as before, so a forged header on `:7717` still changes nothing, and a forwarded value that is not
 exactly one address is refused rather than repaired. A tagged CI runner or a node shared in from
 another tailnet is now refused on both ports.
+
+**Changed on 2026-11-10 by [ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md) (Y-680).**
+The bind address proved nothing: any account on this machine opens a connection from it, with a
+forged header or with none. The proxy now reaches the daemon on its socket, where the kernel names
+the account. TCP never reads the header, and refuses this machine's own address.
 
 ## Testing
 

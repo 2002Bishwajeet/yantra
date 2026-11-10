@@ -19,12 +19,12 @@ const present = (name: string): Check => ({
   detail: "ok",
 });
 
-function renderCard(machine: Machine, checks: Check[]) {
+function renderCard(machine: Machine, checks: Check[], condensed = false) {
   const root = createRootRoute({
     component: () => (
       <MachineCard
         checks={checks}
-        condensed={false}
+        condensed={condensed}
         machine={machine}
         pending={false}
         sessions={0}
@@ -56,6 +56,7 @@ describe("a ready machine whose microphone is not installed", () => {
       "login-session",
       "folder-access",
       "hooks",
+      "no-sudo",
       "heartbeat",
     ].map(present);
     checks.push({
@@ -66,7 +67,7 @@ describe("a ready machine whose microphone is not installed", () => {
     renderCard(aMachine(), checks);
     await screen.findByText("ready");
     expect(screen.getByText("ready")).toBeTruthy();
-    expect(screen.getByText("12 of 13")).toBeTruthy();
+    expect(screen.getByText("13 of 14")).toBeTruthy();
     expect(screen.queryByText(/failing/)).toBeNull();
   });
 });
@@ -93,5 +94,32 @@ describe("a machine whose Tailscale lost its control server (Y-626)", () => {
     renderCard(aMachine(), ["reachable"].map(present));
     await screen.findByText("cachyos-g14");
     expect(screen.queryByText(/control server/)).toBeNull();
+  });
+});
+
+describe("the joined account and sudo (Y-628)", () => {
+  const withSudo = (state: Check["state"], detail: string) => [
+    ...["reachable", "sshd", "tmux", "git", "agent-cli", "terminfo"].map(present),
+    { check: "no-sudo", state, detail },
+  ];
+
+  it.each([false, true])("warns, in words and not on hover, when agents can use sudo (condensed: %s)", async (condensed) => {
+    renderCard(aMachine(), withSudo("absent", "the account is in the wheel group"), condensed);
+    const note = await screen.findByRole("note");
+    expect(note.textContent).toBe(
+      "Agents here can use sudo: the account is in the wheel group. Join a separate account without sudo, named karigar.",
+    );
+  });
+
+  it("says nothing when the account cannot use sudo", async () => {
+    renderCard(aMachine(), withSudo("present", "there is no sudo here"));
+    await screen.findByText("ssh");
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("says nothing when sudo could not be asked, because unknown is not absent", async () => {
+    renderCard(aMachine(), withSudo("unknown", "could not be asked"));
+    await screen.findByText("ssh");
+    expect(screen.queryByRole("note")).toBeNull();
   });
 });

@@ -157,6 +157,12 @@ The reason is the next section: once `/` holds the work rather than the inventor
 you reach the ninety per cent of your fleet that is idle. Keeping verbs out means a destructive
 action is never two keystrokes from anywhere, which §4.7 depends on.
 
+> **2026-11-10, [Y-499](../../tracker.md): M16 lets the palette run the coding loop's verbs.** On a
+> chat it lists Diff, Commit, Push, Open PR and Merge, and from any page Start from issue
+> ([M16 plan §3.9](../plans/m16-the-coding-loop.md)). A verb opens the dialog that asks, so Commit
+> shows its message and Merge asks to confirm. No verb is one step that cannot be undone, and §4.7
+> still holds. The palette still opens every place without a verb.
+
 ---
 
 ## 4. The fleet page
@@ -1113,7 +1119,7 @@ Sized to be taken one at a time. **Proposed, not opened** (§B0).
 | **D3.15** | The page says once when nothing can be reached (§7.2) | one state, naming what it cannot tell apart, and no stale data drawn |
 | **D3.16** | Confirm what cannot be undone (§4.7) | delete and kill ask; stop and resume do not |
 | **D3.17** | `/` fits in under three phone screens (§10) | measured at 390 px with ten workspaces and three machines |
-| **D3.18** | `⌘K` finds workspaces, machines and routes (§3.2) | it navigates, it runs no verb, and it uses the ported `command` |
+| **D3.18** | `⌘K` finds workspaces, machines and routes (§3.2) | it navigates, it runs no verb, and it uses the ported `command`. *Amended 2026-11-10 (Y-499): on a chat it also runs the loop's verbs, each through its own dialog.* |
 | **D3.19** | Idle collapses past a threshold (§4.6) | a count, the recent few, one disclosure |
 | **D3.20** | `/` becomes the setup checklist when no workspace exists (§4.8) | D2's checks draw as the page, and it reverts on the first workspace |
 | **D3.21** | Readiness re-checks on request (§4.8) | a POST, and a machine fixed by hand confirms without waiting a sweep |

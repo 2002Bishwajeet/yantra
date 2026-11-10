@@ -130,7 +130,7 @@ read off the `nightly` release's title. About serves it as `channel`. `PUT /api/
 `write.rs`, on the gate, rewrites that one word in place and wakes the release look. It never names
 a version.
 
-**It is a class on the refresh sweep, not a handler that runs `doctor`.** Twelve checks over ssh per
+**It is a class on the refresh sweep, not a handler that runs `doctor`.** Thirteen checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.
 It runs at the same `EVERY` as the other four, and **not** because a slower loop would pay a fresh
 handshake — the machines, sessions and agents sweeps hold the `ControlPersist=300` masters open on
@@ -145,7 +145,7 @@ unclear, and the second look corrects it.
 **The daemon keeps the latest check of each machine** (Y-579). The sweep asks the machines workspaces
 name and each online tailnet peer that the dashboard's `runsSessions` counts: your own Linux or
 macOS machines. A Windows, shared or tagged peer gets no check, because `presentOn` divides by
-this list and such a peer is never counted. Each machine asked pays thirteen checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
+this list and such a peer is never counted. Each machine asked pays fourteen checks every 30 s, on the same `ControlPersist` masters as the sessions sweep (Y-176). The
 candidates come from the last machines reading, so this adds no `tailscale` call. `Snapshot::checks`
 holds one report per machine with its own age, and `refresh::settle` is the one place a sweep
 lands. A failed sweep changes nothing there, and a machine the sweep skipped keeps its report. An
@@ -162,7 +162,7 @@ installed `tmux` by hand needs the answer before the next sweep, and the `GET` b
 serve one up to 30 s old. It lives in [`write.rs`](src/write.rs) with the probe, on the same
 authoriser, and it answers the sweep's own envelope at `age_seconds: 0` so the page needs no second
 type, and it keeps the report before it answers. **It takes any machine name and there is no 404** — ADR-0009 leaves this daemon no register of
-ssh destinations to refuse one against, and a name nothing answers to is thirteen *unknown* checks like
+ssh destinations to refuse one against, and a name nothing answers to is fourteen *unknown* checks like
 any other machine that did not answer, because `doctor::machine` cannot fail (R-23). It costs a full
 `ConnectTimeout` when the machine is asleep. **Nothing stops a client polling it** — ADR-0019 says so
 of itself, and debounce belongs in the browser.
@@ -415,7 +415,14 @@ because sshd's host key is not Tailscale SSH's. It holds `Fleet::joins` too, and
 `/api/join`'s body. **`GET /join` sits beside
 `/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
 `yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
-owner ruled that generation is Yantra's and happens on first use.
+owner ruled that generation is Yantra's and happens on first use. **On the socket another account
+may join itself** ([ADR-0042](../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md) §3): the
+two join routes call `joining`, which admits that account for `GET /join` and for a `POST /api/join`
+whose `user` is its own name. Every other route refuses it. A script fetched on the socket by an
+account other than root carries the socket's path, and `join.sh` sends its daemon calls there. uid 0
+is the `serve` hop, so its script names no socket: the machine that runs it is another one. The login
+test and `forget-host-key` call `allowed`, so that other account gets a 403 on them, and `join.sh`
+says the test did not run and points at the dashboard's Check.
 
 **`clone` is one of the writes that answer before their work is done** (Y-344). `git clone` runs as the
 startup command of a tmux session on the machine and the route answers `202` with the session's name;
@@ -470,7 +477,7 @@ its browser keys, drafts among them, to itself on `:8443`, because the two origi
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own
-untagged node is refused. *Which* address that is, is ADR-0017's — see the proxy section below.
+untagged node is refused. *Which* address that is, is ADR-0042's — see the proxy section below.
 Three rules that are easy to get subtly wrong:
 
 - **A `tailscale` that cannot answer is `503`, never `403`.** Nothing was decided about the caller,
@@ -675,9 +682,9 @@ socket outlives the terminal at both ends and a caller that never sends a size h
 `MissedTickBehavior::Delay` is load-bearing: `pty::open` can outlast an interval, and the default
 burst would deliver catch-up ticks as misses the peer was given no chance to answer.
 
-This route is authorised on both ports since Y-118 (ADR-0017), and its test is the refusal that
-proves it: a forwarded address resolving to a **tagged** node does not get an upgrade even though the
-TCP peer is ours. That the peer must be a real one is why these tests bind a **real `TcpListener`** —
+This route is authorised on every door (ADR-0042), and its test is the refusal that proves it: a TCP
+peer that is this daemon's own address does not get an upgrade, with a forged header or without. That
+the peer must be a real one is why these tests bind a **real `TcpListener`** —
 `WebSocketUpgrade` strips `OnUpgrade` during extraction, so a `tower::oneshot` never reaches the
 handler and would assert a status the authoriser never produced.
 
@@ -741,7 +748,7 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   `{"type":"queue","threadId","texts"}`, the list as it is now. A tab that attaches gets it too,
   an empty list included, so a tab that was away while the queue drained clears it. A turn holds
   the thread from its start until its checkpoint is kept. When the turn ends, the queue goes as
-  one prompt, the texts joined with a blank line, in the last one's mode, model and effort, before any room prompt.
+  one prompt, the texts joined with a blank line, in the last one's mode, model, effort and context length, before any room prompt.
   It goes to the same agent, Claude's or ACP's, or to the next keeper when this one closes. A
   turn that Claude opens with no prompt, a wake, holds the thread too, so a prompt sent during it
   waits for its `result` (ADR-0041 decision 7). `cancel` empties the queue. A socket follows its thread's next keeper, so a tab sees a queued or a room-woken
@@ -820,11 +827,13 @@ The rules from before the keeper still hold:
   `notAnImage` and `unreachable`. Every Claude keeper makes the directory and gets `--add-dir` on
   it at its start, since its process outlives the turn. A new keeper keeps `images/`, and `thread::remove` deletes it with the thread. The log
   says `image attached` and never a byte or a size.
-- **A `turn` may carry `model` and `effort`** (Y-564). A keeper's first Claude turn passes them
-  as `--model` and `--effort`. A later turn that changes one sends `set_model` or
+- **A `turn` may carry `model`, `effort` and `contextLength`** (Y-564, Y-663). A keeper's first Claude turn passes them
+  as `--model`, `--effort` and `--autocompact`. A later turn that changes one sends `set_model` or
   `apply_flag_settings` to the live process first (ADR-0041 decision 5). A room's turn keeps the
-  model and effort the live process runs with. An ACP turn ignores them. A model outside `[A-Za-z0-9._[]-]`, over 64
-  characters or starting with `-`, and an effort outside `low` to `max`, are `badFrame`.
+  model, effort and context length the live process runs with. An ACP turn ignores the model and effort. A Codex
+  keeper starts with the length of the turn that starts it, as `-c model_auto_compact_token_limit=N`; a later change
+  does not reach a running `codex-acp`. A model outside `[A-Za-z0-9._[]-]`, over 64
+  characters or starting with `-`, an effort outside `low` to `max`, and a length outside 100k to 1M tokens, are `badFrame`.
 - **A thread keeps its harness.** An unknown name, or a name that differs from the thread's, is
   `badFrame`. An ACP event is relayed under the worktree's thread id, and ACP's own
   `thread.started` is dropped. A browser's decision is answered with the option the agent offered.
@@ -848,8 +857,8 @@ The rules from before the keeper still hold:
 ## The route that holds rooms
 
 `POST /api/mcp` ([`mcp.rs`](src/mcp.rs), Y-534,
-[ADR-0038](../../docs/adr/0038-rooms-and-guest-devices.md)) serves `room_send` and `room_read`
-to live agents, and [`room.rs`](src/room.rs) holds the rooms in `Fleet::rooms`.
+[ADR-0038](../../docs/adr/0038-rooms-and-guest-devices.md)) serves the four room tools,
+`room_send`, `room_read`, `room_info` and `room_status` (Y-551), to live agents, and [`room.rs`](src/room.rs) holds the rooms in `Fleet::rooms`.
 [`yantra_core::room`](../yantra-core/src/room.rs) decides every rule; this crate holds the store,
 the wait and the wakes.
 
@@ -872,10 +881,17 @@ the wait and the wakes.
 - **A Chat turn gets the server by `--mcp-config`.** `chat::Registry` holds
   `join::daemon_address` of the bound set, which is the address `agent.env` already reaches, and
   each Claude turn names its own thread in the header. The server is `yantra-room`, apart from a
-  `yantra` stdio server a person may have added. `--allowedTools` lets a woken turn use both tools
-  without a prompt.
+  `yantra` stdio server a person may have added. `--allowedTools` lets a woken turn use all four tools
+  without a prompt, and a test keeps that list equal to `room::TOOLS`.
 - **`room_read` waits in memory, never on ssh**, up to 50 s on a `watch` that every message bumps.
   It answers an `isError` result when the daemon begins to shut down.
+- **`room_info` and `room_status` read and write memory only** (Y-551). `room_info` answers the
+  room and each member with its presence as JSON text. `room_status` takes one line of at most 120
+  characters and answers `{"ok":true}`. Both refuse a room this daemon does not hold.
+- **Each member has a presence**: listening while a `room_read` waits, working, idle, or away
+  after 90 s with no call. An away member stays a member. For an owner thread,
+  `chat::Registry::activity` says whether a turn runs and which tool it uses, and that wins over
+  the thread's own calls.
 - **`room_send` never awaits ssh.** It takes each member thread's unseen messages under the
   store's lock and queues them for that thread. **One task per thread** sends its queue to
   `chat::wake`, one wake at a time, so a thread gets its messages in seq order. The wake finds the
@@ -897,7 +913,13 @@ the wait and the wakes.
 - **The dashboard reads rooms through `GET /api/rooms` and `GET /api/rooms/{room}`** (Y-536). Both
   are behind `allowed()`, both read memory, and both drop expired members first. Each summary
   carries the room's `workspace`, `brief` and `base`, `null` for a room an agent made, and each
-  message a `kind`, `text` or `system`.
+  message a `kind`, `text` or `system`. One room also carries its members as `presence` (Y-551).
+- **`GET /api/rooms/{room}/events?after=<seq>&wait=<s>` is the dashboard's long-poll** (Y-551),
+  behind `allowed()`. It answers `{messages, presence, last}` at once when a message after `after`
+  exists. Otherwise it answers when a message arrives, presence changes or `wait` runs out. It
+  waits on the room's `watch`, on `chat::Registry::changed`, and until the next member turns away.
+  A `wait` above 50 is **400**, a room it does not hold **404**, and a daemon that shuts down
+  **503**.
 - **A room may have a definition** (Y-550, [ADR-0039](../../docs/adr/0039-a-room-is-a-shared-project.md)
   decision 2): `~/.config/yantra/rooms/<name>.toml`, through
   [`room_file`](../yantra-core/src/room_file.rs). `POST /api/rooms` takes
@@ -947,38 +969,39 @@ types appended at the end of `api.ts` in one block.
 daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
 one message identically; that the daemon then accepts it is `terminal.rs`'s own test.
 
-## TLS is not this crate's job, and the proxy costs it something
+## TLS is not this crate's job, and the kernel proves the proxy
 
 Y-111 put the daemon behind `tailscale serve` on port 8443 (`just https`,
 [`docs/development.md`](../../docs/development.md)). §B2: Tailscale already holds and renews a
 publicly-trusted certificate for the machine's `*.ts.net` name, so **do not terminate TLS here, and do
-not add a cert crate** — the daemon speaks plain HTTP on 7717 and that is the whole design. It also
-proxies to the **tailnet address**, because loopback is refused above.
+not add a cert crate** — the daemon speaks plain HTTP, and that is the whole design.
 
-**The proxy launders the source address, and [ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)
-is what unlaunders it** (Y-118, 2026-08-05). Measured 2026-08-03: a request from another machine
-arrives at the backend from *this* node's address, with the caller in `X-Forwarded-For` and
-`Tailscale-User-Login`. So the caller's address is the TCP peer **unless the peer is one of the
-addresses `listen_on` bound**, and then it is `X-Forwarded-For` — that condition and no other.
-`allowed()` is now protection on both ports.
+**There are two doors.** TCP on 7717, on the tailnet addresses `listen_on` bound, and a Unix socket,
+`$RUNTIME_DIRECTORY/yantrad.sock` (`/run/yantra/yantrad.sock` under the unit, which sets
+`RuntimeDirectory=yantra`). `tailscale serve` proxies `:8443` to the socket. A missing directory is a
+warning and TCP alone: a missing socket removes a door and opens none. The socket is `0666`, because
+the peer's uid is the gate.
 
-Three things about that rule are easy to get subtly wrong, and each is a security bug in a different
-direction:
+**[ADR-0042](../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md) decides the caller**
+(Y-680, amending [ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)).
+`Authoriser::hop` is the lookup and `caller_address` is the one pure decision:
 
-- **The trusted set is the bound addresses, not "local".** Not loopback, which is never bound; not
-  any private range. Widening it by one address gives whatever holds that address the run of the
-  fleet.
-- **An absent header is not a refusal.** It means nothing proxied the request, which is every call on
-  7717 — refusing it would leave the CLI's own port answering 503.
-- **One address or refuse.** `tailscaled` writes exactly one with `Set`, so a comma list, a second
-  header line or anything unparseable means something unmeasured is in the path. Do not take the
-  leftmost entry; that is how a caller-supplied entry becomes an identity.
+- **TCP never reads `X-Forwarded-For`.** The peer is the caller. **A peer that is one of the bound
+  addresses is a 403** that names the socket and the `serve` command: any account on this machine
+  opens a connection from that address, with a header or without one.
+- **uid 0 on the socket is the `serve` hop**, because `tailscaled` runs as root. Its header must be
+  exactly one address: absent is a 403, a list or junk is a 503 (nothing was decided about the
+  caller), and an address this daemon bound is a 403, because the account that opened the first
+  connection is unknown. Any other address goes through ADR-0016's predicate.
+- **The daemon's own uid, or a member of the group `yantra`, is this machine.** The caller is `whois`
+  of the first bound address. The header is ignored. Membership is the primary gid or the group's
+  member list, read with `nix` on a blocking thread (I-13); a lookup that fails refuses.
+- **Any other uid, or none, is a 403** on every route but the two join routes.
 
-**The trust is in the local hop, not in `tailscale serve`.** Any process on this machine can connect
-to a bind address and name whatever caller it likes — no escalation under
-[ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md), since a
-local process can already call the library, but it is now written down. **Putting a second reverse
-proxy in front of 7717 is the condition to revisit that ADR.**
+Three costs follow, and each is ADR-0042's. A Chat turn or a session on this machine reaches
+`/api/mcp` as its own account, so it is refused until ADR-0040. A Vite proxy on this machine gets 403
+on every write. A member of the `yantra` group lends its trust to every server it runs.
+**`POST /heartbeat` stays on TCP**: it is attributed by the source address, so a socket peer is a 400.
 
 ## Nothing expensive happens on the request path
 

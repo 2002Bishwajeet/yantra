@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as contract from '@/contract.gen'
 import type { Check } from '@/api'
 import type { Reading } from '@/api/client'
-import { grant, held, signedIn } from './github'
+import { grant, grantPage, held, hiddenNote, signedIn } from './github'
 
 const checked = (state: Check['state']): Reading<Check> => ({
   looked: 'ok',
@@ -68,5 +68,24 @@ describe('words', () => {
   it('names the login only when it is known', () => {
     expect(signedIn('ada')).toBe('Signed in as ada')
     expect(signedIn(null)).toBe('Signed in')
+  })
+})
+
+describe('grantPage', () => {
+  it("is the app's own page with a client id, and every app's without", () => {
+    expect(grantPage('Iv1.abc')).toBe('https://github.com/settings/connections/applications/Iv1.abc')
+    expect(grantPage(null)).toBe('https://github.com/settings/applications')
+    expect(grantPage('')).toBe('https://github.com/settings/applications')
+  })
+})
+
+describe('hiddenNote', () => {
+  it('names every organisation in one sentence, and never claims the list is complete', () => {
+    expect(hiddenNote(['a', 'b'])).toBe(
+      'Yantra sees no repository from a, b. An organisation that restricts OAuth apps hides them. If your membership in one is private, it is not in this list.',
+    )
+    expect(hiddenNote([])).toBe(
+      'An organisation that restricts OAuth apps hides its repositories from Yantra. If your membership there is private, Yantra cannot name it.',
+    )
   })
 })

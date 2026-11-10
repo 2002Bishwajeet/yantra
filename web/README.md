@@ -14,9 +14,13 @@ component gallery and has a chunk behind it in dev builds only.
 mutation in [`src/api/`](src/api/README.md).
 
 `⌘K` opens the palette ([`shell/Palette.tsx`](src/shell/Palette.tsx)): seven
-pages, the workspaces that loaded, and the machines. **No entry is a verb**
-(D3 §3.2), which is what keeps a destructive action further than two keystrokes
-from anywhere.
+pages, the workspaces that loaded, and the machines, then the coding loop's verbs
+(D3 §3.2, amended in Y-499): Diff, Commit, Push, Open PR and Merge while a chat is
+on screen, and Start from issue everywhere. A verb opens its own dialog, so
+Merge stays two steps from any key. Each verb has a chord, bound once by the
+shell ([`screens/session/keys.ts`](src/screens/session/keys.ts)); `?` lists them
+([`shell/KeyboardHelp.tsx`](src/shell/KeyboardHelp.tsx)). On a Mac the Alt chords
+use Control, because ⌘⌥ I, C and J open DevTools and ⌘⌥M minimises the windows.
 
 **While a tab is visible the page says so**, and the daemon stops pushing what
 the page is already showing (D3 §13). `useViewing` posts `/api/viewing` every
@@ -363,12 +367,16 @@ off for any other harness. On a Claude thread,
 [`ModelPicker.tsx`](src/screens/session/ModelPicker.tsx) and
 [`EffortPicker.tsx`](src/screens/session/EffortPicker.tsx) pick Claude's model
 and effort, and each is kept per thread the same way (Y-564). A change
-reaches the running Claude process before the next turn. Each turn runs
+reaches the running Claude process before the next turn.
+[`ContextPicker.tsx`](src/screens/session/ContextPicker.tsx) picks the tokens a
+Claude or Codex thread fills before it compacts, from the lengths the model
+allows, and is kept per thread too (Y-663). Codex reads it only on the turn
+that starts its agent, so the picker locks after the first turn. Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
 harness. The composer under it is [`src/composer/`](src/composer/Composer.tsx),
 one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
-Attach, harness, permission, model and effort controls, a context ring that turns red above 90%,
+Attach, harness, permission, model, effort and context-length controls, a context ring that turns red above 90%,
 the agent's plan on the card's top edge, a Send button or a Stop with Queue beside it, a draft kept
 per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
 Settings → General. Ten things about the code:
@@ -721,6 +729,8 @@ text, and `errors.ts` maps them by hand.
 every `--md-sys-color-*`, `--md-sys-shape-*`, `--md-sys-typescale-*` and
 `--md-sys-motion-*` role, and the three faces.
 
+Route changes use the router's view transitions (Y-678): the content slides by direction, forward or back, and the shell's bars, rail and button stay still. `prefers-reduced-motion: reduce` turns it off.
+
 - **Brass light and dark are precomputed and shipped as CSS** (Y-383), from the
   owner's palette by [`scripts/brass.mjs`](scripts/brass.mjs), which also writes
   [`palette-brass.json`](../docs/design/palette-brass.json). One declaration
@@ -896,6 +906,8 @@ src/
     Shell.tsx        the three shells (the tablet sheet's list lives here), and the outlet under one boundary that a
                      navigation resets
     Palette.tsx      the search pill and `⌘K`; the popup is its own chunk
+    loopCommands.ts  the verbs a chat registers, and the shell's chords for them
+    KeyboardHelp.tsx the `?` sheet
     Bell.tsx  BellPopover.tsx  NotificationsScreen.tsx
                      one set of notifications, at three widths
     formFactor.ts    phone / tablet / desktop, from three media queries
@@ -906,7 +918,7 @@ src/
                      verb (`verbs.ts`), and the Kill and Delete confirms
     machines/        `/machines` — a card per machine, its checks, and Doctor
     machine/         `/m/$machine`
-    session/         `/w/$name` — chat, terminal (History), spend
+    session/         `/w/$name` — chat, terminal (History), spend; `keys.ts` is the loop's chords
     session-terminal/`/m/$machine/s/$session` — the same terminal on a session
                      no workspace claims (ADR-0022)
     repair/          `/w/$name/repair` — the file itself (ADR-0020)

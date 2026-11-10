@@ -27,6 +27,7 @@ import { useScreenTitle } from '@/shell/title'
 import { useTick } from '@/useTick'
 import { SshSaid } from '@/screens/machine/ReachFailure'
 import { Sheet } from '@/screens/settings/Sheet'
+import { AgentAccount } from '@/screens/setup/AgentAccount'
 import { Join } from '@/screens/setup/Join'
 import { joined, LATE_MS, newDevice, newStranger, onTailnet, reachable, ready, installable, type Beat, type BeatState } from './beats'
 import { Track } from '@/m3/track/Track'
@@ -229,9 +230,10 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
               you.
             </Note>
           ) : null}
+          <AgentAccount platform={platform} />
           <Note>
-            Run this once in a terminal on {device}. It adds this appliance's key to the account that runs it and tells
-            the appliance which account that is.
+            Run this once in a terminal on {device}, as karigar. It adds this appliance's key to the account that runs
+            it and tells the appliance which account that is.
           </Note>
           <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
           <JoinKey />
@@ -247,9 +249,10 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
             First turn on Remote Login: System Settings → General → Sharing. The join command cannot turn it on for you.
           </Note>
         ) : null}
+        <AgentAccount platform={platform} />
         <Note>
-          Run this once in a terminal on {device}. It adds this appliance's key to the account that runs it and tells
-          the appliance which account that is.
+          Run this once in a terminal on {device}, as karigar. It adds this appliance's key to the account that runs it
+          and tells the appliance which account that is.
         </Note>
         <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
         <JoinKey />

@@ -96,19 +96,20 @@ describe('the command palette', () => {
     const dialog = await open()
     expect(await dialog.findByRole('group', { name: 'Machines' })).toBeTruthy()
     expect(dialog.getByRole('group', { name: 'Pages' })).toBeTruthy()
-    expect(dialog.getByText('Finds a workspace, a machine or a page. Never runs a verb.')).toBeTruthy()
+    expect(dialog.getByText('Finds a place, or runs a step of the coding loop.')).toBeTruthy()
   })
 
-  /** D3 §3.2: every entry the palette offers is opened, and the daemon is
-   *  asked for nothing but readings. */
-  it('never runs a verb', async () => {
+  /** D3 §3.2: every place the palette offers is opened, and the daemon is
+   *  asked for nothing but readings. The loop's verbs are in Palette.loop.test.tsx. */
+  it('runs no verb when it opens a place', async () => {
     const asked = mount('desktop')
     await screen.findByRole('button', { name: /Search anything/ })
     let dialog = await open()
-    const names = (await dialog.findAllByRole('option')).map((one) => one.textContent ?? '')
-    expect(names.length).toBeGreaterThan(5)
-    for (let index = 0; index < names.length; index++) {
-      fireEvent.click((await dialog.findAllByRole('option'))[index]!)
+    const places = (await dialog.findAllByRole('option')).filter((one) => !/^(Start from issue|Keyboard shortcuts)/.test(one.textContent ?? ''))
+    expect(places.length).toBeGreaterThan(5)
+    for (let index = 0; index < places.length; index++) {
+      const found = await dialog.findAllByRole('option')
+      fireEvent.click(found.filter((one) => !/^(Start from issue|Keyboard shortcuts)/.test(one.textContent ?? ''))[index]!)
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull())
       dialog = await open()
     }

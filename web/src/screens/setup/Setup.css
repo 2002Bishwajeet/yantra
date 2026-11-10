@@ -173,3 +173,16 @@
   max-width: none;
   padding-left: 58px;
 }
+
+/* Y-628: the karigar commands under a line's join command, in the line's narrow column. */
+.setup__karigar .m3-disclosure__row {
+  min-height: 44px;
+  padding: 2px 4px 2px 12px;
+}
+
+.setup__karigar .m3-disclosure__content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px 12px;
+}

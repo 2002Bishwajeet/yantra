@@ -16,6 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -45,6 +46,7 @@ const LOGIN_SESSION: &str = "login-session";
 const MIC: &str = "mic";
 const FOLDER_ACCESS: &str = "folder-access";
 const HOOKS: &str = "hooks";
+const NO_SUDO: &str = "no-sudo";
 /// Public because the one caller that can answer this check finds it by name —
 /// see [`heartbeat`].
 pub const HEARTBEAT: &str = "heartbeat";
@@ -54,7 +56,7 @@ pub const GITHUB: &str = "github";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.
-const BEHIND_SSH: [&str; 10] = [
+const BEHIND_SSH: [&str; 11] = [
     TMUX,
     GIT,
     AGENT_CLI,
@@ -65,6 +67,7 @@ const BEHIND_SSH: [&str; 10] = [
     MIC,
     FOLDER_ACCESS,
     HOOKS,
+    NO_SUDO,
 ];
 
 /// What every check behind ssh says when ssh itself did not answer. The reason
@@ -194,14 +197,14 @@ pub async fn fleet_with(extra: &[String], term: &str) -> Result<Vec<Report>, Err
 ///
 /// Never fails: a connection that cannot even be built is a report of unknowns
 /// with the reason in it, because a caller asking *what is wrong with this box*
-/// is answered better by thirteen states than by one error.
+/// is answered better by fourteen states than by one error.
 pub async fn machine(name: &str, term: &str) -> Report {
     let ssh = ssh::machine_at(name)
         .ok_or_else(|| "no directory for ssh control sockets on this machine".to_owned())
         .and_then(|m| Ssh::new(m).map_err(|err| err.to_string()));
 
     let mut checks = match ssh {
-        Ok(ssh) => of(&ssh, term).await,
+        Ok(ssh) => of_with(&ssh, term, Some(name)).await,
         Err(reason) => nothing_asked(&format!("ssh could not be set up here: {reason}")),
     };
     if let Ok(dir) = identity::dir() {
@@ -240,6 +243,12 @@ pub async fn name_the_account(checks: &mut [Check], machine: &str, dir: &std::pa
 /// `term` is the terminal the caller is sitting at, which is what the terminfo
 /// check is about (I-36) — it is a property of the asker, not of the machine.
 pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
+    of_with(exec, term, None).await
+}
+
+/// [`of`], reusing `machine`'s recent `sudo -n` answer where there is one (see
+/// [`no_sudo`]). `None` always asks.
+async fn of_with<E: Exec>(exec: &E, term: &str, machine: Option<&str>) -> Vec<Check> {
     let (reachable, sshd) = timed(reached(exec)).await;
     let sshd = Check {
         took_ms: reachable.took_ms,
@@ -282,6 +291,7 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
         timed_one(mic(exec)).await,
         timed_one(folder_access(exec)).await,
         timed_one(hooks(exec, found_tmux.as_ref(), &os)).await,
+        timed_one(no_sudo(exec, machine)).await,
         heartbeat(),
     ]
 }
@@ -1022,6 +1032,102 @@ async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Erro
     )
 }
 
+/// Groups whose members sudo lets in on a stock install; macOS admins are in `admin`.
+const SUDO_GROUPS: [&str; 3] = ["sudo", "wheel", "admin"];
+
+/// Asks nothing of sudo, so it runs on every sweep.
+const GROUPS_PROBE: &str =
+    r#"if [ "$(id -u)" = 0 ]; then echo root; else echo "groups $(id -Gn)"; fi"#;
+
+/// Catches a `NOPASSWD` rule (ADR-0046 decision 3.1). `-n` never prompts.
+const RULE_PROBE: &str = "command -v sudo >/dev/null 2>&1 || { echo none; exit 0; }
+if sudo -n true >/dev/null 2>&1; then echo runs; else echo refused; fi";
+
+/// Every refused `sudo -n` writes an auth-log line, and the sweep runs every
+/// 30 s, so [`RULE_PROBE`] is asked of a machine at most this often.
+const RULE_EVERY: Duration = Duration::from_secs(60 * 60);
+
+/// [`RULE_PROBE`]'s last answer per machine. In memory only: the daemon persists nothing.
+static RULES: Mutex<BTreeMap<String, (Instant, Check)>> = Mutex::new(BTreeMap::new());
+
+/// Whether the joined account cannot use sudo (ADR-0046 decision 3). Agents run
+/// as that account, so *absent* is a warning: a prompt-injected agent with root
+/// owns the machine. `machine` names the memo [`RULES`] keeps; `None` always asks.
+async fn no_sudo<E: Exec>(exec: &E, machine: Option<&str>) -> Check {
+    let said = match exec.exec(GROUPS_PROBE).await {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).into_owned(),
+        Err(err) => return unknown(NO_SUDO, format!("could not be asked: {err}")),
+    };
+    if let Some(found) = groups_from(&said) {
+        return found;
+    }
+    let Some(machine) = machine else {
+        return sudo_rule(exec).await;
+    };
+    let now = Instant::now();
+    let remembered = RULES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(machine)
+        .filter(|(asked, _)| now.duration_since(*asked) < RULE_EVERY)
+        .map(|(_, check)| check.clone());
+    if let Some(check) = remembered {
+        return check;
+    }
+    let check = sudo_rule(exec).await;
+    // An unknown is asked again on the next sweep.
+    if check.state != State::Unknown {
+        RULES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(machine.to_owned(), (now, check.clone()));
+    }
+    check
+}
+
+/// `None` where neither root nor a sudo group was found, so [`RULE_PROBE`] decides.
+fn groups_from(said: &str) -> Option<Check> {
+    let said = said.trim();
+    if said == "root" {
+        return Some(absent(NO_SUDO, "the account is root"));
+    }
+    let Some(groups) = said.strip_prefix("groups ") else {
+        return Some(unknown(
+            NO_SUDO,
+            format!("the probe answered nothing Yantra reads: {said}"),
+        ));
+    };
+    let group = groups
+        .split_whitespace()
+        .find(|group| SUDO_GROUPS.contains(group))?;
+    Some(absent(
+        NO_SUDO,
+        format!("the account is in the {group} group"),
+    ))
+}
+
+async fn sudo_rule<E: Exec>(exec: &E) -> Check {
+    match exec.exec(RULE_PROBE).await {
+        Ok(out) => rule_from(&String::from_utf8_lossy(&out.stdout)),
+        Err(err) => unknown(NO_SUDO, format!("could not be asked: {err}")),
+    }
+}
+
+fn rule_from(said: &str) -> Check {
+    match said.trim() {
+        "none" => present(NO_SUDO, "there is no sudo here"),
+        "refused" => present(
+            NO_SUDO,
+            "not root, in no sudo, wheel or admin group, and sudo -n did not run",
+        ),
+        "runs" => absent(NO_SUDO, "sudo -n runs without a password"),
+        said => unknown(
+            NO_SUDO,
+            format!("the probe answered nothing Yantra reads: {said}"),
+        ),
+    }
+}
+
 /// **Unknown from every caller there is today**, and it is the architecture
 /// rather than an omission: the beats live in the running daemon's memory and
 /// nothing persists them (Y-044), while the CLI calls the library in-process and
@@ -1377,7 +1483,7 @@ mod tests {
     #[test]
     fn a_machine_that_cannot_be_asked_is_never_reported_as_missing_anything() {
         let checks = nothing_asked("ssh could not be set up here");
-        assert_eq!(checks.len(), 13);
+        assert_eq!(checks.len(), 14);
         assert!(
             checks.iter().all(|c| c.state == State::Unknown),
             "{checks:?}"
@@ -2007,5 +2113,123 @@ mod tests {
         assert_eq!(found.state, State::Absent, "{}", found.detail);
         assert_eq!(found.detail, "gh found no credential there");
         assert!(!linux.asked("list-sessions") && !linux.asked("run-shell"));
+    }
+
+    /// Answers [`GROUPS_PROBE`] and [`RULE_PROBE`], and counts how often sudo was asked.
+    struct Sudo {
+        groups: &'static str,
+        rule: &'static str,
+        asked: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Sudo {
+        fn new(groups: &'static str, rule: &'static str) -> Self {
+            Self {
+                groups,
+                rule,
+                asked: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn asked(&self) -> usize {
+            self.asked.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl Exec for Sudo {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            let stdout = if command == GROUPS_PROBE {
+                self.groups
+            } else {
+                assert_eq!(command, RULE_PROBE);
+                self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.rule
+            };
+            Ok(ssh::Output {
+                status: 0,
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn root_and_each_sudo_group_are_absent_without_asking_sudo() {
+        let root = Sudo::new("root\n", "runs\n");
+        let found = no_sudo(&root, None).await;
+        assert_eq!(found.state, State::Absent);
+        assert_eq!(found.detail, "the account is root");
+        assert_eq!(root.asked(), 0);
+
+        for group in ["sudo", "wheel", "admin"] {
+            let groups: &'static str = format!("groups staff {group} everyone\n").leak();
+            let machine = Sudo::new(groups, "refused\n");
+            let found = no_sudo(&machine, None).await;
+            assert_eq!(found.state, State::Absent, "{group}");
+            assert_eq!(found.detail, format!("the account is in the {group} group"));
+            assert_eq!(machine.asked(), 0, "{group}");
+        }
+    }
+
+    /// ADR-0046 decision 3.1: a `NOPASSWD` rule is sudo too.
+    #[tokio::test]
+    async fn sudo_decides_once_no_group_does() {
+        for (rule, state, detail) in [
+            ("runs\n", State::Absent, "sudo -n runs without a password"),
+            (
+                "refused\n",
+                State::Present,
+                "not root, in no sudo, wheel or admin group, and sudo -n did not run",
+            ),
+            ("none\n", State::Present, "there is no sudo here"),
+        ] {
+            let machine = Sudo::new("groups karigar staff\n", rule);
+            let found = no_sudo(&machine, None).await;
+            assert_eq!((found.state, found.detail.as_str()), (state, detail));
+            assert_eq!(machine.asked(), 1);
+        }
+    }
+
+    /// R-23: an answer Yantra cannot read is not an account that can use sudo.
+    #[tokio::test]
+    async fn an_unreadable_sudo_answer_is_unknown() {
+        let groups = no_sudo(&Sudo::new("id: not found\n", "runs\n"), None).await;
+        assert_eq!(groups.state, State::Unknown, "{}", groups.detail);
+        let rule = no_sudo(&Sudo::new("groups karigar\n", ""), None).await;
+        assert_eq!(rule.state, State::Unknown, "{}", rule.detail);
+        assert_eq!(no_sudo(&Refuses, None).await.state, State::Unknown);
+    }
+
+    /// A refused `sudo -n` is an auth-log line, so a sweep every 30 s asks it
+    /// once an hour, and the groups on every sweep.
+    #[tokio::test(start_paused = true)]
+    async fn sudo_is_asked_of_a_machine_at_most_once_an_hour() {
+        let machine = Sudo::new("groups karigar\n", "refused\n");
+        for _ in 0..3 {
+            assert_eq!(
+                no_sudo(&machine, Some("memo-box")).await.state,
+                State::Present
+            );
+            tokio::time::advance(Duration::from_secs(30)).await;
+        }
+        assert_eq!(machine.asked(), 1);
+
+        let other = Sudo::new("groups karigar\n", "refused\n");
+        no_sudo(&other, Some("other-box")).await;
+        assert_eq!(other.asked(), 1, "the memo is per machine");
+
+        tokio::time::advance(RULE_EVERY).await;
+        no_sudo(&machine, Some("memo-box")).await;
+        assert_eq!(machine.asked(), 2);
+    }
+
+    /// A sudo group added since the last `sudo -n` shows at once.
+    #[tokio::test]
+    async fn the_groups_are_asked_on_every_sweep() {
+        let before = Sudo::new("groups karigar\n", "refused\n");
+        no_sudo(&before, Some("joined-box")).await;
+        let after = Sudo::new("groups karigar wheel\n", "refused\n");
+        let found = no_sudo(&after, Some("joined-box")).await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
     }
 }

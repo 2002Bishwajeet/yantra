@@ -59,3 +59,22 @@
   gap: 6px;
   white-space: nowrap;
 }
+
+.keyhelp {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.keyhelp__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.keyhelp__row dd {
+  margin: 0;
+}

@@ -27,7 +27,7 @@ afterEach(() => {
   Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
 })
 
-const IDS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'heartbeat']
+const IDS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'no-sudo', 'heartbeat']
 
 const checks = (absent: string[] = [], detail: Record<string, string> = {}): Check[] =>
   IDS.map((id) => ({
@@ -128,7 +128,7 @@ describe('the counts on a machine with optional checks absent', () => {
 
     // The count line's total is the rows drawn, the microphone included.
     expect(rows).toHaveLength(list.length)
-    expect(card().getByText(new RegExp(`^9 of ${list.length} · asked`))).toBeTruthy()
+    expect(card().getByText(new RegExp(`^10 of ${list.length} · asked`))).toBeTruthy()
   })
 
   it('draws the absent microphone idle, with the word optional', async () => {
@@ -178,8 +178,8 @@ describe('the Readiness card', () => {
   /** On a ready machine the microphone is all Install could do, so Install
    *  waits for the box; an absent microphone is a row of its own, marked optional. */
   it.each([
-    ['ready', [] as string[], 'Ready for sessions', '12 of 13'],
-    ['manual', ['provider-auth'], 'gh is not signed in', '11 of 13'],
+    ['ready', [] as string[], 'Ready for sessions', '13 of 14'],
+    ['manual', ['provider-auth'], 'gh is not signed in', '12 of 14'],
   ])('enables Install on a %s machine only while Microphone is ticked', async (_, absent, title, count) => {
     daemon()
     await draw(report([...checks(absent), { check: 'mic', state: 'absent', detail: 'not installed' }]))

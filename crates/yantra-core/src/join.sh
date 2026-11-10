@@ -5,19 +5,25 @@
 #     curl -fsSL https://<appliance>.<tailnet>.ts.net:8443/join | sh
 #
 # or `http://<appliance's tailnet address>:7717/join` where HTTPS is not on.
+# On the appliance itself, fetch it on the daemon's socket (ADR-0042):
+#
+#     curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yantra/join | sh
 #
 # Run it in a terminal on this machine, as the account Yantra is to log in as.
-# It asks before each step that needs root, and your own sudo answers.
+# It asks before each step that needs root, and your own sudo answers. An
+# account without sudo skips those steps, and still joins.
 #
 # YANTRA_JOIN_ANSWER=y (or n) answers every question at once, for a test or a
 # run with no terminal. With neither, it takes no step that needs root.
 set -eu
 # Each case pattern opens with `(`: bash 3.2 ends a `$(…)` at an unpaired `)` (Y-635).
 
-# yantrad writes these three when it serves this script.
+# yantrad writes these when it serves this script. SOCKET is set only when
+# the script was fetched on the daemon's socket.
 DAEMON='__YANTRA_DAEMON__'
 KEY='__YANTRA_KEY__'
 VERSION='__YANTRA_VERSION__'
+SOCKET='__YANTRA_SOCKET__'
 REPO=2002Bishwajeet/yantra
 
 say() { printf 'join: %s\n' "$*"; }
@@ -44,12 +50,36 @@ ask() {
     esac
 }
 
+# The groups doctor's no-sudo check reads, or a NOPASSWD rule.
+can_sudo() {
+    command -v sudo >/dev/null 2>&1 || return 1
+    case " $(id -Gn) " in
+    (*' sudo '* | *' wheel '* | *' admin '*) return 0 ;;
+    esac
+    sudo -n true >/dev/null 2>&1
+}
+
+# karigar cannot start sshd, so the admin account does (docs/appliance.md).
+ADMIN_SSHD="From an admin account, install and start sshd: sudo systemctl enable --now sshd (the unit is ssh on Debian and Ubuntu). Then run this again."
+
 as_root() {
-    command -v sudo >/dev/null 2>&1 || fail "this step needs root and there is no sudo here: $*"
+    if ! can_sudo; then
+        say "this step needs root, and $user cannot use sudo, so it was skipped: $*"
+        return 1
+    fi
     sudo "$@"
 }
 
 fetch() { curl -fsSL --proto '=https' --tlsv1.2 -o "$1" "$2"; }
+
+# On the daemon's own machine yantrad refuses this machine's address over TCP.
+daemon_curl() {
+    if [ -n "$SOCKET" ]; then
+        curl --unix-socket "$SOCKET" "$@"
+    else
+        curl "$@"
+    fi
+}
 
 [ "$(id -u)" -ne 0 ] ||
     fail "run this as the account Yantra is to log in as, not as root. It asks for sudo itself."
@@ -246,6 +276,10 @@ linux_agent() {
         return 0
         ;;
     esac
+    if ! can_sudo; then
+        say "yantra-agent needs root, and $user cannot use sudo, so it was not installed. Sessions work without it; only the heartbeat stays off."
+        return 0
+    fi
     writes="/usr/local/bin/yantra-agent and /etc/systemd/system/yantra-agent.service"
     [ -e /etc/yantra/agent.env ] || writes="$writes, and /etc/yantra/agent.env naming $DAEMON"
     say "yantra-agent is the heartbeat that tells the dashboard this machine is awake."
@@ -339,7 +373,7 @@ PLIST
 # The daemon names this machine from the address the request comes from, so
 # the body carries the account and nothing else (ADR-0016, ADR-0029).
 report() {
-    reply=$(curl -sS --max-time 30 -w '\n%{http_code}' -H 'Content-Type: application/json' \
+    reply=$(daemon_curl -sS --max-time 30 -w '\n%{http_code}' -H 'Content-Type: application/json' \
         -d "{\"user\":\"$user\"}" "http://$DAEMON/api/join") ||
         fail "could not reach yantrad at $DAEMON, so it does not know this machine joined. Run this again."
     status=$(printf '%s\n' "$reply" | tail -n 1)
@@ -366,13 +400,25 @@ report() {
 
 # Only a real login tells: the tailnet's SSH policy decides, and this machine
 # cannot read it. A check policy waits for a browser the appliance does not have.
+# 0: a browser is needed. 1: it is not. 2: yantrad did not test the login.
 browser_needed() {
     say "testing a real login from the appliance, which can take a minute."
-    reply=$(curl -sS --max-time 120 -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 1
+    reply=$(daemon_curl -sS --max-time 120 -w '\n%{http_code}' -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 2
+    code=$(printf '%s\n' "$reply" | tail -n 1)
+    reply=$(printf '%s\n' "$reply" | sed '$d')
+    if [ "$code" != 200 ]; then
+        say "yantrad did not test the login. It answered $code: $reply"
+        return 2
+    fi
     case "$reply" in
     (*'Tailscale SSH requires an additional check'*) return 0 ;;
     (*) return 1 ;;
     esac
+}
+
+# On the hub, an account that is not the owner's gets a 403 here (ADR-0042 §3).
+untested() {
+    say "so this script cannot tell if the appliance can log in here. The dashboard's Check on $machine says."
 }
 
 # Tailscale SSH goes last: it serves this very session if one came in through it.
@@ -388,17 +434,25 @@ use_sshd_instead() {
         sshd_listening || mac_remote_login
     elif ! sshd_listening && ! linux_sshd; then
         say "sshd did not start, so Tailscale SSH stays on and Yantra cannot reach this machine yet."
+        can_sudo || say "$ADMIN_SSHD"
         return 0
     fi
-    as_root tailscale set --ssh=false
+    if ! as_root tailscale set --ssh=false; then
+        say "Tailscale SSH stays on, so Yantra cannot reach this machine yet."
+        say "From an admin account, run: sudo tailscale set --ssh=false. Then run this again, and on the appliance run sudo -u yantra -H yantra forget-host-key $machine."
+        return 0
+    fi
     say "Tailscale SSH is off, and the appliance logs in with its key."
     # sshd answers with another host key, which yantrad would refuse as changed.
-    if ! curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
+    if ! daemon_curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
         say "yantrad kept Tailscale SSH's old host key, so its next check fails on a changed key. Run sudo -u yantra -H yantra forget-host-key $machine on the appliance."
     fi
-    if browser_needed; then
-        fail "the appliance still cannot log in. The dashboard's Check says why."
-    fi
+    needed=0
+    browser_needed || needed=$?
+    case "$needed" in
+    (0) fail "the appliance still cannot log in. The dashboard's Check says why." ;;
+    (2) untested ;;
+    esac
 }
 
 say "this lets the Yantra appliance at $DAEMON log in here as $user."
@@ -413,6 +467,7 @@ elif [ "$os" = Darwin ]; then
     mac_remote_login
 elif ! linux_sshd; then
     say "sshd is not running, so Yantra cannot reach this machine yet. The rest goes on anyway."
+    can_sudo || say "$ADMIN_SSHD"
 fi
 
 place_key
@@ -424,7 +479,12 @@ else
     linux_agent
 fi
 report
-if [ -n "$via_tailscale" ] && [ -n "$machine" ] && browser_needed; then
-    use_sshd_instead
+if [ -n "$via_tailscale" ] && [ -n "$machine" ]; then
+    needed=0
+    browser_needed || needed=$?
+    case "$needed" in
+    (0) use_sshd_instead ;;
+    (2) untested ;;
+    esac
 fi
 say "done. Open the dashboard: this machine's Check turns green once Yantra reaches it."

@@ -51,6 +51,8 @@ CHANNEL_FILE=/etc/yantra/channel
 INSTALLED=/var/lib/yantra/installed
 PORT=7717
 HTTPS_PORT=8443
+# ADR-0042: `tailscale serve` proxies to yantrad's socket, where the kernel names the caller.
+SOCKET=/run/yantra/yantrad.sock
 
 fail() {
     echo "install: $*" >&2
@@ -540,7 +542,8 @@ fi
 # where the sessions are; `yantra` holds the fleet's key and must never get a shell.
 authorise_self() {
     local account machine=${name%%.*} said key
-    local join="curl -fsSL $url/join | sh"
+    # On this box the join goes on the socket: yantrad refuses this box's own address (ADR-0042).
+    local join="curl -fsSL --unix-socket $SOCKET http://yantra/join | sh"
     account=${YANTRA_ACCOUNT:-${SUDO_USER:-$(id -un)}}
 
     if [ -z "$machine" ] || [ "$account" = root ] || [ "$account" = yantra ] ||
@@ -594,6 +597,11 @@ PLACE
 
 up() { command -v tailscale >/dev/null 2>&1 && tailscale status >/dev/null 2>&1; }
 serving() { as_root tailscale serve status --json 2>/dev/null | grep -q "\"$HTTPS_PORT\""; }
+# A serve this script set up before ADR-0042, which proxied to the tailnet address.
+serving_tcp() {
+    as_root tailscale serve status --json 2>/dev/null | tr -d ' \t\n' |
+        grep -q ":$HTTPS_PORT\":{\"Handlers\":{\"/\":{\"Proxy\":\"http://[^\"]*:$PORT\""
+}
 
 # After the checksum, so a bad archive leaves the box as it was. An interactive
 # login joins the box untagged, which superseded Q17 (Y-384).
@@ -630,16 +638,25 @@ if [ "$answering" = yes ]; then
             # there reaches this script too, and would end it before Yantra installs.
             trap 'echo' INT
             echo "install: on a tailnet that never had HTTPS, tailscale prints a link to turn it on. Ctrl-C skips HTTPS."
-            ip=$(tailscale ip -4 2>/dev/null | head -n 1) || true
             # With no terminal nobody is there to Ctrl-C a serve that waits on its link.
             limit=()
             [ "$interactive" = yes ] || limit=(timeout 120)
-            if [ -z "$ip" ] ||
-                ! as_root "${limit[@]}" tailscale serve --bg --https="$HTTPS_PORT" "http://$ip:$PORT" <"$tty"; then
+            if ! as_root "${limit[@]}" tailscale serve --bg --https="$HTTPS_PORT" "unix:$SOCKET" <"$tty"; then
                 echo "install: tailscale serve failed, so the dashboard is on plain HTTP."
             fi
             trap - INT
         fi
+    fi
+fi
+
+# The one configuration an update changes (ADR-0042): the owner turned this serve
+# on, and its old target now gets 403 on every write.
+if up && serving_tcp; then
+    if as_root timeout 30 tailscale serve --bg --https="$HTTPS_PORT" "unix:$SOCKET" </dev/null; then
+        echo "install: the Tailscale serve on port $HTTPS_PORT now proxies to $SOCKET."
+    else
+        echo "install: could not point the Tailscale serve on port $HTTPS_PORT at $SOCKET, so writes through it get 403."
+        echo "install: run: sudo tailscale serve --bg --https=$HTTPS_PORT unix:$SOCKET"
     fi
 fi
 

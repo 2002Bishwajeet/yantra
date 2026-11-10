@@ -294,3 +294,54 @@
 .shell__main:focus {
   outline: none;
 }
+
+/* Y-678: a route change slides the content by direction while the chrome
+   stays put. Each named piece gets its own transition group; without a type
+   (Firefox before it has types) the root keeps the browser's plain fade.
+   The names apply only during a transition: a standing name changed text rendering. */
+:root:active-view-transition {
+  .shell__bar { view-transition-name: shell-bar; }
+  .m3-navigation-bar { view-transition-name: shell-nav; }
+  .rail, .m3-rail { view-transition-name: shell-rail; }
+  .shell__fab { view-transition-name: shell-fab; }
+  .shell__rail-fab { view-transition-name: shell-rail-fab; }
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--md-sys-motion-duration-fast-spatial);
+  animation-timing-function: var(--md-sys-motion-easing-emphasized);
+}
+
+@keyframes shell-axis-out-forward { to { opacity: 0; transform: translateX(-30px); } }
+@keyframes shell-axis-in-forward { from { opacity: 0; transform: translateX(30px); } }
+@keyframes shell-axis-out-back { to { opacity: 0; transform: translateX(30px); } }
+@keyframes shell-axis-in-back { from { opacity: 0; transform: translateX(-30px); } }
+
+:root:active-view-transition-type(forward) {
+  &::view-transition-old(root) { animation-name: shell-axis-out-forward; }
+  &::view-transition-new(root) { animation-name: shell-axis-in-forward; }
+}
+
+:root:active-view-transition-type(back) {
+  &::view-transition-old(root) { animation-name: shell-axis-out-back; }
+  &::view-transition-new(root) { animation-name: shell-axis-in-back; }
+}
+
+/* Covers a browser that has startViewTransition and no types, where the
+   router never asks `transitionTypes`. The pseudo-elements take no taps. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
+  }
+}
+
+::view-transition,
+::view-transition-group(*),
+::view-transition-image-pair(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  pointer-events: none;
+}

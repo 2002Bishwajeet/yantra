@@ -75,7 +75,7 @@ const TRIAGE_SCHEMA = {
           title: { type: 'string' },
           kind: { type: 'string', enum: Object.keys(BUILDER) },
           paths: { type: 'array', items: { type: 'string' }, description: 'the files the change will edit, e.g. web/src/m3/Card.tsx; a folder only for new files in it' },
-          priority: { type: 'integer', minimum: 1, maximum: 4 },
+          priority: { type: 'integer', minimum: 0, maximum: 4 },
           reason: { type: 'string' },
         },
         required: ['id', 'title', 'kind', 'paths', 'priority', 'reason'],
@@ -160,9 +160,9 @@ Rank the open rows in its §3 that an agent can finish alone today.
 Eligible: status ⬜ todo, every row in Depends is ✅ done or 🔵 review (a 🔵 review row has merged; only a release has not marked it), and an agent can prove the done condition on this Linux box with cargo, podman and Playwright.
 Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the owner, a phone, a Pi, audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, or an answer to an open question. A check on a Mac over ssh is eligible: \`ssh biswa@bishwajeets-macbook-pro\` reaches the real Mac.
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
-Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}.` : ''}
+Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}. An open PR does not rule a retried row out: it continues on that PR's branch.` : ''}
 
-Priority, from CLAUDE.md §B7: 1 = closes or unblocks an open milestone, 2 = a defect or a red suite, 3 = a feature whose dependencies are done, 4 = debt. Ties go to the lower Y-number.
+Priority, from CLAUDE.md §B7: 0 = a row that milestone M18 (the daily driver) lists, 1 = closes or unblocks another open milestone, 2 = a defect or a red suite, 3 = a feature whose dependencies are done, 4 = debt. Ties go to the lower Y-number.
 For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
 }
 

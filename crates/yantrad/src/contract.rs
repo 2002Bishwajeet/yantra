@@ -88,6 +88,7 @@ import type {
   Repo,
   Resumed,
   Room,
+  RoomEvents,
   RoomPosted,
   RoomRemoved,
   RoomSummary,
@@ -173,6 +174,11 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             read(&fleet, "/attention").await,
         ),
         ("repos", "Looked<Repo[]>", read(&fleet, "/repos").await),
+        (
+            "hiddenOrgs",
+            "Looked<string[]>",
+            read(&fleet, "/repos/hidden").await,
+        ),
         ("github", "Connection", read(&fleet, "/github").await),
         (
             "githubReadiness",
@@ -373,6 +379,7 @@ async fn fleet() -> Fleet {
                 default_branch: "main".into(),
             },
         ])))),
+        hidden: Some(Arc::new(Reading::new(Ok(vec!["acme-corp".into()])))),
     });
     // Y-582: bound to n-1's address, so n-1 is the hub.
     let fleet = Fleet {
@@ -579,7 +586,7 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
 /// A file the listing refused. It is in the fixture rather than only in a
 /// hand-written stub for this file's own reason: a state nothing generated is a
 /// state nothing checks, and `loaded: "no"` is the entry `web/` must narrow on.
-/// Three checks rather than the thirteen `doctor` runs: what a page has to render
+/// Three checks rather than the fourteen `doctor` runs: what a page has to render
 /// is one of three states beside a name and a sentence, and the tenth of those
 /// tells it nothing the third did not.
 fn swept(machine: &str) -> doctor::Report {

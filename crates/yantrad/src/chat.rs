@@ -53,10 +53,13 @@
 //! and the turn runs as `supervised` whatever its mode, so the daemon accepts
 //! nothing for it and the keeper's `mode` file says `supervised`. A room wake
 //! is never a plan turn.
-//! **A `turn` may name a [`Model`] and an [`Effort`]** (Y-564). A Claude
-//! keeper starts with them as `--model` and `--effort`, and a later turn that
-//! changes one sets it on the live process (ADR-0041 decision 5). An ACP turn
-//! ignores them.
+//! **A `turn` may name a [`Model`], an [`Effort`] and a [`ContextLength`]**
+//! (Y-564, Y-663). A Claude keeper starts with them as `--model`, `--effort`
+//! and `--autocompact`, and a later turn that changes one sets it on the live
+//! process (ADR-0041 decision 5). An ACP turn ignores the model and effort. A
+//! Codex keeper starts with the length of the turn that starts it, as
+//! `model_auto_compact_token_limit`; a later change does not reach a running
+//! `codex-acp`. Gemini, Grok and opencode ignore the length.
 //!
 //! **Each turn ends in a checkpoint** (Y-448, [`checkpoint`]): the first turn
 //! keeps the tree before it, each turn's end keeps the tree after it and sends
@@ -97,12 +100,12 @@ use axum::http::{HeaderMap, Uri};
 use axum::response::Response;
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{OnceCell, broadcast, mpsc, oneshot};
+use tokio::sync::{OnceCell, broadcast, mpsc, oneshot, watch};
 use tokio::time::MissedTickBehavior;
 use yantra_core::acp::{self, Agent, Answer, Harness};
 use yantra_core::chat::{
-    ContentDelta, Decision, Effort, Event, Interaction, Model, PermissionMode, RequestOption,
-    Scope, StopReason, StreamKind, ThreadEvent, TurnDiff, TurnState,
+    ContentDelta, ContextLength, Decision, Effort, Event, Interaction, Model, PermissionMode,
+    RequestOption, Scope, StopReason, StreamKind, ThreadEvent, TurnDiff, TurnState,
 };
 use yantra_core::checkpoint::{self, BranchDiff, Diff};
 use yantra_core::claude::{self, Events, Said, Session};
@@ -178,13 +181,13 @@ async fn chat<I: Inventory + Clone + Send + Sync + 'static>(
         authoriser,
         registry,
     }): State<Chats<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<crate::write::Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     uri: Uri,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let query = read_query(&uri);
     tracing::info!("chat {name} for {}", caller.node);
 
@@ -287,6 +290,10 @@ enum Frame {
         #[serde(default)]
         #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
         effort: Option<Effort>,
+        /// The tokens a thread fills before it compacts, only when picked.
+        #[serde(default, rename = "contextLength")]
+        #[cfg_attr(test, serde(skip_serializing_if = "Option::is_none"))]
+        context: Option<ContextLength>,
     },
     Answer {
         #[serde(rename = "requestId")]
@@ -441,7 +448,9 @@ struct Next {
     interaction: Interaction,
     model: Option<Model>,
     effort: Option<Effort>,
-    /// A room's turn, which keeps the model and effort the thread runs with.
+    context: Option<ContextLength>,
+    /// A room's turn, which keeps the model, effort and context length the
+    /// thread runs with.
     room: bool,
 }
 
@@ -453,12 +462,13 @@ impl Next {
             interaction: self.interaction,
             model: self.model.as_ref(),
             effort: self.effort,
+            context: self.context,
         }
     }
 }
 
 /// The held turns as one: their texts joined with a blank line, with the last one's modes,
-/// model and effort.
+/// model, effort and context length.
 fn joined(mut next: Vec<Next>) -> Option<Next> {
     let last = next.pop()?;
     let mut texts: Vec<String> = next.into_iter().map(|next| next.text).collect();
@@ -651,11 +661,12 @@ trait Machine: Send + Sync + 'static {
         place: &Place,
         title: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
-    /// Starts `harness` in a keeper.
+    /// Starts `harness` in a keeper that compacts at `context`, for Codex.
     fn start_acp(
         &self,
         place: &Place,
         harness: Harness,
+        context: Option<ContextLength>,
     ) -> impl Future<Output = Result<Started<KeptAgent>, String>> + Send;
     /// Reads back the thread's keeper, or `None` when there is none.
     fn adopt(
@@ -827,6 +838,7 @@ impl Machine for Fleet {
             first.interaction,
             first.model,
             first.effort,
+            first.context,
             mcp.as_ref(),
             resumed.as_deref(),
         );
@@ -894,6 +906,7 @@ impl Machine for Fleet {
         &self,
         place: &Place,
         harness: Harness,
+        context: Option<ContextLength>,
     ) -> Result<Started<KeptAgent>, String> {
         let keeper = keeper_of(place)?;
         let tmux = self.tmux().await?;
@@ -902,7 +915,7 @@ impl Machine for Fleet {
             &self.ssh,
             tmux,
             &keeper,
-            &harness.kept_command(&place.worktree),
+            &harness.kept_command(&place.worktree, context),
             &run,
             Limits::default(),
         )
@@ -914,7 +927,7 @@ impl Machine for Fleet {
         let reader = keep::follow(self.ssh.clone(), tmux.clone(), keeper.clone(), pane, 0);
         let writer = keep::feed(self.ssh.clone(), tmux.clone(), keeper.clone(), &run, 0);
         let said = self.said(&keeper);
-        let (agent, events) = Agent::kept(harness, reader, writer, &run, said);
+        let (agent, events) = Agent::kept(harness, reader, writer, &run, context, said);
         Ok(Started::Running(KeptAgent { agent, events, run }))
     }
 
@@ -1184,6 +1197,8 @@ pub struct Registry {
     waits: Option<mpsc::UnboundedSender<Wait>>,
     /// Where a Claude turn reaches the room tools (ADR-0038 decision 2).
     daemon: Option<SocketAddr>,
+    /// Bumped when a held thread's turn or tool changes, for room presence.
+    changed: watch::Sender<u64>,
 }
 
 #[derive(Default)]
@@ -1251,6 +1266,7 @@ impl Registry {
             held: Arc::default(),
             waits: Some(waits),
             daemon: None,
+            changed: watch::Sender::default(),
         }
     }
 
@@ -1296,6 +1312,22 @@ impl Registry {
                 Some((short.to_owned(), doing))
             })
             .collect()
+    }
+
+    /// Whether thread `thread` of `workspace` runs a turn, and its tool. `None`
+    /// is a thread this daemon holds no keeper for. Read from memory.
+    pub fn activity(&self, workspace: &str, thread: &str) -> Option<room::Activity> {
+        let live = self.live(&format!("chat/{workspace}/{thread}"))?;
+        let state = live.lock();
+        Some(room::Activity {
+            busy: state.busy,
+            tool: state.tool.as_ref().map(|(_, tool)| tool.clone()),
+        })
+    }
+
+    /// Changes each time [`Self::activity`] may answer otherwise.
+    pub fn changed(&self) -> watch::Receiver<u64> {
+        self.changed.subscribe()
     }
 
     /// Whether a turn runs, starts, keeps its checkpoint or reverts in thread
@@ -1371,6 +1403,8 @@ impl Registry {
             return false;
         }
         held.lives.insert(live.id.clone(), Arc::clone(live));
+        live.lock().changed = Some(self.changed.clone());
+        bump(&self.changed);
         for waiter in held.waiters.remove(&live.id).unwrap_or_default() {
             if let Some((_, _, receiver)) = live.subscribe() {
                 let _ = waiter.send(Ok(receiver));
@@ -1497,6 +1531,7 @@ impl Registry {
             return Vec::new();
         }
         state.busy = true;
+        state.bump();
         held.queued.remove(&live.id).unwrap_or_default()
     }
 
@@ -1513,6 +1548,7 @@ impl Registry {
             return (Vec::new(), Vec::new());
         }
         held.lives.remove(&live.id);
+        bump(&self.changed);
         let next = held.drain_next(live);
         (held.queued.remove(&live.id).unwrap_or_default(), next)
     }
@@ -1663,13 +1699,35 @@ struct Published {
     /// The last turn's `turn.diff.updated`, until the next turn starts or a
     /// revert puts its files back (ADR-0035 decision 8).
     diff: Option<ThreadEvent>,
+    /// The item the running turn is in, and what it is, for room presence.
+    tool: Option<(String, String)>,
+    /// [`Registry::changed`], once the registry holds this keeper.
+    changed: Option<watch::Sender<u64>>,
 }
 
 impl Published {
     fn set_busy(&mut self, busy: bool) {
         self.busy = busy;
         self.since = busy.then(SystemTime::now);
+        self.bump();
     }
+
+    fn set_tool(&mut self, tool: Option<(String, String)>) {
+        if self.tool != tool {
+            self.tool = tool;
+            self.bump();
+        }
+    }
+
+    fn bump(&self) {
+        if let Some(changed) = &self.changed {
+            bump(changed);
+        }
+    }
+}
+
+fn bump(changed: &watch::Sender<u64>) {
+    changed.send_modify(|count| *count += 1);
 }
 
 impl Live {
@@ -1694,6 +1752,8 @@ impl Live {
                 prompts: 0,
                 ended: None,
                 diff: None,
+                tool: None,
+                changed: None,
             }),
         });
         (live, received)
@@ -1758,14 +1818,41 @@ impl Live {
     fn event(&self, event: &ThreadEvent) {
         match &event.event {
             Event::TurnCompleted(_) if event.cursor.is_none() => {
-                self.lock().ended = Some(event.clone());
+                let mut state = self.lock();
+                state.ended = Some(event.clone());
+                state.set_tool(None);
             }
             Event::TurnStarted => {
                 let mut state = self.lock();
                 state.ended = None;
                 state.diff = None;
+                state.set_tool(None);
             }
-            Event::TurnCompleted(_) => self.lock().ended = None,
+            Event::TurnCompleted(_) => {
+                let mut state = self.lock();
+                state.ended = None;
+                state.set_tool(None);
+            }
+            Event::ItemStarted(item) => {
+                let what = item.title.clone().or_else(|| {
+                    item.item_type
+                        .and_then(|kind| serde_json::to_value(kind).ok())
+                        .and_then(|kind| kind.as_str().map(str::to_owned))
+                });
+                if let Some(what) = what {
+                    self.lock().set_tool(Some((item.item_id.clone(), what)));
+                }
+            }
+            Event::ItemCompleted(item) => {
+                let mut state = self.lock();
+                if state
+                    .tool
+                    .as_ref()
+                    .is_some_and(|(id, _)| *id == item.item_id)
+                {
+                    state.set_tool(None);
+                }
+            }
             Event::TurnDiffUpdated(_) => self.lock().diff = Some(event.clone()),
             _ => {}
         }
@@ -2058,6 +2145,7 @@ async fn heard_frame<M: Machine, P: Peer>(
             interaction,
             model,
             effort,
+            context,
         }) => {
             let asked = harness.as_deref().map(harness_named).transpose();
             let theirs = here.as_ref().map(|here| here.harness);
@@ -2095,6 +2183,7 @@ async fn heard_frame<M: Machine, P: Peer>(
                         interaction,
                         model,
                         effort,
+                        context,
                         room: false,
                     };
                     let next = match &live {
@@ -2566,7 +2655,16 @@ async fn attach<M: Machine, P: Peer>(
             None
         }
         (None, Some(harness)) => {
-            match connect(machine, name, &here.place, harness, here.session.clone()).await {
+            match connect(
+                machine,
+                name,
+                &here.place,
+                harness,
+                here.session.clone(),
+                None,
+            )
+            .await
+            {
                 Ok((_, Some(receiver))) => {
                     if !peer.say(&machine.registry().queue_of(&here.place.id)).await {
                         return None;
@@ -2753,7 +2851,7 @@ async fn begin<M: Machine, P: Peer>(
 ) -> bool {
     let here = match here {
         Some(here) => here,
-        None => match open(machine, name, early, pick).await {
+        None => match open(machine, name, early, pick, next.context).await {
             Ok((opened, subscribed)) => {
                 if !peer.say(&opened.started(None)).await {
                     return false;
@@ -2827,6 +2925,7 @@ async fn open<M: Machine>(
     name: &str,
     early: &mut Option<String>,
     pick: Option<Harness>,
+    context: Option<ContextLength>,
 ) -> Result<(Here, Option<Sub>), Failure> {
     let id = match early.take().map_or_else(thread::new_id, Ok) {
         Ok(id) => id,
@@ -2847,7 +2946,7 @@ async fn open<M: Machine>(
             None,
         ));
     };
-    let connected = connect(machine, name, &place, harness, None)
+    let connected = connect(machine, name, &place, harness, None, context)
         .await
         .and_then(|(session, receiver)| {
             Ok((session, subscribing(machine.as_ref(), &place, receiver)?))
@@ -2907,6 +3006,7 @@ async fn start_or_hold<M: Machine>(
             interaction: next.interaction,
             model: next.model.clone(),
             effort: next.effort,
+            context: next.context,
             room: next.room,
         };
         let turned = match here.harness {
@@ -3025,7 +3125,12 @@ async fn acp_turn<M: Machine>(
     name: &str,
     here: &Here,
     harness: Harness,
-    Next { text, mode, .. }: Next,
+    Next {
+        text,
+        mode,
+        context,
+        ..
+    }: Next,
     unsubscribed: bool,
 ) -> Result<Turned<Option<Follow>>, Failure> {
     let mut subscribed = None;
@@ -3047,8 +3152,15 @@ async fn acp_turn<M: Machine>(
             live
         }
         None => {
-            let (_, receiver) =
-                connect(machine, name, &here.place, harness, here.session.clone()).await?;
+            let (_, receiver) = connect(
+                machine,
+                name,
+                &here.place,
+                harness,
+                here.session.clone(),
+                context,
+            )
+            .await?;
             let gone = || failure(Kind::Unreachable, "the agent's keeper went away");
             let live = machine.registry().live(&here.place.id).ok_or_else(gone)?;
             subscribed = Some(match receiver {
@@ -3069,6 +3181,7 @@ async fn acp_turn<M: Machine>(
         interaction: Interaction::Build,
         model: None,
         effort: None,
+        context: None,
         room: false,
     }));
     Ok(Turned::Started(subscribed))
@@ -3082,13 +3195,14 @@ async fn connect<M: Machine>(
     place: &Place,
     harness: Harness,
     session: Option<String>,
+    context: Option<ContextLength>,
 ) -> Result<(String, Option<broadcast::Receiver<Sent>>), Failure> {
     let Some(mut claim) = Claim::wait(machine, place).await? else {
         return Ok((session.unwrap_or_default(), None));
     };
     let started = tokio::time::timeout(
         CONNECT_WITHIN,
-        start_session(machine, name, place, harness, session, &mut claim),
+        start_session(machine, name, place, harness, session, context, &mut claim),
     )
     .await;
     match started {
@@ -3113,9 +3227,10 @@ async fn start_session<M: Machine>(
     place: &Place,
     harness: Harness,
     session: Option<String>,
+    context: Option<ContextLength>,
     claim: &mut Claim<M>,
 ) -> Result<(String, Option<broadcast::Receiver<Sent>>), Failure> {
-    match machine.start_acp(place, harness).await {
+    match machine.start_acp(place, harness, context).await {
         Ok(Started::Running(kept)) => {
             claim.started = true;
             let (session, receiver) =
@@ -3426,7 +3541,7 @@ async fn keep_claude<M: Machine>(
 }
 
 /// Sends a turn the thread is marked busy with to Claude: its mode, the prompt
-/// the browser draws, and the prompt. A room's turn keeps the model and effort. A keeper whose stdin has gone holds the
+/// the browser draws, and the prompt. A room's turn keeps the model, effort and context length. A keeper whose stdin has gone holds the
 /// turn for the next one.
 async fn send_turn<M: Machine>(
     machine: &M,
@@ -3437,7 +3552,7 @@ async fn send_turn<M: Machine>(
     mut turn: Next,
 ) {
     if turn.room {
-        (turn.model, turn.effort) = claude.session.picked();
+        (turn.model, turn.effort, turn.context) = claude.session.picked();
     }
     if let Err(said) = machine.write_mode(place, turn.mode).await {
         tracing::warn!("chat {name}: the mode was not written: {said}");
@@ -3520,6 +3635,7 @@ async fn claude_next<M: Machine>(
         interaction: Interaction::Build,
         model: None,
         effort: None,
+        context: None,
         room: true,
     };
     send_turn(machine, name, place, live, claude, turn).await;
@@ -3988,6 +4104,7 @@ fn wake_on<M: Machine>(
                 interaction: Interaction::Build,
                 model: None,
                 effort: None,
+                context: None,
                 room: true,
             };
             match claude_turn(&machine, &name, &place, turn, false).await {
@@ -4433,6 +4550,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    context: None,
                     room: false,
                 }],
             ))
@@ -4458,6 +4576,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    context: None,
                 }),
                 frame(Frame::Turn {
                     text: "and the docs".to_owned(),
@@ -4466,6 +4585,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Plan,
                     model: None,
                     effort: None,
+                    context: None,
                 }),
                 frame(Frame::Turn {
                     text: "think it through".to_owned(),
@@ -4474,6 +4594,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     interaction: Interaction::Build,
                     model: Model::try_from("opus".to_owned()).ok(),
                     effort: Some(Effort::High),
+                    context: ContextLength::try_from(400_000).ok(),
                 }),
                 frame(Frame::Answer {
                     request_id: "r1".to_owned(),
@@ -4746,6 +4867,8 @@ mod tests {
         runs: Mutex<u32>,
         turns: Mutex<Vec<Claude>>,
         agents: Mutex<Vec<Acp>>,
+        /// The context length each ACP keeper was started with.
+        contexts: Mutex<Vec<Option<ContextLength>>>,
         opened: Mutex<usize>,
         removed: Mutex<usize>,
         remembered: Mutex<Vec<(Harness, String)>>,
@@ -4914,6 +5037,7 @@ mod tests {
                 first.interaction,
                 first.model,
                 first.effort,
+                first.context,
                 None,
                 None,
             ));
@@ -4986,6 +5110,7 @@ mod tests {
             &self,
             _: &Place,
             harness: Harness,
+            context: Option<ContextLength>,
         ) -> Result<Started<KeptAgent>, String> {
             if self.start_acp_fails {
                 return Err("ssh: could not start the agent".to_owned());
@@ -4994,7 +5119,8 @@ mod tests {
                 return Ok(Started::Busy);
             };
             lock(&self.agents).push(Acp(end));
-            let (agent, events) = Agent::kept(harness, reader, writer, &run, said());
+            lock(&self.contexts).push(context);
+            let (agent, events) = Agent::kept(harness, reader, writer, &run, context, said());
             Ok(Started::Running(KeptAgent { agent, events, run }))
         }
 
@@ -5401,6 +5527,8 @@ mod tests {
             json!({"type": "answer", "requestId": "r1", "decision": "accept"}),
             json!({"type": "turn", "text": "hi", "model": "opus; touch /tmp/pwned"}),
             json!({"type": "turn", "text": "hi", "effort": "ultra"}),
+            json!({"type": "turn", "text": "hi", "contextLength": 50_000}),
+            json!({"type": "turn", "text": "hi", "contextLength": "1m; touch /tmp/pwned"}),
         ] {
             let said = tab.next_after(frame).await;
             assert_eq!(said["type"], "error", "{said}");
@@ -5424,6 +5552,7 @@ mod tests {
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    context: None,
                 },
             ),
             (
@@ -5435,6 +5564,7 @@ mod tests {
                     interaction: Interaction::Build,
                     model: None,
                     effort: None,
+                    context: None,
                 },
             ),
             (
@@ -5446,6 +5576,7 @@ mod tests {
                     interaction: Interaction::Plan,
                     model: None,
                     effort: None,
+                    context: None,
                 },
             ),
             (
@@ -5465,6 +5596,19 @@ mod tests {
                     interaction: Interaction::Build,
                     model: Model::try_from("claude-opus-5-5".to_owned()).ok(),
                     effort: Some(Effort::Xhigh),
+                    context: None,
+                },
+            ),
+            (
+                r#"{"type":"turn","text":"hi","harness":"codex","contextLength":1000000}"#,
+                Frame::Turn {
+                    text: "hi".to_owned(),
+                    harness: Some("codex".to_owned()),
+                    mode: PermissionMode::Supervised,
+                    interaction: Interaction::Build,
+                    model: None,
+                    effort: None,
+                    context: ContextLength::try_from(1_000_000).ok(),
                 },
             ),
             (r#"{"type":"cancel"}"#, Frame::Cancel),
@@ -5659,6 +5803,70 @@ mod tests {
         let (adopted, _commands) = Live::new(&place(), "2".to_owned(), true);
         assert_eq!(adopted.lock().since, None);
         assert!(adopted.busy());
+    }
+
+    #[test]
+    fn a_held_threads_activity_follows_its_turn_and_tool_and_bumps_the_watch() {
+        use yantra_core::chat::{Item, ItemType};
+        let registry = Registry::default();
+        let mut changed = registry.changed();
+        assert_eq!(registry.activity("web", THREAD), None, "not held");
+        registry.hold_for_test(&format!("chat/web/{THREAD}"), true);
+        assert!(changed.has_changed().expect("held"), "the hold bumps");
+        changed.mark_unchanged();
+        let busy = |tool: Option<&str>| {
+            Some(room::Activity {
+                busy: true,
+                tool: tool.map(str::to_owned),
+            })
+        };
+        assert_eq!(registry.activity("web", THREAD), busy(None));
+
+        let live = registry.live(&format!("chat/web/{THREAD}")).expect("held");
+        let item = |id: &str, title: Option<&str>| Item {
+            item_id: id.to_owned(),
+            item_type: Some(ItemType::CommandExecution),
+            status: None,
+            title: title.map(str::to_owned),
+            output: None,
+            changes: vec![],
+        };
+        let at = |event| ThreadEvent {
+            thread_id: THREAD.to_owned(),
+            cursor: None,
+            event,
+        };
+        live.event(&at(Event::ItemStarted(item("t1", Some("cargo test")))));
+        assert_eq!(registry.activity("web", THREAD), busy(Some("cargo test")));
+        assert!(changed.has_changed().expect("held"));
+        changed.mark_unchanged();
+
+        live.event(&at(Event::ItemCompleted(item("t0", None))));
+        assert_eq!(
+            registry.activity("web", THREAD),
+            busy(Some("cargo test")),
+            "another item's end leaves the tool"
+        );
+        live.event(&at(Event::ItemCompleted(item("t1", None))));
+        assert_eq!(registry.activity("web", THREAD), busy(None));
+        live.event(&at(Event::ItemStarted(item("t2", None))));
+        assert_eq!(
+            registry.activity("web", THREAD),
+            busy(Some("command_execution")),
+            "an item with no title is named by its type"
+        );
+        changed.mark_unchanged();
+
+        live.set_busy(false);
+        assert!(changed.has_changed().expect("held"));
+        live.event(&at(Event::TurnStarted));
+        assert_eq!(
+            registry.activity("web", THREAD),
+            Some(room::Activity {
+                busy: false,
+                tool: None
+            })
+        );
     }
 
     #[tokio::test]
@@ -6233,14 +6441,17 @@ mod tests {
         };
         let app = Router::new().nest(
             "/api",
-            router(Authoriser::new(fake, &[]), Registry::default()),
+            router(
+                Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock")),
+                Registry::default(),
+            ),
         );
         let listener = TcpListener::bind((LOCAL, 0)).await.expect("a free port");
         let address = listener.local_addr().expect("it is bound");
         tokio::spawn(async move {
             let _ = axum::serve(
                 listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
+                app.into_make_service_with_connect_info::<crate::write::Peer>(),
             )
             .await;
         });
@@ -6285,7 +6496,11 @@ mod tests {
     async fn a_socket_the_daemon_ends_gets_a_close_frame() {
         use crate::terminal::tests::{TEXT, connect_to, frame, tailnet};
         let api = router(
-            Authoriser::new(tailnet(vec![(LOCAL, caller(ME, &[]))]), &[]),
+            Authoriser::new(
+                tailnet(vec![(LOCAL, caller(ME, &[]))]),
+                &[],
+                std::path::Path::new("yantrad.sock"),
+            ),
             Registry::default(),
         );
         let mut socket = connect_to(
@@ -8360,6 +8575,38 @@ mod tests {
         );
     }
 
+    /// Y-663: a Claude keeper starts with the context length its first frame
+    /// names, and a later turn that changes it sets it on the live process.
+    #[tokio::test]
+    async fn a_claude_turn_compacts_at_the_context_length_it_names() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "fix the test", "contextLength": 256_000}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        assert!(
+            lock(&script.commands)[0].contains("--autocompact 256000 -p"),
+            "{}",
+            lock(&script.commands)[0]
+        );
+        claude.say(ended()).await;
+        through(&mut tab, "turn.completed").await;
+
+        tab.send(json!({"type": "turn", "text": "and the docs", "contextLength": 1_000_000}));
+        assert_eq!(
+            claude.heard().await.expect("a line")["request"],
+            json!({"subtype": "apply_flag_settings",
+                "settings": {"autoCompactWindow": 1_000_000}})
+        );
+        assert_eq!(
+            prompt_of(&claude.heard().await.expect("a line")),
+            "and the docs"
+        );
+        assert_eq!(lock(&script.commands).len(), 1, "one process");
+    }
+
     /// Y-564, ADR-0041 decision 5: a later turn in another model or effort
     /// sets it on the live process before its line, and starts no other.
     #[tokio::test]
@@ -8387,15 +8634,16 @@ mod tests {
         assert_eq!(lock(&script.commands).len(), 1, "one process");
     }
 
-    /// Y-564: a room's turn, queued behind the person's or on an idle
-    /// thread, runs in the model and effort the thread runs with.
+    /// Y-564, Y-663: a room's turn, queued behind the person's or on an idle
+    /// thread, runs in the model, effort and context length the thread runs
+    /// with, so it sends no change before its line.
     #[tokio::test]
     async fn a_room_prompt_keeps_the_picked_model_and_effort() {
         let script = Arc::new(Script::default());
         let (mut tab, _served) = connect(Arc::clone(&script), None);
         tab.send(
             json!({"type": "turn", "text": "fix the test", "mode": "full-access",
-                        "model": "opus", "effort": "max"}),
+                        "model": "opus", "effort": "max", "contextLength": 400_000}),
         );
         tab.next().await;
         tab.next().await;
@@ -8487,6 +8735,29 @@ mod tests {
         assert_eq!(agent.heard().await["method"], "session/prompt");
         assert_eq!(tab.next().await["type"], "turn.started");
         assert!(lock(&script.commands).is_empty(), "no Claude turn started");
+    }
+
+    /// Y-663: a Codex keeper starts with the context length of the turn that
+    /// opens the thread.
+    #[tokio::test]
+    async fn a_codex_keeper_starts_with_the_context_length_of_the_first_turn() {
+        let script = Arc::new(Script::default());
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(
+            json!({"type": "turn", "text": "list the files", "harness": "codex",
+                        "contextLength": 400_000}),
+        );
+        let mut agent = script.agent().await;
+        agent.initialized().await;
+        let new = agent.heard().await;
+        agent
+            .reply(&new, json!({"sessionId": SESSION, "configOptions": []}))
+            .await;
+        assert_eq!(tab.next().await["type"], "thread.started");
+        assert_eq!(
+            *lock(&script.contexts),
+            [ContextLength::try_from(400_000).ok()]
+        );
     }
 
     #[tokio::test]
@@ -8620,7 +8891,7 @@ mod tests {
         };
         let closing = watch::Sender::new(false);
         rooms
-            .read(&me, "r1", Duration::ZERO, &closing)
+            .read(&me, "beta", "r1", Duration::ZERO, &closing)
             .await
             .expect("joins");
 
@@ -8640,7 +8911,7 @@ mod tests {
             .await;
         let read = tokio::time::timeout(
             Duration::from_secs(5),
-            rooms.read(&me, "r1", Duration::from_secs(50), &closing),
+            rooms.read(&me, "beta", "r1", Duration::from_secs(50), &closing),
         )
         .await
         .expect("the give-back ends the wait")
@@ -8968,6 +9239,7 @@ mod tests {
             interaction: Interaction::default(),
             model: None,
             effort: None,
+            context: None,
             room: false,
         }
     }

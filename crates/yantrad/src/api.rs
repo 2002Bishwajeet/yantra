@@ -57,6 +57,7 @@ pub fn router() -> Router<Fleet> {
         .route("/pulls", get(pulls))
         .route("/github", get(connection))
         .route("/repos", get(repos))
+        .route("/repos/hidden", get(hidden))
         .fallback(no_such_route)
 }
 
@@ -477,13 +478,23 @@ async fn repos(State(model): State<Model>) -> impl IntoResponse {
     }))
 }
 
+/// The organisations that own none of `/repos`. The list is read first, so its
+/// failure is this answer's failure too.
+async fn hidden(State(model): State<Model>) -> impl IntoResponse {
+    let snapshot = model.read().await.clone();
+    Json(match snapshot.repos.as_deref() {
+        Some(repos) if repos.value().is_err() => Answer::of(Some(repos), |_| Vec::new()),
+        _ => Answer::of(snapshot.hidden.as_deref(), Vec::clone),
+    })
+}
+
 /// The library answers `heartbeat` *unknown* from every caller it has, and that
 /// is the architecture rather than a gap: the beats are in this process and
 /// nothing persists them (Y-044), while ADR-0012 keeps the CLI out of it. This
 /// is the daemon filling in its own check.
 ///
 /// [`crate::write`]'s re-check calls it too, so a report a person asked for
-/// carries the same thirteen answers as the swept one and not twelve plus an
+/// carries the same fourteen answers as the swept one and not thirteen plus an
 /// *unknown* the daemon could have filled in.
 pub(crate) fn answered(
     report: &doctor::Report,
@@ -1296,6 +1307,7 @@ pub(crate) mod tests {
             "/attention",
             "/readiness/github",
             "/repos",
+            "/repos/hidden",
         ] {
             let body = get_json(holding(Snapshot::default()), path).await;
             assert_eq!(body, json!({"looked": "never"}), "{path}");
@@ -2070,6 +2082,52 @@ pub(crate) mod tests {
                 .is_some_and(|e| e.contains("yantra github login")),
             "{body}"
         );
+    }
+
+    /// An organisation that owns none of the list reaches the JSON by name.
+    #[tokio::test]
+    async fn hidden_organisations_reach_the_json_by_name() {
+        let fleet = holding(Snapshot {
+            repos: Some(Arc::new(Reading::new(Ok(vec![repo("me/yantra")])))),
+            hidden: Some(Arc::new(Reading::new(Ok(vec!["Org".to_owned()])))),
+            ..Snapshot::default()
+        });
+
+        let body = get_json(fleet, "/repos/hidden").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        assert_eq!(body["data"], json!(["Org"]));
+    }
+
+    /// A failed organisation read, or a failed list, is a failed look and
+    /// never "every organisation is visible".
+    #[tokio::test]
+    async fn hidden_organisations_fail_with_their_read_or_with_the_list() {
+        let orgs_failed = holding(Snapshot {
+            repos: Some(Arc::new(Reading::new(Ok(vec![repo("me/yantra")])))),
+            hidden: Some(Arc::new(Reading::new(Err(
+                yantra_core::github::Error::Refused,
+            )))),
+            ..Snapshot::default()
+        });
+        let list_failed = holding(Snapshot {
+            repos: Some(Arc::new(Reading::new(Err(
+                yantra_core::github::Error::NoGrant,
+            )))),
+            ..Snapshot::default()
+        });
+
+        for (fleet, said) in [
+            (orgs_failed, "refused the grant"),
+            (list_failed, "yantra github login"),
+        ] {
+            let body = get_json(fleet, "/repos/hidden").await;
+            assert_eq!(body["looked"], "failed", "{body}");
+            assert!(body.get("data").is_none(), "{body}");
+            assert!(
+                body["error"].as_str().is_some_and(|e| e.contains(said)),
+                "{body}"
+            );
+        }
     }
 
     /// The two shapes the page draws: nobody signed in, and a grant with its

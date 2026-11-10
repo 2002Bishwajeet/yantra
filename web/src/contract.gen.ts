@@ -39,6 +39,7 @@ import type {
   Repo,
   Resumed,
   Room,
+  RoomEvents,
   RoomPosted,
   RoomRemoved,
   RoomSummary,
@@ -451,6 +452,14 @@ export const repos = {
   ],
   "looked": "ok"
 } satisfies Looked<Repo[]>
+
+export const hiddenOrgs = {
+  "age_seconds": 0,
+  "data": [
+    "acme-corp"
+  ],
+  "looked": "ok"
+} satisfies Looked<string[]>
 
 export const github = {
   "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4",
@@ -1353,6 +1362,7 @@ export const chatFrames = [
     "type": "turn"
   },
   {
+    "contextLength": 400000,
     "effort": "high",
     "mode": "supervised",
     "model": "opus",
@@ -1458,9 +1468,59 @@ export const room = {
   "messages": 3,
   "name": "design-review",
   "paused": true,
+  "presence": [
+    {
+      "doing": "cargo test",
+      "label": "cachyos-g14 · chat 1a2b3c4d",
+      "state": "working",
+      "thread": true
+    },
+    {
+      "label": "mac",
+      "state": "listening",
+      "thread": false
+    },
+    {
+      "label": "pixel",
+      "state": "away",
+      "thread": false
+    }
+  ],
   "spent": 20,
   "workspace": "web"
 } satisfies Room
+
+export const roomEvents = {
+  "last": 21,
+  "messages": [
+    {
+      "at": 1800000120,
+      "budget": 1,
+      "from": "mac",
+      "kind": "text",
+      "seq": 21,
+      "text": "The form is done."
+    }
+  ],
+  "presence": [
+    {
+      "doing": "cargo test",
+      "label": "cachyos-g14 · chat 1a2b3c4d",
+      "state": "working",
+      "thread": true
+    },
+    {
+      "label": "mac",
+      "state": "listening",
+      "thread": false
+    },
+    {
+      "label": "pixel",
+      "state": "away",
+      "thread": false
+    }
+  ]
+} satisfies RoomEvents
 
 export const roomPosted = {
   "delivered": 2,

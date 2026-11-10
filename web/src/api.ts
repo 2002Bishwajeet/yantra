@@ -804,8 +804,23 @@ export type RoomMessage = {
   budget: number
 }
 
-/** `GET /api/rooms/{room}`: the summary and the messages the room keeps. */
-export type Room = RoomSummary & { log: RoomMessage[] }
+/** A member's presence (Y-551). A thread's comes from its stream; any other
+ *  member's from its own calls. `doing` is set only while it is working,
+ *  and is the agent's own text, so it is untrusted. */
+export type RoomPresence = {
+  label: string
+  thread: boolean
+  state: 'listening' | 'working' | 'idle' | 'away'
+  doing?: string
+}
+
+/** `GET /api/rooms/{room}`: the summary, the messages the room keeps, and
+ *  each member's presence. */
+export type Room = RoomSummary & { log: RoomMessage[]; presence: RoomPresence[] }
+
+/** `GET /api/rooms/{room}/events?after=<seq>&wait=<s>`: a long-poll. `last`
+ *  is the room's newest seq, the next poll's `after`. */
+export type RoomEvents = { messages: RoomMessage[]; presence: RoomPresence[]; last: number }
 
 /** `POST /api/rooms/{room}/messages` with `{ text }`. */
 export type RoomPosted = { seq: number; delivered: number }

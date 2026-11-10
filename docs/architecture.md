@@ -70,8 +70,9 @@ on a machine where `yantrad` was never started. **Nine verbs are the exceptions.
 (Y-435) is the main agent's MCP server, and it calls `yantrad`'s `/api/tasks` to delegate work to
 another harness in its own git worktree
 ([ADR-0033](adr/0033-other-harnesses-speak-acp-and-claude-delegates.md)). It also forwards
-`room_send` and `room_read` to `/api/mcp`, where agents on two machines talk in a room
-([ADR-0038](adr/0038-rooms-and-guest-devices.md), Y-534). `yantra room new`, `ls`, `show`, `edit` and `rm`
+the four room tools, `room_send`, `room_read`, `room_info` and `room_status`, to `/api/mcp`,
+where agents on two machines talk in a room and show their presence
+([ADR-0038](adr/0038-rooms-and-guest-devices.md), Y-534, Y-551). `yantra room new`, `ls`, `show`, `edit` and `rm`
 define, list, read, edit and end a room there
 ([ADR-0039](adr/0039-a-room-is-a-shared-project.md), Y-550). `yantra room resume` lifts a room's
 pause, and `yantra room post` writes into a room as the owner (Y-536). `yantra why` (Y-452) reads
@@ -173,7 +174,7 @@ flowchart TB
 | --- | --- | --- |
 | Nothing is publicly reachable | `yantrad` binds only the addresses Tailscale reports for **this** machine, and **refuses to start** if it cannot learn them | ✅ `ss -ltnp` shows the tailnet addresses and no `0.0.0.0`; `curl 127.0.0.1:7717` is refused |
 | No auth on the **read** API | Deliberate. Q6 settled that Yantra is personal-first, so for reads the bind address **is** the security model (R-22) | ⚠️ a design decision, not a control — see below |
-| Anything that **acts** | `up`, `down`, `resume` and the terminal socket resolve the caller with `tailscale whois` and refuse unless it is the tailnet's owner ([ADR-0016](adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)). A proxied hop is only trusted to name the caller when the hop is ours ([ADR-0017](adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)) | ✅ tested, including a forged `Forwarded` header |
+| Anything that **acts** | `up`, `down`, `resume` and the terminal socket resolve the caller with `tailscale whois` and refuse unless it is the tailnet's owner ([ADR-0016](adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)). The kernel proves the `serve` hop on a Unix socket, and this machine's own address is refused over TCP ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)) | ✅ tested, including a forged `X-Forwarded-For` from another account |
 | Remote command injection | Every command crosses as **base64 decoded by `/bin/sh` on the far side**, so a hostile `repo` path stays an argument. POSIX quoting was tested and breaks on an embedded newline (I-26) | ✅ tested against a real `/bin/sh`, with a hostile path |
 | Host identity | `UserKnownHostsFile` in Yantra's own state dir, `StrictHostKeyChecking=accept-new` | ✅ |
 | Credentials on disk | Yantra stores **none for the machines it reaches**, and two of its own — the last row names both. It never asks for a password: `BatchMode=yes` means a machine that wants one fails instead of prompting | ✅ |

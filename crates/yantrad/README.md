@@ -27,6 +27,7 @@ API the CLI cannot reach.
 | `POST /api/github/login` | `yantra github login` |
 | `DELETE /api/github` | `yantra github logout` |
 | `GET /api/repos` | `yantra ls repos` |
+| `GET /api/repos/hidden` | — |
 | `POST /api/workspaces` | `yantra new` |
 | `PATCH /api/workspaces/{name}` | `yantra edit` |
 | `POST /api/workspaces/{name}/up` | `yantra up` |
@@ -61,10 +62,11 @@ API the CLI cannot reach.
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
 | `POST /api/machines/{machine}/clone` | `yantra clone` |
 | `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks/{id}/steer`, `GET /api/tasks/{id}/wait`, `POST /api/tasks/{id}/stop`, `DELETE /api/tasks/{id}` | `yantra mcp`'s tools — `start_task`, `list_tasks`, `task_status`, `steer_task`, `wait_task`, `cancel_task`, `remove_task` (ADR-0033, Y-435, Y-454). The `GET`s read memory |
-| `POST /api/mcp` | `yantra mcp`'s `room_send` and `room_read`, which forward here. MCP over HTTP for agents in a room: a Chat turn reaches it through `--mcp-config`, and a message wakes an idle Claude thread (ADR-0038, Y-534). `GET` is `405` |
+| `POST /api/mcp` | `yantra mcp`'s `room_send`, `room_read`, `room_info` and `room_status`, which forward here. MCP over HTTP for agents in a room: a Chat turn reaches it through `--mcp-config`, and a message wakes an idle Claude thread (ADR-0038, Y-534). `GET` is `405` |
 | `POST /api/rooms/{room}/resume` | `yantra room resume` (204; a room this daemon does not hold is `404`) |
 | `POST /api/rooms/{room}/messages` | `yantra room post` (`{seq, delivered}`; the owner writes into a room, labelled `owner on <machine>`, and its count goes to 0; `404` for a room it does not hold, `400` for an empty text or one over 16 KiB; Y-536) |
-| `GET /api/rooms`, `GET /api/rooms/{room}` | `yantra room ls` and `yantra room show`, and the dashboard's Rooms screens (Y-536, Y-550). The rooms with their budget, pause and members, and one room's messages. Memory, owner-only |
+| `GET /api/rooms`, `GET /api/rooms/{room}` | `yantra room ls` and `yantra room show`, and the dashboard's Rooms screens (Y-536, Y-550). The rooms with their budget, pause and members, and one room's messages and its members' `presence` (Y-551). Memory, owner-only |
+| `GET /api/rooms/{room}/events` | no verb; the dashboard's long-poll. `?after=<seq>&wait=<s>` answers `{messages, presence, last}` when a message after `after` exists, a message arrives, presence changes or `wait` runs out. `wait` above 50 is `400`, a room it does not hold `404`, a daemon that shuts down `503`. Memory, owner-only (Y-551) |
 | `POST /api/rooms` | `yantra room new` (201 with the summary; writes the room's definition, ADR-0039, Y-550) |
 | `PATCH /api/rooms/{room}` | `yantra room edit` (`{brief}`, where `null` clears it; an undefined room is `404`) |
 | `DELETE /api/rooms/{room}` | `yantra room rm` (`{"removed": bool}`, as the workspace delete answers) |
@@ -81,12 +83,14 @@ source address is resolved live, and anything that is not this owner's own untag
 `403`. A `tailscale` that cannot answer is **`503`** — nothing was decided about the caller, so
 blaming them would be a lie about which thing broke.
 
-**Which address that is depends on where the connection came from**
-([ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)): when
-the TCP peer is one of the daemon's own bind addresses the request was proxied on this machine, so
-`X-Forwarded-For` names the caller; otherwise the peer does, and a header sent straight to `7717` is
-ignored. A forwarded value that is not exactly one address is a **`503`** — nothing was decided, and
-the caller did not write it.
+**Which address that is depends on the door**
+([ADR-0042](../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)). The daemon also listens
+on a Unix socket, `/run/yantra/yantrad.sock`, and `tailscale serve` proxies to it. On TCP the peer is
+the caller and `X-Forwarded-For` is never read; a peer that is this machine's own address is a
+**`403`** that names the socket. On the socket the kernel names the account. Root is the `serve` hop,
+and its one forwarded address is the caller. The daemon's own account, or a member of the `yantra`
+group, is this machine. Any other account may only join itself. A forwarded value that is not
+exactly one address is a **`503`** — nothing was decided, and the caller did not write it.
 
 `PATCH /api/workspaces/{name}` rewrites only the fields the body names, and answers the workspace as
 it now reads — the same shape `POST /api/workspaces` answers with. `"startup": null` clears the
@@ -158,6 +162,7 @@ acts on, and the two must not read alike.
 daemon polls, and `GET /api/github` says when the grant is live — `connected`, the login, the profile
 image URL, the scopes, whether a sign-in is pending and `expiring` when the last one got a token that expires, never the token. `DELETE /api/github` removes it. `GET /api/repos`
 is every repository the grant can see, swept every five minutes and filtered in the browser.
+`GET /api/repos/hidden` names each organisation that owns none of them (Y-629). It reads `GET /user/orgs` and the public memberships from `GET /users/{login}/orgs`, because GitHub can leave out an organisation that restricts the app. A private membership in such an organisation stays unnamed.
 
 **It is polled every five minutes rather than every thirty seconds**, which is the one read that
 departs from the fleet's interval. The fleet poll pays for itself by keeping the ssh masters warm;

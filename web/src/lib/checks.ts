@@ -66,6 +66,16 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
     }),
     session: false,
   },
+  // Y-628: a warning, because sessions run; ADR-0046 says why agents must not hold sudo.
+  'no-sudo': {
+    name: 'account without sudo',
+    fix: () => ({
+      by: 'hand',
+      words:
+        'Agents run as the account that joined. Join a separate account without sudo, named karigar: Add a device shows how.',
+    }),
+    session: false,
+  },
   heartbeat: {
     name: 'usage reports',
     fix: () => ({ by: 'hand', words: 'The join command offers Yantra’s agent, which reports CPU, memory and disk.' }),
@@ -73,7 +83,7 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
   },
 }
 
-/** `doctor`'s thirteen ids, in its order. */
+/** `doctor`'s fourteen ids, in its order. */
 export const CHECK_IDS: readonly string[] = Object.keys(CHECKS)
 
 export const nameOf = (check: string): string => CHECKS[check]?.name ?? check

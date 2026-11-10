@@ -2,7 +2,8 @@
 //! ([ADR-0038](../../../docs/adr/0038-rooms-and-guest-devices.md) decision 2),
 //! and the owner's room routes (decisions 4 and 5): `GET` and `POST
 //! /api/rooms`, `GET`, `PATCH` and `DELETE /api/rooms/{room}` (ADR-0039,
-//! Y-550), `POST /api/rooms/{room}/messages` and `POST /api/rooms/{room}/resume`.
+//! Y-550), `GET /api/rooms/{room}/events` (Y-551), `POST
+//! /api/rooms/{room}/messages` and `POST /api/rooms/{room}/resume`.
 //!
 //! **A small subset, on purpose**: POST with one JSON-RPC message and a JSON
 //! answer. A notification or a response gets `202` and no body, a batch is
@@ -21,13 +22,13 @@
 //! **A tool's failure is a result with `isError`**, as MCP asks, so the agent
 //! reads it; only the identity check refuses with an HTTP status.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{ConnectInfo, Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -36,12 +37,12 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use yantra_core::identity;
 use yantra_core::inventory::{Inventory, MachineInfo};
-use yantra_core::room::{self, Call, Kind, Message, Reader, Summary, Thread};
+use yantra_core::room::{self, Call, Kind, Message, Presence, Present, Reader, Summary, Thread};
 use yantra_core::room_file::{self, Definition};
 use yantra_core::workspace;
 
 use crate::room::Rooms;
-use crate::write::{Authoriser, Refused, allowed};
+use crate::write::{Authoriser, Peer, Refused, allowed};
 
 const THREAD: &str = "x-yantra-thread";
 const SESSION: &str = "mcp-session-id";
@@ -102,6 +103,7 @@ where
             "/rooms/{room}",
             get(view::<I>).patch(edit::<I>).delete(end::<I>),
         )
+        .route("/rooms/{room}/events", get(events::<I>))
         .route("/rooms/{room}/messages", post(post_message::<I>))
         .route("/rooms/{room}/resume", post(resume::<I>))
         .with_state(Served {
@@ -116,20 +118,20 @@ where
 /// The spec lets a server refuse the event stream.
 async fn stream<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Response, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     Ok((StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "POST")]).into_response())
 }
 
 async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let Ok(message) = serde_json::from_slice::<Value>(&body) else {
         return Ok(refused(&Value::Null, PARSE_ERROR, "Parse error"));
     };
@@ -223,7 +225,13 @@ async fn tool<I>(state: &Served<I>, reader: &Reader, label: &str, call: Call) ->
         Call::Read { room, wait } => {
             let read = state
                 .rooms
-                .read(reader, &room, Duration::from_secs(wait), &state.closing)
+                .read(
+                    reader,
+                    label,
+                    &room,
+                    Duration::from_secs(wait),
+                    &state.closing,
+                )
                 .await;
             match read {
                 Ok(None) => Err("yantrad is shutting down; read again once it is back".to_owned()),
@@ -238,6 +246,29 @@ async fn tool<I>(state: &Served<I>, reader: &Reader, label: &str, call: Call) ->
                 Err(error) => Err(error.to_string()),
             }
         }
+        Call::Info { room } => state
+            .rooms
+            .info(reader, label, &room)
+            .map(|info| {
+                let summary = info.summary;
+                json!({
+                    "room": summary.name,
+                    "workspace": summary.workspace,
+                    "brief": summary.brief,
+                    "base": summary.base,
+                    "spent": summary.spent,
+                    "budget": room::BUDGET,
+                    "paused": summary.paused,
+                    "members": info.members.into_iter().map(RoomPresence::from).collect::<Vec<_>>(),
+                })
+                .to_string()
+            })
+            .map_err(|error| error.to_string()),
+        Call::Status { room, doing } => state
+            .rooms
+            .status(reader, label, &room, &doing)
+            .map(|()| json!({"ok": true}).to_string())
+            .map_err(|error| error.to_string()),
     };
     outcome(said)
 }
@@ -340,11 +371,11 @@ fn session_of(headers: &HeaderMap) -> Option<String> {
 
 async fn resume<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     state.rooms.resume(&name).map_err(|error| Refused::Verb {
         status: StatusCode::NOT_FOUND,
         said: error.to_string(),
@@ -420,12 +451,80 @@ impl From<Message> for RoomMessage {
     }
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum PresenceState {
+    Listening,
+    Working,
+    Idle,
+    Away,
+}
+
+/// A member's presence. `doing` is set only while it is working, and is
+/// the agent's own text.
+#[derive(Debug, serde::Serialize)]
+struct RoomPresence {
+    label: String,
+    thread: bool,
+    state: PresenceState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    doing: Option<String>,
+}
+
+impl From<Present> for RoomPresence {
+    fn from(present: Present) -> Self {
+        let (state, doing) = match present.presence {
+            Presence::Listening => (PresenceState::Listening, None),
+            Presence::Working(doing) => (PresenceState::Working, Some(doing)),
+            Presence::Idle => (PresenceState::Idle, None),
+            Presence::Away => (PresenceState::Away, None),
+        };
+        Self {
+            label: present.label,
+            thread: present.thread,
+            state,
+            doing,
+        }
+    }
+}
+
 /// `GET /api/rooms/{room}`.
 #[derive(Debug, serde::Serialize)]
 struct RoomView {
     #[serde(flatten)]
     summary: RoomSummary,
     log: Vec<RoomMessage>,
+    presence: Vec<RoomPresence>,
+}
+
+/// `GET /api/rooms/{room}/events`. `last` is the room's newest seq, the
+/// `after` of the next poll.
+#[derive(Debug, serde::Serialize)]
+struct RoomEvents {
+    messages: Vec<RoomMessage>,
+    presence: Vec<RoomPresence>,
+    last: u64,
+}
+
+/// `after` and `wait` of `GET /api/rooms/{room}/events`, each 0 when left out.
+fn poll(query: Option<&str>) -> Result<(u64, Duration), String> {
+    let (mut after, mut wait) = (0, 0);
+    for pair in query.unwrap_or_default().split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        let number = || value.parse::<u64>().ok();
+        match key {
+            "after" => after = number().ok_or("`after` is a seq: a whole number")?,
+            "wait" => {
+                wait = number()
+                    .filter(|wait| *wait <= room::WAIT_LIMIT)
+                    .ok_or("`wait` is a whole number of seconds from 0 to 50")?;
+            }
+            _ => {}
+        }
+    }
+    Ok((after, Duration::from_secs(wait)))
 }
 
 /// `POST /api/rooms/{room}/messages`.
@@ -496,11 +595,11 @@ fn defined(error: &room_file::Error) -> Refused {
 /// The owner defines a room in a workspace (ADR-0039 decision 1).
 async fn create<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     body: Result<Json<Create>, JsonRejection>,
 ) -> Result<(StatusCode, Json<RoomSummary>), Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let asked = json_only(body, "{\"name\", \"workspace\", \"brief\"?, \"base\"?}")?;
     let definition = Definition {
         name: asked.name,
@@ -534,12 +633,12 @@ async fn create<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn edit<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     body: Result<Json<Edit>, JsonRejection>,
 ) -> Result<Json<RoomSummary>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let asked = json_only(body, "{\"brief\": \"...\" | null}")?;
     let summary = state
         .rooms
@@ -551,11 +650,11 @@ async fn edit<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn end<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<RoomRemoved>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let removed = state.rooms.end(&name).map_err(|error| defined(&error))?;
     tracing::info!("room {name}: ended for {}, removed {removed}", caller.node);
     Ok(Json(RoomRemoved { removed }))
@@ -563,10 +662,10 @@ async fn end<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn list<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RoomSummary>>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     Ok(Json(
         state
             .rooms
@@ -579,27 +678,59 @@ async fn list<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn view<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<RoomView>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let (summary, messages) = state.rooms.view(&name).map_err(missing)?;
+    let presence = state.rooms.presence(&name).map_err(missing)?;
     Ok(Json(RoomView {
         summary: summary.into(),
         log: messages.into_iter().map(RoomMessage::from).collect(),
+        presence: presence.into_iter().map(RoomPresence::from).collect(),
+    }))
+}
+
+/// The owner's long-poll for a room's messages and presence, as `room_read`
+/// waits. It joins no one and moves no cursor.
+async fn events<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Served<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    RawQuery(query): RawQuery,
+) -> Result<Json<RoomEvents>, Refused> {
+    allowed(&state.authoriser, &from, &headers).await?;
+    let (after, wait) = poll(query.as_deref()).map_err(|said| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said: said.to_owned(),
+    })?;
+    let (messages, presence, last) = state
+        .rooms
+        .events(&name, after, wait, &state.closing)
+        .await
+        .map_err(missing)?
+        .ok_or_else(|| Refused::Verb {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            said: "yantrad is shutting down; poll again once it is back".to_owned(),
+        })?;
+    Ok(Json(RoomEvents {
+        messages: messages.into_iter().map(RoomMessage::from).collect(),
+        presence: presence.into_iter().map(RoomPresence::from).collect(),
+        last,
     }))
 }
 
 /// A person's message. The label is the caller's machine, never the body.
 async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     post: Result<Json<Post>, JsonRejection>,
 ) -> Result<Json<RoomPosted>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let post = json_only(post, "{\"text\": \"...\"}")?;
     let machine = machine_of(&state.authoriser, &caller.node)
         .await
@@ -638,6 +769,28 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, Value)> {
     fn of<T: serde::Serialize>(value: &T) -> Value {
         serde_json::to_value(value).expect("a DTO of owned strings and numbers")
     }
+    let presence = || {
+        vec![
+            RoomPresence {
+                label: "cachyos-g14 · chat 1a2b3c4d".to_owned(),
+                thread: true,
+                state: PresenceState::Working,
+                doing: Some("cargo test".to_owned()),
+            },
+            RoomPresence {
+                label: "mac".to_owned(),
+                thread: false,
+                state: PresenceState::Listening,
+                doing: None,
+            },
+            RoomPresence {
+                label: "pixel".to_owned(),
+                thread: false,
+                state: PresenceState::Away,
+                doing: None,
+            },
+        ]
+    };
     let summary = |name: &str, spent, paused, last_at| RoomSummary {
         name: name.to_owned(),
         spent,
@@ -702,6 +855,23 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, Value)> {
                         budget: 0,
                     },
                 ],
+                presence: presence(),
+            }),
+        ),
+        (
+            "roomEvents",
+            "RoomEvents",
+            of(&RoomEvents {
+                messages: vec![RoomMessage {
+                    seq: 21,
+                    kind: MessageKind::Text,
+                    at: 1_800_000_120,
+                    from: "mac".to_owned(),
+                    text: "The form is done.".to_owned(),
+                    budget: 1,
+                }],
+                presence: presence(),
+                last: 21,
             }),
         ),
         (
@@ -749,6 +919,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Method, Request};
     use std::net::IpAddr;
+    use std::net::SocketAddr;
     use tower::ServiceExt as _;
     use yantra_core::inventory::{self, Caller, Fake, MachineInfo, Os, Ownership};
 
@@ -823,6 +994,7 @@ mod tests {
         router: Router,
         woke: crate::room::tests::Woken,
         pauses: tokio::sync::mpsc::UnboundedReceiver<yantra_core::notify::Message>,
+        closing: watch::Sender<bool>,
     }
 
     fn app() -> App {
@@ -831,16 +1003,34 @@ mod tests {
 
     fn app_with<I: Inventory + Clone + Send + Sync + 'static>(inventory: I) -> App {
         let (rooms, woke, pauses) = rooms();
+        serve(inventory, rooms, woke, pauses)
+    }
+
+    /// An app whose threads' streams answer as `look` does.
+    fn app_looking(look: crate::room::Look) -> App {
+        let (rooms, woke, pauses) = rooms();
+        let rooms = rooms.looking(look, watch::Sender::new(0).subscribe());
+        serve(fake(), rooms, woke, pauses)
+    }
+
+    fn serve<I: Inventory + Clone + Send + Sync + 'static>(
+        inventory: I,
+        rooms: Rooms,
+        woke: crate::room::tests::Woken,
+        pauses: tokio::sync::mpsc::UnboundedReceiver<yantra_core::notify::Message>,
+    ) -> App {
+        let closing = watch::Sender::new(false);
         App {
             router: routes(
-                Authoriser::new(inventory, &[]),
+                Authoriser::new(inventory, &[], std::path::Path::new("yantrad.sock")),
                 rooms,
                 locate(),
                 resolve(),
-                watch::Sender::new(false),
+                closing.clone(),
             ),
             woke,
             pauses,
+            closing,
         }
     }
 
@@ -862,7 +1052,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((from, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((from, 61620)))));
         let response = app
             .router
             .clone()
@@ -938,6 +1128,16 @@ mod tests {
         )
         .await;
         assert_eq!(listed["result"]["tools"], room::tools());
+        let names: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        assert_eq!(
+            names,
+            ["room_send", "room_read", "room_info", "room_status"]
+        );
         let pinged = rpc(
             &app,
             ALPHA,
@@ -946,6 +1146,234 @@ mod tests {
         )
         .await;
         assert_eq!(pinged["result"], json!({}));
+    }
+
+    async fn json(app: &App, path: &str) -> Value {
+        let (status, said) = send(app, Method::GET, path, None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {said}");
+        serde_json::from_str(&said).expect("JSON")
+    }
+
+    /// The long-poll, with what `then` does 100 ms into its wait.
+    async fn polled<F: std::future::Future>(app: &App, path: &str, then: F) -> Value {
+        let (answer, _) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(json(app, path), async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                then.await
+            })
+        })
+        .await
+        .expect("the change ends the wait");
+        answer
+    }
+
+    #[tokio::test]
+    async fn an_events_wait_ends_with_the_message_a_send_makes() {
+        let app = app();
+        tool(&app, BETA, None, "room_read", json!({"room": "r1"})).await;
+        let answer = polled(
+            &app,
+            "/rooms/r1/events?wait=50",
+            tool(
+                &app,
+                ALPHA,
+                None,
+                "room_send",
+                json!({"room": "r1", "text": "late"}),
+            ),
+        )
+        .await;
+        assert_eq!(answer["last"], 1, "{answer}");
+        assert_eq!(answer["messages"][0]["text"], "late", "{answer}");
+        assert_eq!(answer["messages"][0]["from"], "alpha", "{answer}");
+    }
+
+    #[tokio::test]
+    async fn an_events_wait_ends_with_the_presence_a_status_sets() {
+        let app = app();
+        tool(&app, BETA, None, "room_read", json!({"room": "r1"})).await;
+        let answer = polled(
+            &app,
+            "/rooms/r1/events?after=0&wait=50",
+            tool(
+                &app,
+                BETA,
+                None,
+                "room_status",
+                json!({"room": "r1", "doing": "editing src/auth.rs"}),
+            ),
+        )
+        .await;
+        assert_eq!(
+            answer,
+            json!({"messages": [], "last": 0, "presence": [
+                {"label": "beta", "thread": false, "state": "working",
+                 "doing": "editing src/auth.rs"}]})
+        );
+    }
+
+    #[tokio::test]
+    async fn an_events_wait_ends_when_a_read_starts_to_listen() {
+        let app = app();
+        tool(&app, BETA, None, "room_read", json!({"room": "r1"})).await;
+        let answer = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::select! {
+                answer = json(&app, "/rooms/r1/events?wait=50") => answer,
+                _ = async {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    tool(&app, BETA, None, "room_read", json!({"room": "r1", "wait": 50})).await
+                } => unreachable!("nothing is sent"),
+            }
+        })
+        .await
+        .expect("the read's wait ends the poll");
+        assert_eq!(answer["presence"][0]["state"], "listening", "{answer}");
+    }
+
+    #[tokio::test]
+    async fn events_after_a_seq_leave_out_the_older_messages_and_refuse_a_bad_query() {
+        let app = app();
+        for text in ["one", "two"] {
+            tool(
+                &app,
+                ALPHA,
+                None,
+                "room_send",
+                json!({"room": "r1", "text": text}),
+            )
+            .await;
+        }
+        let answer = json(&app, "/rooms/r1/events?after=1").await;
+        assert_eq!(answer["last"], 2);
+        let texts: Vec<&Value> = answer["messages"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|message| &message["text"])
+            .collect();
+        assert_eq!(texts, [&json!("two")]);
+        assert_eq!(
+            json(&app, "/rooms/r1/events").await["messages"]
+                .as_array()
+                .map(Vec::len),
+            Some(2),
+            "after is 0 when left out, and the owner moves no cursor"
+        );
+
+        for (path, status) in [
+            ("/rooms/r1/events?wait=51", StatusCode::BAD_REQUEST),
+            ("/rooms/r1/events?wait=soon", StatusCode::BAD_REQUEST),
+            ("/rooms/r1/events?after=-1", StatusCode::BAD_REQUEST),
+            ("/rooms/nope/events", StatusCode::NOT_FOUND),
+        ] {
+            let (got, said) = send(&app, Method::GET, path, None, ALPHA, None).await;
+            assert_eq!(got, status, "{path}: {said}");
+        }
+
+        app.closing.send_replace(true);
+        let (got, said) = send(
+            &app,
+            Method::GET,
+            "/rooms/r1/events?after=2&wait=50",
+            None,
+            ALPHA,
+            None,
+        )
+        .await;
+        assert_eq!(got, StatusCode::SERVICE_UNAVAILABLE, "{said}");
+    }
+
+    #[tokio::test]
+    async fn a_status_shows_as_working_in_the_view_and_needs_a_room_that_exists() {
+        let app = app();
+        let refused = tool(
+            &app,
+            ALPHA,
+            None,
+            "room_status",
+            json!({"room": "r1", "doing": "x"}),
+        )
+        .await;
+        assert_eq!(refused["isError"], true, "{refused}");
+        let unknown = tool(&app, ALPHA, None, "room_info", json!({"room": "r1"})).await;
+        assert_eq!(unknown["isError"], true, "{unknown}");
+        let (status, _) = send(&app, Method::GET, "/rooms/r1", None, ALPHA, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "neither call made the room");
+
+        tool(&app, ALPHA, None, "room_read", json!({"room": "r1"})).await;
+        let set = tool(
+            &app,
+            ALPHA,
+            None,
+            "room_status",
+            json!({"room": "r1", "doing": "reviewing the API"}),
+        )
+        .await;
+        assert_eq!(text(&set), r#"{"ok":true}"#, "{set}");
+        assert_eq!(
+            json(&app, "/rooms/r1").await["presence"],
+            json!([{"label": "alpha", "thread": false, "state": "working",
+                    "doing": "reviewing the API"}])
+        );
+        let bad = rpc(
+            &app,
+            ALPHA,
+            None,
+            json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                   "params": {"name": "room_status",
+                              "arguments": {"room": "r1", "doing": "a\nb"}}}),
+        )
+        .await;
+        assert_eq!(bad["error"]["code"], INVALID_PARAMS, "{bad}");
+    }
+
+    /// The fake stream says B2 runs `cargo test`, which wins over B2's own
+    /// status, and says nothing of A1, which is read from its calls.
+    #[tokio::test]
+    async fn room_info_shows_each_member_and_a_threads_presence_comes_from_its_stream() {
+        let app = app_looking(Arc::new(|thread: &Thread| {
+            (thread.thread == "B2").then(|| room::Activity {
+                busy: true,
+                tool: Some("cargo test".to_owned()),
+            })
+        }));
+        tool(
+            &app,
+            BETA,
+            Some("wb/B2"),
+            "room_read",
+            json!({"room": "r1"}),
+        )
+        .await;
+        tool(
+            &app,
+            BETA,
+            Some("wb/B2"),
+            "room_status",
+            json!({"room": "r1", "doing": "planning"}),
+        )
+        .await;
+        let info = tool(
+            &app,
+            ALPHA,
+            Some("wa/A1"),
+            "room_info",
+            json!({"room": "r1"}),
+        )
+        .await;
+        assert_eq!(info["isError"], false, "{info}");
+        assert_eq!(
+            serde_json::from_str::<Value>(text(&info)).expect("JSON"),
+            json!({"room": "r1", "workspace": null, "brief": null, "base": null,
+                   "spent": 0, "budget": 20, "paused": false, "members": [
+                       {"label": "alpha · chat A1", "thread": true, "state": "idle"},
+                       {"label": "beta · chat B2", "thread": true, "state": "working",
+                        "doing": "cargo test"}]})
+        );
+        assert_eq!(
+            json(&app, "/rooms/r1").await["presence"][1]["doing"],
+            "cargo test"
+        );
     }
 
     #[tokio::test]
@@ -994,6 +1422,7 @@ mod tests {
             (Method::POST, "/rooms/r1/resume"),
             (Method::GET, "/rooms"),
             (Method::GET, "/rooms/r1"),
+            (Method::GET, "/rooms/r1/events?wait=1"),
             (Method::POST, "/rooms/r1/messages"),
             (Method::POST, "/rooms"),
             (Method::PATCH, "/rooms/r1"),
@@ -1322,7 +1751,7 @@ mod tests {
             .expect("a request");
         forged
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((ALPHA, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
         let refused = app
             .router
             .clone()
@@ -1355,7 +1784,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((from, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((from, 61620)))));
         let response = app
             .router
             .clone()
@@ -1709,7 +2138,7 @@ mod tests {
             ))
             .expect("a request");
         form.extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((ALPHA, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
         let response = app.router.clone().oneshot(form).await.expect("infallible");
         assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
         let (_, said) = send(&app, Method::GET, "/rooms", None, ALPHA, None).await;

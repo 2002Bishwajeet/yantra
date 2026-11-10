@@ -35,6 +35,7 @@ export const keys = {
   /** Under `github`, so a sign-in or sign-out that drops one drops both. */
   githubReadiness: () => ['github', 'readiness'] as const,
   repos: () => ['repos'] as const,
+  hiddenOrgs: () => ['repos', 'hidden'] as const,
   notifications: () => ['notifications'] as const,
   /** The appliance's PR watch, one list for every thread's Checks. */
   pulls: () => ['pulls'] as const,

@@ -422,6 +422,7 @@ async fn every_script() -> Vec<(String, String)> {
             chat::Interaction::Plan,
             None,
             None,
+            None,
             Some(&claude::Mcp {
                 url: "http://yantra:7717/api/mcp".to_owned(),
                 thread: "web/11111111".to_owned(),
@@ -438,6 +439,7 @@ async fn every_script() -> Vec<(String, String)> {
             chat::Interaction::Build,
             None,
             None,
+            chat::ContextLength::try_from(256_000).ok(),
             None,
             Some("9a11f727-ba24-4f1a-9c4b-76ce3721282e"),
         ),
@@ -449,7 +451,11 @@ async fn every_script() -> Vec<(String, String)> {
         Harness::Opencode,
     ] {
         r.keep("acp", ssh::stdio_payload(harness.command()));
-        r.keep("acp", harness.kept_command(WORKTREE));
+        r.keep("acp", harness.kept_command(WORKTREE, None));
+        r.keep(
+            "acp",
+            harness.kept_command(WORKTREE, chat::ContextLength::try_from(256_000).ok()),
+        );
     }
     r.keep("mic", ssh::stdio_payload(mic::WRITER));
     r.keep("keep", keep::SCRIPT.to_owned());
@@ -464,6 +470,7 @@ async fn every_script() -> Vec<(String, String)> {
         join::script(
             std::net::SocketAddr::from(([100, 64, 0, 1], join::DAEMON_PORT)),
             "ssh-ed25519 AAAA yantra",
+            None,
         )
         .expect("a usable key"),
     );

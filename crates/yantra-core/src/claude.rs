@@ -77,7 +77,15 @@ pub struct Prompt<'a> {
     pub interaction: chat::Interaction,
     pub model: Option<&'a chat::Model>,
     pub effort: Option<chat::Effort>,
+    pub context: Option<chat::ContextLength>,
 }
+
+/// The model, effort and context length a session runs with.
+pub type Picked = (
+    Option<chat::Model>,
+    Option<chat::Effort>,
+    Option<chat::ContextLength>,
+);
 
 /// One running `claude -p`. Dropping it kills the local `ssh` and leaves the
 /// remote `claude` to end when its stdin closes (I-27); [`Session::close`] is
@@ -116,6 +124,7 @@ impl Session {
             first.interaction,
             first.model,
             first.effort,
+            first.context,
             None,
             None,
         ))?;
@@ -227,7 +236,7 @@ impl Session {
     fn first(&self, first: &Prompt) -> Result<(), Error> {
         let mut state = self.shared.lock();
         state.flag = Some(flag(first.mode, first.interaction).to_owned());
-        state.picked = (first.model.cloned(), first.effort);
+        state.picked = (first.model.cloned(), first.effort, first.context);
         drop(state);
         self.prompt(first.text)
     }
@@ -237,17 +246,17 @@ impl Session {
         self.shared.send(&user(text))
     }
 
-    /// Sends the next turn. A mode, model or effort other than the one Claude
-    /// runs with is set first, on the live process (ADR-0041 decision 5,
-    /// Y-564); `null` is Claude's default.
+    /// Sends the next turn. A mode, model, effort or context length other than
+    /// the one Claude runs with is set first, on the live process (ADR-0041
+    /// decision 5, Y-564, Y-663); `null` is Claude's default.
     pub fn send_turn(&self, prompt: &Prompt) -> Result<(), Error> {
         let flag = flag(prompt.mode, prompt.interaction);
-        let (model, effort) = (prompt.model.cloned(), prompt.effort);
-        let (mode_changed, (was_model, was_effort)) = {
+        let (model, effort, context) = (prompt.model.cloned(), prompt.effort, prompt.context);
+        let (mode_changed, (was_model, was_effort, was_context)) = {
             let mut state = self.shared.lock();
             let mode_changed = state.flag.as_deref() != Some(flag);
             state.flag = Some(flag.to_owned());
-            let was = std::mem::replace(&mut state.picked, (model.clone(), effort));
+            let was = std::mem::replace(&mut state.picked, (model.clone(), effort, context));
             (mode_changed, was)
         };
         if mode_changed {
@@ -265,6 +274,13 @@ impl Session {
                 "effort",
                 json!({"subtype": "apply_flag_settings",
                     "settings": {"effortLevel": effort}}),
+            )?;
+        }
+        if was_context != context {
+            self.shared.request(
+                "context",
+                json!({"subtype": "apply_flag_settings",
+                    "settings": {"autoCompactWindow": context}}),
             )?;
         }
         self.prompt(prompt.text)
@@ -345,8 +361,9 @@ impl Session {
         self.shared.lock().session.clone()
     }
 
-    /// The `--model` and `--effort` Claude runs with now; `None` is Claude's default.
-    pub fn picked(&self) -> (Option<chat::Model>, Option<chat::Effort>) {
+    /// The `--model`, `--effort` and `--autocompact` Claude runs with now;
+    /// `None` is Claude's default.
+    pub fn picked(&self) -> Picked {
         self.shared.lock().picked.clone()
     }
 
@@ -366,8 +383,8 @@ impl Session {
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
 /// cannot turn approval off. `Plan` is Claude's own `plan` whatever the mode
-/// (Y-565). `model` and `effort` reach Claude only when the person picked them
-/// (Y-564). `mcp` adds the room server and lets a woken turn
+/// (Y-565). `model`, `effort` and `context` reach Claude only when the person
+/// picked them (Y-564, Y-663). `mcp` adds the room server and lets a woken turn
 /// use its tools without a prompt (ADR-0038 decision 2). The task tools are
 /// Claude's plan, and `-p` has them only when asked for (`Tasks`).
 #[allow(clippy::too_many_arguments)]
@@ -378,6 +395,7 @@ pub fn command(
     interaction: chat::Interaction,
     model: Option<&chat::Model>,
     effort: Option<chat::Effort>,
+    context: Option<chat::ContextLength>,
     mcp: Option<&Mcp>,
     session: Option<&str>,
 ) -> String {
@@ -395,7 +413,7 @@ pub fn command(
          export CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n\
          mkdir -p -m 700 {images} || exit 1\n\
          {resume}\
-         exec \"$c\" --add-dir {images} {rooms}--permission-mode {mode} {model}{effort}-p --input-format stream-json --output-format stream-json --verbose \
+         exec \"$c\" --add-dir {images} {rooms}--permission-mode {mode} {model}{effort}{context}-p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         images = keeper.images(),
@@ -409,6 +427,10 @@ pub fn command(
             sq(model.as_str())
         )),
         effort = effort.map_or_else(String::new, |effort| format!("--effort {} ", effort.name())),
+        context = context.map_or_else(String::new, |context| format!(
+            "--autocompact {} ",
+            context.tokens()
+        )),
         probe = agent::probe("claude"),
         searched = agent::CANDIDATES.join(", "),
     )
@@ -441,7 +463,8 @@ const PLAN_CAPTURED: &str = "The client captured your proposed plan. Stop here a
 
 /// Named apart from a `yantra` stdio server a person may have added by hand.
 const ROOM_SERVER: &str = "yantra-room";
-const ROOM_TOOLS: &str = "mcp__yantra-room__room_send,mcp__yantra-room__room_read";
+const ROOM_TOOLS: &str = "mcp__yantra-room__room_send,mcp__yantra-room__room_read,\
+mcp__yantra-room__room_info,mcp__yantra-room__room_status";
 
 /// Where a Chat turn reaches `yantrad`'s room tools, and the thread it names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -530,9 +553,9 @@ struct State {
     session: Option<String>,
     /// The `--permission-mode` Claude runs in now.
     flag: Option<String>,
-    /// The `--model` and `--effort` Claude runs with now. A session this
-    /// daemon did not start is taken to run with neither.
-    picked: (Option<chat::Model>, Option<chat::Effort>),
+    /// The `--model`, `--effort` and `--autocompact` Claude runs with now. A
+    /// session this daemon did not start is taken to run with none of them.
+    picked: Picked,
     /// The background tasks that still run, in the order they started.
     background: Vec<chat::BackgroundTask>,
     /// When Claude last wrote a line, which pins a keeper with background work.
@@ -949,7 +972,7 @@ impl Shared {
 
     /// The turn's `result`. Stdin stays open for the next turn.
     fn finish(&self, outcome: Outcome) {
-        let (cancelled, used) = {
+        let (cancelled, used, context) = {
             let mut state = self.lock();
             if state.open {
                 // A wake turn that opened while a line waited leaves it waiting.
@@ -970,13 +993,18 @@ impl Shared {
             state.open = false;
             state.cancelled = false;
             state.pending.clear();
-            (cancelled, state.used)
+            (cancelled, state.used, state.picked.2)
         };
-        let max = outcome
+        let window = outcome
             .model_usage
             .values()
             .filter_map(|usage| usage.context_window)
             .max();
+        // Claude compacts at the picked length, so the chip counts against it.
+        let max = match context.map(|context| u64::from(context.tokens())) {
+            Some(context) => Some(window.map_or(context, |window| window.min(context))),
+            None => window,
+        };
         if let (Some(used_tokens), Some(max_tokens)) = (used, max) {
             self.emit(Event::TokenUsageUpdated(chat::TokenUsage {
                 used_tokens,
@@ -1689,9 +1717,9 @@ impl Behaviour {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, Effort, Interaction, Item, ItemStatus, ItemType, Model,
-        PermissionMode, PlanStep, PlanStepStatus, RequestOpened, RequestResolved, RequestType,
-        Scope, StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
+        ContentDelta, ContextLength, Decision, Effort, Interaction, Item, ItemStatus, ItemType,
+        Model, PermissionMode, PlanStep, PlanStepStatus, RequestOpened, RequestResolved,
+        RequestType, Scope, StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
@@ -1699,6 +1727,8 @@ mod tests {
     const STOP: &str = include_str!("../tests/recordings/claude-2.1.319-stop-task.jsonl");
     const MODEL_EFFORT: &str =
         include_str!("../tests/recordings/claude-2.1.319-set-model-effort.jsonl");
+    /// Y-663: 2.1.322 run with `--autocompact 256000` and sent no user turn.
+    const AUTOCOMPACT: &str = include_str!("../tests/recordings/claude-2.1.322-autocompact.jsonl");
 
     const ACCEPT: &str = include_str!("../tests/recordings/claude-2.1.291-accept.jsonl");
     const DECLINE: &str = include_str!("../tests/recordings/claude-2.1.291-decline.jsonl");
@@ -2328,6 +2358,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(
             script.starts_with("cd '/home/u/.yantra/worktrees/chat/w/11111111' || exit 1\nc=$("),
@@ -2353,6 +2384,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(hostile.starts_with(r"cd '/tmp/x'\''; touch /tmp/pwned; '\''' || exit 1"));
     }
@@ -2369,6 +2401,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some("9a11f727-ba24"),
         );
         assert!(
@@ -2381,6 +2414,7 @@ mod tests {
             &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
+            None,
             None,
             None,
             None,
@@ -2402,6 +2436,7 @@ mod tests {
             &keeper(),
             PermissionMode::Supervised,
             Interaction::Build,
+            None,
             None,
             None,
             None,
@@ -2439,6 +2474,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             );
             assert!(
                 script.contains(&format!(
@@ -2469,6 +2505,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             );
             assert!(
                 script.contains(&format!(
@@ -2480,7 +2517,8 @@ mod tests {
         }
     }
 
-    /// Y-564: the model and the effort follow the mode, each only when picked.
+    /// Y-564, Y-663: the model, the effort and the context length follow
+    /// the mode, each only when picked.
     #[test]
     fn a_picked_model_and_effort_follow_the_mode() {
         let model = Model::try_from("claude-opus-5-5[1m]".to_owned()).expect("a model");
@@ -2491,6 +2529,7 @@ mod tests {
             Interaction::Build,
             Some(&model),
             Some(Effort::Xhigh),
+            None,
             None,
             None,
         );
@@ -2509,6 +2548,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(
             model_only.contains("--model 'claude-opus-5-5[1m]' -p "),
@@ -2524,12 +2564,29 @@ mod tests {
             Some(Effort::Low),
             None,
             None,
+            None,
         );
         assert!(
             effort_only.contains("--permission-mode auto --effort low -p "),
             "{effort_only}"
         );
         assert!(!effort_only.contains("--model"), "{effort_only}");
+        let length = ContextLength::try_from(256_000).expect("a length");
+        let context = command(
+            "/w",
+            &keeper(),
+            PermissionMode::Supervised,
+            Interaction::Build,
+            Some(&model),
+            Some(Effort::Xhigh),
+            Some(length),
+            None,
+            None,
+        );
+        assert!(
+            context.contains("--effort xhigh --autocompact 256000 -p "),
+            "{context}"
+        );
         let neither = command(
             "/w",
             &keeper(),
@@ -2539,10 +2596,13 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(neither.contains("--permission-mode auto -p "), "{neither}");
         assert!(
-            !neither.contains("--model") && !neither.contains("--effort"),
+            !neither.contains("--model")
+                && !neither.contains("--effort")
+                && !neither.contains("--autocompact"),
             "{neither}"
         );
     }
@@ -2562,6 +2622,7 @@ mod tests {
             Interaction::Build,
             None,
             None,
+            None,
             Some(&mcp),
             None,
         );
@@ -2570,7 +2631,8 @@ mod tests {
                 "exec \"$c\" --add-dir {IMAGES} --mcp-config '{{\"mcpServers\":{{\"yantra-room\":\
                  {{\"headers\":{{\"X-Yantra-Thread\":\"web/1a2b3c4d\"}},\"type\":\"http\",\
                  \"url\":\"http://100.64.0.1:7717/api/mcp\"}}}}}}' \
-                 --allowedTools mcp__yantra-room__room_send,mcp__yantra-room__room_read \
+                 --allowedTools mcp__yantra-room__room_send,mcp__yantra-room__room_read,\
+                 mcp__yantra-room__room_info,mcp__yantra-room__room_status \
                  --permission-mode default -p"
             )),
             "{script}"
@@ -2587,6 +2649,7 @@ mod tests {
             Interaction::Build,
             None,
             None,
+            None,
             Some(&hostile),
             None,
         );
@@ -2597,6 +2660,20 @@ mod tests {
             "the quote ends nothing and the JSON stays one string: {script}"
         );
         assert_eq!(script.matches("--mcp-config").count(), 1, "{script}");
+    }
+
+    /// A woken turn runs in a capped mode, so a room tool left off the list
+    /// stalls it on a prompt the owner may never see.
+    #[test]
+    fn every_room_tool_is_allowed_without_a_prompt() {
+        let allowed: Vec<&str> = ROOM_TOOLS.split(',').collect();
+        for tool in crate::room::TOOLS {
+            assert!(
+                allowed.contains(&format!("mcp__{ROOM_SERVER}__{tool}").as_str()),
+                "{tool} is not in {ROOM_TOOLS}"
+            );
+        }
+        assert_eq!(allowed.len(), crate::room::TOOLS.len(), "{ROOM_TOOLS}");
     }
 
     /// Claude's acceptEdits still asks about an edit outside its directories,
@@ -2900,6 +2977,7 @@ mod tests {
             interaction: Interaction::Build,
             model: None,
             effort: None,
+            context: None,
         }
     }
 
@@ -3108,6 +3186,7 @@ mod tests {
             interaction: Interaction::Build,
             model: None,
             effort: None,
+            context: None,
         };
         session.send_turn(&edits("edit")).expect("stdin is open");
         assert_eq!(
@@ -3127,6 +3206,7 @@ mod tests {
                 interaction: Interaction::Plan,
                 model: None,
                 effort: None,
+                context: None,
             })
             .expect("stdin is open");
         assert_eq!(
@@ -3194,6 +3274,84 @@ mod tests {
         assert_eq!(fake.receive().await, Some(user("default")));
     }
 
+    /// Y-663: a turn with another context length sets `autoCompactWindow` on
+    /// the live process once, and `None` goes back to Claude's default.
+    #[tokio::test]
+    async fn a_new_context_length_is_set_on_the_live_process_once() {
+        let (session, _events, mut fake) = pair(None);
+        fake.receive().await;
+        let turn = |text, tokens: Option<u32>| Prompt {
+            context: tokens.map(|tokens| ContextLength::try_from(tokens).expect("a length")),
+            ..build(text)
+        };
+        session
+            .send_turn(&turn("long", Some(512_000)))
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await,
+            Some(
+                json!({"type": "control_request", "request_id": "yantra-context-1",
+                "request": {"subtype": "apply_flag_settings",
+                    "settings": {"autoCompactWindow": 512_000}}})
+            )
+        );
+        assert_eq!(fake.receive().await, Some(user("long")));
+        assert_eq!(
+            session.picked().2,
+            Some(ContextLength::try_from(512_000).expect("a length"))
+        );
+
+        session
+            .send_turn(&turn("again", Some(512_000)))
+            .expect("stdin is open");
+        assert_eq!(fake.receive().await, Some(user("again")));
+
+        session
+            .send_turn(&turn("default", None))
+            .expect("stdin is open");
+        assert_eq!(
+            fake.receive().await.expect("a line")["request"],
+            json!({"subtype": "apply_flag_settings", "settings": {"autoCompactWindow": null}})
+        );
+        assert_eq!(fake.receive().await, Some(user("default")));
+    }
+
+    /// Y-663: the usage chip counts against the picked length, and never
+    /// against more than the model's own window.
+    #[tokio::test]
+    async fn the_usage_max_is_the_picked_context_length() {
+        for (tokens, window, max) in [
+            (Some(256_000), 1_000_000, 256_000),
+            (Some(1_000_000), 200_000, 200_000),
+            (None, 1_000_000, 1_000_000),
+        ] {
+            let (session, mut events, mut fake) = pair(None);
+            fake.receive().await;
+            session
+                .send_turn(&Prompt {
+                    context: tokens
+                        .map(|tokens| ContextLength::try_from(tokens).expect("a length")),
+                    ..build("next")
+                })
+                .expect("stdin is open");
+            let assistant = json!({"type": "assistant", "message": {"content": [],
+                "usage": {"input_tokens": 1000, "output_tokens": 10}}});
+            let done = json!({"type": "result", "subtype": "success", "is_error": false,
+                "stop_reason": "end_turn",
+                "modelUsage": {"claude-opus-5-5": {"contextWindow": window}}});
+            fake.play(&(line(&init()) + &line(&assistant) + &line(&done)))
+                .await;
+            let seen = until_completed(&mut events).await;
+            assert!(
+                seen.contains(&Event::TokenUsageUpdated(TokenUsage {
+                    used_tokens: 1010,
+                    max_tokens: max,
+                })),
+                "{tokens:?} {seen:?}"
+            );
+        }
+    }
+
     /// Recorded on 2.1.319 with no user turn: Claude answers `set_model` and
     /// `apply_flag_settings` with success, `null` included, and the session
     /// reads those answers as no event.
@@ -3204,6 +3362,20 @@ mod tests {
         let (_session, mut events, mut fake) = pair(None);
         fake.receive().await;
         fake.play(MODEL_EFFORT).await;
+        fake.play(&(line(&init()) + &line(&result(None)))).await;
+        let seen = until_completed(&mut events).await;
+        assert!(matches!(seen.first(), Some(Event::TurnStarted)), "{seen:?}");
+    }
+
+    /// Recorded on 2.1.322 with no user turn: Claude takes `--autocompact`
+    /// and answers both `autoCompactWindow` changes with success.
+    #[tokio::test]
+    async fn claudes_answers_to_a_context_length_change_make_no_event() {
+        assert_eq!(AUTOCOMPACT.matches("\"subtype\":\"success\"").count(), 2);
+        assert!(!AUTOCOMPACT.contains("not supported"));
+        let (_session, mut events, mut fake) = pair(None);
+        fake.receive().await;
+        fake.play(AUTOCOMPACT).await;
         fake.play(&(line(&init()) + &line(&result(None)))).await;
         let seen = until_completed(&mut events).await;
         assert!(matches!(seen.first(), Some(Event::TurnStarted)), "{seen:?}");

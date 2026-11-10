@@ -26,6 +26,7 @@ import {
   githubQuery,
   githubReadinessQuery,
   hereQuery,
+  hiddenOrgsQuery,
   machineReadinessQuery,
   machinesQuery,
   MISSING,
@@ -373,6 +374,7 @@ export function useResetOnRouteChange() {
 export const useGithub = () => useQuery(githubQuery())
 export const useGithubReadiness = () => useReading(githubReadinessQuery())
 export const useRepos = () => useReading(reposQuery())
+export const useHiddenOrgs = () => useReading(hiddenOrgsQuery())
 export const useNotifications = () => useQuery(notificationsQuery())
 export const useAbout = () => useQuery(aboutQuery())
 export const useThisDevice = () => useQuery(hereQuery()).data?.machine ?? null

@@ -34,7 +34,7 @@ const CONFIG: &str = "/home/yantra/.ssh/config";
 const AUTHORIZED: &str = "/home/deploy/.ssh/authorized_keys";
 
 const DASHBOARD: &str = "install: open the dashboard at https://cachyos-g14.example.ts.net:8443";
-const JOIN: &str = "curl -fsSL https://cachyos-g14.example.ts.net:8443/join | sh";
+const JOIN: &str = "curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yantra/join | sh";
 
 /// `refresh.rs` looks every 30 s, and the first look is before the key is there.
 const TWO_SWEEPS: Duration = Duration::from_secs(90);

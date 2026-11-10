@@ -19,7 +19,10 @@ use common::{Systemd, UNPRIVILEGED, repo_root};
 
 const FILE: &str = "/home/deploy/.config/yantra/dashboard.json";
 const TEMP: &str = "/home/deploy/.config/yantra/dashboard.json.tmp";
-const URL: &str = "http://127.0.0.1:7717/api/layout";
+/// ADR-0042: this machine's own address is refused over TCP, so the owner's
+/// account writes on the socket, as the CLI's own user would.
+const SOCKET: &str = "/run/yantra/yantrad.sock";
+const URL: &str = "http://yantra/api/layout";
 
 const TAILSCALE_STUB: &str = r#"#!/bin/sh
 case "$1" in
@@ -93,7 +96,7 @@ impl Daemon {
         ))?;
 
         daemon.sh(&format!(
-            "systemd-run --unit=yantrad --uid={UNPRIVILEGED} /usr/local/bin/yantrad && \
+            "systemd-run --unit=yantrad --uid={UNPRIVILEGED} -p RuntimeDirectory=yantra /usr/local/bin/yantrad && \
              for _ in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/7717) 2>/dev/null && exit 0; sleep 0.2; done; exit 1"
         ))
         .map_err(|error| {
@@ -128,10 +131,26 @@ impl Daemon {
     }
 
     fn curl(&self, args: &[&str]) -> Result<(u16, String)> {
-        let mut argv = vec!["curl", "-sS", "--max-time", "10", "-w", "\n%{http_code}"];
+        let mut argv = vec![
+            "curl",
+            "-sS",
+            "--max-time",
+            "10",
+            "--unix-socket",
+            SOCKET,
+            "-w",
+            "\n%{http_code}",
+        ];
         argv.extend_from_slice(args);
         argv.push(URL);
-        let said = self.systemd.run(&argv)?;
+        let out = self.systemd.exec_as(UNPRIVILEGED, &argv)?;
+        if !out.status.success() {
+            bail!(
+                "curl failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        let said = String::from_utf8(out.stdout)?;
         let (body, status) = said.rsplit_once('\n').unwrap_or(("", said.as_str()));
         Ok((status.trim().parse()?, body.to_owned()))
     }

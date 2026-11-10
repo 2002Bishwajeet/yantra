@@ -19,7 +19,9 @@ use std::time::{Duration, SystemTime};
 
 use tokio::sync::{mpsc, watch};
 use yantra_core::notify::{self, Relay};
-use yantra_core::room::{self, BUDGET, Home, Message, Reader, Sent, Summary, Thread};
+use yantra_core::room::{
+    self, Activity, BUDGET, Home, Info, Message, Present, Reader, Sent, Summary, Thread,
+};
 use yantra_core::room_file::{self, Definition};
 
 use crate::chat::{self, Woke};
@@ -28,13 +30,19 @@ use crate::chat::{self, Woke};
 /// what came of it. A test captures it.
 pub(crate) type Wake =
     Arc<dyn Fn(Thread, String) -> Pin<Box<dyn Future<Output = Woke> + Send>> + Send + Sync>;
+/// What an owner thread's stream says it is doing. A test answers its own.
+pub(crate) type Look = Arc<dyn Fn(&Thread) -> Option<Activity> + Send + Sync>;
 
 #[derive(Clone)]
 pub struct Rooms {
     store: Arc<Mutex<room::Rooms>>,
-    /// Bumped on every message, so a waiting read looks again.
+    /// Bumped on every message and every change of a member's own presence,
+    /// so a waiting read or events wait looks again.
     said: watch::Sender<u64>,
     wake: Wake,
+    look: Look,
+    /// [`chat::Registry::changed`], so an events wait sees a thread's turn.
+    turned: watch::Receiver<u64>,
     waking: Arc<Mutex<Waking>>,
     pauses: Option<mpsc::UnboundedSender<notify::Message>>,
     /// Where the definitions are. `None` is no config directory, and then a
@@ -75,6 +83,10 @@ impl Rooms {
         pauses: Option<mpsc::UnboundedSender<notify::Message>>,
         dir: Option<PathBuf>,
     ) -> Self {
+        let turned = chats.changed();
+        let looked = chats.clone();
+        let look: Look =
+            Arc::new(move |thread: &Thread| looked.activity(&thread.workspace, &thread.thread));
         let wake: Wake = Arc::new(move |thread: Thread, prompt: String| {
             Box::pin(chat::wake(
                 chats.clone(),
@@ -83,7 +95,22 @@ impl Rooms {
                 prompt,
             ))
         });
-        Self::loading(dir, wake, pauses)
+        Self {
+            look,
+            turned,
+            ..Self::loading(dir, wake, pauses)
+        }
+    }
+
+    /// These rooms, with `look` for the threads' streams, and `turned` bumped
+    /// when it may answer otherwise.
+    #[cfg(test)]
+    pub(crate) fn looking(self, look: Look, turned: watch::Receiver<u64>) -> Self {
+        Self {
+            look,
+            turned,
+            ..self
+        }
     }
 
     #[cfg(test)]
@@ -122,6 +149,8 @@ impl Rooms {
             store: Arc::new(Mutex::new(store)),
             said: watch::Sender::new(0),
             wake,
+            look: Arc::new(|_| None),
+            turned: watch::Sender::new(0).subscribe(),
             waking: Arc::default(),
             pauses,
             dir,
@@ -247,17 +276,19 @@ impl Rooms {
 
     /// Tells waiting reads to look again, and starts a worker per new thread.
     fn start(&self, workers: Vec<Thread>) {
-        self.said.send_modify(|count| *count += 1);
+        self.bump();
         for thread in workers {
             tokio::spawn(self.clone().work(thread));
         }
     }
 
     /// What `reader` has not seen, waiting up to `wait` for something new.
-    /// `None` is a daemon that began to shut down while it waited.
+    /// `None` is a daemon that began to shut down while it waited. The wait
+    /// shows `reader` as listening until it ends, however it ends.
     pub async fn read(
         &self,
         reader: &Reader,
+        label: &str,
         name: &str,
         wait: Duration,
         closing: &watch::Sender<bool>,
@@ -265,11 +296,12 @@ impl Rooms {
         let deadline = tokio::time::Instant::now() + wait;
         let mut said = self.said.subscribe();
         let mut closing = closing.subscribe();
+        let mut listening = None;
         loop {
             let messages = {
                 let mut store = self.lock();
                 let made = !store.contains(name);
-                let messages = store.read(name, reader, SystemTime::now())?;
+                let messages = store.read(name, reader, label, SystemTime::now())?;
                 if made {
                     tracing::info!("room {name}: made by {}", reader.node);
                 }
@@ -278,12 +310,88 @@ impl Rooms {
             if !messages.is_empty() || tokio::time::Instant::now() >= deadline {
                 return Ok(Some(messages));
             }
+            listening.get_or_insert_with(|| Listening::open(self, name, reader));
             tokio::select! {
                 biased;
                 _ = closing.wait_for(|closing| *closing) => return Ok(None),
                 _ = tokio::time::timeout_at(deadline, said.changed()) => {}
             }
         }
+    }
+
+    /// The room and its members, for `room_info`.
+    pub fn info(&self, reader: &Reader, label: &str, name: &str) -> Result<Info, room::Error> {
+        self.lock()
+            .info(name, reader, label, SystemTime::now(), &*self.look)
+    }
+
+    /// What `reader` says it is doing, for `room_status`.
+    pub fn status(
+        &self,
+        reader: &Reader,
+        label: &str,
+        name: &str,
+        doing: &str,
+    ) -> Result<(), room::Error> {
+        self.lock()
+            .status(name, reader, label, doing, SystemTime::now())?;
+        self.bump();
+        Ok(())
+    }
+
+    /// Each member's presence, for the dashboard.
+    pub fn presence(&self, name: &str) -> Result<Vec<Present>, room::Error> {
+        self.lock().presence(name, SystemTime::now(), &*self.look)
+    }
+
+    /// The messages after seq `after`, the members' presence and the last
+    /// seq, for the owner's long-poll. It answers at once when a message is
+    /// new, and otherwise once one is, presence changes, or `wait` runs out.
+    /// `None` is a daemon that began to shut down while it waited.
+    pub async fn events(
+        &self,
+        name: &str,
+        after: u64,
+        wait: Duration,
+        closing: &watch::Sender<bool>,
+    ) -> Result<Option<(Vec<Message>, Vec<Present>, u64)>, room::Error> {
+        let deadline = tokio::time::Instant::now() + wait;
+        let mut said = self.said.subscribe();
+        let mut turned = self.turned.clone();
+        turned.mark_unchanged();
+        let mut closing = closing.subscribe();
+        let mut before = None;
+        loop {
+            let now = SystemTime::now();
+            let (messages, present, last, away) = {
+                let mut store = self.lock();
+                let present = store.presence(name, now, &*self.look)?;
+                let (messages, last) = store.since(name, after)?;
+                (messages, present, last, store.next_away(name, now))
+            };
+            let moved = before.as_ref().is_some_and(|before| *before != present);
+            if !messages.is_empty() || moved || tokio::time::Instant::now() >= deadline {
+                return Ok(Some((messages, present, last)));
+            }
+            before = Some(present);
+            // The next member to turn away changes presence with no call.
+            let until = away
+                .and_then(|away| away.duration_since(now).ok())
+                .map_or(deadline, |left| {
+                    deadline.min(tokio::time::Instant::now() + left)
+                });
+            tokio::select! {
+                biased;
+                _ = closing.wait_for(|closing| *closing) => return Ok(None),
+                _ = tokio::time::sleep_until(until) => {}
+                _ = said.changed() => {}
+                Ok(()) = turned.changed() => {}
+            }
+        }
+    }
+
+    fn bump(&self) {
+        self.said.send_modify(|count| *count += 1);
     }
 
     /// Wakes `thread` with everything queued for it, until nothing is. The
@@ -319,7 +427,7 @@ impl Rooms {
                     store.give_back(&job.room, &job.member, &job.seqs);
                 }
             }
-            self.said.send_modify(|count| *count += 1);
+            self.bump();
             let given: usize = jobs.iter().map(|job| job.seqs.len()).sum();
             tracing::info!(
                 "chat {}: {given} room messages given back to thread {}",
@@ -365,6 +473,33 @@ impl Rooms {
 
     fn dir(&self) -> Result<&std::path::Path, room_file::Error> {
         self.dir.as_deref().ok_or(room_file::Error::NoConfigDir)
+    }
+}
+
+/// A `room_read` wait that is open, counted in its member's presence until
+/// it drops: when the read answers, fails, or the daemon shuts down.
+struct Listening<'a> {
+    rooms: &'a Rooms,
+    name: String,
+    reader: Reader,
+}
+
+impl<'a> Listening<'a> {
+    fn open(rooms: &'a Rooms, name: &str, reader: &Reader) -> Self {
+        rooms.lock().listen(name, reader, true);
+        rooms.bump();
+        Self {
+            rooms,
+            name: name.to_owned(),
+            reader: reader.clone(),
+        }
+    }
+}
+
+impl Drop for Listening<'_> {
+    fn drop(&mut self) {
+        self.rooms.lock().listen(&self.name, &self.reader, false);
+        self.rooms.bump();
     }
 }
 
@@ -515,7 +650,7 @@ pub(crate) mod tests {
         let closing = watch::Sender::new(false);
         for member in [&b, &tui] {
             rooms
-                .read(member, "r1", Duration::ZERO, &closing)
+                .read(member, "m", "r1", Duration::ZERO, &closing)
                 .await
                 .expect("joins");
         }
@@ -533,7 +668,7 @@ pub(crate) mod tests {
             )]
         );
         let read = rooms
-            .read(&b, "r1", Duration::ZERO, &closing)
+            .read(&b, "m", "r1", Duration::ZERO, &closing)
             .await
             .expect("read")
             .expect("not closing");
@@ -546,14 +681,14 @@ pub(crate) mod tests {
         let (a, b) = (reader("alpha", None), reader("beta", Some("B")));
         let closing = watch::Sender::new(false);
         rooms
-            .read(&b, "r1", Duration::ZERO, &closing)
+            .read(&b, "m", "r1", Duration::ZERO, &closing)
             .await
             .expect("joins");
         answer(&answers, Woke::Failed);
         rooms.send(&a, "alpha", "r1", "lost?").expect("sent");
         let read = tokio::time::timeout(
             Duration::from_secs(5),
-            rooms.read(&b, "r1", Duration::from_secs(50), &closing),
+            rooms.read(&b, "m", "r1", Duration::from_secs(50), &closing),
         )
         .await
         .expect("the give-back ends the wait")
@@ -567,7 +702,7 @@ pub(crate) mod tests {
         rooms.send(&a, "alpha", "r1", "next").expect("sent");
         assert_eq!(woken(&woke).await.len(), 2);
         let read = rooms
-            .read(&b, "r1", Duration::ZERO, &closing)
+            .read(&b, "m", "r1", Duration::ZERO, &closing)
             .await
             .expect("read")
             .expect("not closing");
@@ -582,7 +717,7 @@ pub(crate) mod tests {
         let (a, b) = (reader("alpha", None), reader("beta", Some("B")));
         let closing = watch::Sender::new(false);
         rooms
-            .read(&b, "r1", Duration::ZERO, &closing)
+            .read(&b, "m", "r1", Duration::ZERO, &closing)
             .await
             .expect("joins");
         answer(&answers, Woke::Never);
@@ -591,7 +726,7 @@ pub(crate) mod tests {
         rooms.send(&a, "alpha", "r1", "two").expect("sent");
         assert_eq!(woken(&woke).await.len(), 1, "not tried again");
         let read = rooms
-            .read(&b, "r1", Duration::ZERO, &closing)
+            .read(&b, "m", "r1", Duration::ZERO, &closing)
             .await
             .expect("read")
             .expect("not closing");
@@ -621,7 +756,7 @@ pub(crate) mod tests {
         let (a, b) = (reader("alpha", None), reader("beta", Some("B")));
         let closing = watch::Sender::new(false);
         rooms
-            .read(&b, "r1", Duration::ZERO, &closing)
+            .read(&b, "m", "r1", Duration::ZERO, &closing)
             .await
             .expect("joins");
         rooms.send(&a, "alpha", "r1", "first").expect("sent");
@@ -656,7 +791,7 @@ pub(crate) mod tests {
         let (rooms, woke, mut heard) = rooms();
         let (a, b) = (reader("alpha", None), reader("beta", Some("B")));
         rooms
-            .read(&b, "r2", Duration::ZERO, &watch::Sender::new(false))
+            .read(&b, "m", "r2", Duration::ZERO, &watch::Sender::new(false))
             .await
             .expect("joins");
         for n in 1..=BUDGET {
@@ -691,7 +826,7 @@ pub(crate) mod tests {
         let (a, b) = (reader("alpha", Some("A")), reader("beta", Some("B")));
         let closing = watch::Sender::new(false);
         rooms
-            .read(&b, "r3", Duration::ZERO, &closing)
+            .read(&b, "m", "r3", Duration::ZERO, &closing)
             .await
             .expect("joins");
         for _ in 0..BUDGET {
@@ -732,7 +867,7 @@ pub(crate) mod tests {
         let (a, b) = (reader("alpha", None), reader("beta", None));
         let closing = watch::Sender::new(false);
         rooms
-            .read(&b, "r1", Duration::ZERO, &closing)
+            .read(&b, "m", "r1", Duration::ZERO, &closing)
             .await
             .expect("joins");
         let sender = rooms.clone();
@@ -742,7 +877,7 @@ pub(crate) mod tests {
         });
         let read = tokio::time::timeout(
             Duration::from_secs(5),
-            rooms.read(&b, "r1", Duration::from_secs(50), &closing),
+            rooms.read(&b, "m", "r1", Duration::from_secs(50), &closing),
         )
         .await
         .expect("the message ends the wait")
@@ -762,12 +897,65 @@ pub(crate) mod tests {
         });
         let read = tokio::time::timeout(
             Duration::from_secs(5),
-            rooms.read(&reader("b", None), "r1", Duration::from_secs(50), &closing),
+            rooms.read(
+                &reader("b", None),
+                "m",
+                "r1",
+                Duration::from_secs(50),
+                &closing,
+            ),
         )
         .await
         .expect("the shutdown ends the wait")
         .expect("no refusal");
         assert_eq!(read, None);
+    }
+
+    /// The wait counts while it is open, and stops counting however it ends:
+    /// with a message, or with the daemon's shutdown.
+    #[tokio::test]
+    async fn a_waiting_read_listens_until_it_ends() {
+        let (rooms, _, _) = rooms();
+        let (a, b) = (reader("alpha", None), reader("beta", None));
+        let closing = watch::Sender::new(false);
+        rooms
+            .read(&b, "beta", "r1", Duration::ZERO, &closing)
+            .await
+            .expect("joins");
+        let state = |rooms: &Rooms| rooms.presence("r1").expect("known")[0].presence.clone();
+        assert_eq!(
+            state(&rooms),
+            room::Presence::Idle,
+            "a wait of 0 is no wait"
+        );
+
+        let watcher = rooms.clone();
+        let sender = rooms.clone();
+        let ended = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let heard = state(&watcher);
+            sender.send(&a, "alpha", "r1", "hi").expect("sent");
+            heard
+        });
+        rooms
+            .read(&b, "beta", "r1", Duration::from_secs(50), &closing)
+            .await
+            .expect("read")
+            .expect("not closing");
+        assert_eq!(ended.await.expect("ran"), room::Presence::Listening);
+        assert_eq!(state(&rooms), room::Presence::Idle, "the message ended it");
+
+        let ender = closing.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            ender.send_replace(true);
+        });
+        let read = rooms
+            .read(&b, "beta", "r1", Duration::from_secs(50), &closing)
+            .await
+            .expect("read");
+        assert_eq!(read, None);
+        assert_eq!(state(&rooms), room::Presence::Idle, "the shutdown ended it");
     }
 
     fn definition(name: &str) -> Definition {

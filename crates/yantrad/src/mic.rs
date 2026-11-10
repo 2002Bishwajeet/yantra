@@ -20,7 +20,6 @@
 //!
 //! [ADR-0031]: ../../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,7 +36,7 @@ use yantra_core::inventory::Inventory;
 use yantra_core::mic::{self, Stream};
 
 use crate::terminal::{MISSES, PING_EVERY};
-use crate::write::{Authoriser, Refused, allowed, chain};
+use crate::write::{Authoriser, Peer, Refused, allowed, chain};
 
 /// What starts the writer for a machine: [`mic::open_at`], or a pipe in a test.
 type Open = Arc<dyn Fn(&str) -> Result<Stream, mic::Error> + Send + Sync>;
@@ -68,12 +67,12 @@ where
 
 async fn talk<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Mic<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(machine): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     install::check_machine(&machine).map_err(|error| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said: error.to_string(),
@@ -169,7 +168,7 @@ async fn refuse(socket: &mut WebSocket, machine: &str, error: &mic::Error) {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use std::net::IpAddr;
+    use std::net::SocketAddr;
     use std::sync::Mutex;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader, DuplexStream};
     use tokio::net::TcpStream;
@@ -255,19 +254,16 @@ mod tests {
         assert!(owner.starts_with("HTTP/1.1 101"), "{owner}");
     }
 
-    /// ADR-0017: the proxy's own address is ours, so the forwarded header is
-    /// what names the caller, and here it names a tagged node.
+    /// ADR-0042: the peer is this machine's own address, so a forged header
+    /// names nobody and the request is refused.
     #[tokio::test]
-    async fn a_forwarded_tagged_node_is_not_upgraded() {
-        let tagged: IpAddr = "100.64.0.4".parse().expect("v4");
+    async fn a_peer_that_is_this_machine_is_not_upgraded() {
         let ours = Authoriser::new(
-            tailnet(vec![
-                (LOCAL, caller(ME, &[])),
-                (tagged, caller(ME, &["tag:ci"])),
-            ]),
+            tailnet(vec![(LOCAL, caller(ME, &[]))]),
             &[SocketAddr::new(LOCAL, 7717)],
+            std::path::Path::new("yantrad.sock"),
         );
-        let said = status(real(ours), MIC, "X-Forwarded-For: 100.64.0.4\r\n").await;
+        let said = status(real(ours), MIC, "X-Forwarded-For: 100.64.0.2\r\n").await;
         assert!(said.starts_with("HTTP/1.1 403"), "{said}");
     }
 

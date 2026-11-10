@@ -309,6 +309,19 @@ export const routeTree = root.addChildren([
   gallery,
 ])
 
+type TransitionInfo = {
+  fromLocation?: { pathname: string; state: { __TSR_index?: number } }
+  toLocation: { pathname: string; state: { __TSR_index?: number } }
+}
+
+/** `false` makes the router skip the view transition: reduce gets a plain cut, and so do the first load and a search-only change. */
+export function transitionTypes({ fromLocation, toLocation }: TransitionInfo): string[] | false {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false
+  if (!fromLocation || fromLocation.pathname === toLocation.pathname) return false
+  const back = (toLocation.state.__TSR_index ?? 0) < (fromLocation.state.__TSR_index ?? 0)
+  return [back ? 'back' : 'forward']
+}
+
 /** The history is a parameter rather than a default, which is
  *  [T3 Code](https://github.com/pingdotgg/t3code)'s `getRouter` shape: it is
  *  what lets a test drive a memory history and the entry point drive the
@@ -327,6 +340,7 @@ export function getRouter(history: RouterHistory, client: QueryClient) {
     scrollRestoration: true,
     // The phone scrolls `main` and not the window (Y-670).
     scrollToTopSelectors: ['.shell__main'],
+    defaultViewTransition: { types: transitionTypes },
   })
 }
 

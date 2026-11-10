@@ -1,9 +1,11 @@
 import {
+  CONTEXT_LENGTHS,
   DEFAULT_MODE,
   EFFORTS,
   MODELS,
   MODES,
   type ClaudeModel,
+  type ContextLength,
   type Effort,
   type Interaction,
   type PermissionMode,
@@ -85,3 +87,18 @@ export const recallEffort = (thread: string | null | undefined): Effort | null =
   recall(EFFORT_KEY, thread, EFFORTS.map((one) => one.effort))
 
 export const keepEffort = (thread: string, effort: Effort | null) => keep(EFFORT_KEY, thread, effort)
+
+const CONTEXT_KEY = 'yantra.chat.context.'
+
+/** The context length this browser kept for `thread` (Y-663), or `null` for the agent's default. */
+export function recallContext(thread: string | null | undefined): ContextLength | null {
+  const kept = recall(
+    CONTEXT_KEY,
+    thread,
+    CONTEXT_LENGTHS.map((one) => (one.length === null ? null : String(one.length))),
+  )
+  return kept === null ? null : (Number(kept) as ContextLength)
+}
+
+export const keepContext = (thread: string, length: ContextLength | null) =>
+  keep(CONTEXT_KEY, thread, length === null ? null : String(length))
