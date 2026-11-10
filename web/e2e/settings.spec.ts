@@ -137,6 +137,55 @@ test.describe('the settings shell', () => {
   })
 })
 
+/** Y-677, note 25 S3: a person on a phone can use every Settings input. Font
+ *  size counts hidden inputs too (iOS zooms on focus under 16 px); the
+ *  controls sit inside the viewport; the hit area is the pseudo-element's, so
+ *  it is measured with `elementFromPoint` rather than the drawn box. */
+test.describe('settings · inputs on a touch screen', () => {
+  for (const one of CATEGORIES) {
+    test(`${one.label} has 16 px inputs, in view, with 44 px hit areas`, async ({ page, size }) => {
+      test.skip(size === 'desktop', 'a pointer device does not zoom or tap')
+      await scenario(page, 'busy')
+      await page.goto(`/settings/${one.id}`)
+      await opened(page, one.label, size)
+      await expect(page.getByText(one.shows, { exact: true }).first()).toBeVisible()
+
+      const small = await page.evaluate(() =>
+        [...document.querySelectorAll('input, select, textarea')]
+          .filter((el) => parseFloat(getComputedStyle(el).fontSize) < 16)
+          .map((el) => el.outerHTML.slice(0, 80)),
+      )
+      expect(small, 'inputs under 16 px').toEqual([])
+
+      const found = await page.evaluate(() => {
+        const controls = [
+          ...document.querySelectorAll<HTMLElement>(
+            '[role=radio], [role=switch], select, input:not([aria-hidden=true]), textarea',
+          ),
+        ].filter((el) => el.getClientRects().length > 0)
+        const name = (el: HTMLElement) =>
+          el.getAttribute('aria-label') || el.textContent?.trim() || el.id || el.tagName
+        const failures: string[] = []
+        for (const el of controls) {
+          el.scrollIntoView({ block: 'center' })
+          const r = el.getBoundingClientRect()
+          if (r.left < 0 || r.right > innerWidth) failures.push(`${name(el)}: outside the viewport`)
+          const x = r.left + r.width / 2
+          const y = r.top + r.height / 2
+          for (const dy of [-21, 21]) {
+            const hit = document.elementFromPoint(x, y + dy)
+            if (!hit || !(el.contains(hit) || hit.contains(el)))
+              failures.push(`${name(el)}: no hit at ${dy}px`)
+          }
+        }
+        return { count: controls.length, failures }
+      })
+      expect(found.failures).toEqual([])
+      if (['general', 'appearance', 'notifications'].includes(one.id)) expect(found.count).toBeGreaterThan(0)
+    })
+  }
+})
+
 test.describe('settings · Appearance recolours everything', () => {
   test('a seed changes the scheme with no reload, and brass puts it back', async ({ page, size }) => {
     await scenario(page, 'busy')

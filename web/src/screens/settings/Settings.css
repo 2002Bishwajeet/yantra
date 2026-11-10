@@ -119,6 +119,14 @@
   background: transparent;
 }
 
+@media (pointer: coarse) {
+  .settings__select {
+    min-height: 44px;
+    font: var(--md-sys-typescale-body-large);
+    letter-spacing: var(--md-sys-typescale-body-large-tracking);
+  }
+}
+
 .settings__select:focus-visible {
   outline: var(--md-sys-focus-ring-width) solid var(--md-sys-color-secondary);
   outline-offset: 2px;
