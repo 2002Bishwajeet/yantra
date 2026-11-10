@@ -302,7 +302,7 @@
 :root:active-view-transition {
   .shell__bar { view-transition-name: shell-bar; }
   .m3-navigation-bar { view-transition-name: shell-nav; }
-  .rail { view-transition-name: shell-rail; }
+  .rail, .m3-rail { view-transition-name: shell-rail; }
   .shell__fab { view-transition-name: shell-fab; }
   .shell__rail-fab { view-transition-name: shell-rail-fab; }
 }

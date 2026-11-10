@@ -5,6 +5,8 @@ import { createMemoryHistory } from '@tanstack/react-router'
 import App from './App'
 import { makeQueryClient } from '@/api/client'
 import { getRouter, transitionTypes } from './router'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const at = (pathname: string, index: number) => ({ pathname, state: { __TSR_index: index } })
 
@@ -90,5 +92,15 @@ describe('a route change in the router', () => {
     await router.navigate({ to: '/machines' })
     await h1('Machines')
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('the shell chrome stays out of the slide', () => {
+  // The e2e test skips the tablet, so this pins the class each shell's rail really wears.
+  it('names the desktop and the tablet rail', () => {
+    const shellCss = readFileSync(resolve(process.cwd(), 'src/shell/Shell.css'), 'utf8')
+    const block = /:root:active-view-transition \{([^}]*)\}/.exec(shellCss)?.[1] ?? ''
+    expect(block).toMatch(/\.rail\b[^;]*view-transition-name: shell-rail/)
+    expect(block).toMatch(/\.m3-rail\b[^;]*view-transition-name: shell-rail/)
   })
 })
