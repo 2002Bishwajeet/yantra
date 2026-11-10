@@ -8,7 +8,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
-import { ChevronDown, Diff, RefreshCw } from 'lucide-react'
+import { ChevronDown, Diff, Plus, RefreshCw } from 'lucide-react'
 import { useThreads } from '@/api/mutations'
 import { useThreadStates } from '@/api/queries'
 import { useTick } from '@/useTick'
@@ -97,6 +97,21 @@ export function ChatHeader(props: ChatHeaderProps) {
             <ChevronDown aria-hidden="true" />
           </MenuTrigger>
           <MenuPopup align="start" className="chat__threads">
+            {active ? (
+              <MenuLinkItem
+                render={
+                  <Link
+                    activeOptions={{ exact: true, includeSearch: true }}
+                    params={{ name: workspace }}
+                    search={{ view: 'chat' }}
+                    to="/w/$name"
+                  />
+                }
+              >
+                <Plus aria-hidden="true" />
+                New thread
+              </MenuLinkItem>
+            ) : null}
             {threads.isPending && !shown ? (
               <div aria-busy="true" className="threads__pending">
                 <Skeleton shape="text" style={{ width: '50%' }} />
