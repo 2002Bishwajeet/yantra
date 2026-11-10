@@ -633,6 +633,7 @@ export const failed = {
 
 export const about = {
   "built": "2026-09-06",
+  "channel": "stable",
   "listening_on": [
     "100.64.0.1:7717",
     "[fd7a:115c:a1e0::1]:7717"

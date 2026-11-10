@@ -155,6 +155,31 @@ same thing, and `yantra update --check` only says whether one exists.
   or an unreachable GitHub stops the unit before it. Read why with `journalctl -u yantra-update`.
 - `yantra update` needs root. Without it, it prints `sudo systemctl start yantra-update.service`.
 
+### Stable and nightly
+
+**[Y-662](../tracker.md), ADR-0027's 2026-11-10 amendment.** A box follows one of two channels:
+
+- **stable**, the default: each `v*` tag, read through `/releases/latest`.
+- **nightly**: the build of the latest merge to `main`. It is one rolling pre-release, tagged
+  `nightly`, with the two Linux archives only. Its version reads like
+  `0.10.4-nightly.20261110143205.abc1234`.
+
+Choose it at install time, at the command line, or in Settings → About:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --channel nightly
+sudo yantra update --channel nightly   # write the channel, then update
+yantra update --check --channel nightly
+```
+
+- The choice is one word in `/etc/yantra/channel`, mode `0644` and owned by `yantra`, so Settings
+  can rewrite it. Later updates follow it. A box with no file is on stable.
+- **The unit never goes back a version.** `install.sh` records what it installed in
+  `/var/lib/yantra/installed`. A switch from nightly to stable therefore waits for a newer stable
+  release. To go back now, run the script by hand: `sudo yantra-update --channel stable`.
+- The first update of a box from before Y-662 runs the old updater, which knows no channel and
+  installs stable. It also creates `/etc/yantra/channel`, so the next switch works.
+
 **How far an update got** ([Y-612](../tracker.md)). `yantrad` runs as `yantra`, which cannot read
 the root unit's journal. So the unit gives `install.sh` a `RuntimeDirectory`, `/run/yantra-update`,
 mode `0755`, and keeps it after the run:

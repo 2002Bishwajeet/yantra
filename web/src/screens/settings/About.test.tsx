@@ -32,6 +32,59 @@ describe('About', () => {
     expect(await screen.findByText('About could not be drawn')).toBeTruthy()
   })
 
+  describe('the release channel (Y-662)', () => {
+    it('shows the channel and switches it through the daemon', async () => {
+      let channel = 'stable'
+      let sent: unknown = null
+      mountSettings('desktop', '/settings/about', {
+        'PUT /api/update/channel': (init) => {
+          sent = JSON.parse(String(init?.body))
+          channel = 'nightly'
+          return [204]
+        },
+        'GET /api/about': () => [200, { ...contract.about, channel }],
+      })
+      const group = await screen.findByRole('radiogroup', { name: 'Release channel' })
+      const stable = within(group).getByRole('radio', { name: 'Stable' })
+      await waitFor(() => expect(stable.getAttribute('aria-checked')).toBe('true'))
+      fireEvent.click(within(group).getByRole('radio', { name: 'Nightly' }))
+      await waitFor(() => expect(sent).toEqual({ channel: 'nightly' }))
+      await waitFor(() =>
+        expect(within(group).getByRole('radio', { name: 'Nightly' }).getAttribute('aria-checked')).toBe('true'),
+      )
+    })
+
+    it('draws a refused switch and keeps the channel it had', async () => {
+      mountSettings('desktop', '/settings/about', {
+        'PUT /api/update/channel': [409, 'could not write /etc/yantra/channel: Permission denied'],
+      })
+      const group = await screen.findByRole('radiogroup', { name: 'Release channel' })
+      fireEvent.click(within(group).getByRole('radio', { name: 'Nightly' }))
+      expect(await screen.findByText('The channel did not change')).toBeTruthy()
+      expect(within(group).getByRole('radio', { name: 'Stable' }).getAttribute('aria-checked')).toBe('true')
+    })
+
+    it('links the nightly release by its tag', async () => {
+      mountSettings('desktop', '/settings/about', {
+        'GET /api/about': [
+          200,
+          {
+            ...contract.about,
+            channel: 'nightly',
+            published: { looked: 'ok', age_seconds: 5, data: { version: '0.4.1-nightly.20261110143205.abc1234', newer: true } },
+          },
+        ],
+      })
+      const link = await screen.findByRole('link', { name: 'v0.4.1-nightly.20261110143205.abc1234 is out' })
+      expect(link.getAttribute('href')).toBe('https://github.com/2002Bishwajeet/yantra/releases/tag/nightly')
+    })
+
+    it('says so when the channel file names no channel', async () => {
+      mountSettings('desktop', '/settings/about', { 'GET /api/about': [200, { ...contract.about, channel: null }] })
+      expect(await screen.findByText(/names no channel/)).toBeTruthy()
+    })
+  })
+
   describe('the published release (Y-367)', () => {
     const publishing = (published: unknown) => ({ 'GET /api/about': [200, { ...contract.about, published }] as [number, unknown] })
 

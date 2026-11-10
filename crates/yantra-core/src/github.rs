@@ -22,6 +22,7 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use crate::attention::{Attention, Forge, Item};
+use crate::update::Channel;
 
 /// The variable the daemon reads the grant from, and the one
 /// `/etc/yantra/daemon.env` carries it under.
@@ -37,7 +38,7 @@ const SLOW_DOWN: Duration = Duration::from_secs(5);
 /// `gh search` capped here too: a person triaging does not scroll past thirty.
 const SEARCH_LIMIT: &str = "30";
 /// ADR-0027 §4: the one repository whose releases the appliance installs from.
-const RELEASES: &str = "repos/2002Bishwajeet/yantra/releases/latest";
+const RELEASES: &str = "repos/2002Bishwajeet/yantra/releases";
 /// Enough for 3000 repositories; a `Link` chain that never ends is a bug, not a
 /// fleet.
 const MAX_PAGES: usize = 30;
@@ -179,20 +180,27 @@ pub struct Repo {
     pub default_branch: String,
 }
 
-/// The newest published release, read off its tag (ADR-0027 §4).
+/// The newest published release on a channel (ADR-0027 §4, Y-662).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Release {
-    /// `MAJOR.MINOR.PATCH`, without the tag's `v`.
+    /// `MAJOR.MINOR.PATCH`, or that with `-nightly.<stamp>.<sha>`, without the `v`.
     pub version: String,
     pub parts: (u64, u64, u64),
+    /// A nightly's UTC commit time as `YYYYMMDDHHMMSS`; `None` is a stable release.
+    pub nightly: Option<u64>,
 }
 
 impl Release {
-    /// `v0.3.3` or `0.3.3`, and nothing else: a pre-release tag never reaches
-    /// `/releases/latest`, so a suffix here is a tag this cannot order.
+    /// `v0.3.3`, `0.3.3` or `0.3.4-nightly.20261110143205.abc1234`, and nothing
+    /// else: an `rc` never reaches `/releases/latest`, so it is a tag this
+    /// cannot order.
     pub fn parse(tag: &str) -> Option<Self> {
         let version = tag.strip_prefix('v').unwrap_or(tag);
-        let mut numbers = version.split('.').map(|part| part.parse::<u64>().ok());
+        let (core, nightly) = match version.split_once('-') {
+            None => (version, None),
+            Some((core, pre)) => (core, Some(nightly_stamp(pre)?)),
+        };
+        let mut numbers = core.split('.').map(|part| part.parse::<u64>().ok());
         let parts = (numbers.next()??, numbers.next()??, numbers.next()??);
         if numbers.next().is_some() {
             return None;
@@ -200,8 +208,34 @@ impl Release {
         Some(Self {
             version: version.to_owned(),
             parts,
+            nightly,
         })
     }
+
+    /// Semver's order: a nightly sorts below the release of its own number,
+    /// and the workflow numbers a nightly one patch past the last release.
+    pub fn is_newer_than(&self, other: &Self) -> bool {
+        self.order() > other.order()
+    }
+
+    fn order(&self) -> ((u64, u64, u64), bool, u64) {
+        (
+            self.parts,
+            self.nightly.is_none(),
+            self.nightly.unwrap_or_default(),
+        )
+    }
+}
+
+fn nightly_stamp(pre: &str) -> Option<u64> {
+    let mut ids = pre.split('.');
+    if ids.next()? != "nightly" {
+        return None;
+    }
+    let stamp = ids.next()?.parse().ok()?;
+    let sha = ids.next()?;
+    let hex = !sha.is_empty() && sha.bytes().all(|b| b.is_ascii_hexdigit());
+    (hex && ids.next().is_none()).then_some(stamp)
 }
 
 /// `owner/repo#n`, the one way an issue is named to Yantra (Y-488).
@@ -396,7 +430,7 @@ pub enum Error {
     #[error("GitHub could not be reached: {reason}")]
     Unreachable { reason: String },
 
-    #[error("the newest release is tagged `{tag}`, which is not MAJOR.MINOR.PATCH")]
+    #[error("the newest release is `{tag}`, which is not MAJOR.MINOR.PATCH or a nightly")]
     NotAVersion { tag: String },
 
     #[error("`{input}` is not an issue — name one as owner/repo#number")]
@@ -521,19 +555,31 @@ impl Github {
         .await
     }
 
-    /// ADR-0027 §4's one read: the newest release's `tag_name`. The grant goes
-    /// along when there is one, for its 5,000-an-hour quota; without one the
-    /// call is anonymous and a `403` is a failed check, never *current*.
-    pub async fn latest_release(&self, token: Option<&Token>) -> Result<Release, Error> {
-        let url = format!("{}/{RELEASES}", self.api);
+    /// ADR-0027 §4's one read: the newest release's `tag_name` on stable, and
+    /// the rolling `nightly` release's title on nightly, whose tag names no
+    /// version (Y-662). The grant goes along when there is one, for its
+    /// 5,000-an-hour quota; without one the call is anonymous and a `403` is a
+    /// failed check, never *current*.
+    pub async fn latest_release(
+        &self,
+        channel: Channel,
+        token: Option<&Token>,
+    ) -> Result<Release, Error> {
+        let (path, what) = match channel {
+            Channel::Stable => ("latest", "/releases/latest"),
+            Channel::Nightly => ("tags/nightly", "/releases/tags/nightly"),
+        };
+        let url = format!("{}/{RELEASES}/{path}", self.api);
         let token = token.cloned();
         blocking(move || {
             let mut response = request(&url, token.as_ref(), &[]).map_err(unreachable)?;
-            ok(&response, "/releases/latest")?;
+            ok(&response, what)?;
             let latest: Latest = read_json(&mut response, "the newest release")?;
-            Release::parse(&latest.tag_name).ok_or(Error::NotAVersion {
-                tag: latest.tag_name,
-            })
+            let tag = match channel {
+                Channel::Stable => latest.tag_name,
+                Channel::Nightly => latest.name.unwrap_or_default(),
+            };
+            Release::parse(&tag).ok_or(Error::NotAVersion { tag })
         })
         .await
     }
@@ -1048,6 +1094,9 @@ impl Refusal {
 #[derive(serde::Deserialize)]
 struct Latest {
     tag_name: String,
+    /// The release's title, which the nightly job sets to `v<version>`.
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1726,7 +1775,10 @@ pub(crate) mod tests {
             )],
         );
 
-        let release = at(address).latest_release(None).await.expect("a release");
+        let release = at(address)
+            .latest_release(Channel::Stable, None)
+            .await
+            .expect("a release");
 
         assert_eq!(release.version, "0.10.2");
         assert_eq!(release.parts, (0, 10, 2));
@@ -1745,9 +1797,12 @@ pub(crate) mod tests {
         let tag = r#"{"tag_name":"v0.3.3"}"#;
         let served = serve(listener, vec![reply("200 OK", tag), reply("200 OK", tag)]);
 
-        at(address).latest_release(None).await.expect("anonymous");
         at(address)
-            .latest_release(Some(&token()))
+            .latest_release(Channel::Stable, None)
+            .await
+            .expect("anonymous");
+        at(address)
+            .latest_release(Channel::Stable, Some(&token()))
             .await
             .expect("with the grant");
 
@@ -1779,7 +1834,10 @@ pub(crate) mod tests {
             )],
         );
 
-        let failed = at(address).latest_release(None).await.expect_err("403");
+        let failed = at(address)
+            .latest_release(Channel::Stable, None)
+            .await
+            .expect_err("403");
 
         assert!(
             matches!(failed, Error::Status { status: 403, .. }),
@@ -1793,7 +1851,7 @@ pub(crate) mod tests {
         drop(listener);
 
         let failed = at(gone)
-            .latest_release(None)
+            .latest_release(Channel::Stable, None)
             .await
             .expect_err("nothing listens");
 
@@ -1805,7 +1863,10 @@ pub(crate) mod tests {
         let (listener, address) = listen();
         let _served = serve(listener, vec![reply("200 OK", r#"{"tag_name":"nightly"}"#)]);
 
-        let failed = at(address).latest_release(None).await.expect_err("nightly");
+        let failed = at(address)
+            .latest_release(Channel::Stable, None)
+            .await
+            .expect_err("nightly");
 
         match failed {
             Error::NotAVersion { tag } => assert_eq!(tag, "nightly"),
@@ -1819,7 +1880,59 @@ pub(crate) mod tests {
         assert!(Release::parse("v0.3").is_none());
         assert!(Release::parse("v0.3.3.1").is_none());
         assert!(Release::parse("v0.3.0-rc.1").is_none());
+        assert!(Release::parse("0.3.0-nightly.20261110").is_none(), "no sha");
+        assert!(Release::parse("0.3.0-nightly.x.abc1234").is_none());
         assert!(Release::parse("").is_none());
+        let nightly = Release::parse("v0.10.4-nightly.20261110143205.abc1234").expect("a nightly");
+        assert_eq!(nightly.parts, (0, 10, 4));
+        assert_eq!(nightly.nightly, Some(20_261_110_143_205));
+        assert_eq!(nightly.version, "0.10.4-nightly.20261110143205.abc1234");
+    }
+
+    /// Y-662: a nightly is past the release before it and below its own.
+    #[test]
+    fn a_nightly_orders_between_two_releases_and_by_its_stamp() {
+        let parse = |tag: &str| Release::parse(tag).expect("a version");
+        let (before, night, later, after) = (
+            parse("0.10.3"),
+            parse("0.10.4-nightly.20261110143205.abc1234"),
+            parse("0.10.4-nightly.20261111090000.def5678"),
+            parse("0.10.4"),
+        );
+        assert!(night.is_newer_than(&before));
+        assert!(later.is_newer_than(&night));
+        assert!(after.is_newer_than(&later));
+        assert!(
+            !before.is_newer_than(&night),
+            "stable after a nightly is older"
+        );
+        assert!(!night.is_newer_than(&night), "equal is not newer");
+    }
+
+    /// Y-662: the nightly tag names no version, so its title is read.
+    #[tokio::test]
+    async fn the_nightly_release_is_read_off_its_title() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![reply(
+                "200 OK",
+                r#"{"tag_name":"nightly","name":"v0.10.4-nightly.20261110143205.abc1234","prerelease":true}"#,
+            )],
+        );
+
+        let release = at(address)
+            .latest_release(Channel::Nightly, None)
+            .await
+            .expect("a nightly");
+
+        assert_eq!(release.version, "0.10.4-nightly.20261110143205.abc1234");
+        let request = served.join().expect("the listener thread").remove(0);
+        assert!(
+            request
+                .starts_with("GET /repos/2002Bishwajeet/yantra/releases/tags/nightly HTTP/1.1\r\n"),
+            "{request}"
+        );
     }
 
     #[test]

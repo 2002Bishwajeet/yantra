@@ -381,6 +381,9 @@ export type About = {
   relay: boolean
   // Y-367: the newest release, read hourly. `failed` is never *current*.
   published: Looked<Published>
+  // Y-662: which release the update unit installs. Null is a channel file
+  // that names no channel.
+  channel: Channel | null
   // Y-612: how far `yantra-update.service` has got. Null when nothing runs
   // and the last run did not fail.
   update: UpdateProgress | null
@@ -397,6 +400,9 @@ export type UpdateProgress =
 
 /** ADR-0027 §2: the published version, and whether it is newer than this
  *  build. The daemon decides `newer`, so the page and the CLI agree. */
+/** Y-662: a stable release is a `v*` tag; a nightly is the latest merge to main. */
+export type Channel = 'stable' | 'nightly'
+
 export type Published = {
   version: string
   newer: boolean

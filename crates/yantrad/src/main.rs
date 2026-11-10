@@ -193,6 +193,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             trigger: PathBuf::from(yantra_core::update::TRIGGER),
             updater: PathBuf::from(yantra_core::update::UPDATER),
             progress: PathBuf::from(yantra_core::update::PROGRESS),
+            channel: PathBuf::from(yantra_core::update::CHANNEL),
         }),
         github: github::Grant::from_env(),
         rooms: rooms(chats.clone()),

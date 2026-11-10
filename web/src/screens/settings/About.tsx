@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import { ExternalLink, FileKey, Scale, Shield } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import type { Looked, Published, UpdateProgress } from '@/api'
+import type { Channel, Looked, Published, UpdateProgress } from '@/api'
 import { fromReading } from '@/api/client'
-import { useApplyUpdate } from '@/api/mutations'
+import { useApplyUpdate, useSetChannel } from '@/api/mutations'
 import { aboutQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
 import { type Described, ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListChevron, ListItem } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
+import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Mono, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Group, Note } from './Group'
@@ -63,7 +64,10 @@ export function About() {
           <Fact label="Listens on" value={facts ? <Mono>{facts.listening_on.join(' · ')}</Mono> : null} />
           <Fact label="Reached at" value={<Mono>{location.host}</Mono>} />
           {facts?.published.looked === 'failed' ? null : (
-            <Fact label="Published" value={facts ? <Release published={facts.published} /> : null} />
+            <Fact
+              label="Published"
+              value={facts ? <Release channel={facts.channel} published={facts.published} /> : null}
+            />
           )}
         </dl>
         {facts?.published.looked === 'failed' ? (
@@ -73,6 +77,7 @@ export function About() {
             title="The newest release could not be read"
           />
         ) : null}
+        {facts ? <ChannelSwitch channel={facts.channel} /> : null}
         {facts ? (
           <Update
             asked={asked}
@@ -133,15 +138,57 @@ export function About() {
 }
 
 /** ADR-0027 §2. A failed read is drawn by the caller, never as current. */
-function Release(props: { published: Exclude<Looked<Published>, { looked: 'failed' }> }) {
-  const { published } = props
+function Release(props: {
+  channel: Channel | null
+  published: Exclude<Looked<Published>, { looked: 'failed' }>
+}) {
+  const { channel, published } = props
   if (published.looked === 'never') return <Text scale="body-medium" tone="variant">not asked yet</Text>
   const { version, newer } = published.data
   if (!newer) return <Mono>{version} · current</Mono>
+  // The nightly's tag names no version, and it moves with each merge.
+  const tag = channel === 'nightly' ? 'nightly' : `v${version}`
   return (
-    <a href={`https://github.com/2002Bishwajeet/yantra/releases/tag/v${version}`} rel="noreferrer" target="_blank">
+    <a href={`https://github.com/2002Bishwajeet/yantra/releases/tag/${tag}`} rel="noreferrer" target="_blank">
       <Mono>v{version} is out</Mono>
     </a>
+  )
+}
+
+function isChannel(value: string): value is Channel {
+  return value === 'stable' || value === 'nightly'
+}
+
+/** Y-662: the daemon rewrites the channel the update unit reads. Switching
+ *  installs nothing; the next update does, and it never goes back a version. */
+function ChannelSwitch(props: { channel: Channel | null }) {
+  const { channel } = props
+  const set = useSetChannel()
+  const shown = set.isPending ? set.variables : channel
+  return (
+    <div className="settings__channel">
+      <Segmented
+        disabled={set.isPending}
+        label="Release channel"
+        onValueChange={(next) => {
+          if (isChannel(next) && next !== channel) set.mutate(next)
+        }}
+        value={shown ?? ''}
+      >
+        <Segment value="stable">Stable</Segment>
+        <Segment value="nightly">Nightly</Segment>
+      </Segmented>
+      <Text render={<p />} scale="body-small" tone="variant">
+        {channel === null ? (
+          <>
+            <Mono>/etc/yantra/channel</Mono> names no channel. Pick one to rewrite it.
+          </>
+        ) : (
+          'Stable is each tagged release. Nightly is the latest merge to main. An update never goes back a version.'
+        )}
+      </Text>
+      {set.error ? <ErrorSurface.Inline error={set.error} title="The channel did not change" /> : null}
+    </div>
   )
 }
 
