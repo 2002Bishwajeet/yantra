@@ -682,8 +682,8 @@ struct Machine {
     address: Option<String>,
     os: String,
     online: bool,
-    /// Y-626: online because the path answers while Tailscale's control server
-    /// cannot see the node.
+    /// Y-626: online because the node answered a WireGuard handshake while
+    /// Tailscale's control server cannot see it.
     control_lost: bool,
     /// I-39: an expired key is a third state. Such a machine can be powered on,
     /// listed, and still unreachable — which a green dot would erase.

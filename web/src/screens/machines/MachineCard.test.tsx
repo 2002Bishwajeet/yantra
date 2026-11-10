@@ -84,7 +84,7 @@ describe("a machine whose Tailscale lost its control server (Y-626)", () => {
       ["reachable", "sshd", "tmux"].map(present),
     );
     await screen.findByText(
-      "Tailscale lost its control server. The direct path still answers.",
+      "Tailscale lost its control server. The machine still answers over the tailnet.",
     );
     expect(screen.queryByText(/asleep/)).toBeNull();
   });

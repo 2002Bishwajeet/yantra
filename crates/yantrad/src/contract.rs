@@ -277,7 +277,7 @@ async fn fleet() -> Fleet {
                 false,
                 Some("2026-07-07T09:00:00Z"),
             ),
-            // Online only because its path answers (Y-626).
+            // Online only because it answered a handshake (Y-626).
             MachineInfo {
                 control_lost: true,
                 ..machine("n-3", "pi", true, None)

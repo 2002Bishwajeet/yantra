@@ -163,7 +163,7 @@ export function MachineCard(props: MachineCardProps) {
       </Text>
       {machine.control_lost ? (
         <Text render={<p />} className="machines__about" scale="body-small" tone="variant">
-          Tailscale lost its control server. The direct path still answers.
+          Tailscale lost its control server. The machine still answers over the tailnet.
         </Text>
       ) : null}
 
