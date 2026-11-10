@@ -1,6 +1,6 @@
 import type { About, Carried } from '@/api'
 import { fetchJson, fields, json, type Shape } from '@/api/client'
-import { asApiError, type ApiError } from '@/api/errors'
+import { ApiError, asApiError } from '@/api/errors'
 
 /** Y-652: what the page-load step did. Only `moved` leaves the page; every
  *  other answer keeps it on `:7717`, where Talk says why the mic is off. */
@@ -27,6 +27,17 @@ const CARRY = '#yantra-carry='
 const CARRIED = /^yantra\.(prefs|editor|chat\.interaction\..+|chat\.draft\..+)$/
 const ID = /^[0-9a-f]{32}$/
 
+/** The page has not rendered yet, so a daemon that does not answer must not
+ *  leave it blank. `fetchJson` rethrows an abort untyped, so it is typed here. */
+async function ask<T>(path: string, init: RequestInit, shape: Shape, timeoutMs: number): Promise<T> {
+  const signal = AbortSignal.timeout(timeoutMs)
+  try {
+    return await fetchJson<T>(path, { ...init, signal }, shape)
+  } catch (error) {
+    throw signal.aborted ? new ApiError('network', 'the daemon did not answer in time') : asApiError(error)
+  }
+}
+
 /** The keys this page can carry: prefs, the editor, plan mode and drafts. */
 function kept(storage: Store): Record<string, string> {
   const found: Record<string, string> = {}
@@ -49,7 +60,7 @@ export async function toSecure(page: Page = window, timeoutMs = 3000): Promise<S
   if (page.isSecureContext) return { kind: 'secure' }
   let about: About
   try {
-    about = await fetchJson<About>('/api/about', {}, fields('https'))
+    about = await ask<About>('/api/about', {}, fields('https'), timeoutMs)
   } catch (error) {
     return { kind: 'about-failed', error: asApiError(error) }
   }
@@ -67,14 +78,17 @@ export async function toSecure(page: Page = window, timeoutMs = 3000): Promise<S
   let to = `${https}${pathname}${search}${hash}`
   if (carried > 0) {
     try {
-      const { id } = await fetchJson<Carried>('/api/carry', { method: 'POST', ...json(keys) }, fields('id'))
+      const { id } = await ask<Carried>('/api/carry', { method: 'POST', ...json(keys) }, fields('id'), timeoutMs)
       to = `${https}${pathname}${search}${CARRY}${id}&${encodeURIComponent(hash)}`
     } catch (error) {
       return { kind: 'carry-failed', error: asApiError(error) }
     }
-    // Moved, not copied: a copy here would come back over a newer value on a later visit.
+    // Moved, not copied: a copy here would come back over a newer value on a
+    // later visit. A value another tab wrote meanwhile was not carried, so it stays.
     try {
-      for (const key of Object.keys(keys)) page.localStorage.removeItem(key)
+      for (const [key, value] of Object.entries(keys)) {
+        if (page.localStorage.getItem(key) === value) page.localStorage.removeItem(key)
+      }
     } catch {
       // The keys stay here as well, which loses nothing.
     }
@@ -135,7 +149,7 @@ function restored(encoded: string): string {
  *  reads the carried keys. A take that fails keeps its id for this tab, and a
  *  reload asks again. A carried key replaces the one held here: the owner
  *  comes from the page that set it last. */
-export async function arrive(page: Landing = window): Promise<Arrived> {
+export async function arrive(page: Landing = window, timeoutMs = 3000): Promise<Arrived> {
   const { pathname, search, hash } = page.location
   let id: string | null
   if (hash.startsWith(CARRY)) {
@@ -152,7 +166,7 @@ export async function arrive(page: Landing = window): Promise<Arrived> {
   if (!ID.test(id)) return { kind: 'lost' }
   let keys: Record<string, unknown>
   try {
-    keys = await fetchJson<Record<string, unknown>>(`/api/carry/${id}`, { method: 'POST' }, anObject)
+    keys = await ask<Record<string, unknown>>(`/api/carry/${id}`, { method: 'POST' }, anObject, timeoutMs)
   } catch (error) {
     const failure = asApiError(error)
     if (failure.kind !== 'missing') return { kind: 'failed', error: failure }

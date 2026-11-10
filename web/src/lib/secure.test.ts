@@ -82,6 +82,8 @@ function stub({
 const served = (https: string | null) => () => Promise.resolve(answer(200, { ...about, https }))
 const answers = () => Promise.resolve(answer(200))
 const rejects = () => Promise.reject(new TypeError('Failed to fetch'))
+const hangs = (init?: RequestInit) =>
+  new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)))
 const movedTo = (result: Secure) => (result.kind === 'moved' ? result.to : '')
 
 describe('toSecure', () => {
@@ -149,6 +151,35 @@ describe('toSecure', () => {
     expect(here.held.get('yantra.chat.draft.t-1')).toBe('half a thought')
   })
 
+  it('stays, typed as network, and loses no key, when the carry does not answer in time', async () => {
+    stub({ keep: hangs })
+    const here = page(false, { 'yantra.chat.draft.t-1': 'half a thought' })
+    const result = await toSecure(here, 10)
+    expect(result.kind === 'carry-failed' && result.error.kind).toBe('network')
+    expect(here.replace).not.toHaveBeenCalled()
+    expect(here.held.get('yantra.chat.draft.t-1')).toBe('half a thought')
+  })
+
+  it('stays, typed as network, when /api/about does not answer in time', async () => {
+    stub({ about: hangs })
+    const here = page()
+    const result = await toSecure(here, 10)
+    expect(result.kind === 'about-failed' && result.error.kind).toBe('network')
+    expect(here.replace).not.toHaveBeenCalled()
+  })
+
+  it('keeps a key another tab changed while the carry was made', async () => {
+    const here = page(false, { 'yantra.chat.draft.t-1': 'half a thought', 'yantra.editor': 'zed' })
+    stub({
+      keep: () => {
+        here.held.set('yantra.chat.draft.t-1', 'a whole thought')
+        return Promise.resolve(answer(200, { id: ID }))
+      },
+    })
+    expect(await toSecure(here)).toMatchObject({ kind: 'moved', carried: 2 })
+    expect([...here.held.entries()]).toEqual([['yantra.chat.draft.t-1', 'a whole thought']])
+  })
+
   it('moves with nothing to carry when the store refuses to be read', async () => {
     stub()
     const here = page()
@@ -187,10 +218,6 @@ describe('toSecure', () => {
   })
 
   it('stays when the HTTPS origin does not answer in time', async () => {
-    const hangs = (init?: RequestInit) =>
-      new Promise<Response>((_, reject) =>
-        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)),
-      )
     stub({ probe: hangs })
     const here = page()
     expect(await toSecure(here, 10)).toEqual({ kind: 'unreachable' })
@@ -283,6 +310,14 @@ describe('arrive', () => {
     expect(result.kind === 'failed' && result.error.kind).toBe(kind)
     expect(kept.held.size).toBe(0)
     expect(there.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/machines/pi?tab=talk#mic')
+    expect(there.session.get('yantra.carry')).toBe(ID)
+  })
+
+  it('fails, typed as network, when the take does not answer in time, and keeps the id', async () => {
+    stub({ take: hangs })
+    const there = landing(carried('#mic'))
+    const result = await arrive(there, 10)
+    expect(result.kind === 'failed' && result.error.kind).toBe('network')
     expect(there.session.get('yantra.carry')).toBe(ID)
   })
 

@@ -125,7 +125,6 @@ async fn take<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
 pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> {
     vec![
         (
