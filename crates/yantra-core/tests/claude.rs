@@ -96,7 +96,7 @@ async fn run_in(
     tokio::time::timeout(PATIENCE, async {
         while let Some(next) = events.recv().await {
             if let (Event::RequestOpened(opened), Some(decision)) = (&next.event, answer) {
-                turn.answer(&opened.request_id, decision)?;
+                turn.answer(&opened.request_id, decision, None)?;
             }
             let done = matches!(next.event, Event::TurnCompleted(_));
             seen.push(next.event);
@@ -432,7 +432,7 @@ async fn a_real_claude_background_task_outlives_its_turn() -> Result<()> {
     tokio::time::timeout(PATIENCE, async {
         while let Some(next) = events.recv().await {
             if let Event::RequestOpened(opened) = &next.event {
-                session.answer(&opened.request_id, Decision::Accept)?;
+                session.answer(&opened.request_id, Decision::Accept, None)?;
             }
             if matches!(next.event, Event::TurnCompleted(_)) {
                 ended += 1;

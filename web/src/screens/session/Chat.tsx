@@ -8,6 +8,7 @@ import {
   LABEL,
   type ClaudeModel,
   type Effort,
+  type Decision,
   type Harness,
   type Interaction,
   type PermissionMode,
@@ -30,11 +31,10 @@ import { detectTrigger, insertMention, type Trigger } from '@/composer/trigger'
 import { useDockHeight } from '@/composer/useDockHeight'
 import { useImages } from '@/composer/useImages'
 import { Button } from '@/m3/button/Button'
-import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow } from '@/m3/text/Text'
 import { BackgroundWork } from './BackgroundWork'
 import { appendToDraft } from './diff/comment'
 import { branchData, type DiffState } from './diff/data'
@@ -56,19 +56,14 @@ import {
 } from './mode'
 import { ModePicker } from './ModePicker'
 import { ModelPicker } from './ModelPicker'
+import { PendingApproval } from './PendingApproval'
+import { PendingQuestion } from './PendingQuestion'
 import { PlanToggle } from './PlanToggle'
 import type { Message, Timeline } from './timeline'
 import { TurnDiff } from './TurnDiff'
 import { useChat } from './useChat'
 import { WorkLog } from './WorkLog'
 import { workRows } from './workLog.logic'
-
-const ASKS: Record<RequestOpened['requestType'], string> = {
-  exec_command_approval: 'asks to run',
-  file_change_approval: 'asks to change',
-  file_read_approval: 'asks to read',
-  dynamic_tool_call: 'asks to use a tool',
-}
 
 function Said(props: { message: Message; agent: string; machine: string; worktree: string | null }) {
   const { message, agent, machine, worktree } = props
@@ -94,47 +89,6 @@ function Said(props: { message: Message; agent: string; machine: string; worktre
         </div>
       )}
     </article>
-  )
-}
-
-/** The agent's own question, with the three answers the chat offers. */
-function Asking(props: {
-  request: RequestOpened
-  agent: string
-  onAnswer: (decision: 'accept' | 'acceptAlways' | 'decline') => boolean
-}) {
-  const { request, agent, onAnswer } = props
-  // The card stays until the daemon says `request.resolved`; a second answer
-  // before then reaches no pending request.
-  const [answered, setAnswered] = useState(false)
-  const answer = (decision: 'accept' | 'acceptAlways' | 'decline') => {
-    if (onAnswer(decision)) setAnswered(true)
-  }
-  return (
-    <Card className="chat__asking" surface="primary">
-      <div className="chat__asking-head">
-        <Eyebrow>{`${agent} ${ASKS[request.requestType]}`}</Eyebrow>
-        <Text render={<h3 />} scale="title-medium">
-          {request.title ? <Mono>{request.title}</Mono> : (request.detail ?? 'a tool')}
-        </Text>
-        {request.title && request.detail ? (
-          <Text render={<p />} scale="body-medium">
-            {request.detail}
-          </Text>
-        ) : null}
-      </div>
-      <div className="chat__answers">
-        <Button disabled={answered} onClick={() => answer('accept')}>
-          Accept
-        </Button>
-        <Button disabled={answered} onClick={() => answer('acceptAlways')} variant="tonal">
-          Accept always
-        </Button>
-        <Button disabled={answered} onClick={() => answer('decline')} variant="text">
-          Decline
-        </Button>
-      </div>
-    </Card>
   )
 }
 
@@ -453,14 +407,9 @@ export function Chat(props: ChatProps) {
     box.current?.focus()
   }
 
-  const asks = timeline.requests.map((request) => (
-    <Asking
-      agent={agent}
-      key={request.requestId}
-      onAnswer={(decision) => chat.answer(request.requestId, decision)}
-      request={request}
-    />
-  ))
+  const [asked1, ...others] = timeline.requests
+  const answerOf = (request: RequestOpened) => (decision: Decision, answers?: Record<string, string[]>) =>
+    chat.answer(request.requestId, decision, answers)
 
   const toggleDiff = () => {
     if (showDiff) {
@@ -496,12 +445,6 @@ export function Chat(props: ChatProps) {
             state={sheet}
             workspace={workspace}
           />
-        </section>
-      ) : null}
-      {/* The diff hides the conversation, but the agent still waits on these. */}
-      {showDiff && asks.length > 0 ? (
-        <section aria-label="Waiting for your answer" className="chat__asks">
-          {asks}
         </section>
       ) : null}
       <section aria-label="Conversation" className="chat__turns" hidden={showDiff}>
@@ -540,7 +483,6 @@ export function Chat(props: ChatProps) {
             />
           ) : null,
         )}
-        {showDiff ? null : asks}
         <div ref={end} />
       </section>
       <div className="composer-dock" ref={dock}>
@@ -617,6 +559,27 @@ export function Chat(props: ChatProps) {
             send()
           }}
         >
+          {asked1 ? (
+            asked1.questions?.length ? (
+              <PendingQuestion
+                agent={agent}
+                error={error}
+                key={asked1.requestId}
+                more={others.length}
+                onAnswer={answerOf(asked1)}
+                request={asked1}
+              />
+            ) : (
+              <PendingApproval
+                agent={agent}
+                error={error}
+                key={asked1.requestId}
+                more={others.length}
+                onAnswer={answerOf(asked1)}
+                request={asked1}
+              />
+            )
+          ) : null}
           <Attachments images={images} onRemove={remove} />
           <Composer.Input
             aria-activedescendant={trigger && at >= 0 ? optionId(menu, at) : undefined}

@@ -164,7 +164,7 @@ export type ChatSocket = {
     model?: ClaudeModel | null,
     effort?: Effort | null,
   ) => boolean
-  answer: (requestId: string, decision: Decision) => boolean
+  answer: (requestId: string, decision: Decision, answers?: Record<string, string[]>) => boolean
   stop: () => boolean
   /** Stops one background task (ADR-0041); a failure is `stopTask`. */
   stopTask: (taskId: string) => boolean
@@ -548,7 +548,8 @@ export function openChat(
       if (sent) turn = ++sends
       return sent
     },
-    answer: (requestId, decision) => send({ type: 'answer', requestId, decision }),
+    answer: (requestId, decision, answers) =>
+      send({ type: 'answer', requestId, decision, ...(answers ? { answers } : {}) }),
     stop: () => send({ type: 'cancel' }),
     stopTask: (taskId) => send({ type: 'stopTask', taskId }),
     stopAll: () => send({ type: 'stopAll' }),

@@ -1331,6 +1331,7 @@ export const chatFrames = [
     "type": "turn"
   },
   {
+    "answers": null,
     "decision": "acceptAlways",
     "requestId": "r1",
     "type": "answer"

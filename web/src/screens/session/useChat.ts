@@ -107,7 +107,8 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
       dispatch({ type: 'sent' })
       return true
     },
-    answer: (requestId: string, decision: Decision) => socket.current?.answer(requestId, decision) ?? false,
+    answer: (requestId: string, decision: Decision, answers?: Record<string, string[]>) =>
+      socket.current?.answer(requestId, decision, answers) ?? false,
     /** Sends an image; it resolves to the path on the machine. */
     attach: (file: Blob) => socket.current?.attach(file) ?? Promise.reject(new AttachError('closed')),
     stop: () => {

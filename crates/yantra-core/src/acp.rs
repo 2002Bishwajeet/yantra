@@ -888,6 +888,7 @@ impl Shared {
                 title: None,
                 detail: asked.tool_call.title,
                 options,
+                questions: Vec::new(),
                 scope,
             }),
         );
@@ -1819,6 +1820,7 @@ mod tests {
                         decision: Decision::Decline,
                     },
                 ],
+                questions: vec![],
                 scope: Scope::Other,
             })
         );

@@ -82,7 +82,7 @@
 //! [ADR-0035]: ../../../docs/adr/0035-a-chat-turn-outlives-its-ssh-pipe.md
 //! [ADR-0041]: ../../../docs/adr/0041-a-claude-keeper-holds-the-thread.md
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -292,6 +292,9 @@ enum Frame {
         #[serde(rename = "requestId")]
         request_id: String,
         decision: Decision,
+        /// The labels chosen for each question text, for a question.
+        #[serde(default)]
+        answers: Option<BTreeMap<String, Vec<String>>>,
     },
     Cancel,
     /// Puts the thread's files back as checkpoint `turn` kept them.
@@ -1610,6 +1613,7 @@ enum Command {
     Answer {
         request: String,
         decision: Decision,
+        answers: Option<BTreeMap<String, Vec<String>>>,
         reply: oneshot::Sender<Result<(), String>>,
     },
     Cancel,
@@ -2110,6 +2114,7 @@ async fn heard_frame<M: Machine, P: Peer>(
         Ok(Frame::Answer {
             request_id,
             decision,
+            answers,
         }) => {
             let answered = match live {
                 Some(live) => {
@@ -2117,6 +2122,7 @@ async fn heard_frame<M: Machine, P: Peer>(
                     live.command(Command::Answer {
                         request: request_id,
                         decision,
+                        answers,
                         reply,
                     });
                     replied
@@ -3288,9 +3294,10 @@ async fn keep_claude<M: Machine>(
             Heeded::Command(Some(Command::Answer {
                 request,
                 decision,
+                answers,
                 reply,
             })) => {
-                let answered = claude.session.answer(&request, decision);
+                let answered = claude.session.answer(&request, decision, answers);
                 let _ = reply.send(answered.map_err(|error| chain(&error)));
             }
             Heeded::Command(Some(Command::Cancel)) => {
@@ -3319,7 +3326,7 @@ async fn keep_claude<M: Machine>(
                 match &event.event {
                     Event::RequestOpened(opened) => {
                         if let Some(decision) = claude::answers(claude.mode, opened.scope) {
-                            match claude.session.answer(&opened.request_id, decision) {
+                            match claude.session.answer(&opened.request_id, decision, None) {
                                 Ok(()) => continue,
                                 Err(error) => tracing::warn!(
                                     "chat {name}: {:?} could not answer: {error}",
@@ -3661,9 +3668,14 @@ async fn keep_acp<M: Machine>(
             Step::Command(Some(Command::Answer {
                 request,
                 decision,
+                answers,
                 reply,
             })) => {
-                let _ = reply.send(answer(&acp, &request, decision));
+                let _ = reply.send(if answers.is_some() {
+                    Err(format!("{} asks no questions", acp.harness.name()))
+                } else {
+                    answer(&acp, &request, decision)
+                });
             }
             // An ACP agent has no background task Yantra knows of, so stopping all stops the turn.
             Step::Command(Some(Command::Cancel | Command::StopAll)) => {
@@ -4113,7 +4125,7 @@ async fn adopt_claimed<M: Machine>(
                 for (request, scope, _) in waiting(&replayed) {
                     match claude::answers(mode, scope) {
                         Some(decision) => {
-                            if let Err(error) = session.answer(&request, decision) {
+                            if let Err(error) = session.answer(&request, decision, None) {
                                 tracing::warn!("chat {name}: {mode:?} could not answer: {error}");
                             }
                         }
@@ -4257,6 +4269,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     title: Some("cargo test".to_owned()),
                     detail: Some("Run the unit tests".to_owned()),
                     options,
+                    questions: vec![],
                     scope: Scope::Other,
                 })),
                 event(Event::RequestResolved(RequestResolved {
@@ -4465,6 +4478,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 frame(Frame::Answer {
                     request_id: "r1".to_owned(),
                     decision: Decision::AcceptAlways,
+                    answers: None,
                 }),
                 frame(Frame::Cancel),
                 frame(Frame::StopTask {
@@ -5439,6 +5453,7 @@ mod tests {
                 Frame::Answer {
                     request_id: "r".to_owned(),
                     decision: Decision::AcceptAlways,
+                    answers: None,
                 },
             ),
             (
@@ -7158,6 +7173,40 @@ mod tests {
         let asked = tab.next().await;
         assert_eq!(asked["type"], "request.opened", "{asked}");
         assert_eq!(asked["payload"]["requestId"], "r1");
+    }
+
+    /// Y-654: the browser answers a question with the labels it chose.
+    #[tokio::test]
+    async fn an_answer_with_answers_reaches_claude_and_an_empty_one_is_a_bad_frame() {
+        let script = Arc::new(Script::default());
+        let (mut tab, mut claude) = a_claude_turn_in(&script, None).await;
+        let questions = json!({"questions": [{"question": "Which?", "header": "Pick",
+            "multiSelect": true, "options": [{"label": "A", "description": "a"}]}]});
+        claude
+            .say(can_use("r1", "AskUserQuestion", questions.clone()))
+            .await;
+        let asked = tab.next().await;
+        assert_eq!(asked["payload"]["questions"][0]["question"], "Which?");
+
+        let refused = tab
+            .next_after(json!({"type": "answer", "requestId": "r1", "decision": "accept"}))
+            .await;
+        assert_eq!(refused["kind"], "badFrame", "{refused}");
+
+        tab.send(
+            json!({"type": "answer", "requestId": "r1", "decision": "accept",
+                        "answers": {"Which?": ["A", "B"]}}),
+        );
+        let sent = claude.heard().await.expect("the answer");
+        assert_eq!(sent["response"]["response"]["behavior"], "allow");
+        assert_eq!(
+            sent["response"]["response"]["updatedInput"]["answers"],
+            json!({"Which?": "A, B"})
+        );
+        assert_eq!(
+            sent["response"]["response"]["updatedInput"]["questions"],
+            questions["questions"]
+        );
     }
 
     const ACCEPT: &str =

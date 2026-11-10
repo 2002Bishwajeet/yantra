@@ -13,7 +13,7 @@ test.describe('the background work', () => {
     await page.goto(PATH)
     await page.getByLabel('Message Claude in yantra-web', { exact: true }).fill('sleep in the background')
     await page.getByRole('button', { name: 'Send' }).click()
-    await page.getByRole('button', { name: 'Accept', exact: true }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
   })
 
