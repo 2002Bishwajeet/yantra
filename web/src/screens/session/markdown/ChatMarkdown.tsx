@@ -35,7 +35,7 @@ function EditorLink(props: { machine: string; worktree: string; target: FilePath
   return (
     <a
       aria-label={`Open ${target.path} in ${known?.label}`}
-      className={code ? 'chat__file m3-hit' : 'm3-hit'}
+      className={code ? 'chat__file' : undefined}
       href={editorUrl(editor, machine, worktree, target.path, line)}
     >
       {children}
@@ -80,7 +80,7 @@ function componentsFor(machine: string, worktree: string | null): Components {
         )
       }
       return (
-        <a {...rest} className="m3-hit" href={href} rel="noreferrer" target="_blank">
+        <a {...rest} href={href} rel="noreferrer" target="_blank">
           {children}
         </a>
       )

@@ -241,6 +241,9 @@
 }
 
 .chat__markdown a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--md-sys-hit-area);
   color: var(--md-sys-color-primary);
   text-decoration: underline;
 }
