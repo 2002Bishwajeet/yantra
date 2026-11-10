@@ -29,6 +29,10 @@ const NOT_A_PEER: &str = "peer not found";
 
 const ZERO_TIME: &str = "0001-01-01T00:00:00Z";
 
+/// WireGuard rejects a session older than 180 s, and a handshake needs the
+/// peer's reply. `Active` is no proof: an outbound send alone sets it (Y-626).
+pub const ANSWERED_WITHIN: time::Duration = time::Duration::seconds(180);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineInfo {
     /// `ID` — the stable node identifier, and the only safe key (I-5).
@@ -40,7 +44,12 @@ pub struct MachineInfo {
     /// `DNSName` verbatim, trailing dot included.
     pub dns_name: String,
     pub os: Os,
+    /// Reachable: Tailscale's control server sees the node (`Online`), or the
+    /// node completed a WireGuard handshake within [`ANSWERED_WITHIN`].
     pub online: bool,
+    /// Tailscale's control server cannot see the node, but it answered a
+    /// handshake within [`ANSWERED_WITHIN`].
+    pub control_lost: bool,
     /// RFC 3339 as Tailscale reported it; `None` when it reported the zero
     /// time. An **online** peer can still carry a real value, so this says
     /// nothing about reachability on its own — read `online` for that.
@@ -278,6 +287,10 @@ fn parse_whois(json: &[u8]) -> Result<Caller, Error> {
 }
 
 fn parse(json: &[u8]) -> Result<Vec<MachineInfo>, Error> {
+    parse_at(json, time::OffsetDateTime::now_utc())
+}
+
+fn parse_at(json: &[u8], now: time::OffsetDateTime) -> Result<Vec<MachineInfo>, Error> {
     let status: Status = serde_json::from_slice(json).map_err(Error::Parse)?;
     let owner = status.self_node.as_ref().and_then(|node| node.user);
     // This node is the reference, so it is yours unless the tailnet owns it.
@@ -287,13 +300,13 @@ fn parse(json: &[u8]) -> Result<Vec<MachineInfo>, Error> {
         } else {
             Ownership::Yours
         };
-        MachineInfo::of(node, ownership)
+        MachineInfo::of(node, ownership, now)
     });
     let mut machines: Vec<MachineInfo> = this
         .into_iter()
         .chain(status.peers.unwrap_or_default().into_values().map(|node| {
             let ownership = Ownership::of(&node, owner);
-            MachineInfo::of(node, ownership)
+            MachineInfo::of(node, ownership, now)
         }))
         .collect();
     machines.sort_by(|a, b| a.name.cmp(&b.name));
@@ -320,6 +333,8 @@ struct Node {
     os: String,
     #[serde(rename = "Online")]
     online: bool,
+    #[serde(rename = "LastHandshake", default)]
+    last_handshake: Option<String>,
     #[serde(rename = "LastSeen")]
     last_seen: Option<String>,
     /// Peers carry this; `Self` has no such key at all.
@@ -368,7 +383,7 @@ struct WhoisNode {
 }
 
 impl MachineInfo {
-    fn of(node: Node, ownership: Ownership) -> Self {
+    fn of(node: Node, ownership: Ownership, now: time::OffsetDateTime) -> Self {
         let label = node
             .dns_name
             .trim_end_matches('.')
@@ -381,11 +396,19 @@ impl MachineInfo {
             label.to_string()
         };
 
+        let answered = node
+            .last_handshake
+            .as_deref()
+            .and_then(|t| {
+                time::OffsetDateTime::parse(t, &time::format_description::well_known::Rfc3339).ok()
+            })
+            .is_some_and(|at| now - at <= ANSWERED_WITHIN);
         Self {
             id: node.id,
             name,
             os: Os::parse(&node.os),
-            online: node.online,
+            online: node.online || answered,
+            control_lost: !node.online && answered,
             last_seen: node.last_seen.filter(|t| t != ZERO_TIME),
             expired: node.expired,
             key_expires: node.key_expiry.filter(|t| t != ZERO_TIME),
@@ -612,6 +635,63 @@ mod tests {
             "Online": true
         }}"#;
         assert_eq!(parse(json).expect("parses")[0].key_expires, None);
+    }
+
+    /// Y-626, measured on the owner's Mac: Tailscale lost its control server,
+    /// so `Online` went false while `tailscale ping` answered in 34 ms. The
+    /// handshake is in the format `tailscale status --json` 1.98 prints.
+    fn peer_with(online: bool, handshake: &str) -> MachineInfo {
+        let json = format!(
+            r#"{{"Self": {{"ID": "n1", "DNSName": "box.example.ts.net.", "OS": "linux",
+                "Online": true}},
+              "Peer": {{"nodekey:01": {{"ID": "n2", "DNSName": "mac.example.ts.net.",
+                "OS": "macOS", "Online": {online}, "Active": true,
+                "LastHandshake": "{handshake}"}}}}}}"#
+        );
+        let now = time::OffsetDateTime::parse(
+            "2026-11-10T10:57:48Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .expect("a literal time");
+        parse_at(json.as_bytes(), now)
+            .expect("parses")
+            .into_iter()
+            .find(|m| m.name == "mac")
+            .expect("the peer")
+    }
+
+    #[test]
+    fn a_peer_that_answered_a_handshake_is_online_though_control_lost_it() {
+        let mac = peer_with(false, "2026-11-10T11:56:41.173245482+01:00");
+        assert!(mac.online, "{mac:?}");
+        assert!(mac.control_lost, "{mac:?}");
+    }
+
+    #[test]
+    fn an_active_peer_whose_last_answer_is_stale_stays_offline() {
+        // Yantra's own polls keep `Active` true while the Mac sleeps.
+        let mac = peer_with(false, "2026-11-10T11:54:47+01:00");
+        assert!(!mac.online, "{mac:?}");
+        assert!(!mac.control_lost, "{mac:?}");
+    }
+
+    #[test]
+    fn an_active_peer_that_never_answered_stays_offline() {
+        let mac = peer_with(false, ZERO_TIME);
+        assert!(!mac.online, "{mac:?}");
+        assert!(!mac.control_lost, "{mac:?}");
+    }
+
+    #[test]
+    fn a_peer_control_sees_is_not_control_lost() {
+        let mac = peer_with(true, "2026-11-10T11:56:41+01:00");
+        assert!(mac.online, "{mac:?}");
+        assert!(!mac.control_lost, "{mac:?}");
+    }
+
+    #[test]
+    fn no_node_in_the_real_fixture_has_lost_its_control_server() {
+        assert!(machines().iter().all(|m| !m.control_lost));
     }
 
     #[test]

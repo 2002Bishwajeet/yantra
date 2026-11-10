@@ -682,6 +682,9 @@ struct Machine {
     address: Option<String>,
     os: String,
     online: bool,
+    /// Y-626: online because the node answered a WireGuard handshake while
+    /// Tailscale's control server cannot see it.
+    control_lost: bool,
     /// I-39: an expired key is a third state. Such a machine can be powered on,
     /// listed, and still unreachable — which a green dot would erase.
     expired: bool,
@@ -717,6 +720,7 @@ impl Machine {
                 .map(ToString::to_string),
             os: machine.os.to_string(),
             online: machine.online,
+            control_lost: machine.control_lost,
             expired: machine.expired,
             key_expires: machine.key_expires.clone(),
             last_seen: machine.last_seen.clone(),
@@ -1220,6 +1224,7 @@ pub(crate) mod tests {
             dns_name: format!("{name}.example.ts.net."),
             os: Os::Linux,
             online,
+            control_lost: false,
             last_seen: None,
             expired: false,
             key_expires: None,
@@ -1578,6 +1583,7 @@ pub(crate) mod tests {
                 dns_name: "laptop-9ml3d644.example.ts.net.".into(),
                 os: Os::Linux,
                 online: false,
+                control_lost: false,
                 last_seen: Some("2026-07-07T09:00:00Z".into()),
                 expired: true,
                 key_expires: Some("2027-01-18T10:11:44Z".into()),

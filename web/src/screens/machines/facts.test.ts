@@ -115,6 +115,13 @@ describe('a machine', () => {
       word: 'key expired',
     })
   })
+
+  it('is online with its control link named when only the tailnet path answers (Y-626)', () => {
+    expect(machineState(aMachine({ control_lost: true }))).toEqual({
+      state: 'running',
+      word: 'online · control link lost',
+    })
+  })
 })
 
 describe('the unclaimed sessions', () => {

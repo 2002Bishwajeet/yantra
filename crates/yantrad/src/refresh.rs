@@ -438,6 +438,7 @@ mod tests {
             dns_name: format!("{name}.example.ts.net."),
             os: Os::Linux,
             online: true,
+            control_lost: false,
             last_seen: None,
             expired: false,
             key_expires: None,

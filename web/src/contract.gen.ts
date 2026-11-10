@@ -67,6 +67,7 @@ export const machines = {
   "data": [
     {
       "address": "100.64.0.1",
+      "control_lost": false,
       "dns_name": "cachyos-g14.<tailnet>.ts.net.",
       "expired": false,
       "heartbeat": {
@@ -91,6 +92,7 @@ export const machines = {
     },
     {
       "address": null,
+      "control_lost": false,
       "dns_name": "bishwajeets-macbook-pro.<tailnet>.ts.net.",
       "expired": false,
       "heartbeat": {
@@ -119,6 +121,7 @@ export const machines = {
     },
     {
       "address": null,
+      "control_lost": true,
       "dns_name": "pi.<tailnet>.ts.net.",
       "expired": false,
       "heartbeat": null,

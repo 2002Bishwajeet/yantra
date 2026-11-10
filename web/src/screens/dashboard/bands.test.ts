@@ -11,6 +11,7 @@ const machine = (name: string, up: boolean, seen: string | null = null): Machine
   address: null,
   os: 'linux',
   online: up,
+  control_lost: false,
   expired: false,
   ownership: 'yours',
   hub: false,
