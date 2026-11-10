@@ -47,6 +47,8 @@ git -C "$dir" fetch -q origin "$branch"
 git -C "$dir" checkout -qf --detach "$sha"
 git -C "$dir" clean -fdq
 cd "$dir"
+# .cargo/config.toml links with mold, and yantra-box has none; an empty list falls back to the toolchain default.
+command -v mold >/dev/null || export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=
 exec systemd-run --user --scope -q -p MemoryMax="$mem" nice -n 10 bash -c "$command"'
 
 case $cmd in
