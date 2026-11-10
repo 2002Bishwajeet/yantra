@@ -159,14 +159,14 @@ test.describe('the shell on busy', () => {
     await screenshot(page, 'shell', 'busy', size)
   })
 
-  test('opens the palette with ⌘K, finds landing, and never runs a verb', async ({ page, size }) => {
+  test('opens the palette with ⌘K, finds landing, and runs no verb for a place', async ({ page, size }) => {
     test.skip(size !== 'desktop', 'only the desktop board draws a search; the rest list everything')
     await page.keyboard.press('ControlOrMeta+k')
     const dialog = page.getByRole('dialog', { name: 'Search' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('combobox').fill('lan')
     await expect(dialog.getByRole('option', { name: /^landing running/ })).toBeVisible()
-    await expect(dialog.getByText('Never runs a verb.')).toBeVisible()
+    await expect(dialog.getByText('Finds a place, or runs a step of the coding loop.')).toBeVisible()
     // The palette is a surface over the page: a full-page shot scrolls the
     // page under it and sometimes catches the dashboard alone.
     await screenshot(page, 'shell-palette', 'busy', size, { overlay: true })
@@ -184,6 +184,40 @@ test.describe('the shell on busy', () => {
     await expect(page).toHaveURL('/w/landing?view=chat')
     await expect(heading(page, 'landing')).toBeVisible()
     expect(verbs).toEqual([])
+  })
+
+  /** M16 (Y-499): on a chat the palette runs the loop's verbs, and each opens the dialog that asks. */
+  test('lists the loop on a chat, and Merge asks before it merges', async ({ page }) => {
+    await page.goto('/w/yantra-web?thread=1a2b3c4d')
+    await expect(page.getByText('Is the core crate green?')).toBeVisible()
+    await page.locator('.chat__header').getByRole('button', { name: 'Git actions' }).click()
+    await page.getByRole('menuitem', { name: 'Open PR' }).click()
+    await expect(page.locator('.chat__header').getByRole('link', { name: 'PR #497' })).toBeVisible()
+
+    const writes: string[] = []
+    page.on('request', (request) => {
+      if (request.url().includes('/api/') && request.method() === 'POST' && request.url().endsWith('/merge')) {
+        writes.push(request.url())
+      }
+    })
+    await page.keyboard.press('ControlOrMeta+k')
+    const dialog = page.getByRole('dialog', { name: 'Search' })
+    const commands = dialog.getByRole('group', { name: 'Commands' })
+    await expect(commands.getByRole('option')).toHaveCount(6)
+    await dialog.getByRole('combobox').fill('merge')
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('dialog', { name: 'Merge PR #497' })).toBeVisible()
+    expect(writes).toEqual([])
+  })
+
+  test('shows the shortcuts under ?', async ({ page }) => {
+    await page.keyboard.press('Shift+Slash')
+    const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByRole('term')).toHaveCount(8)
+    await axe(page)
+    await page.keyboard.press('Escape')
+    await expect(sheet).toHaveCount(0)
   })
 
   /** Finding 129: the boards put the bell and the avatar at the foot of the
