@@ -99,7 +99,7 @@ describe('the shell chrome stays out of the slide', () => {
   // The e2e test skips the tablet, so this pins the class each shell's rail really wears.
   it('names the desktop and the tablet rail', () => {
     const shellCss = readFileSync(resolve(process.cwd(), 'src/shell/Shell.css'), 'utf8')
-    const block = /:root:active-view-transition \{([^}]*)\}/.exec(shellCss)?.[1] ?? ''
+    const block = shellCss.slice(shellCss.indexOf(':root:active-view-transition {'))
     expect(block).toMatch(/\.rail\b[^;]*view-transition-name: shell-rail/)
     expect(block).toMatch(/\.m3-rail\b[^;]*view-transition-name: shell-rail/)
   })
