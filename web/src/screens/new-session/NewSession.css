@@ -264,6 +264,19 @@ span.ns__toggle {
   color: var(--md-sys-color-primary);
 }
 
+.ns__hidden {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+/* A touch target of 44 px, not the line box of the label. */
+.ns__grant {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 44px;
+}
+
 .ns__crumbs ol {
   display: flex;
   flex-wrap: wrap;

@@ -21,6 +21,17 @@ export function grant(connection: Connection | undefined, readiness: Reading<Che
   return { kind: readiness.data.state === 'absent' ? 'refused' : 'unasked', login }
 }
 
+/** Where GitHub lets the account grant Yantra's OAuth app each organisation.
+ *  Without a client id, the list of every authorised app. */
+export const grantPage = (clientId: string | null) =>
+  clientId
+    ? `https://github.com/settings/connections/applications/${encodeURIComponent(clientId)}`
+    : 'https://github.com/settings/applications'
+
+/** True when the organisation hides its repositories and when it has none, so it claims neither. */
+export const hiddenNote = (orgs: string[]) =>
+  `Yantra sees no repository from ${orgs.join(', ')}. An organisation that restricts OAuth apps hides them.`
+
 export const REFUSED = 'GitHub refused the grant'
 
 /** Why a sign-in ended with no grant: the OAuth App opted in to token expiry. */

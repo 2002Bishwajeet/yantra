@@ -639,6 +639,35 @@ impl Github {
         .await
     }
 
+    /// The login of every organisation the account belongs to, page by page.
+    /// `read:org` is in [`SCOPES`], so this asks for nothing the grant lacks.
+    pub async fn orgs(&self, token: &Token) -> Result<Vec<String>, Error> {
+        #[derive(serde::Deserialize)]
+        struct Org {
+            login: String,
+        }
+        let first = format!("{}/user/orgs", self.api);
+        let token = token.clone();
+        blocking(move || {
+            let mut orgs = Vec::new();
+            let mut next = Some((first, vec![("per_page", "100")]));
+            let mut pages = 0;
+            while let Some((url, query)) = next.take() {
+                pages += 1;
+                if pages > MAX_PAGES {
+                    break;
+                }
+                let mut response = get(&url, &token, &query).map_err(unreachable)?;
+                ok(&response, "/user/orgs")?;
+                next = next_link(&response).map(|url| (url, Vec::new()));
+                let page: Vec<Org> = read_json(&mut response, "the organisation list")?;
+                orgs.extend(page.into_iter().map(|org| org.login));
+            }
+            Ok(orgs)
+        })
+        .await
+    }
+
     /// The issue's title and body. A pull request answers this route too, and
     /// is refused: a thread starts from an issue.
     pub async fn issue(&self, token: &Token, issue: &IssueRef) -> Result<Issue, Error> {
@@ -1359,6 +1388,25 @@ fn rel(header: &str, wanted: &str) -> Option<String> {
     })
 }
 
+/// The organisations that own none of `repos`, sorted. An organisation that
+/// restricts OAuth apps hides every repository from the grant, public ones too,
+/// and GitHub gives no probe for that — so an empty organisation is named too.
+pub fn hidden(orgs: &[String], repos: &[Repo]) -> Vec<String> {
+    let mut hidden: Vec<String> = orgs
+        .iter()
+        .filter(|org| {
+            !repos.iter().any(|repo| {
+                repo.full_name
+                    .split_once('/')
+                    .is_some_and(|(owner, _)| owner.eq_ignore_ascii_case(org))
+            })
+        })
+        .cloned()
+        .collect();
+    hidden.sort();
+    hidden
+}
+
 fn next_link(response: &Response) -> Option<String> {
     rel(link(response)?, "next")
 }
@@ -1834,6 +1882,55 @@ pub(crate) mod tests {
             "{}",
             seen[1]
         );
+    }
+
+    /// The organisations follow `Link` as the repositories do, and only the
+    /// login is read.
+    #[tokio::test]
+    async fn orgs_follow_the_link_header_to_the_last_page() {
+        let (listener, address) = listen();
+        let link =
+            format!("Link: <http://{address}/user/orgs?page=2&per_page=100>; rel=\"next\"\r\n");
+        let served = serve(
+            listener,
+            vec![
+                ("200 OK", link, r#"[{"login":"Acme","id":1}]"#.to_owned()),
+                reply("200 OK", r#"[{"login":"utopia-php"}]"#),
+            ],
+        );
+
+        let orgs = at(address).orgs(&token()).await.expect("two pages");
+
+        assert_eq!(orgs, ["Acme", "utopia-php"]);
+        let seen = served.join().expect("the listener thread");
+        assert!(
+            seen[0].starts_with("GET /user/orgs?per_page=100 HTTP/1.1"),
+            "{}",
+            seen[0]
+        );
+        assert!(
+            seen[1].starts_with("GET /user/orgs?page=2&per_page=100 HTTP/1.1"),
+            "{}",
+            seen[1]
+        );
+    }
+
+    /// An organisation that owns a repository is seen, whatever its case; one
+    /// that owns none is named, in order.
+    #[test]
+    fn hidden_names_the_organisations_that_own_no_repository() {
+        let repo = |full_name: &str| Repo {
+            full_name: full_name.into(),
+            private: false,
+            language: None,
+            pushed_at: None,
+            clone_url: String::new(),
+            default_branch: "main".into(),
+        };
+        let orgs = ["zeta", "Acme", "seen", "beta"].map(String::from);
+        let repos = [repo("SEEN/a"), repo("me/zeta"), repo("acme-labs/b")];
+
+        assert_eq!(hidden(&orgs, &repos), ["Acme", "beta", "zeta"]);
     }
 
     /// The inbox: two searches and a count read off `Link` with one item per

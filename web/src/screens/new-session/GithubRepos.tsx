@@ -4,9 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { Check, GitBranch, Search } from 'lucide-react'
 import type { Repo } from '@/api'
 import { asApiError } from '@/api/errors'
-import { useGithub, useGithubReadiness, useRepos } from '@/api/hooks'
+import { useGithub, useGithubReadiness, useHiddenOrgs, useRepos } from '@/api/hooks'
 import { dirsQuery } from '@/api/queries'
-import { grant, REFUSED } from '@/lib/github'
+import { grant, grantPage, hiddenNote, REFUSED } from '@/lib/github'
 import { derive } from '@/lib/name'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -48,6 +48,22 @@ function SignedIn(props: { login: string | null; asked: boolean }) {
         Use another account
       </Link>
     </p>
+  )
+}
+
+/** A read that did not answer draws nothing: the list above it still works. */
+function Hidden(props: { clientId: string | null }) {
+  const hidden = useHiddenOrgs()
+  if (hidden.looked !== 'ok' || hidden.data.length === 0) return null
+  return (
+    <div className="ns__hidden">
+      <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
+        {hiddenNote(hidden.data)}
+      </Text>
+      <a className="ns__link ns__grant" href={grantPage(props.clientId)} rel="noreferrer" target="_blank">
+        Grant access on GitHub
+      </a>
+    </div>
   )
 }
 
@@ -202,6 +218,7 @@ export function GithubRepos(props: { form: SessionForm; values: Values }) {
   return (
     <div className="ns__github">
       <SignedIn asked={held.kind === 'accepted'} login={github.data?.login ?? null} />
+      <Hidden clientId={github.data?.client_id ?? null} />
       <TextField
         autoComplete="off"
         label="Search your repositories"

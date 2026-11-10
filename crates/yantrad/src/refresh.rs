@@ -364,12 +364,29 @@ enum Verdict {
 
 /// Every repository the grant can see, for New session to search **in the
 /// browser**: a typed box polls, and a read handler never awaits the network.
+/// The organisations that own none of them are read with the same token, and
+/// only when the list itself was read.
 async fn look_at_repos(model: &Model, grant: &Grant) {
-    let repos = match grant.token().await {
-        None => Err(github::Error::NoGrant),
-        Some(token) => Github::default().repos(&token).await,
+    let github = Github::default();
+    let (repos, hidden) = match grant.token().await {
+        None => (Err(github::Error::NoGrant), None),
+        Some(token) => {
+            let repos = github.repos(&token).await;
+            let hidden = match &repos {
+                Ok(repos) => Some(
+                    github
+                        .orgs(&token)
+                        .await
+                        .map(|orgs| github::hidden(&orgs, repos)),
+                ),
+                Err(_) => None,
+            };
+            (repos, hidden)
+        }
     };
-    model.write().await.repos = Some(Arc::new(Reading::new(repos)));
+    let mut snapshot = model.write().await;
+    snapshot.repos = Some(Arc::new(Reading::new(repos)));
+    snapshot.hidden = hidden.map(|hidden| Arc::new(Reading::new(hidden)));
 }
 
 /// The newest published release on the box's channel, with the grant when
@@ -846,6 +863,7 @@ mod tests {
             failure.to_string().contains("yantra github login"),
             "{failure}"
         );
+        assert!(model.read().await.hidden.is_none());
     }
 
     /// No grant is *absent* on the check, earned without a network call.
