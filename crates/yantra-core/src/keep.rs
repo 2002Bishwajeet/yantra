@@ -1327,8 +1327,11 @@ mod tests {
             .expect("the LaunchAgent was asked for");
         assert!(asked[script + 1].contains("new-session"), "{asked:?}");
         for command in asked.iter().filter(|command| command.contains("tmux' ")) {
-            assert!(
-                command.starts_with("'/opt/homebrew/bin/tmux' -L yantra -N "),
+            assert_eq!(
+                command.matches("tmux' ").count(),
+                command
+                    .matches("'/opt/homebrew/bin/tmux' -L yantra -N ")
+                    .count(),
                 "{command}"
             );
         }

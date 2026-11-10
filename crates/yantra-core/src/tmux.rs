@@ -253,6 +253,21 @@ impl Tmux {
         }
     }
 
+    /// On a Mac, a statement that gives the ssh shell the server's `PATH`, put
+    /// before each call that starts a pane (Y-707). Elsewhere, nothing.
+    pub(crate) fn pane_path(&self) -> String {
+        if !self.mac {
+            return String::new();
+        }
+        // tmux gives a new pane the PATH of the detached client that asks for it,
+        // over both `-e PATH=` and the session's environment. Measured on 3.8.
+        format!(
+            "p=$({} show-environment -g PATH 2>/dev/null); \
+             case $p in (PATH=?*) PATH=${{p#PATH=}} ;; esac; ",
+            self.command()
+        )
+    }
+
     /// Opens `name` at `cwd`, running `startup` if the session had to be
     /// created.
     ///
@@ -275,7 +290,8 @@ impl Tmux {
         // die. Measured, not theorised — the obvious one-shot form fails this
         // way.
         let create = format!(
-            "{} new-session -d -s {} -c {} -P -F {}",
+            "{}{} new-session -d -s {} -c {} -P -F {}",
+            self.pane_path(),
             self.command(),
             sq(name),
             sq(cwd),
@@ -543,7 +559,8 @@ impl Tmux {
         // I-21: `%id`, because a pane target is never `=name`.
         let out = exec
             .exec(&format!(
-                "{} respawn-pane -k -t {} {}",
+                "{}{} respawn-pane -k -t {} {}",
+                self.pane_path(),
                 self.command(),
                 sq(pane_id),
                 sq(command)
@@ -908,9 +925,49 @@ mod tests {
         every_call(&tmux(), &mac).await;
         let asked = mac.asked();
         assert_eq!(asked.len(), 10, "{asked:?}");
+        let prefix = tmux().pane_path();
         for command in &asked {
-            assert!(command.starts_with(ON_THE_SOCKET), "{command}");
+            let call = command.strip_prefix(&prefix).unwrap_or(command);
+            assert!(call.starts_with(ON_THE_SOCKET), "{command}");
         }
+    }
+
+    /// Y-707: every pane Yantra starts on a Mac gets the server's `PATH`.
+    #[tokio::test]
+    async fn a_mac_starts_each_pane_with_the_servers_path() {
+        let mac = fake::Mac::new(fake::Server::Empty, 0);
+        every_call(&tmux(), &mac).await;
+        let prefix = format!("p=$({ON_THE_SOCKET}show-environment -g PATH 2>/dev/null); ");
+        for call in ["new-session", "respawn-pane"] {
+            for command in mac.asked().iter().filter(|c| c.contains(call)) {
+                assert!(command.starts_with(&prefix), "{command}");
+            }
+        }
+        assert!(mac.asked_for("respawn-pane"));
+    }
+
+    /// The statement under a real `sh`: only a set, non-empty `PATH` replaces
+    /// ssh's. An unset one, an empty answer and no server leave it.
+    #[test]
+    fn only_a_server_path_that_is_set_replaces_sshs() {
+        let mac = launchd::Mac::new("pane-path", true, false, None);
+        let print = "printf '%s' \"$PATH\"";
+        let ssh = String::from_utf8(mac.run(print).stdout).expect("text");
+        let with = |answer: Option<&str>| {
+            let server = mac.dir.join("server");
+            match answer {
+                Some(answer) => std::fs::write(server, answer).expect("a file"),
+                None => std::fs::remove_file(server).expect("removed"),
+            }
+            let out = mac.run(&format!("{}{print}", mac.tmux().pane_path()));
+            String::from_utf8(out.stdout).expect("text")
+        };
+        assert_eq!(with(Some("PATH=/srv/bin:/bin\n")), "/srv/bin:/bin");
+        assert_eq!(with(Some("PATH=/a b:/c\n")), "/a b:/c");
+        assert_eq!(with(Some("-PATH\n")), ssh);
+        assert_eq!(with(Some("")), ssh);
+        assert_eq!(with(Some("PATH=\n")), ssh);
+        assert_eq!(with(None), ssh);
     }
 
     #[tokio::test]
@@ -928,6 +985,8 @@ mod tests {
                 "{command}"
             );
         }
+        // Y-707: a pane there keeps ssh's PATH.
+        assert!(!linux.asked_for("show-environment"));
     }
 
     fn creates(asked: &[String]) -> Vec<usize> {
@@ -982,7 +1041,11 @@ mod tests {
         let asked = mac.asked();
         assert_eq!(creates(&asked).len(), 2, "{asked:?}");
         for at in creates(&asked) {
-            assert!(asked[at].starts_with(ON_THE_SOCKET), "{}", asked[at]);
+            assert!(
+                asked[at].contains(&format!("{ON_THE_SOCKET}new-session")),
+                "{}",
+                asked[at]
+            );
         }
     }
 
