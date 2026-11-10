@@ -233,8 +233,10 @@ just https        # tailscale serve --bg --https=8443 "http://$(tailscale ip -4)
 
 Open **`https://<machine>.<tailnet>.ts.net:8443/`** from anything on the tailnet — a phone included.
 A built dashboard opened on `:7717` moves itself there when that origin answers (Y-652), because the
-microphone works only in a secure context. It takes its prefs along, because each origin has its own
-browser storage. Drafts stay on `:7717`, because the browser records the moved-to URL in its history. `npm run dev` does not move.
+microphone works only in a secure context. Each origin has its own browser storage, so the page
+takes its prefs and drafts along. They go through the daemon's memory (`POST /api/carry`), and the
+address holds only a one-time id, because the browser records the moved-to URL in its history.
+`npm run dev` does not move.
 `--bg` makes it a stored `tailscaled` setting, so it survives reboots and outlives the shell; you set
 it once per machine, not once per session. To undo it:
 

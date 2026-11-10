@@ -2426,6 +2426,7 @@ pub(crate) mod tests {
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
                 progress: std::path::PathBuf::new(),
+                channel: std::path::PathBuf::new(),
             }),
             ..looking_at_machines(vec![MachineInfo {
                 addresses: vec!["100.64.0.2".parse().expect("an address")],

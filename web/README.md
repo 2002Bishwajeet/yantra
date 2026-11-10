@@ -328,14 +328,17 @@ button, in the workspace header and above an unclaimed session's terminal.
   only in a secure context. A built page on plain HTTP reads `https` from
   `/api/about`, probes that origin's `/healthz`, and moves when it answers
   ([`lib/secure.ts`](src/lib/secure.ts), Y-652). Otherwise it stays, and the button is off and says why.
-- **The move takes this browser's settings with it.** Each origin has its own
-  `localStorage`, so prefs, the editor and plan mode travel in the fragment,
-  leave `:7717`, and replace what `:8443` holds. The owner comes from the page
-  that set them last. A draft stays on `:7717`: the browser keeps the moved-to
-  URL in its history, and a draft can hold anything the owner typed. A
-  permission mode stays too, because a link must not choose one. The page
-  renders only after the move is decided, so no draft is typed on `:7717` in
-  the meantime.
+- **The move takes this browser's settings and drafts with it.** Each origin
+  has its own `localStorage`. The page on `:7717` posts prefs, the editor, plan
+  mode and drafts to `POST /api/carry`, and the daemon holds them in memory for
+  5 minutes. The moved-to URL carries only `#yantra-carry=<id>&<hash>`, because
+  the browser keeps that URL in its history. On `:8443` the page removes the
+  fragment, takes the keys once with `POST /api/carry/{id}`, and lets them
+  replace what `:8443` holds: the owner comes from the page that set them last.
+  A carry that fails keeps the page on `:7717`, and a lost one renders `:8443`
+  without the keys. A permission mode stays on `:7717`, because a link must not
+  choose one. The page renders only after the move is decided, so nothing is
+  typed on `:7717` in the meantime.
 - **Each way a press ends is its own sentence**: a refused permission, no
   device, a track the browser took, a socket that never opened, and the
   daemon's text frame. The audio is never stored or logged here either (Q5).

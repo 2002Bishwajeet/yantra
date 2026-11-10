@@ -9,6 +9,7 @@ import type {
   About,
   Attention,
   Broken,
+  Carried,
   ChatAttached,
   ChatBranchDiff,
   ChatFailure,
@@ -678,6 +679,14 @@ export const sshIdentity = {
   "path": "/home/<user>/.ssh/id_yantra",
   "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra"
 } satisfies SshIdentity
+
+export const carried = {
+  "id": "0123456789abcdef0123456789abcdef"
+} satisfies Carried
+
+export const carriedKeys = {
+  "yantra.chat.draft.site": "a draft"
+} satisfies Record<string, string>
 
 export const here = {
   "machine": "iphone"

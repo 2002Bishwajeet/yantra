@@ -58,6 +58,7 @@ import type {
   About,
   Attention,
   Broken,
+  Carried,
   ChatAttached,
   ChatBranchDiff,
   ChatFailure,
@@ -206,6 +207,7 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
         ),
     ];
     out.extend(crate::api::answers());
+    out.extend(crate::carry::answers());
     out.extend(crate::write::answers());
     out.extend(crate::placement::answers());
     out.extend(crate::terminal::answers());

@@ -434,6 +434,12 @@ export type Here = {
   machine: string | null
 }
 
+/** `POST /api/carry` (Y-652): the slot a page on :7717 left its keys in, for
+ *  the page on :8443 to take once with `POST /api/carry/{id}`. */
+export type Carried = {
+  id: string
+}
+
 /** `GET /api/notifications` — `Looked<Event[]>`, newest first, at most fifty,
  *  in memory ([ADR-0025](../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md)).
  *  A restart empties it, and the page says so rather than hides it (I-59).

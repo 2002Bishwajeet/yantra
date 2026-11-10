@@ -9,7 +9,7 @@ no *read* ever waits on ssh. The CLI calls [`yantra-core`](../yantra-core/README
 keeps working with no daemon running — that is a decision, not a gap
 ([ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md)).
 
-Every route below has a CLI equivalent, except `POST /api/viewing` and `GET /api/here`, and that is the rule rather than a coincidence: anything the
+Every route below has a CLI equivalent, except `POST /api/viewing`, `GET /api/here` and the two `carry` routes, and that is the rule rather than a coincidence: anything the
 web UI can do must be expressible in `yantra` first, which is what stops the daemon growing a richer
 API the CLI cannot reach.
 
@@ -68,6 +68,7 @@ API the CLI cannot reach.
 | `POST /api/rooms` | `yantra room new` (201 with the summary; writes the room's definition, ADR-0039, Y-550) |
 | `PATCH /api/rooms/{room}` | `yantra room edit` (`{brief}`, where `null` clears it; an undefined room is `404`) |
 | `DELETE /api/rooms/{room}` | `yantra room rm` (`{"removed": bool}`, as the workspace delete answers) |
+| `POST /api/carry`, `POST /api/carry/{id}` | — (the browser keys a page on `:7717` hands to itself on `:8443`: an object of strings, at most 1 MiB, answered `{id}`; the second takes it once, and a taken, expired or unknown id is a JSON `404`. In memory only, at most 8 slots of 5 minutes, never logged, Y-652) |
 | `GET /api/layout`, `PUT /api/layout` | `yantra layout show` and `yantra layout set` (the dashboard layout in `~/.config/yantra/dashboard.json`; a `PUT` at a stale `rev` is `409` with the current layout, ADR-0036, Y-515). The `GET` is not gated |
 | `GET /api/workspaces/{name}/chat` | **None yet for a turn**, which breaks the rule above: an open gap, not a decision. `yantra chat new` and `chat ls` open and list threads (Y-488). A WebSocket for the dashboard's Chat tab; each turn runs the thread's harness in its own worktree: `claude -p`, or an ACP agent (ADR-0026, ADR-0033, Y-356, Y-434). A keeper on the machine holds the turn, so it outlives the socket and the daemon (ADR-0035, Y-447) |
 | `POST /api/update` | `yantra update` (202 with no body; the daemon creates the trigger `yantra-update.path` watches, and a box with no updater is `409`, ADR-0027 §3) |

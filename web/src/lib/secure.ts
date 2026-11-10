@@ -1,5 +1,5 @@
-import type { About } from '@/api'
-import { fetchJson, fields } from '@/api/client'
+import type { About, Carried } from '@/api'
+import { fetchJson, fields, json, type Shape } from '@/api/client'
 import { asApiError, type ApiError } from '@/api/errors'
 
 /** Y-652: what the page-load step did. Only `moved` leaves the page; every
@@ -10,6 +10,7 @@ export type Secure =
   | { kind: 'no-origin' }
   | { kind: 'about-failed'; error: ApiError }
   | { kind: 'unreachable' }
+  | { kind: 'carry-failed'; error: ApiError }
 
 type Store = Pick<Storage, 'length' | 'key' | 'getItem' | 'setItem' | 'removeItem'>
 
@@ -19,14 +20,14 @@ export type Page = {
   localStorage: Store
 }
 
-// Settings only: the browser keeps the moved-to URL in its history, so a draft
-// stays on :7717, and a link must not choose a permission mode.
+// The keys go through the daemon's memory (carry.rs), so the address and the
+// browser's history hold only a one-time id. A link must not choose a
+// permission mode, so `yantra.chat.mode.*` stays on :7717.
 const CARRY = '#yantra-carry='
-const CARRIED = /^yantra\.(prefs|editor|chat\.interaction\..+)$/
+const CARRIED = /^yantra\.(prefs|editor|chat\.interaction\..+|chat\.draft\..+)$/
+const ID = /^[0-9a-f]{32}$/
 
-type Carry = { hash: string; kept: Record<string, string> }
-
-/** The settings this page can carry: prefs, the editor and plan mode. */
+/** The keys this page can carry: prefs, the editor, plan mode and drafts. */
 function kept(storage: Store): Record<string, string> {
   const found: Record<string, string> = {}
   try {
@@ -61,20 +62,34 @@ export async function toSecure(page: Page = window, timeoutMs = 3000): Promise<S
     return { kind: 'unreachable' }
   }
   const { pathname, search, hash } = page.location
-  const carry: Carry = { hash, kept: kept(page.localStorage) }
-  const to = `${https}${pathname}${search}${CARRY}${encodeURIComponent(JSON.stringify(carry))}`
-  // Moved, not copied: :8443 takes every carried key, so a copy here would
-  // only come back over a newer setting on a later visit.
-  try {
-    for (const key of Object.keys(carry.kept)) page.localStorage.removeItem(key)
-  } catch {
-    // The keys stay here as well, which loses nothing.
+  const keys = kept(page.localStorage)
+  const carried = Object.keys(keys).length
+  let to = `${https}${pathname}${search}${hash}`
+  if (carried > 0) {
+    let id: string
+    try {
+      ;({ id } = await fetchJson<Carried>('/api/carry', { method: 'POST', ...json(keys) }, fields('id')))
+    } catch (error) {
+      return { kind: 'carry-failed', error: asApiError(error) }
+    }
+    to = `${https}${pathname}${search}${CARRY}${id}&${encodeURIComponent(hash)}`
+    // Moved, not copied: a copy here would come back over a newer value on a later visit.
+    try {
+      for (const key of Object.keys(keys)) page.localStorage.removeItem(key)
+    } catch {
+      // The keys stay here as well, which loses nothing.
+    }
   }
   page.location.replace(to)
-  return { kind: 'moved', to, carried: Object.keys(carry.kept).length }
+  return { kind: 'moved', to, carried }
 }
 
-export type Arrived = { kind: 'none' } | { kind: 'arrived'; kept: number } | { kind: 'unreadable' }
+/** `lost` is a slot the daemon no longer holds: taken, expired, or a restart. */
+export type Arrived =
+  | { kind: 'none' }
+  | { kind: 'arrived'; kept: number }
+  | { kind: 'lost' }
+  | { kind: 'failed'; error: ApiError }
 
 export type Landing = {
   location: Pick<Location, 'pathname' | 'search' | 'hash'>
@@ -82,39 +97,40 @@ export type Landing = {
   localStorage: Store
 }
 
-function isCarry(value: unknown): value is Carry {
-  if (typeof value !== 'object' || value === null) return false
-  const { hash, kept } = value as Partial<Carry>
-  return (
-    typeof hash === 'string' &&
-    typeof kept === 'object' &&
-    kept !== null &&
-    Object.values(kept).every((one) => typeof one === 'string')
-  )
-}
+const anObject: Shape = (body) =>
+  typeof body === 'object' && body !== null && !Array.isArray(body) ? null : 'body'
 
-function parse(payload: string): Carry | null {
+function restored(encoded: string): string {
   try {
-    const body: unknown = JSON.parse(decodeURIComponent(payload))
-    return isCarry(body) ? body : null
+    return decodeURIComponent(encoded)
   } catch {
-    return null
+    return ''
   }
 }
 
 /** The other half of `toSecure`, run before the first render so every screen
  *  reads the carried keys. A carried key replaces the one held here: the owner
  *  comes from the page that set it last. */
-export function arrive(page: Landing = window): Arrived {
+export async function arrive(page: Landing = window): Promise<Arrived> {
   const { pathname, search, hash } = page.location
   if (!hash.startsWith(CARRY)) return { kind: 'none' }
-  const carry = parse(hash.slice(CARRY.length))
-  page.history.replaceState(null, '', `${pathname}${search}${carry?.hash ?? ''}`)
-  if (!carry) return { kind: 'unreadable' }
+  const rest = hash.slice(CARRY.length)
+  const split = rest.indexOf('&')
+  const id = split < 0 ? rest : rest.slice(0, split)
+  // Out of the address first, so a reload or a shared link never asks again.
+  page.history.replaceState(null, '', `${pathname}${search}${split < 0 ? '' : restored(rest.slice(split + 1))}`)
+  if (!ID.test(id)) return { kind: 'lost' }
+  let keys: Record<string, unknown>
+  try {
+    keys = await fetchJson<Record<string, unknown>>(`/api/carry/${id}`, { method: 'POST' }, anObject)
+  } catch (error) {
+    const failure = asApiError(error)
+    return failure.kind === 'missing' ? { kind: 'lost' } : { kind: 'failed', error: failure }
+  }
   let written = 0
   try {
-    for (const [key, value] of Object.entries(carry.kept)) {
-      if (!CARRIED.test(key)) continue
+    for (const [key, value] of Object.entries(keys)) {
+      if (!CARRIED.test(key) || typeof value !== 'string') continue
       page.localStorage.setItem(key, value)
       written++
     }
@@ -129,11 +145,11 @@ export function arrive(page: Landing = window): Arrived {
 export async function boot(
   render: () => void,
   move: () => Promise<Secure> = toSecure,
-  land: () => Arrived = arrive,
+  land: () => Promise<Arrived> = arrive,
 ): Promise<Secure> {
-  land()
   let secure: Secure | null = null
   try {
+    await land()
     secure = await move()
   } finally {
     // A step that threw still leaves a page to work on.
