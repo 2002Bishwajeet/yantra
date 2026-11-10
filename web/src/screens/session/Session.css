@@ -240,10 +240,12 @@
   white-space: pre;
 }
 
+/* Grows sideways only: lines sit about 22 px apart, so a taller overlay would steal the next line's taps. */
 .chat__markdown a::after {
   content: "";
   position: absolute;
-  inset: min(0px, calc((100% - var(--md-sys-hit-area)) / 2));
+  inset-block: 0;
+  inset-inline: min(0px, calc((100% - var(--md-sys-hit-area)) / 2));
 }
 
 .chat__markdown a {

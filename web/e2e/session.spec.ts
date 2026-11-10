@@ -125,20 +125,25 @@ test.describe('the session screen, chat first', () => {
     await expect(page.getByRole('button', { name: 'Harness: Claude, kept by this chat' })).toBeDisabled()
   })
 
-  test('a short link in a chat turn is 44 px in both directions', async ({ page, size }) => {
+  test('a short link in a chat turn is 44 px wide and owns every row of its own line', async ({ page, size }) => {
     test.skip(size !== 'phone', 'the 44 px rule is the phone rule')
     await page.goto(`${PATH}?thread=${THREAD}`)
     const reach = await page.getByRole('link', { name: '#663' }).evaluate((el) => {
       const rect = el.getBoundingClientRect()
       const after = getComputedStyle(el, '::after')
       // The ::after offsets are negative when it reaches outside the link's own box.
-      return {
-        width: rect.width - Math.min(0, parseFloat(after.left)) - Math.min(0, parseFloat(after.right)),
-        height: rect.height - Math.min(0, parseFloat(after.top)) - Math.min(0, parseFloat(after.bottom)),
+      const width = rect.width - Math.min(0, parseFloat(after.left)) - Math.min(0, parseFloat(after.right))
+      // Lines are about 22 px apart, so the overlay must stay inside the line: hit-test each row.
+      const x = rect.left + rect.width / 2
+      const stolen = []
+      for (let y = Math.ceil(rect.top) + 1; y < rect.bottom - 1; y += 2) {
+        const hit = document.elementFromPoint(x, y)
+        if (hit !== el && !el.contains(hit)) stolen.push(y - rect.top)
       }
+      return { width, stolen }
     })
     expect(reach.width).toBeGreaterThanOrEqual(44)
-    expect(reach.height).toBeGreaterThanOrEqual(44)
+    expect(reach.stolen).toEqual([])
   })
 
   test('a thread the workspace does not have is refused by name', async ({ page }) => {
