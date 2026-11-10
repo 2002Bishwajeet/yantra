@@ -42,6 +42,8 @@
   flex-direction: column;
   gap: 4px;
   padding: 8px 12px 12px 66px;
+  /* A key fingerprint is one word wider than a phone. */
+  overflow-wrap: anywhere;
 }
 
 .setup__lines {

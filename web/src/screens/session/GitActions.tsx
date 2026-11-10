@@ -4,6 +4,7 @@ import { useCommit, useDraftMessage, useOpenPr, usePush } from '@/api/mutations'
 import type { ThreadPr } from '@/api'
 import { Button } from '@/m3/button/Button'
 import { Dialog, DialogClose, DialogPopup } from '@/m3/dialog/Dialog'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
 import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
@@ -128,6 +129,7 @@ export function GitActions(props: {
 
   const draftFailure = draft.isError ? gitFailure('draft', draft.error) : null
   const commitFailure = commit.isError ? gitFailure('commit', commit.error) : null
+  const clean = draftFailure?.kind === 'draftNothing'
 
   // The quick action and the menu item run one verb, so they share its pending word.
   const busyWord = (verb: GitVerb, label: string) =>
@@ -141,42 +143,50 @@ export function GitActions(props: {
         <DialogPopup
           actions={
             <>
-              <DialogClose render={<Button variant="text" />}>Cancel</DialogClose>
-              <Button disabled={message.trim() === '' || draft.isPending || commit.isPending} onClick={send}>
-                {commit.isPending ? 'Committing…' : 'Commit'}
-              </Button>
+              <DialogClose render={<Button variant="text" />}>{clean ? 'Close' : 'Cancel'}</DialogClose>
+              {clean ? null : (
+                <Button disabled={message.trim() === '' || draft.isPending || commit.isPending} onClick={send}>
+                  {commit.isPending ? 'Committing…' : 'Commit'}
+                </Button>
+              )}
             </>
           }
           description="claude drafts a message from the changes on the machine. Edit it, or write your own."
           finalFocus={returnTo}
           title="Commit this thread"
         >
-          <div className="git__message">
-            <label className="git__label" htmlFor={boxId}>
-              Commit message
-            </label>
-            <textarea
-              aria-busy={draft.isPending}
-              className="git__box"
-              disabled={draft.isPending}
-              id={boxId}
-              onChange={(event) => setMessage(event.target.value)}
-              ref={box}
-              rows={6}
-              value={message}
-            />
-            <p className="git__status" role="status">
-              {draft.isPending ? 'Drafting a message…' : ''}
-            </p>
-            <Button disabled={draft.isPending} onClick={ask} variant="text">
-              Draft again
-            </Button>
-          </div>
-          {commitFailure ? (
-            <Failure failure={commitFailure} retry={send} />
-          ) : draftFailure ? (
-            <Failure failure={draftFailure} retry={ask} />
-          ) : null}
+          {clean ? (
+            <EmptyState title="Nothing to commit">The thread has no changes.</EmptyState>
+          ) : (
+            <>
+              <div className="git__message">
+                <label className="git__label" htmlFor={boxId}>
+                  Commit message
+                </label>
+                <textarea
+                  aria-busy={draft.isPending}
+                  className="git__box"
+                  disabled={draft.isPending}
+                  id={boxId}
+                  onChange={(event) => setMessage(event.target.value)}
+                  ref={box}
+                  rows={6}
+                  value={message}
+                />
+                <p className="git__status" role="status">
+                  {draft.isPending ? 'Drafting a message…' : ''}
+                </p>
+                <Button disabled={draft.isPending} onClick={ask} variant="text">
+                  Draft again
+                </Button>
+              </div>
+              {commitFailure ? (
+                <Failure failure={commitFailure} retry={send} />
+              ) : draftFailure ? (
+                <Failure failure={draftFailure} retry={ask} />
+              ) : null}
+            </>
+          )}
         </DialogPopup>
       </Dialog>
       <div className="git__split">

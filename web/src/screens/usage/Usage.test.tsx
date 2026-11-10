@@ -52,6 +52,14 @@ describe('/usage on the busy fleet', () => {
     expect(screen.getByText('as read · every response in each transcript')).toBeTruthy()
   })
 
+  it('puts Read spend in the empty state, and pressing it starts the fan-out', async () => {
+    const asked = mount('desktop', '/usage', scenario('busy'))
+    const empty = (await screen.findByText('Nothing read yet')).closest('[data-slot="empty"]') as HTMLElement
+    fireEvent.click(within(empty).getByRole('button', { name: 'Read spend' }))
+    await waitFor(() => expect(asked.some((one) => one.includes('/tokens'))).toBe(true))
+    expect(await screen.findByRole('button', { name: 'Read again' })).toBeTruthy()
+  })
+
   it('fans out one read a workspace and draws both breakdowns', async () => {
     const asked = mount('desktop', '/usage', scenario('busy'))
     fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
@@ -173,6 +181,8 @@ describe('/usage time windows (Y-354)', () => {
       for (const [name, since] of expected) {
         vi.mocked(fetch).mockClear()
         await pick(name)
+        // The button lives in the empty state now, so wait for the window to change before looking for it.
+        await screen.findByText('Nothing read yet')
         await read()
         expect(sinces(), name).toEqual(Array(10).fill(since))
       }

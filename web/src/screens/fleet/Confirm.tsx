@@ -186,7 +186,7 @@ export function DeleteWorkspace(props: DeleteWorkspaceProps) {
       }
       body={
         <>
-          This removes the workspace file from <Mono>~/.config/yantra/workspaces</Mono> on this machine; the
+          This removes the workspace file from <Mono>~/.config/yantra/workspaces</Mono> on the machine that runs yantrad; the
           repository and the tmux session stay.
         </>
       }

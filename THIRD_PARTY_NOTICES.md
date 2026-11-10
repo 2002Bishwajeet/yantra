@@ -116,6 +116,13 @@ states and the summary line of
 [`pullRequestPresentation.tsx`](https://github.com/pingdotgg/t3code/blob/b8c2cfad/apps/web/src/components/pullRequest/pullRequestPresentation.tsx).
 Its name, wordmark and icon are not used.
 
+[`web/src/screens/session/WorkLog.tsx`](web/src/screens/session/WorkLog.tsx) adapts
+[`TimelineWorkGroupRows.tsx`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/TimelineWorkGroupRows.tsx)
+and [`WorkLog.tsx`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/WorkLog.tsx),
+and [`workLog.logic.ts`](web/src/screens/session/workLog.logic.ts) adapts the grouping of
+[`MessagesTimeline.logic.ts`](https://github.com/pingdotgg/t3code/blob/main/apps/web/src/components/chat/MessagesTimeline.logic.ts)
+and its working timer. Its name, wordmark and icon are not used.
+
 The composer in [`web/src/composer/`](web/src/composer/) adapts, at commit `810e8f6`, these files of T3 Code,
 each with its upstream path in the block comment at its top:
 [`ComposerSurface.tsx`](https://github.com/pingdotgg/t3code/blob/810e8f62f0eff2f3b6ae4602f781d9bb80607913/apps/web/src/components/chat/ComposerSurface.tsx)

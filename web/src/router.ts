@@ -187,6 +187,14 @@ const newSession = createRoute({
   head: () => titled('New session'),
 })
 
+// The checklist under `/` shows only while the fleet is empty; this reaches it after.
+const setup = createRoute({
+  getParentRoute: () => root,
+  path: '/setup',
+  component: lazyRouteComponent(() => import('@/screens/setup/Setup'), 'Setup'),
+  head: () => titled('Set up Yantra'),
+})
+
 // Two routes, one screen: `/settings` is the index on a phone and the first
 // category beside the list on a desktop; `/settings/$category` is one category.
 const settings = createRoute({
@@ -291,6 +299,7 @@ export const routeTree = root.addChildren([
   usage,
   session,
   repair,
+  setup,
   settings,
   settingsCategory,
   addDevice,
