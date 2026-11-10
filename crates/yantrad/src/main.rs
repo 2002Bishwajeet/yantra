@@ -8,12 +8,13 @@
 //! refuses to start when it cannot learn them. Q6 settled that Yantra is
 //! personal-first, so there is no authentication — which makes the bind address
 //! the entire security boundary (R-22), and makes an overridable one a mistake
-//! waiting to be made. There is deliberately no flag for it.
+//! waiting to be made. There is deliberately no flag for it. Beside them it
+//! listens on a Unix socket, where `tailscale serve` proxies to (ADR-0042).
 //!
 //! [ADR-0012]: ../../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use axum::Router;
@@ -47,6 +48,10 @@ mod write;
 
 const PORT: u16 = yantra_core::join::DAEMON_PORT;
 
+/// systemd sets `RUNTIME_DIRECTORY` from the unit's `RuntimeDirectory=yantra`.
+const RUNTIME: &str = "/run/yantra";
+const SOCKET: &str = "yantrad.sock";
+
 #[derive(Debug, thiserror::Error)]
 enum Error {
     #[error("could not ask Tailscale which addresses this machine holds")]
@@ -58,6 +63,13 @@ enum Error {
     #[error("could not listen on {address}")]
     Bind {
         address: SocketAddr,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("could not listen on {}", path.display())]
+    Socket {
+        path: PathBuf,
         #[source]
         source: std::io::Error,
     },
@@ -170,10 +182,12 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
     let addresses = listen_on(inventory).await?;
-    // ADR-0017 §2: the set bound here is exactly the set a forwarded address may
-    // arrive from, so the authoriser is built from it rather than from anything
-    // that could drift.
-    let authoriser = write::Authoriser::new(inventory.clone(), &addresses);
+    let socket =
+        Path::new(&std::env::var_os("RUNTIME_DIRECTORY").unwrap_or_else(|| RUNTIME.into()))
+            .join(SOCKET);
+    // ADR-0042: the set bound here is exactly the set that is this machine, so
+    // the authoriser is built from it rather than from anything that could drift.
+    let authoriser = write::Authoriser::new(inventory.clone(), &addresses, &socket);
     let ssh_dir = yantra_core::identity::dir().unwrap_or_else(|error| {
         tracing::warn!("no ssh identity can be served: {error}");
         PathBuf::new()
@@ -234,6 +248,29 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     let app = app(fleet, authoriser, dashboard(web::from_env())?);
 
     let mut servers = tokio::task::JoinSet::new();
+    // Before TCP, so a daemon that answers on its port also answers here.
+    match listen_at(&socket)? {
+        Some(listener) => {
+            tracing::info!("listening on {}", socket.display());
+            let app = app
+                .clone()
+                .into_make_service_with_connect_info::<write::Peer>();
+            let mut closing = closing.clone();
+            servers.spawn(async move {
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(async move {
+                        let _ = closing.wait_for(|closing| *closing).await;
+                    })
+                    .await
+            });
+        }
+        // A missing socket removes a door and opens none, so this is no refusal.
+        None => tracing::warn!(
+            "{} is not there, so nothing listens on {}: tailscale serve and this machine's own requests are refused",
+            socket.parent().unwrap_or(&socket).display(),
+            socket.display()
+        ),
+    }
     for address in addresses {
         let listener = tokio::net::TcpListener::bind(address)
             .await
@@ -243,7 +280,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         // nothing but the source address to attribute a heartbeat with.
         let app = app
             .clone()
-            .into_make_service_with_connect_info::<SocketAddr>();
+            .into_make_service_with_connect_info::<write::Peer>();
         let mut closing = closing.clone();
         servers.spawn(async move {
             axum::serve(listener, app)
@@ -263,6 +300,28 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         }
     }
     Ok(())
+}
+
+/// `None` when the directory is missing. 0666, because the peer's uid is the
+/// gate and ADR-0042 rejects file modes as one.
+fn listen_at(socket: &Path) -> Result<Option<tokio::net::UnixListener>, Error> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !socket.parent().is_some_and(Path::is_dir) {
+        return Ok(None);
+    }
+    let failed = |source| Error::Socket {
+        path: socket.to_owned(),
+        source,
+    };
+    // A socket a stopped daemon left refuses the bind.
+    match std::fs::remove_file(socket) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(failed(error)),
+        _ => {}
+    }
+    let listener = tokio::net::UnixListener::bind(socket).map_err(failed)?;
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o666)).map_err(failed)?;
+    Ok(Some(listener))
 }
 
 /// Fails closed. Every branch that cannot prove an address belongs to this
@@ -421,7 +480,7 @@ mod tests {
         std::fs::write(dir.join("index.html"), "<title>Yantra</title>").expect("index");
         let app = app(
             heartbeat::Fleet::default(),
-            write::Authoriser::new(Fake::default(), &[]),
+            write::Authoriser::new(Fake::default(), &[], Path::new(SOCKET)),
             dashboard(Some(dir)).expect("a directory with an index"),
         );
 

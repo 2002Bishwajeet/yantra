@@ -10,6 +10,8 @@ After=tailscaled.service
 EnvironmentFile=-/etc/yantra/daemon.env
 ExecStart=/usr/local/bin/yantrad
 User=yantra
+# ADR-0042: /run/yantra holds yantrad.sock, where `tailscale serve` proxies to.
+RuntimeDirectory=yantra
 Restart=on-failure
 # Written for the boot race rather than for a crash: `yantrad` refuses to start
 # until Tailscale can name this machine's addresses, and `tailscaled` answers

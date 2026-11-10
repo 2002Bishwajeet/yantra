@@ -76,10 +76,10 @@ fixtures:
     YANTRA_FIXTURES=1 cargo test -p yantrad contract
 
 # TLS for the dashboard, so a phone can open it (docs/development.md). 8443
-# because `/` on 443 is code-server's, and the tailnet address because Y-069
-# has the daemon refuse loopback. Set once per machine; `--bg` persists it.
+# because `/` on 443 is code-server's, and the socket because yantrad refuses
+# this machine's own address over TCP (ADR-0042). `--bg` persists it.
 https:
-    tailscale serve --bg --https=8443 "http://$(tailscale ip -4):7717"
+    tailscale serve --bg --https=8443 unix:/run/yantra/yantrad.sock
 
 https-off:
     tailscale serve --https=8443 off

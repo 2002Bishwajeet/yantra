@@ -79,8 +79,9 @@ account. The script says so first, because the dashboard cannot exist before the
    superseded [Q17](../tracker.md#6-open-questions). **Turn off key expiry for this box once**, or
    it leaves the tailnet when its key expires: admin console → Machines → the box's menu → *Disable
    key expiry*.
-5. It turns on HTTPS: `sudo tailscale serve --bg --https=8443 http://<tailnet address>:7717`, the
-   same command as `just https`. **Before it asks, it says that the machine's name goes into a public
+5. It turns on HTTPS: `sudo tailscale serve --bg --https=8443 unix:/run/yantra/yantrad.sock`, the
+   same command as `just https`. The proxy reaches `yantrad` on its socket, where the kernel names
+   the account that connected ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)). **Before it asks, it says that the machine's name goes into a public
    certificate log** that anyone can read ([Tailscale KB 1153](https://tailscale.com/kb/1153/enabling-https)).
    On a tailnet that never had HTTPS, `tailscale serve` prints one link to turn it on and waits;
    open it. Ctrl-C there skips HTTPS, and the install goes on to finish on plain HTTP.
@@ -121,8 +122,10 @@ not install `gh`, and `provision.sh` is gone: its fleet half belongs to the dash
 
 **A second run is the updater.** It asks nothing it already has an answer to, except whether to
 restart. It touches no configuration ([D2](design/02-setup.md) §1): an existing `agent.env` or `daemon.env` stays as it
-is, and it does not run `tailscale up` or `tailscale serve` again. It replaces the binaries and the
-units, and it ends on the same URL. **A run at a terminal or with `--yes` also repeats step 9**, which
+is, and it does not run `tailscale up` or `tailscale serve` again. **One exception**: a serve on
+port 8443 that still proxies to `http://<address>:7717` is pointed at the socket in the same run,
+because `yantrad` now refuses this box's own address over TCP (ADR-0042). It replaces the binaries
+and the units, and it ends on the same URL. **A run at a terminal or with `--yes` also repeats step 9**, which
 adds a key or a `Host` block only if it is missing. `yantra-update` runs with neither, so an update
 never runs step 9.
 
@@ -443,7 +446,7 @@ box the way the script does:
 
 ```bash
 ssh <host> 'sudo systemctl enable --now yantrad.service yantra-agent.service'
-ssh <host> 'sudo tailscale serve --bg --https=8443 "http://$(tailscale ip -4):7717"'
+ssh <host> 'sudo tailscale serve --bg --https=8443 unix:/run/yantra/yantrad.sock'
 ssh <host> 'journalctl -u yantrad -f'
 ```
 
@@ -461,6 +464,16 @@ curl -fsSL https://<appliance>.<tailnet>.ts.net:8443/join | sh
 ```
 
 Where HTTPS is not on, `http://<appliance's tailnet address>:7717/join` serves the same script.
+**On the appliance itself, fetch it on the daemon's socket**, because `yantrad` refuses the
+appliance's own address ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)):
+
+```bash
+curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yantra/join | sh
+```
+
+There an account that is not `yantra` and not in the `yantra` group may join itself and nothing more.
+So the script cannot ask `yantrad` to test its login, and it says so: the dashboard's Check on the
+appliance shows whether `yantrad` can log in.
 
 The daemon makes its key the first time this is fetched. The script asks before each step that
 needs root: it turns on `sshd`, places the key in that account's `authorized_keys`, offers `tmux`,

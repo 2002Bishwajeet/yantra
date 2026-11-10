@@ -57,7 +57,6 @@
 //!
 //! [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
 
-use std::net::SocketAddr;
 use std::time::Duration;
 
 use axum::Router;
@@ -72,7 +71,7 @@ use yantra_core::install;
 use yantra_core::inventory::Inventory;
 use yantra_core::pty;
 
-use crate::write::{Authoriser, Left, Missed, Refused, allowed, chain, left_command};
+use crate::write::{Authoriser, Left, Missed, Peer, Refused, allowed, chain, left_command};
 
 /// Long enough that a socket nobody is typing at costs one frame a browser
 /// answers in microseconds; short enough that what a vanished peer holds is
@@ -120,12 +119,12 @@ struct OneOff<I> {
 
 async fn attach<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let target = Target::Workspace(name);
     tracing::info!("terminal {target} for {}", caller.node);
 
@@ -137,12 +136,12 @@ async fn attach<I: Inventory + Clone + Send + Sync + 'static>(
 /// and the tap is refused by name rather than opened.
 async fn tap<I: Inventory + Clone + Send + Sync + 'static>(
     State(authoriser): State<Authoriser<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((machine, session)): Path<(String, String)>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let target = Target::Session { machine, session };
     tracing::info!("terminal {target} for {}", caller.node);
 
@@ -159,13 +158,13 @@ async fn tap<I: Inventory + Clone + Send + Sync + 'static>(
 /// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
 async fn step<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<OneOff<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((machine, index)): Path<(String, usize)>,
     uri: Uri,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     install::check_machine(&machine).map_err(|error| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said: error.to_string(),
@@ -480,6 +479,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
 pub(crate) mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use std::net::SocketAddr;
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -514,13 +514,13 @@ pub(crate) mod tests {
         }
     }
 
-    /// Bound to nothing, so the loopback peer is never ours and no header is
-    /// read — the direct port, which is what these tests stood on before
-    /// ADR-0017.
+    /// Bound to nothing, so the loopback peer is never this machine and is
+    /// the caller, as ADR-0016 wrote it.
     pub(crate) fn direct(caller: Option<Caller>) -> Authoriser<Fake> {
         Authoriser::new(
             tailnet(caller.map(|caller| (LOCAL, caller)).into_iter().collect()),
             &[],
+            std::path::Path::new("yantrad.sock"),
         )
     }
 
@@ -565,11 +565,7 @@ pub(crate) mod tests {
         let listener = TcpListener::bind((LOCAL, 0)).await.expect("a free port");
         let address = listener.local_addr().expect("it is bound");
         tokio::spawn(async move {
-            let _ = axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
-            )
-            .await;
+            let _ = axum::serve(listener, app.into_make_service_with_connect_info::<Peer>()).await;
         });
 
         let mut stream = TcpStream::connect(address).await.expect("the daemon is up");
@@ -894,30 +890,23 @@ pub(crate) mod tests {
         );
     }
 
-    /// **ADR-0017 on the route that hands over a shell.** Loopback is declared
-    /// as what this daemon bound, which is the only way a test can stand where
-    /// `tailscale serve` stands: the peer is then ours, and the header names a
-    /// tagged node the proxy would otherwise have laundered into the owner's.
+    /// **ADR-0042 on the route that hands over a shell.** Loopback is declared
+    /// as what this daemon bound, so the peer is this machine: refused with a
+    /// forged header and without one, as any account here could have sent it.
     #[tokio::test]
-    async fn a_forwarded_tagged_node_is_not_upgraded_even_though_the_peer_is_ours() {
-        let tagged: IpAddr = "100.64.0.4".parse().expect("v4");
+    async fn a_peer_that_is_this_machine_is_not_upgraded_with_or_without_a_header() {
         let ours = || {
             Authoriser::new(
-                tailnet(vec![
-                    (LOCAL, caller(ME, &[])),
-                    (tagged, caller(ME, &["tag:ci"])),
-                ]),
+                tailnet(vec![(LOCAL, caller(ME, &[]))]),
                 &[SocketAddr::new(LOCAL, 7717)],
+                std::path::Path::new("yantrad.sock"),
             )
         };
 
-        let refused = handshake(ours(), WORKSPACE, "X-Forwarded-For: 100.64.0.4\r\n").await;
-        assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
-
-        // The proxy's own node still opens one, so the refusal above is the
-        // forwarded address being read rather than the hop being distrusted.
-        let unproxied = handshake(ours(), WORKSPACE, "").await;
-        assert!(unproxied.starts_with("HTTP/1.1 101"), "{unproxied}");
+        let forged = handshake(ours(), WORKSPACE, "X-Forwarded-For: 100.64.0.2\r\n").await;
+        assert!(forged.starts_with("HTTP/1.1 403"), "{forged}");
+        let bare = handshake(ours(), WORKSPACE, "").await;
+        assert!(bare.starts_with("HTTP/1.1 403"), "{bare}");
     }
 
     /// **The half of Y-134 that is easy to break.** An agent that runs quietly

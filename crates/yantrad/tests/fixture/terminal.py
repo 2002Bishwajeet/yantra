@@ -5,6 +5,9 @@ text frame for the window, binary for the stream, and a pong for every ping.
 It does what `web/src/api/socket.ts` does after a close — up to ATTEMPTS
 reopens, PAUSE apart — with the two numbers handed in from that file.
 
+It runs as the daemon's own account on its socket, because the daemon refuses
+this box's own address over TCP (ADR-0042).
+
     terminal.py update  <session> <attempts> <pause_ms> <marker>
     terminal.py refused <session> <attempts> <pause_ms> <marker>
 
@@ -20,9 +23,8 @@ import struct
 import subprocess
 import sys
 import time
-import urllib.request
 
-DAEMON = ("127.0.0.1", 7717)
+SOCKET = "/run/yantra/yantrad.sock"
 WINDOW = json.dumps({"rows": 24, "cols": 80, "term": "xterm-256color"}).encode()
 # Under the unit's own TimeoutStopSec, so a stop that hangs is seen as one.
 CLOSE_BY = 80
@@ -57,12 +59,23 @@ def send(sock, opcode, payload):
     sock.sendall(head + mask + body)
 
 
+def connect():
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(5)
+    try:
+        sock.connect(SOCKET)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
 def upgrade(path):
-    sock = socket.create_connection(DAEMON, timeout=5)
+    sock = connect()
     key = base64.b64encode(os.urandom(16)).decode()
     sock.sendall(
         (
-            f"GET {path} HTTP/1.1\r\nHost: {DAEMON[0]}:{DAEMON[1]}\r\n"
+            f"GET {path} HTTP/1.1\r\nHost: yantra\r\n"
             "Upgrade: websocket\r\nConnection: Upgrade\r\n"
             f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
         ).encode()
@@ -116,10 +129,14 @@ def attached(path, marker):
 
 
 def ask_for_update():
-    request = urllib.request.Request(f"http://{DAEMON[0]}:{DAEMON[1]}/api/update", method="POST", data=b"")
-    with urllib.request.urlopen(request, timeout=10) as answer:
-        if answer.status != 202:
-            raise SystemExit(f"POST /api/update answered {answer.status}")
+    with connect() as sock:
+        sock.settimeout(10)
+        sock.sendall(b"POST /api/update HTTP/1.1\r\nHost: yantra\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        status = b""
+        while b"\r\n" not in status:
+            status += exactly(sock, 1)
+    if b" 202 " not in status:
+        raise SystemExit(f"POST /api/update answered {status.decode(errors='replace').strip()}")
 
 
 def unit_state():

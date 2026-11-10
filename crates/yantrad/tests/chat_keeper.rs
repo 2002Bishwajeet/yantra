@@ -29,7 +29,7 @@ use anyhow::{Context, Result, bail};
 use common::{SshFixture, USER};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UnixStream};
 
 const WORKSPACE: &str = "kw";
 const REPO: &str = "/home/yantra/repo";
@@ -169,8 +169,7 @@ impl Host {
         let lock = fs::File::create(std::env::temp_dir().join("yantra-chat-keeper.lock"))?;
         lock.lock()
             .context("waiting for the other chat_keeper cases")?;
-        // Short: the control socket's path budget is 90 bytes (I-28).
-        let root = PathBuf::from(format!("/tmp/ykc-{}", std::process::id()));
+        let root = root();
         if root.exists() {
             fs::remove_dir_all(&root)?;
         }
@@ -255,6 +254,7 @@ impl Host {
             .env("PATH", path)
             .env("HOME", self.root.join("home"))
             .env("XDG_RUNTIME_DIR", self.root.join("run"))
+            .env("RUNTIME_DIRECTORY", self.root.join("run"))
             .env("RUST_LOG", "info")
             .envs(env.iter().copied())
             .stdin(Stdio::null())
@@ -329,6 +329,17 @@ impl Drop for Host {
             .status();
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+/// Short: the control socket's path budget is 90 bytes (I-28).
+fn root() -> PathBuf {
+    PathBuf::from(format!("/tmp/ykc-{}", std::process::id()))
+}
+
+/// ADR-0042: this host's own address is refused over TCP, so the requests go
+/// on the daemon's socket, as the account that runs it.
+fn daemon_socket() -> PathBuf {
+    root().join("run/yantrad.sock")
 }
 
 /// A `yantrad` that a failed assertion does not leave holding port 7717.
@@ -539,12 +550,12 @@ fn credentials() -> Result<Option<PathBuf>> {
 /// A WebSocket client in the few lines the chat needs, so the test adds no
 /// dependency: masked text frames out, unmasked frames in.
 struct Socket {
-    stream: BufReader<TcpStream>,
+    stream: BufReader<UnixStream>,
 }
 
 impl Socket {
     async fn open(path: &str) -> Result<Self> {
-        let mut stream = BufReader::new(TcpStream::connect(DAEMON).await?);
+        let mut stream = BufReader::new(UnixStream::connect(daemon_socket()).await?);
         stream
             .get_mut()
             .write_all(
@@ -905,7 +916,7 @@ async fn outlives(agent: Agent) -> Result<()> {
 
 /// A `POST` with no body, answered as JSON.
 async fn post(path: &str) -> Result<Value> {
-    let mut stream = TcpStream::connect(DAEMON).await?;
+    let mut stream = UnixStream::connect(daemon_socket()).await?;
     stream
         .write_all(
             format!(
