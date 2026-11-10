@@ -71,6 +71,15 @@ describe('KillSession', () => {
 })
 
 describe('DeleteWorkspace', () => {
+  it('names the machine that holds the workspace file', async () => {
+    at(1440)
+    await renderInApp(<DeleteWorkspace name="landing" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Delete landing?' })
+    expect(dialog.textContent).toContain('on the machine that runs yantrad')
+    expect(dialog.textContent).not.toContain('on this machine')
+  })
+
   it('offers Delete anyway on the 409 for a live session, and then sends force', async () => {
     at(1440)
     const fetch = vi

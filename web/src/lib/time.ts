@@ -36,6 +36,12 @@ export function at(stamp: string, now = Date.now()): Reading | null {
   }
 }
 
+/** A reading's text in a sentence: `3h` is "3h ago" and `8 Oct` is "on 8 Oct".
+ *  Callers that appended " ago" to a date read "8 Oct ago". */
+export function seen(text: string): string {
+  return /^\d+[smh]$/.test(text) ? `${text} ago` : `on ${text}`
+}
+
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
 /** A calendar day another program wrote, `2026-08-11` as `11 Aug`. It names no

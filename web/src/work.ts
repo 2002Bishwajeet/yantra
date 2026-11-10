@@ -150,6 +150,10 @@ export function unclaimed(
   )
 }
 
+/** Yantra never names a session with digits only, so tmux gave that name to a
+ *  session a person opened at a terminal. Attach it; do not offer to kill it. */
+export const openedByHand = (name: string) => /^\d+$/.test(name)
+
 /** Whether the attention band has anything to say, which is what decides
  *  whether `Needs you` draws at all with no workspace row in it. D6 §3.1: an
  *  empty queue adds no second sentence about GitHub having nothing. A look that

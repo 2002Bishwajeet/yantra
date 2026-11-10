@@ -89,8 +89,9 @@ export class GitFailure {
   constructor(kind: GitFailureKind, said: string) {
     this.kind = kind
     this.said = said
-    // A missing thread does not appear by asking again, and an empty message is mended by typing.
-    this.retryable = kind !== 'noThread' && kind !== 'commitEmpty'
+    // A missing thread does not appear by asking again, an empty message is mended by typing,
+    // and a clean tree stays clean until the agent changes something.
+    this.retryable = kind !== 'noThread' && kind !== 'commitEmpty' && kind !== 'draftNothing'
   }
 
   get title(): string {

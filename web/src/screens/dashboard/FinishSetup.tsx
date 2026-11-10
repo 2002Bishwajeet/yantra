@@ -27,7 +27,9 @@ function Unfinished(props: { now: number }) {
     <Card aria-labelledby={heading} className="dash__setup" surface="high">
       <div className="dash__setup-head">
         <Text emphasized id={heading} render={<h2 />} scale="title-large">
-          Finish setup
+          <Link className="dash__setup-link" to="/setup">
+            Finish setup
+          </Link>
         </Text>
         <Button aria-label="Hide Finish setup" onClick={hideSetupCard} variant="text">
           Hide
