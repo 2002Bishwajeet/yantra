@@ -409,7 +409,7 @@ export function Setup() {
                 <Text scale="body-small" tone="variant">
                   {identity.data ? (
                     <>
-                      this appliance's key · <Mono>{identity.data.fingerprint}</Mono>
+                      this appliance's key · <Mono title={identity.data.fingerprint}>{identity.data.fingerprint}</Mono>
                     </>
                   ) : (
                     'the key is made when the first machine joins'

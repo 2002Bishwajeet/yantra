@@ -55,25 +55,16 @@ test.describe('the dashboard on a busy fleet', () => {
     await expect(region(page, 'Finish setup')).toBeVisible()
     const words = page.locator('.dash__hero-words')
     await expect(words).toBeVisible()
-    // Y-670: .shell__main scrolls and this fixture is not tall enough to scroll the line to the FAB.
-    // A spacer above the dashboard puts the line level with the FAB, then the test measures the text and not the box.
-    await words.evaluate((el) => {
-      const text = el.getBoundingClientRect()
-      const fab = document.querySelector('.shell__fab')!.getBoundingClientRect()
-      const spacer = document.createElement('div')
-      spacer.style.height = `${Math.max(0, fab.top + fab.height / 2 - (text.top + text.height / 2))}px`
-      document.querySelector('.dash')!.before(spacer)
-    })
-    const gap = await page.evaluate(() => {
+    // The page scrolls under the FAB, so the headline is judged by where its lines end across the page:
+    // every line must stop left of the FAB, wherever the scroll puts it.
+    const clear = await page.evaluate(() => {
       const fab = document.querySelector('.shell__fab')!.getBoundingClientRect()
       const range = document.createRange()
       range.selectNodeContents(document.querySelector('.dash__hero-words')!)
-      return [...range.getClientRects()].map(
-        (line) => line.top < fab.bottom && fab.top < line.bottom && line.left < fab.right && fab.left < line.right,
-      )
+      return [...range.getClientRects()].map((line) => line.right <= fab.left)
     })
-    expect(gap.length).toBeGreaterThan(0)
-    expect(gap.some(Boolean)).toBe(false)
+    expect(clear.length).toBeGreaterThan(0)
+    expect(clear.every(Boolean)).toBe(true)
   })
 
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {
