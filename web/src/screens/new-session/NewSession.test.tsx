@@ -973,7 +973,7 @@ describe('the hub (Y-627)', () => {
     const note = await screen.findByRole('note')
     expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
     expect(note.textContent).toMatch(/after an account on it joins/)
-    expect(note.textContent).toMatch(/separate account without sudo/)
+    expect(note.textContent).toMatch(/separate account without sudo on yantra-box, named karigar/)
     expect(await within(note).findByText(COMMAND)).toBeTruthy()
     expect(within(note).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
   })

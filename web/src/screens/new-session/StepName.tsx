@@ -55,8 +55,8 @@ function HubJoin(props: { name: string }) {
   return (
     <Text render={<div role="note" />} className="ns__note" scale="body-medium" tone="variant">
       <p>
-        {name} runs sessions after an account on it joins. Make a separate account without sudo on {name}, log in to
-        it there, and run the join command.
+        {name} runs sessions after an account on it joins. Make a separate account without sudo on {name}, named
+        karigar, log in to it there, and run the join command.
       </p>
       {url ? <Copyable text={joinCommand(url)} what="the join command" /> : null}
       <Button render={<Link params={{ machine: name }} to="/m/$machine" />} role="link" variant="text">

@@ -264,6 +264,41 @@ describe('beat 2, joined', () => {
   })
 })
 
+/** Y-628, ADR-0046: the account that joins is the agents', so it is karigar. */
+describe('the account the join command runs as', () => {
+  const LINUX = ["sudo useradd --create-home --shell /bin/bash karigar", "sudo usermod -p '*' karigar", 'sudo -iu karigar']
+  const MACOS = [
+    'brew install tmux git',
+    'sudo sysadminctl -addUser karigar -fullName Karigar -password -',
+    `echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile`,
+  ]
+
+  it.each([
+    ['desktop', 'linux', LINUX],
+    ['phone', 'linux', LINUX],
+    ['desktop', 'macos', MACOS],
+    ['phone', 'macos', MACOS],
+  ] as const)('on a %s, gives %s the commands that make karigar, each with Copy', async (size, platform, commands) => {
+    const os = platform === 'macos' ? 'macOS' : 'linux'
+    mountSettings(size, at(`platform=${platform}&machine=laptop`), fleet([aMachine({ name: 'laptop', os, online: true })], []))
+    expect(await screen.findByText(/Run the join command as a separate account without sudo, named karigar/)).toBeTruthy()
+    expect(screen.getByText(/Run this once in a terminal on laptop, as karigar/)).toBeTruthy()
+    for (const command of commands) {
+      const shown = screen.getByText(command)
+      expect(within(shown.closest('.m3-copyable')! as HTMLElement).getByRole('button', { name: /^Copy / })).toBeTruthy()
+    }
+    const other = platform === 'linux' ? MACOS : LINUX
+    expect(screen.queryByText(other[1]!)).toBeNull()
+  })
+
+  it('tells a Mac to log in as karigar at the screen once', async () => {
+    const mac = aMachine({ name: 'laptop', os: 'macOS', online: true })
+    mountSettings('desktop', at('platform=macos&machine=laptop'), fleet([mac], []))
+    expect(await screen.findByText(/log in as karigar at the Mac's screen once/)).toBeTruthy()
+    expect(screen.getByText(/Allow karigar in System Settings → General → Sharing → Remote Login/)).toBeTruthy()
+  })
+})
+
 describe('beat 3, reachable', () => {
   it('asks when Check again is pressed, and goes done on the answer', async () => {
     const asked = mountSettings('desktop', at('platform=linux&machine=laptop'), {

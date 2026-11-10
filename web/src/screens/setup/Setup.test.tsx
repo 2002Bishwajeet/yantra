@@ -290,7 +290,11 @@ describe('the steps', () => {
 
   it('says the one step that runs in a terminal is the join command', async () => {
     await draw(base())
-    expect(screen.getByText(/One step runs in a terminal: the join command/)).toBeTruthy()
+    expect(
+      screen.getByText(
+        'One step runs in a terminal: the join command, once on each new machine, as an account without sudo named karigar. Each step here re-checks itself every few seconds.',
+      ),
+    ).toBeTruthy()
   })
 })
 

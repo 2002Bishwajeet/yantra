@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Check, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
 import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
+import { isReady } from '@/lib/ready'
 import { chipOf, sessionsFailure, sorted, startable, titleOf, verdictOf } from './verdict'
 
 const machine = (over: Partial<Machine> = {}) =>
@@ -13,7 +14,7 @@ const report = (checks: Check[]): Reading<Readiness> => ({ looked: 'ok', age_sec
 
 const all = (over: Record<string, Check['state']> = {}, detail: Record<string, string> = {}) =>
   report(
-    ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'heartbeat'].map(
+    ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'no-sudo', 'heartbeat'].map(
       (id) => check(id, over[id] ?? 'present', detail[id] ?? ''),
     ),
   )
@@ -238,6 +239,16 @@ describe('the machine page’s verdict', () => {
     expect(v.kind).toBe('manual')
     expect(titleOf(v, 'mbp')).toBe('a hook cannot run')
     expect(startable(v)).toBe(true)
+  })
+
+  /** Y-628: sessions run as an account that can use sudo, so it is a warning. */
+  it('lets a session start where the joined account can use sudo', () => {
+    const absent = all({ 'no-sudo': 'absent' })
+    const v = verdict(absent)
+    expect(v.kind).toBe('manual')
+    expect(titleOf(v, 'pi')).toBe('The joined account can use sudo')
+    expect(startable(v)).toBe(true)
+    expect(absent.looked === 'ok' && isReady(absent.data)).toBe(true)
   })
 
   /** ADR-0031 §9: a microphone never installed is no fault. */

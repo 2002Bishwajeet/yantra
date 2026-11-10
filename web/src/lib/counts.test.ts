@@ -12,7 +12,7 @@ import { waiting, work } from '@/work'
 import { useHeldBands } from '@/screens/fleet/held'
 
 const BASICS = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo']
-const OPTIONAL = ['provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'heartbeat']
+const OPTIONAL = ['provider-cli', 'provider-auth', 'login-session', 'folder-access', 'hooks', 'no-sudo', 'heartbeat']
 
 const report = (machine: string, absent: string[]): Readiness => ({
   machine,
@@ -68,7 +68,7 @@ describe('one fleet, every count', () => {
       expect(view.getByText(new RegExp(`^${count}`))).toBeTruthy()
       view.unmount()
     }
-    expect(counted(tally(fleet[0]!.report!.checks))).toBe('9 of 12')
+    expect(counted(tally(fleet[0]!.report!.checks))).toBe('10 of 13')
     // A Mac whose login has no tmux server is not ready, and the chip says so.
     expect(chipFor(mac, fleet[0]!.report).word).toBe('3 to fix')
     expect(chipFor(laptop, fleet[1]!.report).word).toBe('ready · 1 to fix')

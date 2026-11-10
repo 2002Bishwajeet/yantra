@@ -135,6 +135,8 @@ export function MachineCard(props: MachineCardProps) {
     return check ? [check] : []
   })
   const shown = condensed ? four.filter((one) => one.state !== 'present') : four
+  // ADR-0046: not one of the four, so its warning is a line of its own. Unknown is not absent (R-23).
+  const sudo = checkNamed(checks, 'no-sudo')
   // D3 §5.7's one clock, as the board prints it: `2h` under a day, `7 Jul` past one.
   const seen = machine.last_seen ? at(machine.last_seen) : null
   const verdict = verdictOf({
@@ -184,6 +186,11 @@ export function MachineCard(props: MachineCardProps) {
               />
             ))}
           </ul>
+          {sudo?.state === 'absent' ? (
+            <Text render={<p role="note" />} className="machines__about" scale="body-small" tone="error">
+              Agents here can use sudo: {sudo.detail}. Join a separate account without sudo, named karigar.
+            </Text>
+          ) : null}
           {verdict.kind === 'unasked' ? null : (
             <Text className="machines__summary" scale="body-small" tone="variant">
               {summary(tally(checks))}

@@ -539,8 +539,8 @@ export function Setup() {
 
       <div className="setup__foot">
         <Text scale="body-medium" tone="variant">
-          One step runs in a terminal: the join command, once on each new machine. Each step here re-checks itself
-          every few seconds.
+          One step runs in a terminal: the join command, once on each new machine, as an account without sudo named
+          karigar. Each step here re-checks itself every few seconds.
         </Text>
         <Button className="setup__skip" render={<Link to="/fleet" />} role="link" variant="text">
           Skip for now
