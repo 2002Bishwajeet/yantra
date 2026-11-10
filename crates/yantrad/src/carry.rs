@@ -9,7 +9,6 @@
 //! owner's words, so no body reaches a trace (Q5).
 
 use std::collections::{BTreeMap, VecDeque};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,7 +22,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use yantra_core::inventory::Inventory;
 
-use crate::write::{Authoriser, Refused, allowed};
+use crate::write::{Authoriser, Peer, Refused, allowed};
 
 /// A draft is kilobytes; this refuses a flood.
 const BODY_LIMIT: usize = 1024 * 1024;
@@ -78,11 +77,11 @@ fn failed(status: StatusCode, error: &'static str) -> Response {
 
 async fn keep<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Carrier<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     // The serde error quotes the body, so it is not passed on.
     let Ok(kept) = serde_json::from_slice::<Kept>(&body) else {
         return Ok(failed(
@@ -112,11 +111,11 @@ async fn keep<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn take<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Carrier<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Response, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let slots = state.slots.lock().await;
     let slot = slots.iter().find(|slot| slot.id == id);
     Ok(match slot {
@@ -153,6 +152,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, header};
     use serde_json::{Value, json};
+    use std::net::SocketAddr;
     use tower::ServiceExt as _;
 
     use crate::terminal::tests::{LOCAL, ME, caller, direct};
@@ -168,7 +168,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((LOCAL, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((LOCAL, 61620)))));
         let response = app
             .clone()
             .oneshot(request)

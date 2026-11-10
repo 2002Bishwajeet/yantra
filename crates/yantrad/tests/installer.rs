@@ -131,7 +131,7 @@ ip)
     ;;
 serve)
     if [ "$2" = status ]; then
-        [ -e $state/serving ] && printf '{"TCP": {"8443": {"HTTPS": true}}}\n'
+        [ -e $state/serving ] && printf '{"TCP": {"8443": {"HTTPS": true}}, "Web": {"yantra-box.tail0000.ts.net:8443": {"Handlers": {"/": {"Proxy": "%s"}}}}}\n' "$(cat $state/serving)"
     else
         [ -e $state/serve-fails ] && exit 1
         # What tailscale does on a tailnet that never had HTTPS: a link, then a wait.
@@ -139,7 +139,9 @@ serve)
             echo "Serve is not enabled on your tailnet. To enable, visit: https://login.tailscale.com/f/serve"
             exec sleep 60
         fi
-        touch $state/serving
+        # The target is the last argument, and status reports it.
+        for target; do :; done
+        echo "$target" > $state/serving
     fi
     ;;
 esac
@@ -974,6 +976,43 @@ fn at_a_terminal_a_no_to_https_on_a_logged_in_box_still_starts_the_dashboard() -
     Ok(())
 }
 
+/// ADR-0042: a serve set up before the socket proxied to the tailnet address,
+/// where every write is now refused. The run the root updater makes, with no
+/// terminal and no `--yes`, points it at the socket.
+#[test]
+fn an_update_points_a_serve_at_the_old_address_to_the_socket() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    fixture.arrange_tailnet()?;
+    fixture.sh("touch /var/tmp/tailscale-stub/up && \
+         echo http://127.0.0.1:7717 > /var/tmp/tailscale-stub/serving")?;
+
+    fixture.publish(VERSION, "repoint")?;
+    let said = fixture.install_ok()?;
+    let calls = fixture.tailscale_calls()?;
+    assert!(
+        calls
+            .iter()
+            .any(|c| c == "serve --bg --https=8443 unix:/run/yantra/yantrad.sock"),
+        "the old target was left in place: {calls:?}\n{said}"
+    );
+    assert!(
+        said.contains("now proxies to /run/yantra/yantrad.sock"),
+        "{said}"
+    );
+
+    // Pointed once: a second run finds the socket and changes nothing.
+    let before = fixture.tailscale_calls()?.len();
+    fixture.install_ok()?;
+    let later = &fixture.tailscale_calls()?[before..];
+    assert!(
+        !later.iter().any(|c| c.starts_with("serve --bg")),
+        "a serve already on the socket was set again: {later:?}"
+    );
+    Ok(())
+}
+
 /// Y-384's row: a yes logs the box in, turns on HTTPS, writes this box's own
 /// address, starts both units and ends on the dashboard's URL. The second run
 /// is the updater — it asks nothing and leaves every file and setting alone.
@@ -1006,8 +1045,8 @@ fn at_a_terminal_a_yes_starts_the_dashboard_and_a_second_run_asks_nothing() -> R
     assert!(
         calls
             .iter()
-            .any(|c| c == "serve --bg --https=8443 http://127.0.0.1:7717"),
-        "HTTPS goes in front of the daemon's own address, as `just https` does: {calls:?}"
+            .any(|c| c == "serve --bg --https=8443 unix:/run/yantra/yantrad.sock"),
+        "HTTPS goes in front of the daemon's socket, as `just https` does: {calls:?}"
     );
 
     let env = fixture.sh("cat /etc/yantra/agent.env")?;
@@ -1261,7 +1300,7 @@ fn with_yes_and_no_terminal_the_install_ends_on_the_dashboard() -> Result<()> {
     assert!(
         calls
             .iter()
-            .any(|c| c == "serve --bg --https=8443 http://127.0.0.1:7717"),
+            .any(|c| c == "serve --bg --https=8443 unix:/run/yantra/yantrad.sock"),
         "--yes did not turn on HTTPS: {calls:?}"
     );
     let env = fixture.sh("cat /etc/yantra/agent.env")?;

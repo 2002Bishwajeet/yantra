@@ -49,6 +49,10 @@ whois) cat /srv/tailscale/whois.json ;;
 esac
 "#;
 
+/// ADR-0042: the daemon's own account on its socket, because this box's own
+/// address is refused over TCP.
+const OWNER_CURL: &str = "runuser -u yantra -- curl --unix-socket /run/yantra/yantrad.sock";
+
 struct Appliance {
     systemd: Systemd,
     repo: String,
@@ -280,15 +284,18 @@ impl Appliance {
     /// `web/src/api/socket.ts`'s reconnect budget, handed to the client.
     fn client(&self, mode: &str) -> Result<Output> {
         let (attempts, pause) = socket_budget()?;
-        self.systemd.exec(&[
-            "python3",
-            "/fixture/terminal.py",
-            mode,
-            SESSION,
-            &attempts.to_string(),
-            &pause.to_string(),
-            PANE_MARK,
-        ])
+        self.systemd.exec_as(
+            "yantra",
+            &[
+                "python3",
+                "/fixture/terminal.py",
+                mode,
+                SESSION,
+                &attempts.to_string(),
+                &pause.to_string(),
+                PANE_MARK,
+            ],
+        )
     }
 
     /// Everything a failure needs to be read without rerunning it.
@@ -407,8 +414,8 @@ fn restart_now_after_a_config_save_restarts_the_daemon() -> Result<()> {
 
     let post = |path: &str, body: &str| {
         appliance.sh(&format!(
-            "curl -sS -o /dev/null -w '%{{http_code}}' -X POST -H 'Content-Type: application/json' \
-             -d '{body}' http://127.0.0.1:7717{path}"
+            "{OWNER_CURL} -sS -o /dev/null -w '%{{http_code}}' -X POST -H 'Content-Type: application/json' \
+             -d '{body}' http://yantra{path}"
         ))
     };
     assert_eq!(
@@ -527,8 +534,9 @@ fn a_failed_update_is_read_back_on_about_in_the_units_words() -> Result<()> {
         appliance.repo
     ))?;
 
-    let asked = appliance
-        .sh("curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7717/api/update")?;
+    let asked = appliance.sh(&format!(
+        "{OWNER_CURL} -sS -o /dev/null -w '%{{http_code}}' -X POST http://yantra/api/update"
+    ))?;
     assert_eq!(asked, "202");
 
     let read = appliance.systemd.exec(&[

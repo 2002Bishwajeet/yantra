@@ -5,6 +5,9 @@
 #     curl -fsSL https://<appliance>.<tailnet>.ts.net:8443/join | sh
 #
 # or `http://<appliance's tailnet address>:7717/join` where HTTPS is not on.
+# On the appliance itself, fetch it on the daemon's socket (ADR-0042):
+#
+#     curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yantra/join | sh
 #
 # Run it in a terminal on this machine, as the account Yantra is to log in as.
 # It asks before each step that needs root, and your own sudo answers.
@@ -14,10 +17,12 @@
 set -eu
 # Each case pattern opens with `(`: bash 3.2 ends a `$(…)` at an unpaired `)` (Y-635).
 
-# yantrad writes these three when it serves this script.
+# yantrad writes these when it serves this script. SOCKET is set only when
+# the script was fetched on the daemon's socket.
 DAEMON='__YANTRA_DAEMON__'
 KEY='__YANTRA_KEY__'
 VERSION='__YANTRA_VERSION__'
+SOCKET='__YANTRA_SOCKET__'
 REPO=2002Bishwajeet/yantra
 
 say() { printf 'join: %s\n' "$*"; }
@@ -50,6 +55,15 @@ as_root() {
 }
 
 fetch() { curl -fsSL --proto '=https' --tlsv1.2 -o "$1" "$2"; }
+
+# On the daemon's own machine yantrad refuses this machine's address over TCP.
+daemon_curl() {
+    if [ -n "$SOCKET" ]; then
+        curl --unix-socket "$SOCKET" "$@"
+    else
+        curl "$@"
+    fi
+}
 
 [ "$(id -u)" -ne 0 ] ||
     fail "run this as the account Yantra is to log in as, not as root. It asks for sudo itself."
@@ -339,7 +353,7 @@ PLIST
 # The daemon names this machine from the address the request comes from, so
 # the body carries the account and nothing else (ADR-0016, ADR-0029).
 report() {
-    reply=$(curl -sS --max-time 30 -w '\n%{http_code}' -H 'Content-Type: application/json' \
+    reply=$(daemon_curl -sS --max-time 30 -w '\n%{http_code}' -H 'Content-Type: application/json' \
         -d "{\"user\":\"$user\"}" "http://$DAEMON/api/join") ||
         fail "could not reach yantrad at $DAEMON, so it does not know this machine joined. Run this again."
     status=$(printf '%s\n' "$reply" | tail -n 1)
@@ -368,7 +382,7 @@ report() {
 # cannot read it. A check policy waits for a browser the appliance does not have.
 browser_needed() {
     say "testing a real login from the appliance, which can take a minute."
-    reply=$(curl -sS --max-time 120 -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 1
+    reply=$(daemon_curl -sS --max-time 120 -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 1
     case "$reply" in
     (*'Tailscale SSH requires an additional check'*) return 0 ;;
     (*) return 1 ;;
@@ -393,7 +407,7 @@ use_sshd_instead() {
     as_root tailscale set --ssh=false
     say "Tailscale SSH is off, and the appliance logs in with its key."
     # sshd answers with another host key, which yantrad would refuse as changed.
-    if ! curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
+    if ! daemon_curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
         say "yantrad kept Tailscale SSH's old host key, so its next check fails on a changed key. Run sudo -u yantra -H yantra forget-host-key $machine on the appliance."
     fi
     if browser_needed; then

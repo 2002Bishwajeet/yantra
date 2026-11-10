@@ -2156,6 +2156,7 @@ dependencies = [
  "anyhow",
  "axum",
  "include_dir",
+ "nix",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

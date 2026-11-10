@@ -37,7 +37,7 @@ use anyhow::{Context, Result, bail};
 use common::{SshFixture, USER};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::net::{TcpSocket, TcpStream, UnixStream};
 
 const REPO: &str = "/home/yantra/repo";
 const DAEMON: &str = "127.0.0.1:7717";
@@ -167,8 +167,7 @@ impl Host {
     fn new(alpha: &SshFixture, beta: &SshFixture) -> Result<Self> {
         let lock = fs::File::create(std::env::temp_dir().join("yantra-chat-keeper.lock"))?;
         lock.lock().context("waiting for the other 7717 cases")?;
-        // Short: the control socket's path budget is 90 bytes (I-28).
-        let root = PathBuf::from(format!("/tmp/ykr-{}", std::process::id()));
+        let root = root();
         if root.exists() {
             fs::remove_dir_all(&root)?;
         }
@@ -279,6 +278,7 @@ impl Host {
             .env("PATH", path)
             .env("HOME", self.root.join("home"))
             .env("XDG_RUNTIME_DIR", self.root.join("run"))
+            .env("RUNTIME_DIRECTORY", self.root.join("run"))
             .env("RUST_LOG", "info")
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
@@ -314,6 +314,17 @@ impl Drop for Host {
     }
 }
 
+/// Short: the control socket's path budget is 90 bytes (I-28).
+fn root() -> PathBuf {
+    PathBuf::from(format!("/tmp/ykr-{}", std::process::id()))
+}
+
+/// ADR-0042: this host's own address is refused over TCP, so the requests go
+/// on the daemon's socket, as the account that runs it.
+fn daemon_socket() -> PathBuf {
+    root().join("run/yantrad.sock")
+}
+
 /// A `yantrad` that a failed assertion does not leave holding port 7717.
 struct Daemon(Child);
 
@@ -343,7 +354,35 @@ async fn http(
 ) -> Result<(u16, String)> {
     let socket = TcpSocket::new_v4()?;
     socket.bind(SocketAddr::new(from.parse()?, 0))?;
-    let mut stream = socket.connect(DAEMON.parse()?).await?;
+    exchange(
+        socket.connect(DAEMON.parse()?).await?,
+        method,
+        path,
+        thread,
+        body,
+    )
+    .await
+}
+
+/// The same request as this host's owner, on the daemon's socket.
+async fn owner_http(method: &str, path: &str) -> Result<(u16, String)> {
+    exchange(
+        UnixStream::connect(daemon_socket()).await?,
+        method,
+        path,
+        None,
+        None,
+    )
+    .await
+}
+
+async fn exchange(
+    mut stream: impl AsyncReadExt + AsyncWriteExt + Unpin,
+    method: &str,
+    path: &str,
+    thread: Option<&str>,
+    body: Option<&Value>,
+) -> Result<(u16, String)> {
     let body = body.map(Value::to_string).unwrap_or_default();
     let thread = thread.map_or_else(String::new, |thread| {
         format!("X-Yantra-Thread: {thread}\r\n")
@@ -391,12 +430,12 @@ fn text(result: &Value) -> &str {
 /// The WebSocket client `chat_keeper.rs` uses: masked text frames out,
 /// unmasked frames in.
 struct Socket {
-    stream: BufReader<TcpStream>,
+    stream: BufReader<UnixStream>,
 }
 
 impl Socket {
     async fn open(path: &str) -> Result<Self> {
-        let mut stream = BufReader::new(TcpStream::connect(DAEMON).await?);
+        let mut stream = BufReader::new(UnixStream::connect(daemon_socket()).await?);
         stream
             .get_mut()
             .write_all(
@@ -629,7 +668,7 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     .await?;
     assert_eq!(refused["isError"], true, "{refused}");
     assert!(text(&refused).contains("paused"), "{refused}");
-    let (status, body) = http("127.0.0.1", "POST", "/api/rooms/r2/resume", None, None).await?;
+    let (status, body) = owner_http("POST", "/api/rooms/r2/resume").await?;
     assert_eq!(status, 204, "{body}");
     let again = tool(
         ALPHA,

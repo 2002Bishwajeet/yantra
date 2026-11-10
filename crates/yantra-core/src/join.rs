@@ -1,11 +1,12 @@
 //! The join command a person runs on a new machine (Y-387,
 //! [ADR-0029](../../../docs/adr/0029-a-machine-joins-itself.md)).
 //!
-//! The script is POSIX `sh` in [`join.sh`](join.sh). The daemon fills in three
+//! The script is POSIX `sh` in [`join.sh`](join.sh). The daemon fills in four
 //! values and `login_server.sh`, and serves it at `GET /join`; `yantra
 //! join-script` prints the same bytes. What the machine reports back is [`crate::identity::join_in`]'s input.
 
 use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
 
 /// `yantrad`'s port, here so the CLI names the daemon without a second copy.
 pub const DAEMON_PORT: u16 = 7717;
@@ -18,6 +19,11 @@ pub enum Error {
         "the public key holds a character a shell would read, so it is not written into a script"
     )]
     UnusableKey,
+
+    #[error(
+        "the socket's path holds a character a shell would read, so it is not written into a script"
+    )]
+    UnusableSocket,
 
     #[error("this machine holds no tailnet address, so a joined machine has nowhere to report")]
     NoAddress,
@@ -34,8 +40,13 @@ pub fn daemon_address(addresses: &[IpAddr]) -> Result<SocketAddr, Error> {
 }
 
 /// The script with this daemon's address, its public key and its version in
-/// it. The agent it installs is this daemon's own release.
-pub fn script(daemon: SocketAddr, public_key: &str) -> Result<String, Error> {
+/// it. The agent it installs is this daemon's own release. `socket` is the
+/// daemon's socket, for a script fetched on it (ADR-0042).
+pub fn script(
+    daemon: SocketAddr,
+    public_key: &str,
+    socket: Option<&Path>,
+) -> Result<String, Error> {
     // Each value sits inside single quotes, so a quote or a newline would end it.
     let usable = !public_key.is_empty()
         && public_key
@@ -44,10 +55,20 @@ pub fn script(daemon: SocketAddr, public_key: &str) -> Result<String, Error> {
     if !usable {
         return Err(Error::UnusableKey);
     }
+    let socket = socket
+        .map_or(Some(""), Path::to_str)
+        .ok_or(Error::UnusableSocket)?;
+    if !socket
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
+    {
+        return Err(Error::UnusableSocket);
+    }
     Ok(SCRIPT
         .replace("__YANTRA_DAEMON__", &daemon.to_string())
         .replace("__YANTRA_KEY__", public_key)
         .replace("__YANTRA_VERSION__", crate::about::VERSION)
+        .replace("__YANTRA_SOCKET__", socket)
         .replace("__YANTRA_LOGIN_SERVER__", crate::tmux::LOGIN_SERVER))
 }
 
@@ -62,7 +83,7 @@ mod tests {
     #[test]
     fn the_script_carries_all_three_values_and_no_placeholder() {
         let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
-        let script = script(daemon, KEY).expect("a usable key");
+        let script = script(daemon, KEY, None).expect("a usable key");
 
         assert!(script.contains("DAEMON='100.64.0.1:7717'"), "{script}");
         assert!(script.contains(&format!("KEY='{KEY}'")));
@@ -70,11 +91,33 @@ mod tests {
         assert!(!script.contains("__YANTRA_"), "a placeholder was left in");
     }
 
+    /// ADR-0042: a script fetched on the socket posts on it, and one fetched
+    /// over the tailnet does not.
+    #[test]
+    fn the_socket_is_written_only_when_the_script_came_on_it() {
+        let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
+        let over_tcp = script(daemon, KEY, None).expect("a usable key");
+        assert!(over_tcp.contains("SOCKET=''"), "{over_tcp}");
+
+        let socket = Path::new("/run/yantra/yantrad.sock");
+        let on_socket = script(daemon, KEY, Some(socket)).expect("a usable path");
+        assert!(on_socket.contains("SOCKET='/run/yantra/yantrad.sock'"));
+        for hostile in ["/run/y'; id; '", "/run/a b", "/run/$(id)"] {
+            assert!(
+                matches!(
+                    script(daemon, KEY, Some(Path::new(hostile))),
+                    Err(Error::UnusableSocket)
+                ),
+                "{hostile:?}"
+            );
+        }
+    }
+
     /// The Mac branch calls `login_server`, so the function must be in it.
     #[test]
     fn the_script_carries_the_login_server_function() {
         let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
-        let script = script(daemon, KEY).expect("a usable key");
+        let script = script(daemon, KEY, None).expect("a usable key");
         assert!(script.contains(crate::tmux::LOGIN_SERVER));
         assert!(script.contains("login_server() {"));
         assert!(script.contains("login_server \"$tmux\""));
@@ -128,7 +171,7 @@ mod tests {
     #[test]
     fn the_script_parses_as_posix_sh() {
         let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
-        let script = script(daemon, KEY).expect("a usable key");
+        let script = script(daemon, KEY, None).expect("a usable key");
         let out = std::process::Command::new("sh")
             .args(["-n", "-c", &script])
             .output()
@@ -149,7 +192,7 @@ mod tests {
             "ssh-ed25519 AAAA\nexit",
         ] {
             assert!(
-                matches!(script(daemon, hostile), Err(Error::UnusableKey)),
+                matches!(script(daemon, hostile, None), Err(Error::UnusableKey)),
                 "{hostile:?}"
             );
         }

@@ -415,7 +415,11 @@ because sshd's host key is not Tailscale SSH's. It holds `Fleet::joins` too, and
 `/api/join`'s body. **`GET /join` sits beside
 `/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
 `yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
-owner ruled that generation is Yantra's and happens on first use.
+owner ruled that generation is Yantra's and happens on first use. **On the socket another account
+may join itself** ([ADR-0042](../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md) §3): the
+two join routes call `joining`, which admits that account for `GET /join` and for a `POST /api/join`
+whose `user` is its own name. Every other route refuses it. A script fetched on the socket carries
+the socket's path, and `join.sh` sends its three daemon calls there.
 
 **`clone` is one of the writes that answer before their work is done** (Y-344). `git clone` runs as the
 startup command of a tmux session on the machine and the route answers `202` with the session's name;
@@ -470,7 +474,7 @@ its browser keys, drafts among them, to itself on `:8443`, because the two origi
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own
-untagged node is refused. *Which* address that is, is ADR-0017's — see the proxy section below.
+untagged node is refused. *Which* address that is, is ADR-0042's — see the proxy section below.
 Three rules that are easy to get subtly wrong:
 
 - **A `tailscale` that cannot answer is `503`, never `403`.** Nothing was decided about the caller,
@@ -675,9 +679,9 @@ socket outlives the terminal at both ends and a caller that never sends a size h
 `MissedTickBehavior::Delay` is load-bearing: `pty::open` can outlast an interval, and the default
 burst would deliver catch-up ticks as misses the peer was given no chance to answer.
 
-This route is authorised on both ports since Y-118 (ADR-0017), and its test is the refusal that
-proves it: a forwarded address resolving to a **tagged** node does not get an upgrade even though the
-TCP peer is ours. That the peer must be a real one is why these tests bind a **real `TcpListener`** —
+This route is authorised on every door (ADR-0042), and its test is the refusal that proves it: a TCP
+peer that is this daemon's own address does not get an upgrade, with a forged header or without. That
+the peer must be a real one is why these tests bind a **real `TcpListener`** —
 `WebSocketUpgrade` strips `OnUpgrade` during extraction, so a `tower::oneshot` never reaches the
 handler and would assert a status the authoriser never produced.
 
@@ -962,38 +966,39 @@ types appended at the end of `api.ts` in one block.
 daemon reads (Y-129). `satisfies` checks the same thing about it, which is that the two sides spell
 one message identically; that the daemon then accepts it is `terminal.rs`'s own test.
 
-## TLS is not this crate's job, and the proxy costs it something
+## TLS is not this crate's job, and the kernel proves the proxy
 
 Y-111 put the daemon behind `tailscale serve` on port 8443 (`just https`,
 [`docs/development.md`](../../docs/development.md)). §B2: Tailscale already holds and renews a
 publicly-trusted certificate for the machine's `*.ts.net` name, so **do not terminate TLS here, and do
-not add a cert crate** — the daemon speaks plain HTTP on 7717 and that is the whole design. It also
-proxies to the **tailnet address**, because loopback is refused above.
+not add a cert crate** — the daemon speaks plain HTTP, and that is the whole design.
 
-**The proxy launders the source address, and [ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)
-is what unlaunders it** (Y-118, 2026-08-05). Measured 2026-08-03: a request from another machine
-arrives at the backend from *this* node's address, with the caller in `X-Forwarded-For` and
-`Tailscale-User-Login`. So the caller's address is the TCP peer **unless the peer is one of the
-addresses `listen_on` bound**, and then it is `X-Forwarded-For` — that condition and no other.
-`allowed()` is now protection on both ports.
+**There are two doors.** TCP on 7717, on the tailnet addresses `listen_on` bound, and a Unix socket,
+`$RUNTIME_DIRECTORY/yantrad.sock` (`/run/yantra/yantrad.sock` under the unit, which sets
+`RuntimeDirectory=yantra`). `tailscale serve` proxies `:8443` to the socket. A missing directory is a
+warning and TCP alone: a missing socket removes a door and opens none. The socket is `0666`, because
+the peer's uid is the gate.
 
-Three things about that rule are easy to get subtly wrong, and each is a security bug in a different
-direction:
+**[ADR-0042](../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md) decides the caller**
+(Y-680, amending [ADR-0017](../../docs/adr/0017-the-forwarded-address-is-the-caller-when-the-hop-is-ours.md)).
+`Authoriser::hop` is the lookup and `caller_address` is the one pure decision:
 
-- **The trusted set is the bound addresses, not "local".** Not loopback, which is never bound; not
-  any private range. Widening it by one address gives whatever holds that address the run of the
-  fleet.
-- **An absent header is not a refusal.** It means nothing proxied the request, which is every call on
-  7717 — refusing it would leave the CLI's own port answering 503.
-- **One address or refuse.** `tailscaled` writes exactly one with `Set`, so a comma list, a second
-  header line or anything unparseable means something unmeasured is in the path. Do not take the
-  leftmost entry; that is how a caller-supplied entry becomes an identity.
+- **TCP never reads `X-Forwarded-For`.** The peer is the caller. **A peer that is one of the bound
+  addresses is a 403** that names the socket and the `serve` command: any account on this machine
+  opens a connection from that address, with a header or without one.
+- **uid 0 on the socket is the `serve` hop**, because `tailscaled` runs as root. Its header must be
+  exactly one address: absent is a 403, a list or junk is a 503 (nothing was decided about the
+  caller), and an address this daemon bound is a 403, because the account that opened the first
+  connection is unknown. Any other address goes through ADR-0016's predicate.
+- **The daemon's own uid, or a member of the group `yantra`, is this machine.** The caller is `whois`
+  of the first bound address. The header is ignored. Membership is the primary gid or the group's
+  member list, read with `nix` on a blocking thread (I-13); a lookup that fails refuses.
+- **Any other uid, or none, is a 403** on every route but the two join routes.
 
-**The trust is in the local hop, not in `tailscale serve`.** Any process on this machine can connect
-to a bind address and name whatever caller it likes — no escalation under
-[ADR-0012](../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md), since a
-local process can already call the library, but it is now written down. **Putting a second reverse
-proxy in front of 7717 is the condition to revisit that ADR.**
+Three costs follow, and each is ADR-0042's. A Chat turn or a session on this machine reaches
+`/api/mcp` as its own account, so it is refused until ADR-0040. A Vite proxy on this machine gets 403
+on every write. A member of the `yantra` group lends its trust to every server it runs.
+**`POST /heartbeat` stays on TCP**: it is attributed by the source address, so a socket peer is a 400.
 
 ## Nothing expensive happens on the request path
 

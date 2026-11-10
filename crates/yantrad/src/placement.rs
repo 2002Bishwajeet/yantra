@@ -12,7 +12,6 @@
 //! [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
 
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -23,7 +22,7 @@ use yantra_core::placement::{self, Beat, Candidate, Find, Here, Ranking, Scored,
 use yantra_core::workspace::Workspace;
 
 use crate::heartbeat::Fleet;
-use crate::write::{Authoriser, Refused, allowed, chain};
+use crate::write::{Authoriser, Peer, Refused, allowed, chain};
 
 #[derive(Clone)]
 struct Placer<I> {
@@ -84,11 +83,11 @@ impl Asked {
 
 async fn place<I: Inventory + Clone + Send + Sync + 'static>(
     State(placer): State<Placer<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     body: Option<Json<Asked>>,
 ) -> Result<Json<Placed>, Refused> {
-    allowed(&placer.authoriser, from.ip(), &headers).await?;
+    allowed(&placer.authoriser, &from, &headers).await?;
     let asked = body.map(|Json(asked)| asked).unwrap_or_default();
     let wanted = asked.wanted()?;
 
@@ -279,6 +278,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, header};
     use std::net::IpAddr;
+    use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tower::ServiceExt as _;
@@ -389,7 +389,11 @@ mod tests {
                 .collect(),
             owner: ME,
         };
-        let app: Router = routes(Authoriser::new(fake, &[]), fleet, find);
+        let app: Router = routes(
+            Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock")),
+            fleet,
+            find,
+        );
         let mut request = Request::post("/placement");
         if body.is_some() {
             request = request.header(header::CONTENT_TYPE, "application/json");
@@ -399,7 +403,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((from, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((from, 61620)))));
         let response = app
             .oneshot(request)
             .await
