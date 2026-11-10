@@ -44,6 +44,7 @@ yantra history stage             # redact this machine's agent transcripts into 
 yantra history extract --decision session-state --out rows ~/.local/share/yantra/history
                                  # cut training rows from that folder, checked by gitleaks again
 yantra doctor [machine] [--json] # what each machine can and cannot do; changes nothing
+yantra jobs [--json]             # this machine's systemd user timers, each last result and state file
 yantra fix-terminfo <machine>    # teach a machine your terminal
 yantra forget-host-key <machine> # forget its recorded host key, once you know why it changed
 yantra ssh-identity              # prepare this account's ~/.ssh, and print the key to place
