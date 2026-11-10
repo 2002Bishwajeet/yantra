@@ -444,6 +444,108 @@ describe("Claude's model and effort", () => {
   })
 })
 
+describe("the thread's context length", () => {
+  async function pick(control: 'Model' | 'Context' | 'Harness', label: string) {
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${control}: `) }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    // The harness menu names each item by its text alone.
+    fireEvent.click(options.find((one) => (one.getAttribute('aria-label') ?? one.textContent) === label)!)
+    await settled(() => expect(screen.getByRole('button', { name: `${control}: ${label}` })).toBeTruthy())
+    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
+  }
+
+  it('sends none until one is picked, and then sends it on the turn', async () => {
+    await open()
+    expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy()
+    type('first')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say(started())
+    say(of('turn.started'))
+    await pick('Context', '512K')
+    say({ ...of('turn.completed'), payload: { state: 'completed', stopReason: 'end_turn' } })
+    await settled(() => expect(screen.getByRole('status').textContent).toBe('Claude finished.'))
+    type('second')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([
+        { type: 'turn', text: 'first', harness: 'claude', mode: 'supervised' },
+        { type: 'turn', text: 'second', mode: 'supervised', contextLength: 512_000 },
+      ]),
+    )
+  })
+
+  it('goes back to Default when the model cannot hold the length', async () => {
+    await open()
+    await pick('Context', '1M')
+    await pick('Model', 'Haiku')
+    expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Context: Default' }))
+    const options = await settled(() => screen.getAllByRole('menuitemradio'))
+    expect(options.map((one) => one.getAttribute('aria-label'))).toEqual(['Default'])
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
+    await pick('Model', 'Opus')
+    expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy()
+    type('short')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([{ type: 'turn', text: 'short', harness: 'claude', mode: 'supervised', model: 'opus' }]),
+    )
+  })
+
+  it('reaches Codex on the turn that opens the thread, and is fixed after it', async () => {
+    await open()
+    await pick('Harness', 'Codex')
+    await pick('Context', '400K')
+    fireEvent.change(screen.getByLabelText('Message Codex in yantra-web'), { target: { value: 'list the files' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() =>
+      expect(frames()).toEqual([
+        { type: 'turn', text: 'list the files', harness: 'codex', mode: 'supervised', contextLength: 400_000 },
+      ]),
+    )
+    say(started('codex'))
+    await settled(() => expect(screen.getByRole('button', { name: 'Context: 400K' })).toHaveProperty('disabled', true))
+  })
+
+  it('is not offered by a harness that takes no length', async () => {
+    await open()
+    await pick('Harness', 'opencode')
+    expect(screen.queryByRole('button', { name: /^Context: / })).toBeNull()
+  })
+
+  it('is kept for each thread', async () => {
+    await open()
+    await pick('Context', '1M')
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(2))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Context: 1M' })).toBeTruthy())
+    cleanup()
+
+    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    await settled(() => expect(server.asked).toHaveLength(3))
+    say(started())
+    await settled(() => expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy())
+  })
+
+  it('draws the bad frame a daemon sends for a length it refuses, and the picker stays usable', async () => {
+    await open()
+    await pick('Context', '256K')
+    type('go')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    say({ type: 'error', kind: 'badFrame', said: '50000 is not a context length of 100k to 1M tokens' })
+    const alert = await settled(() => screen.getByRole('alert'))
+    expect(alert.textContent).toContain('The daemon could not read what the dashboard sent.')
+    expect(alert.textContent).toContain('is not a context length of 100k to 1M tokens')
+    expect(screen.getByRole('button', { name: 'Context: 256K' })).toHaveProperty('disabled', false)
+  })
+})
+
 describe('the chat', () => {
   it('opens on an empty conversation, and says why Send is off', async () => {
     await open()

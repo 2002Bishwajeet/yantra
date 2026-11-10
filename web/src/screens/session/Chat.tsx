@@ -6,7 +6,9 @@ import { asApiError } from '@/api/errors'
 import { useCommands, useMentions } from '@/api/queries'
 import {
   LABEL,
+  lengthsFor,
   type ClaudeModel,
+  type ContextLength,
   type Effort,
   type Decision,
   type Harness,
@@ -43,12 +45,15 @@ import { useEditors } from './diff/useEditors'
 import { ChatMarkdown } from './markdown/ChatMarkdown'
 import { ChatHeader } from './ChatHeader'
 import { HarnessPicker } from './HarnessPicker'
+import { ContextPicker } from './ContextPicker'
 import { EffortPicker } from './EffortPicker'
 import {
+  keepContext,
   keepEffort,
   keepInteraction,
   keepMode,
   keepModel,
+  recallContext,
   recallEffort,
   recallInteraction,
   recallMode,
@@ -205,13 +210,15 @@ export function Chat(props: ChatProps) {
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
   const [model, setModel] = useState<ClaudeModel | null>(() => recallModel(thread))
   const [effort, setEffort] = useState<Effort | null>(() => recallEffort(thread))
-  // A new thread is named on its first turn, and keeps the mode, model and effort it was sent with.
+  const [context, setContext] = useState<ContextLength | null>(() => recallContext(thread))
+  // A new thread is named on its first turn, and keeps the mode, model, effort and context length it was sent with.
   useEffect(() => {
     if (!timeline.thread) return
     keepMode(timeline.thread, mode)
     keepModel(timeline.thread, model)
     keepEffort(timeline.thread, effort)
-  }, [timeline.thread, mode, model, effort])
+    keepContext(timeline.thread, context)
+  }, [timeline.thread, mode, model, effort, context])
   const [interaction, setInteraction] = useState<Interaction>(() => recallInteraction(thread))
   useEffect(() => {
     if (timeline.thread) keepInteraction(timeline.thread, interaction)
@@ -223,6 +230,12 @@ export function Chat(props: ChatProps) {
   const agent = harness ? LABEL[harness] : 'the agent'
   // Only Claude has a plan mode, so another harness's turn is a build turn whatever was kept.
   const planning = harness === 'claude' ? interaction : 'build'
+  const lengths = lengthsFor(harness, model, timeline.usage?.max)
+  const pickModel = (next: ClaudeModel | null) => {
+    setModel(next)
+    // A length the new model does not allow goes back to the default.
+    if (!lengthsFor(harness, next).some((one) => one.length === context)) setContext(null)
+  }
   // A first turn refused for its login never reaches the timeline, so the
   // words it carried come back to the composer. Its images do not: the
   // daemon removes them when the client closes the socket.
@@ -306,7 +319,8 @@ export function Chat(props: ChatProps) {
     const out = compose(words)
     if (out === '' || uploading) return
     const claude = harness === 'claude'
-    if (chat.send(out, locked ? undefined : picked, mode, planning, claude ? model : null, claude ? effort : null)) {
+    const length = lengths.some((one) => one.length === context) ? context : null
+    if (chat.send(out, locked ? undefined : picked, mode, planning, claude ? model : null, claude ? effort : null, length)) {
       lastSent.current = words.trim()
       recalled.current = null
       setDraft('')
@@ -674,9 +688,18 @@ export function Chat(props: ChatProps) {
                 />
                 {harness === 'claude' ? (
                   <>
-                    <ModelPicker disabled={link !== 'open'} onChange={setModel} value={model} />
+                    <ModelPicker disabled={link !== 'open'} onChange={pickModel} value={model} />
                     <EffortPicker disabled={link !== 'open'} onChange={setEffort} value={effort} />
                   </>
+                ) : null}
+                {lengths.length > 0 ? (
+                  <ContextPicker
+                    // Codex reads its length only when its keeper starts, on the thread's first turn.
+                    disabled={link !== 'open' || (harness === 'codex' && locked)}
+                    lengths={lengths}
+                    onChange={setContext}
+                    value={context}
+                  />
                 ) : null}
               </>
             }

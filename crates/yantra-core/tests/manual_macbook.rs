@@ -876,6 +876,7 @@ async fn real_turn(
         None,
         None,
         None,
+        None,
     );
     let run = keep::run_id()?;
     let Started::Running { pane } =
@@ -903,6 +904,7 @@ async fn real_turn(
             interaction: Interaction::Build,
             model: None,
             effort: None,
+            context: None,
         },
         said,
     );

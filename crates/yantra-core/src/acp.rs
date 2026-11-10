@@ -59,11 +59,18 @@ impl Harness {
     /// as I-34 requires, since a tmux pane's `PATH` is the server's, then its
     /// arguments. The `cd` matters: the keeper runs it in its journal
     /// directory, where a relative write would land beside `in` and `out`.
-    pub fn kept_command(self, worktree: &str) -> String {
+    /// Only Codex takes a context length, as a config override (Y-663).
+    pub fn kept_command(self, worktree: &str, context: Option<chat::ContextLength>) -> String {
         let (binary, args) = self
             .command()
             .split_once(' ')
             .unwrap_or((self.command(), ""));
+        let args = match (self, context) {
+            (Self::Codex, Some(context)) => {
+                format!("-c model_auto_compact_token_limit={}", context.tokens())
+            }
+            _ => args.to_owned(),
+        };
         format!(
             "cd {} || exit 1\n\
              c=$({}) || {{ echo '{binary} was not found on PATH or in any of: {}' >&2; exit 127; }}\n\
@@ -239,18 +246,24 @@ impl Agent {
     /// An agent held by a keeper ([`keep`]): `reader` follows its `out` from
     /// byte 0 and `writer` appends to its `in`. Each event read carries a
     /// cursor in `run`, and `said` is what the keeper's `err` holds.
+    /// `context` is the length [`Harness::kept_command`] started it with.
     pub fn kept<R, W>(
         harness: Harness,
         reader: R,
         writer: W,
         run: &str,
+        context: Option<chat::ContextLength>,
         said: Said,
     ) -> (Self, Events)
     where
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
-        let parse = (Some(run.to_owned()), Some(0), State::default());
+        let state = State {
+            context: context.map(|context| u64::from(context.tokens())),
+            ..State::default()
+        };
+        let parse = (Some(run.to_owned()), Some(0), state);
         Self::wire(harness, reader, writer, parse, Some(said), None)
     }
 
@@ -572,6 +585,8 @@ struct State {
     answered: HashMap<String, Value>,
     /// The end of the line being read and the number of events made from it.
     line: Option<(u64, u32)>,
+    /// The tokens the agent compacts at. An adopted keeper's is unknown.
+    context: Option<u64>,
 }
 
 /// A call this client made. `reply` is `None` for a call an earlier daemon
@@ -805,8 +820,10 @@ impl Shared {
             }
             (Some(id), Some(_)) => self.refuse(id, METHOD_NOT_FOUND, "Method not found"),
             (None, Some(method)) if method == "session/update" => {
+                // Read first: a guard in the condition would live into `emit`, which locks too.
+                let context = self.lock().context;
                 if let Ok(updated) = serde_json::from_value::<Updated>(message.params)
-                    && let Some(event) = event(updated.update)
+                    && let Some(event) = event(updated.update, context)
                 {
                     self.emit(&updated.session_id, event);
                 }
@@ -1362,7 +1379,7 @@ enum OptionKind {
 }
 
 /// One update as the chat sees it, or `None` for what the chat does not draw.
-fn event(update: SessionUpdate) -> Option<Event> {
+fn event(update: SessionUpdate, context: Option<u64>) -> Option<Event> {
     let delta = |kind, chunk: Chunk| match chunk.content {
         ContentBlock::Text { text } => Some(Event::ContentDelta(chat::ContentDelta {
             stream_kind: kind,
@@ -1406,7 +1423,7 @@ fn event(update: SessionUpdate) -> Option<Event> {
         SessionUpdate::UsageUpdate { used, size } => {
             Some(Event::TokenUsageUpdated(chat::TokenUsage {
                 used_tokens: used,
-                max_tokens: size,
+                max_tokens: context.map_or(size, |context| size.min(context)),
             }))
         }
         SessionUpdate::SessionInfoUpdate { title } => {
@@ -1476,9 +1493,9 @@ fn item(call: ToolCall) -> chat::Item {
 mod tests {
     use super::*;
     use chat::{
-        ContentDelta, Decision, FileChange, Item, ItemStatus, ItemType, PlanStep, PlanStepStatus,
-        RequestOpened, RequestOption, RequestResolved, RequestType, Scope, StopReason, StreamKind,
-        TokenUsage, TurnCompleted, TurnState,
+        ContentDelta, ContextLength, Decision, FileChange, Item, ItemStatus, ItemType, PlanStep,
+        PlanStepStatus, RequestOpened, RequestOption, RequestResolved, RequestType, Scope,
+        StopReason, StreamKind, TokenUsage, TurnCompleted, TurnState,
     };
     use tokio::io::{AsyncBufReadExt, BufReader, DuplexStream, ReadHalf, WriteHalf};
 
@@ -1552,7 +1569,10 @@ mod tests {
     }
 
     fn parse(update: Value) -> Option<Event> {
-        event(serde_json::from_value(update).expect("an update parses"))
+        event(
+            serde_json::from_value(update).expect("an update parses"),
+            None,
+        )
     }
 
     /// R19 §1's handshake, as opencode 1.18.34 answered it.
@@ -2350,7 +2370,7 @@ mod tests {
 
     #[test]
     fn a_kept_agent_starts_in_its_worktree_and_is_searched_for() {
-        let command = Harness::Opencode.kept_command("/w/it's");
+        let command = Harness::Opencode.kept_command("/w/it's", None);
         assert!(
             command.starts_with("cd '/w/it'\\''s' || exit 1\nc=$("),
             "{command}"
@@ -2358,9 +2378,46 @@ mod tests {
         assert!(command.ends_with("exec \"$c\" acp\n"), "{command}");
         assert!(
             Harness::Codex
-                .kept_command("/w")
+                .kept_command("/w", None)
                 .ends_with("exec \"$c\" \n")
         );
+    }
+
+    /// Y-663: Codex compacts at the picked length; the other harnesses have
+    /// no such flag and run as they would.
+    #[test]
+    fn only_codex_is_started_with_a_context_length() {
+        let length = Some(ContextLength::try_from(400_000).expect("a length"));
+        assert!(
+            Harness::Codex
+                .kept_command("/w", length)
+                .ends_with("exec \"$c\" -c model_auto_compact_token_limit=400000\n")
+        );
+        for harness in [Harness::Gemini, Harness::Grok, Harness::Opencode] {
+            assert_eq!(
+                harness.kept_command("/w", length),
+                harness.kept_command("/w", None)
+            );
+        }
+    }
+
+    /// Y-663: the usage chip counts against the length the agent compacts at.
+    #[test]
+    fn a_usage_update_counts_against_the_context_length() {
+        let usage = |size: u64, context| {
+            let update = json!({"sessionUpdate": "usage_update", "used": 7840, "size": size});
+            event(
+                serde_json::from_value(update).expect("an update parses"),
+                context,
+            )
+        };
+        let max = |event: Option<Event>| match event {
+            Some(Event::TokenUsageUpdated(usage)) => usage.max_tokens,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(max(usage(1_000_000, Some(256_000))), 256_000);
+        assert_eq!(max(usage(200_000, Some(400_000))), 200_000);
+        assert_eq!(max(usage(400_000, None)), 400_000);
     }
 
     /// A kept agent over pipes: the agent's stdout is `out`, and what the
@@ -2370,7 +2427,14 @@ mod tests {
         let (client_read, client_write) = tokio::io::split(client);
         let (agent_read, agent_write) = tokio::io::split(agent);
         let said: Said = Box::pin(async { String::new() });
-        let (client, events) = Agent::kept(Harness::Opencode, client_read, client_write, RUN, said);
+        let (client, events) = Agent::kept(
+            Harness::Opencode,
+            client_read,
+            client_write,
+            RUN,
+            None,
+            said,
+        );
         let fake = Fake {
             from_client: BufReader::new(agent_read),
             to_client: agent_write,

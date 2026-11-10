@@ -262,11 +262,11 @@ describe('the chat socket', () => {
     )
   })
 
-  it("sends Claude's model and effort only when they are picked", async () => {
+  it("sends Claude's model, effort and context length only when they are picked", async () => {
     const { socket, opened } = connect()
     await settled(() => expect(opened).toHaveBeenCalled())
-    socket.send('and the docs', undefined, 'supervised', 'plan', null, null)
-    socket.send('think it through', undefined, 'supervised', 'build', 'opus', 'high')
+    socket.send('and the docs', undefined, 'supervised', 'plan', null, null, null)
+    socket.send('think it through', undefined, 'supervised', 'build', 'opus', 'high', 400_000)
     await settled(() => expect(server.heard).toHaveLength(2))
     expect(server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))).toEqual(
       chatFrames.slice(1, 3),

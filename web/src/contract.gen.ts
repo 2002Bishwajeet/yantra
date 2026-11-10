@@ -1351,6 +1351,7 @@ export const chatFrames = [
     "type": "turn"
   },
   {
+    "contextLength": 400000,
     "effort": "high",
     "mode": "supervised",
     "model": "opus",

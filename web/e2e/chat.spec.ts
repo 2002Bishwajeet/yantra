@@ -403,10 +403,11 @@ test.describe('the composer', () => {
       .toEqual([])
   })
 
-  // Y-564: six controls do not fit a phone's row, and a hidden scroll would hide the last ones.
+  // Y-564, Y-663: seven controls do not fit a phone's row, and a hidden scroll would hide the last ones.
   test('shows every control, wrapping rather than scrolling', async ({ page }) => {
     await composer(page).focus()
     await expect(page.getByRole('button', { name: /^Effort: / })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Context: / })).toBeVisible()
     const row = page.locator('.composer__controls')
     expect(await row.evaluate((one) => one.scrollWidth <= one.clientWidth)).toBe(true)
   })

@@ -408,6 +408,39 @@ impl From<Model> for String {
     }
 }
 
+/// The tokens Claude or Codex lets a thread fill before it compacts (Y-663):
+/// `claude --autocompact` takes 100k to 1M, and nothing outside that parses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u32", into = "u32")]
+pub struct ContextLength(u32);
+
+impl ContextLength {
+    #[must_use]
+    pub fn tokens(self) -> u32 {
+        self.0
+    }
+}
+
+impl TryFrom<u32> for ContextLength {
+    type Error = String;
+
+    fn try_from(tokens: u32) -> Result<Self, String> {
+        if (100_000..=1_000_000).contains(&tokens) {
+            Ok(Self(tokens))
+        } else {
+            Err(format!(
+                "{tokens} is not a context length of 100k to 1M tokens"
+            ))
+        }
+    }
+}
+
+impl From<ContextLength> for u32 {
+    fn from(length: ContextLength) -> Self {
+        length.0
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -623,6 +656,34 @@ mod tests {
             assert_eq!(effort.name(), name);
         }
         assert!(serde_json::from_value::<Effort>(json!("ultra")).is_err());
+    }
+
+    #[test]
+    fn a_context_length_is_a_token_count_from_100k_to_1m() {
+        for tokens in [100_000, 256_000, 1_000_000] {
+            let length: ContextLength =
+                serde_json::from_value(json!(tokens)).expect("a length parses");
+            assert_eq!(length.tokens(), tokens);
+            assert_eq!(
+                serde_json::to_value(length).expect("a length serialises"),
+                json!(tokens)
+            );
+        }
+        for hostile in [
+            json!(99_999),
+            json!(1_000_001),
+            json!(0),
+            json!(-1),
+            json!(256_000.5),
+            json!("256000"),
+            json!("1m; touch /tmp/pwned"),
+            json!(u64::MAX),
+        ] {
+            assert!(
+                serde_json::from_value::<ContextLength>(hostile.clone()).is_err(),
+                "{hostile}"
+            );
+        }
     }
 
     #[test]
