@@ -472,6 +472,8 @@ curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yantra/join | sh
 ```
 
 There an account that is not `yantra` and not in the `yantra` group may join itself and nothing more.
+So the script cannot ask `yantrad` to test its login, and it says so: the dashboard's Check on the
+appliance shows whether `yantrad` can log in.
 
 The daemon makes its key the first time this is fetched. The script asks before each step that
 needs root: it turns on `sshd`, places the key in that account's `authorized_keys`, offers `tmux`,

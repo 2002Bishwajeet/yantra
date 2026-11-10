@@ -418,8 +418,11 @@ because sshd's host key is not Tailscale SSH's. It holds `Fleet::joins` too, and
 owner ruled that generation is Yantra's and happens on first use. **On the socket another account
 may join itself** ([ADR-0042](../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md) §3): the
 two join routes call `joining`, which admits that account for `GET /join` and for a `POST /api/join`
-whose `user` is its own name. Every other route refuses it. A script fetched on the socket carries
-the socket's path, and `join.sh` sends its three daemon calls there.
+whose `user` is its own name. Every other route refuses it. A script fetched on the socket by an
+account other than root carries the socket's path, and `join.sh` sends its daemon calls there. uid 0
+is the `serve` hop, so its script names no socket: the machine that runs it is another one. The login
+test and `forget-host-key` call `allowed`, so that other account gets a 403 on them, and `join.sh`
+says the test did not run and points at the dashboard's Check.
 
 **`clone` is one of the writes that answer before their work is done** (Y-344). `git clone` runs as the
 startup command of a tmux session on the machine and the route answers `202` with the session's name;

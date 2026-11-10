@@ -380,13 +380,25 @@ report() {
 
 # Only a real login tells: the tailnet's SSH policy decides, and this machine
 # cannot read it. A check policy waits for a browser the appliance does not have.
+# 0: a browser is needed. 1: it is not. 2: yantrad did not test the login.
 browser_needed() {
     say "testing a real login from the appliance, which can take a minute."
-    reply=$(daemon_curl -sS --max-time 120 -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 1
+    reply=$(daemon_curl -sS --max-time 120 -w '\n%{http_code}' -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 2
+    code=$(printf '%s\n' "$reply" | tail -n 1)
+    reply=$(printf '%s\n' "$reply" | sed '$d')
+    if [ "$code" != 200 ]; then
+        say "yantrad did not test the login. It answered $code: $reply"
+        return 2
+    fi
     case "$reply" in
     (*'Tailscale SSH requires an additional check'*) return 0 ;;
     (*) return 1 ;;
     esac
+}
+
+# On the hub, an account that is not the owner's gets a 403 here (ADR-0042 §3).
+untested() {
+    say "so this script cannot tell if the appliance can log in here. The dashboard's Check on $machine says."
 }
 
 # Tailscale SSH goes last: it serves this very session if one came in through it.
@@ -410,9 +422,12 @@ use_sshd_instead() {
     if ! daemon_curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
         say "yantrad kept Tailscale SSH's old host key, so its next check fails on a changed key. Run sudo -u yantra -H yantra forget-host-key $machine on the appliance."
     fi
-    if browser_needed; then
-        fail "the appliance still cannot log in. The dashboard's Check says why."
-    fi
+    needed=0
+    browser_needed || needed=$?
+    case "$needed" in
+    (0) fail "the appliance still cannot log in. The dashboard's Check says why." ;;
+    (2) untested ;;
+    esac
 }
 
 say "this lets the Yantra appliance at $DAEMON log in here as $user."
@@ -438,7 +453,12 @@ else
     linux_agent
 fi
 report
-if [ -n "$via_tailscale" ] && [ -n "$machine" ] && browser_needed; then
-    use_sshd_instead
+if [ -n "$via_tailscale" ] && [ -n "$machine" ]; then
+    needed=0
+    browser_needed || needed=$?
+    case "$needed" in
+    (0) use_sshd_instead ;;
+    (2) untested ;;
+    esac
 fi
 say "done. Open the dashboard: this machine's Check turns green once Yantra reaches it."

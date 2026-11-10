@@ -1454,8 +1454,10 @@ async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
         .collect();
     let script = join::daemon_address(&bound)
         .and_then(|daemon| {
-            // ADR-0042: a script fetched on the socket reports on it too.
-            let socket = matches!(from, Peer::Unix(_)).then_some(&*state.authoriser.socket);
+            // ADR-0042: a script fetched on the socket reports on it too, but
+            // uid 0 is `serve`, whose caller is another machine with no socket.
+            let socket = matches!(from, Peer::Unix(Some(uid)) if uid != 0)
+                .then_some(&*state.authoriser.socket);
             join::script(daemon, &prepared.public_key, socket)
         })
         .map_err(|error| Refused::Verb {
@@ -6428,9 +6430,29 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(body.contains("SOCKET='/run/yantra/yantrad.sock'"), "{body}");
 
-        let served = script::<Fake, ()>(at(tailnet), fleet.clone());
+        let served = script::<Fake, ()>(at(tailnet.clone()), fleet.clone());
         let (status, _, body) = join_send(served, "GET", "/join", tcp(address(7)), "").await;
         assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("SOCKET=''"), "{body}");
+
+        // `curl …:8443/join | sh` on another machine reaches the socket as root.
+        use tower::ServiceExt as _;
+        let request = axum::http::Request::builder()
+            .method("GET")
+            .uri("/join")
+            .header(FORWARDED_FOR, address(7).to_string())
+            .extension(ConnectInfo(SERVE))
+            .body(axum::body::Body::empty())
+            .expect("a request");
+        let response = script::<Fake, ()>(at(tailnet), fleet.clone())
+            .oneshot(request)
+            .await
+            .expect("infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("a body");
+        let body = String::from_utf8_lossy(&body);
         assert!(body.contains("SOCKET=''"), "{body}");
         let _ = std::fs::remove_dir_all(&dir);
     }

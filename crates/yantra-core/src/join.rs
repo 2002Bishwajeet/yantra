@@ -166,6 +166,52 @@ mod tests {
         );
     }
 
+    /// `browser_needed` from `join.sh`, run in `sh` against a `daemon_curl`
+    /// that prints `body` and then `code`, as `-w '\n%{http_code}'` does.
+    fn browser_needed_given(code: u16, body: &str) -> (i32, String) {
+        let start = SCRIPT
+            .find("browser_needed() {")
+            .expect("join.sh has browser_needed");
+        let end = start + SCRIPT[start..].find("\n}\n").expect("browser_needed ends") + 3;
+        let say = SCRIPT
+            .lines()
+            .find(|line| line.starts_with("say() {"))
+            .expect("join.sh has say");
+        let out = std::process::Command::new("sh")
+            .args([
+                "-c",
+                &format!(
+                    "{say}\ndaemon_curl() {{ printf '%s\\n%s' \"$BODY\" \"$CODE\"; }}\n{}\nbrowser_needed",
+                    &SCRIPT[start..end]
+                ),
+            ])
+            .env("BODY", body)
+            .env("CODE", code.to_string())
+            .output()
+            .expect("sh is on every machine this builds on");
+        (
+            out.status.code().expect("sh exited"),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    }
+
+    /// ADR-0042 §3: on the hub, another account's login test is a 403, which
+    /// is neither answer and is said.
+    #[test]
+    fn a_refused_login_test_is_reported_and_not_read_as_no_browser() {
+        let (status, said) = browser_needed_given(403, "this account may only join itself");
+        assert_eq!(status, 2, "{said}");
+        assert!(said.contains("answered 403"), "{said}");
+        assert!(said.contains("may only join itself"), "{said}");
+
+        let blocked = r#"{"detail":"Tailscale SSH requires an additional check."}"#;
+        assert_eq!(browser_needed_given(200, blocked).0, 0);
+        assert_eq!(
+            browser_needed_given(200, r#"{"detail":"a command ran"}"#).0,
+            1
+        );
+    }
+
     /// `sh -n` parses without running, so a syntax error fails here rather
     /// than on the machine someone is trying to join.
     #[test]
