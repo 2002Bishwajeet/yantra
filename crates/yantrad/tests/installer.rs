@@ -775,6 +775,79 @@ fn a_release_whose_archive_carries_no_updater_installs_without_one() -> Result<(
     Ok(())
 }
 
+/// Y-662: `--channel nightly` installs the rolling nightly and keeps the
+/// choice for yantrad's account to rewrite. The unit then refuses to go back
+/// to an older stable release, and a person running the script does not.
+#[test]
+fn a_nightly_install_keeps_its_channel_and_only_a_person_goes_back() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    const NIGHTLY: &str = "0.2.1-nightly.20261110143205.abc1234";
+
+    fixture.publish(NIGHTLY, "nightly")?;
+    fixture.release(&["nightly", &fixture.repo, NIGHTLY])?;
+    fixture.release(&["unresolvable", &fixture.repo])?;
+    let piped = "cat /fixture/install.sh | bash -s -- --channel nightly";
+    let out = fixture
+        .systemd
+        .exec_as(UNPRIVILEGED, &["bash", "-c", piped])?;
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{said}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        said.contains(&format!("install: yantra v{NIGHTLY},")),
+        "the version comes off this target's nightly archive:\n{said}"
+    );
+    assert_eq!(
+        fixture
+            .sh("stat -c '%a %U' /etc/yantra/channel && cat /etc/yantra/channel")?
+            .trim(),
+        "644 yantra\nnightly"
+    );
+    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), NIGHTLY);
+    for binary in BINARIES {
+        assert_eq!(
+            fixture.sha(&format!("/usr/local/bin/{binary}"))?,
+            fixture.sha(&format!("/srv/staging/yantra-*/{binary}"))?,
+            "{binary} is not the nightly's"
+        );
+    }
+
+    // A run that names no channel follows the kept one.
+    let again = fixture.install_ok()?;
+    assert!(
+        again.contains(&format!("install: yantra v{NIGHTLY},")),
+        "{again}"
+    );
+
+    // Settings switched back to stable, whose release is older than the
+    // nightly. The unit, which RUNTIME_DIRECTORY marks, installs nothing.
+    fixture.publish(VERSION, "stable")?;
+    fixture.sh("echo stable > /etc/yantra/channel")?;
+    let unit = fixture.sh("install -d /run/fake-update && \
+         RUNTIME_DIRECTORY=/run/fake-update bash /fixture/install.sh; echo \"exit=$?\"; \
+         cat /run/fake-update/said")?;
+    assert!(unit.contains("exit=1"), "{unit}");
+    assert!(
+        unit.contains(&format!("v{VERSION} is older than v{NIGHTLY}")),
+        "{unit}"
+    );
+    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), NIGHTLY);
+
+    // A person may go back.
+    let back = fixture.install_ok()?;
+    assert!(
+        back.contains(&format!("install: yantra v{VERSION},")),
+        "{back}"
+    );
+    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), VERSION);
+    Ok(())
+}
+
 /// A release list that does not answer resolves no version, and the script
 /// stops there — a `403` from the unauthenticated rate limit takes this same
 /// branch (ADR-0027 §4). `YANTRA_VERSION` is the way past it, and it reads no

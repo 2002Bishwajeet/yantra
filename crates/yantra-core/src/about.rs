@@ -4,7 +4,11 @@
 //! crate for its own target in the same build and the workspace has one
 //! version, so the three constants are the binary's own.
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// A nightly build carries its own version, which the workflow sets (Y-662).
+pub const VERSION: &str = match option_env!("YANTRA_BUILD_VERSION") {
+    Some(version) if !version.is_empty() => version,
+    _ => env!("CARGO_PKG_VERSION"),
+};
 /// The target triple this was compiled for.
 pub const TARGET: &str = env!("YANTRA_TARGET");
 /// The UTC date the build script last ran, `YYYY-MM-DD`.
@@ -19,7 +23,7 @@ pub fn newer(published: &crate::github::Release) -> bool {
 fn newer_than(published: &crate::github::Release, running: &str) -> bool {
     // An unparsable running version orders below every release, so a check
     // says *newer* rather than *current* when it cannot tell.
-    crate::github::Release::parse(running).is_none_or(|running| published.parts > running.parts)
+    crate::github::Release::parse(running).is_none_or(|running| published.is_newer_than(&running))
 }
 
 #[cfg(test)]
@@ -39,6 +43,15 @@ mod tests {
         assert!(!newer_than(&release("0.3.2"), "0.3.3"), "older is current");
         assert!(newer_than(&release("1.0.0"), "0.9.9"));
         assert!(newer_than(&release("0.10.0"), "0.9.9"), "multi-digit minor");
+        let nightly = "0.10.4-nightly.20261110143205.abc1234";
+        assert!(
+            newer_than(&release(nightly), "0.10.3"),
+            "a nightly past stable"
+        );
+        assert!(
+            !newer_than(&release("0.10.3"), nightly),
+            "stable below a nightly"
+        );
     }
 
     #[test]

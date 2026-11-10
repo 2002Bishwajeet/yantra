@@ -4,7 +4,8 @@
 //! Two callers, one unit. `yantrad` runs as an account that cannot write
 //! `/usr/local/bin`, so it only creates [`TRIGGER`] and `yantra-update.path`
 //! starts the unit. `yantra update` run with privilege starts the unit itself.
-//! Neither passes a version: the unit resolves the current release on its own.
+//! Neither passes a version: the unit resolves the current release on its own,
+//! on the channel [`CHANNEL`] names (Y-662).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -22,6 +23,10 @@ pub const UNIT: &str = "yantra-update.service";
 /// The unit's `RuntimeDirectory`, where `install.sh` writes how far it got
 /// (Y-612). The daemon's account cannot read the journal, so it reads this.
 pub const PROGRESS: &str = "/run/yantra-update";
+
+/// Which release the unit installs (Y-662). `/etc/yantra` is root's, so the
+/// daemon's account can rewrite this file and cannot swap it for a link.
+pub const CHANNEL: &str = "/etc/yantra/channel";
 
 /// How many of the unit's last stderr lines a failure carries.
 const SAID_LINES: usize = 20;
@@ -43,6 +48,37 @@ pub enum Progress {
     Failed {
         said: String,
     },
+}
+
+/// A stable release is a `v*` tag; a nightly is the rolling pre-release that
+/// every merge to `main` republishes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Channel {
+    #[default]
+    Stable,
+    Nightly,
+}
+
+impl std::fmt::Display for Channel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Stable => "stable",
+            Self::Nightly => "nightly",
+        })
+    }
+}
+
+impl std::str::FromStr for Channel {
+    type Err = String;
+
+    fn from_str(word: &str) -> Result<Self, String> {
+        match word {
+            "stable" => Ok(Self::Stable),
+            "nightly" => Ok(Self::Nightly),
+            _ => Err(format!("`{word}` is not a channel: name stable or nightly")),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -75,6 +111,46 @@ pub enum Error {
 
     #[error("{} names an archive that is a path: {archive}", dir.display())]
     ArchivePath { dir: PathBuf, archive: String },
+
+    /// The file's text stays out: root reads it, and this error reaches a page.
+    #[error("{} names no channel: it must hold stable or nightly", path.display())]
+    NotAChannel { path: PathBuf },
+
+    #[error("could not write {}", path.display())]
+    ChannelUnwritable {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// The channel `path` names. No file is stable, as it is to the unit.
+pub fn channel(path: &Path) -> Result<Channel, Error> {
+    match read(path)? {
+        None => Ok(Channel::Stable),
+        Some(text) => text.trim().parse().map_err(|_| Error::NotAChannel {
+            path: path.to_owned(),
+        }),
+    }
+}
+
+/// Written in place, because the daemon's account cannot create a file in
+/// `/etc/yantra`. `install.sh` creates it and hands it to that account.
+pub fn set_channel(path: &Path, channel: Channel) -> Result<(), Error> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let unwritable = |source| Error::ChannelUnwritable {
+        path: path.to_owned(),
+        source,
+    };
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o644)
+        .open(path)
+        .and_then(|mut file| writeln!(file, "{channel}"))
+        .map_err(unwritable)
 }
 
 /// The daemon's half: an empty file the path unit watches. The paths are
@@ -211,6 +287,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a scratch directory");
         dir
+    }
+
+    #[test]
+    fn a_channel_is_one_of_two_words_and_no_file_is_stable() {
+        let dir = scratch("channel");
+        let file = dir.join("channel");
+        assert_eq!(channel(&file).expect("no file"), Channel::Stable);
+        set_channel(&file, Channel::Nightly).expect("written");
+        assert_eq!(std::fs::read_to_string(&file).expect("read"), "nightly\n");
+        assert_eq!(channel(&file).expect("read"), Channel::Nightly);
+        set_channel(&file, Channel::Stable).expect("rewritten");
+        assert_eq!(channel(&file).expect("read"), Channel::Stable);
+        std::fs::write(&file, "root:x:0:0\n").expect("junk");
+        let refused = channel(&file).expect_err("junk");
+        assert!(matches!(refused, Error::NotAChannel { .. }), "{refused:?}");
+        assert!(!refused.to_string().contains("root:x"), "{refused}");
+        assert!("beta".parse::<Channel>().is_err());
+        assert_eq!("nightly".parse::<Channel>(), Ok(Channel::Nightly));
+    }
+
+    #[test]
+    fn a_channel_in_a_directory_that_is_not_there_is_unwritable() {
+        let dir = scratch("channel-gone");
+        let refused = set_channel(&dir.join("gone").join("channel"), Channel::Nightly);
+        assert!(
+            matches!(refused, Err(Error::ChannelUnwritable { .. })),
+            "{refused:?}"
+        );
     }
 
     #[test]

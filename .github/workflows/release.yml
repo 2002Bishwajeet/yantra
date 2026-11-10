@@ -4,8 +4,13 @@ name: release
 # uploads the archives as workflow artifacts without publishing anything, which
 # is how you rehearse a release before committing to a tag. Either way the
 # `rehearse` job installs and updates the built x86_64 archive before `release`.
+#
+# A push to main publishes the nightly (Y-662): the two Linux archives only,
+# with no rehearse, re-uploaded to the one rolling `nightly` pre-release.
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -38,14 +43,29 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
+      nightly: ${{ steps.resolve.outputs.nightly }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Resolve version from ref
         id: resolve
         shell: bash
         run: |
           set -euo pipefail
+          nightly=false
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            # One patch past the crate's version, which is the last release, so
+            # semver orders a nightly after it and before the next. The stamp is
+            # the commit's UTC time, so two merges a day still order.
+            base=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+            IFS=. read -r major minor patch <<<"$base"
+            stamp=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S HEAD)
+            version="${major}.${minor}.$((patch + 1))-nightly.${stamp}.${GITHUB_SHA:0:7}"
+            nightly=true
           else
             version="0.0.0-dev.${GITHUB_SHA:0:7}"
           fi
@@ -56,7 +76,48 @@ jobs:
           esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "version=$version prerelease=$prerelease" >> "$GITHUB_STEP_SUMMARY"
+          echo "nightly=$nightly" >> "$GITHUB_OUTPUT"
+          echo "version=$version prerelease=$prerelease nightly=$nightly" >> "$GITHUB_STEP_SUMMARY"
+
+      # The build matrix, here so a nightly can drop the two macOS targets.
+      #
+      # aarch64-unknown-linux-musl is the appliance: static musl, no libc on the
+      # Pi 5 to depend on. x86_64-unknown-linux-musl is Linux dev boxes and the
+      # x86 mini-PC alternative to the Pi.
+      #
+      # macOS exists only for the heartbeat agent; the daemon and CLI are not
+      # shipped there (see the PR description for the reasoning).
+      #
+      # **Windows is not here, and its absence is Q4's.** `probes.rs` carries
+      # a `compile_error!` for any other target — the probes are Linux and
+      # macOS only because Q4 is deliberately open — so a Windows entry
+      # claims an artifact the code refuses to produce. It was in this matrix
+      # from the first commit and green in the 2026-07-31 rehearsal; Y-106
+      # added the refusal afterwards and nothing re-ran this workflow until
+      # v0.1.0's tag. Restoring it needs the matrix entry, a `.exe` suffix in
+      # the staging step and a zip archive step — all removed with it.
+      #
+      # Per R-19 in ADR-0004, Apple targets are never cross-compiled from
+      # Linux — that needs the Apple SDK via osxcross. They are built on a
+      # macOS runner with Apple's own toolchain, which carries both the
+      # arm64 and the x86_64 slice, so one runner covers both triples.
+      - name: Choose the targets
+        id: matrix
+        shell: bash
+        env:
+          NIGHTLY: ${{ steps.resolve.outputs.nightly }}
+        run: |
+          set -euo pipefail
+          linux='{"os":"ubuntu-24.04","packages":"yantrad yantra yantra-agent yantra-box","zigbuild":true,"archive":"tar.gz","dashboard":true}'
+          apple='{"os":"macos-15","packages":"yantra-agent","archive":"tar.gz"}'
+          matrix=$(jq -cn --argjson linux "$linux" --argjson apple "$apple" --arg nightly "$NIGHTLY" '
+            [ ($linux + {target: "aarch64-unknown-linux-musl"}),
+              ($linux + {target: "x86_64-unknown-linux-musl"}),
+              ($apple + {target: "aarch64-apple-darwin"}),
+              ($apple + {target: "x86_64-apple-darwin"}) ]
+            | if $nightly == "true" then map(select(.os == "ubuntu-24.04")) else . end
+            | {include: .}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   build:
     name: build ${{ matrix.target }}
@@ -67,50 +128,7 @@ jobs:
     strategy:
       # One broken target should still tell us about the other four.
       fail-fast: false
-      matrix:
-        include:
-          # The appliance. Static musl, no libc on the Pi 5 to depend on.
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-24.04
-            packages: yantrad yantra yantra-agent yantra-box
-            zigbuild: true
-            archive: tar.gz
-            dashboard: true
-
-          # Linux dev boxes and the x86 mini-PC alternative to the Pi.
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-24.04
-            packages: yantrad yantra yantra-agent yantra-box
-            zigbuild: true
-            archive: tar.gz
-            dashboard: true
-
-          # macOS exists only for the heartbeat agent; the daemon and CLI are
-          # not shipped there (see the PR description for the reasoning).
-          #
-          # **Windows is not here, and its absence is Q4's.** `probes.rs` carries
-          # a `compile_error!` for any other target — the probes are Linux and
-          # macOS only because Q4 is deliberately open — so a Windows entry
-          # claims an artifact the code refuses to produce. It was in this matrix
-          # from the first commit and green in the 2026-07-31 rehearsal; Y-106
-          # added the refusal afterwards and nothing re-ran this workflow until
-          # v0.1.0's tag. Restoring it needs the matrix entry, a `.exe` suffix in
-          # the staging step and a zip archive step — all removed with it.
-          #
-          # Per R-19 in ADR-0004, Apple targets are never cross-compiled from
-          # Linux — that needs the Apple SDK via osxcross. They are built on a
-          # macOS runner with Apple's own toolchain, which carries both the
-          # arm64 and the x86_64 slice, so one runner covers both triples.
-          - target: aarch64-apple-darwin
-            os: macos-15
-            packages: yantra-agent
-            archive: tar.gz
-
-          - target: x86_64-apple-darwin
-            os: macos-15
-            packages: yantra-agent
-            archive: tar.gz
-
+      matrix: ${{ fromJSON(needs.meta.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -168,6 +186,8 @@ jobs:
           PACKAGES: ${{ matrix.packages }}
           ZIGBUILD: ${{ matrix.zigbuild }}
           DASHBOARD: ${{ matrix.dashboard }}
+          # A nightly carries its own version; a tag's is the crate's.
+          YANTRA_BUILD_VERSION: ${{ needs.meta.outputs.nightly == 'true' && needs.meta.outputs.version || '' }}
           # Not a secret (ADR-0023): a repository variable, baked in for
           # `option_env!` to read (crates/yantra-core/src/github.rs).
           YANTRA_GITHUB_CLIENT_ID: ${{ vars.YANTRA_GITHUB_CLIENT_ID }}
@@ -309,6 +329,7 @@ jobs:
   rehearse:
     name: rehearse install and update
     needs: [meta, build]
+    if: needs.meta.outputs.nightly != 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -439,5 +460,61 @@ jobs:
           )
           if [ "$PRERELEASE" = "true" ]; then
             flags+=(--prerelease)
+          else
+            flags+=(--latest)
           fi
           gh release create "$GITHUB_REF_NAME" "${flags[@]}" artifacts/*
+
+  # Y-662: one rolling pre-release. Its tag moves to this commit, its assets
+  # are replaced, and its title carries the version, since the tag names none.
+  # A pre-release is never /releases/latest, so stable boxes never see it.
+  nightly:
+    name: publish nightly
+    needs: [meta, build]
+    if: needs.meta.outputs.nightly == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: yantra-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Aggregate and verify checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          cat *.sha256 | sort -k2 > SHA256SUMS
+          rm -f -- *.sha256
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+
+      # New archives go up before the old ones come down. An installer caught
+      # between the two fetches an archive SHA256SUMS does not list, and
+      # install.sh refuses it.
+      - name: Move the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="The build of ${GITHUB_SHA}, the latest merge to main. Linux only, and not rehearsed.
+          Install it on a box with: \`curl -fsSL https://raw.githubusercontent.com/${GH_REPO}/main/install.sh | bash -s -- --channel nightly\`"
+          if gh release view nightly >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/nightly" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            old=$(gh release view nightly --json assets --jq '.assets[].name')
+            gh release upload nightly --clobber artifacts/*
+            for asset in $old; do
+              [ -e "artifacts/$asset" ] || gh release delete-asset nightly "$asset" --yes
+            done
+            gh release edit nightly --title "v${VERSION}" --notes "$notes" --prerelease --latest=false
+          else
+            gh release create nightly --target "$GITHUB_SHA" --title "v${VERSION}" \
+              --notes "$notes" --prerelease --latest=false artifacts/*
+          fi

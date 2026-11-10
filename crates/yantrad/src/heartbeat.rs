@@ -94,6 +94,9 @@ pub struct Fleet {
     /// verb's result does not wait out `EVERY`. The sweep looks again after
     /// `SETTLE`, because `claude` registers after `up` returns.
     pub look_at_agents: Arc<tokio::sync::Notify>,
+    /// Woken by a channel switch, so the release look reads the new channel
+    /// now and not within the hour (Y-662).
+    pub look_at_release: Arc<tokio::sync::Notify>,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -117,6 +120,8 @@ pub struct Facts {
     pub trigger: PathBuf,
     pub updater: PathBuf,
     pub progress: PathBuf,
+    /// [`yantra_core::update::CHANNEL`], for the same reason (Y-662).
+    pub channel: PathBuf,
 }
 
 impl Default for Fleet {
@@ -136,6 +141,7 @@ impl Default for Fleet {
                 trigger: PathBuf::new(),
                 updater: PathBuf::new(),
                 progress: PathBuf::new(),
+                channel: PathBuf::new(),
             }),
             github: crate::github::Grant::default(),
             joins: Arc::default(),
@@ -146,6 +152,7 @@ impl Default for Fleet {
             chats,
             pulls: crate::watch::Pulls::default(),
             look_at_agents: Arc::default(),
+            look_at_release: Arc::default(),
         }
     }
 }

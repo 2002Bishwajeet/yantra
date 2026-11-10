@@ -215,6 +215,13 @@
   word-break: break-all;
 }
 
+.settings__channel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .settings__update {
   display: flex;
   flex-wrap: wrap;

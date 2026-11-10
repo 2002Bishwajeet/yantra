@@ -3,6 +3,7 @@
 //! Nothing here awaits ssh on behalf of a request: the tasks below look on
 //! their own schedule and write into the snapshot, and a handler reads memory.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +13,7 @@ use yantra_core::github::{self, Github};
 use yantra_core::inventory::{Inventory, MachineInfo, Os, Ownership};
 use yantra_core::notify::Relay;
 use yantra_core::snapshot::{Readiness, Reading, Snapshot};
-use yantra_core::{doctor, sessions, status, workspace};
+use yantra_core::{doctor, sessions, status, update, workspace};
 
 use crate::events::{self, Event, Events};
 use crate::github::Grant;
@@ -142,10 +143,15 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
 
     let release = model.clone();
     let reader = grant.clone();
+    let channel = fleet.facts.channel.clone();
+    let switched = fleet.look_at_release.clone();
     tokio::spawn(async move {
         loop {
-            look_at_release(&release, &reader, &Github::default()).await;
-            tokio::time::sleep(RELEASE).await;
+            look_at_release(&release, &reader, &Github::default(), &channel).await;
+            tokio::select! {
+                () = tokio::time::sleep(RELEASE) => {}
+                () = switched.notified() => {}
+            }
         }
     });
 
@@ -366,12 +372,32 @@ async fn look_at_repos(model: &Model, grant: &Grant) {
     model.write().await.repos = Some(Arc::new(Reading::new(repos)));
 }
 
-/// The newest published release, with the grant when there is one and
-/// anonymously when there is not (ADR-0027 §4).
-async fn look_at_release(model: &Model, grant: &Grant, github: &Github) {
+/// The newest published release on the box's channel, with the grant when
+/// there is one and anonymously when there is not (ADR-0027 §4, Y-662). A
+/// channel file that names no channel is looked at as stable, and About shows
+/// it as unknown.
+async fn look_at_release(model: &Model, grant: &Grant, github: &Github, channel: &Path) {
+    let channel = read_channel(channel).await.unwrap_or_default();
     let token = grant.token().await;
-    let release = github.latest_release(token.as_ref()).await;
+    let release = github.latest_release(channel, token.as_ref()).await;
     model.write().await.release = Some(Arc::new(Reading::new(release)));
+}
+
+/// The channel file, read off the worker (I-13). `None` when it names no
+/// channel or cannot be read, and the journal says which.
+pub(crate) async fn read_channel(path: &Path) -> Option<update::Channel> {
+    let path = path.to_owned();
+    match tokio::task::spawn_blocking(move || update::channel(&path)).await {
+        Ok(Ok(channel)) => Some(channel),
+        Ok(Err(error)) => {
+            tracing::warn!(
+                "the update channel is unreadable: {}",
+                crate::write::chain(&error)
+            );
+            None
+        }
+        Err(_) => None,
+    }
 }
 
 /// The reading lands in the model before anything is sent, so a browser never
@@ -910,7 +936,13 @@ mod tests {
         drop(listener);
 
         let model = Model::default();
-        look_at_release(&model, &Grant::default(), &Github::at(&gone, &gone)).await;
+        look_at_release(
+            &model,
+            &Grant::default(),
+            &Github::at(&gone, &gone),
+            Path::new("/nonexistent"),
+        )
+        .await;
 
         let reading = model.read().await.release.clone().expect("looked");
         let failure = reading.value().as_ref().expect_err("the look failed");

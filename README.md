@@ -75,6 +75,10 @@ published. `yantra update` on the box does the same
 ([docs/appliance.md](docs/appliance.md#update-from-the-dashboard)). A box on v0.3.3 or older has no
 updater. To reach v0.10.3, run `install.sh` on that box once more.
 
+**Every merge to `main` also publishes a `nightly` pre-release** for the two Linux targets (Y-662).
+`install.sh --channel nightly`, `yantra update --channel nightly` or Settings → About puts a box on
+it. Stable stays the default ([docs/appliance.md](docs/appliance.md#stable-and-nightly)).
+
 To build from source, you need [rustup](https://rustup.rs). The file `rust-toolchain.toml` pins the
 toolchain version.
 

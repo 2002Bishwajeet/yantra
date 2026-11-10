@@ -27,7 +27,7 @@ use axum::Router;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{get, patch, post, put};
 use yantra_core::github;
 use yantra_core::install;
 use yantra_core::inventory::{self, Caller, Inventory};
@@ -159,6 +159,7 @@ where
         .route("/join", post(join_as::<I>))
         .route("/join/forget-host-key", post(forget_host_key::<I>))
         .route("/update", post(renew::<I>))
+        .route("/update/channel", put(rechannel::<I>))
         // Here for the grant: a thread's PR and its issue are read with it.
         .route(
             "/workspaces/{name}/threads",
@@ -1209,15 +1210,51 @@ async fn renew<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(StatusCode::ACCEPTED)
 }
 
+#[derive(serde::Deserialize)]
+struct Rechannel {
+    channel: update::Channel,
+}
+
+/// Settings' channel switch (Y-662). The daemon writes one word to the file
+/// the root unit reads, and names no version, then wakes the release look so
+/// About compares against the new channel within seconds. A box whose updater
+/// has not yet made the file is a **409**.
+async fn rechannel<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(asked): Json<Rechannel>,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let fleet = &state.fleet;
+    let path = fleet.facts.channel.clone();
+    let written = tokio::task::spawn_blocking(move || update::set_channel(&path, asked.channel))
+        .await
+        .map_err(|_| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: "the channel write did not finish".to_owned(),
+        })?;
+    written.map_err(|error| Refused::Verb {
+        status: from_update(&error),
+        said: chain(&error),
+    })?;
+    tracing::info!("update channel set to {} by {}", asked.channel, caller.node);
+    fleet.look_at_release.notify_one();
+    Ok(StatusCode::NO_CONTENT)
+}
+
 fn from_update(error: &update::Error) -> StatusCode {
     match error {
-        update::Error::NotInstalled { .. } => StatusCode::CONFLICT,
+        update::Error::NotInstalled { .. } | update::Error::ChannelUnwritable { .. } => {
+            StatusCode::CONFLICT
+        }
         update::Error::NoPrivilege { .. }
         | update::Error::Failed { .. }
         | update::Error::Io(_)
         | update::Error::Unreadable { .. }
         | update::Error::UnknownStep { .. }
-        | update::Error::ArchivePath { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        | update::Error::ArchivePath { .. }
+        | update::Error::NotAChannel { .. } => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -5423,6 +5460,7 @@ mod tests {
                 trigger: trigger.clone(),
                 updater,
                 progress: PathBuf::new(),
+                channel: PathBuf::new(),
             }),
             ..Fleet::default()
         };
@@ -5513,6 +5551,91 @@ mod tests {
         assert!(!trigger.exists());
     }
 
+    fn channel_fleet(label: &str, made: bool) -> (Fleet, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("yantra-write-channel-{label}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        if made {
+            std::fs::create_dir_all(&dir).expect("a scratch directory");
+        }
+        let channel = dir.join("channel");
+        let fleet = Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: Vec::new(),
+                ssh_dir: PathBuf::new(),
+                ssh_state: PathBuf::new(),
+                relay: false,
+                trigger: PathBuf::new(),
+                updater: PathBuf::new(),
+                progress: PathBuf::new(),
+                channel: channel.clone(),
+            }),
+            ..Fleet::default()
+        };
+        (fleet, channel)
+    }
+
+    async fn switch<J: Inventory + Clone + Send + Sync + 'static>(
+        authoriser: Authoriser<J>,
+        fleet: Fleet,
+        body: &str,
+    ) -> (StatusCode, String) {
+        let (status, _, body) = join_send(
+            router::<J, ()>(authoriser, fleet),
+            "PUT",
+            "/update/channel",
+            address(9),
+            body,
+        )
+        .await;
+        (status, body)
+    }
+
+    /// Y-662: the owner's node writes one word, and the release look wakes.
+    #[tokio::test]
+    async fn the_owner_switches_the_channel_and_the_release_look_wakes() {
+        let (fleet, channel) = channel_fleet("owner", true);
+        let woken = fleet.look_at_release.clone();
+
+        let owner = direct(tailnet(vec![(address(9), caller(ME, &[]))]));
+        let (status, body) = switch(owner, fleet, r#"{"channel":"nightly"}"#).await;
+
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+        assert_eq!(
+            std::fs::read_to_string(&channel).expect("the channel"),
+            "nightly\n"
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(1), woken.notified())
+            .await
+            .expect("the release look was woken");
+    }
+
+    #[tokio::test]
+    async fn a_channel_switch_is_refused_to_a_caller_that_is_not_the_owner() {
+        let (fleet, channel) = channel_fleet("refused", true);
+
+        let (status, _) = switch(direct(tailnet(vec![])), fleet, r#"{"channel":"nightly"}"#).await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(!channel.exists(), "a refused caller wrote the channel");
+    }
+
+    /// A channel the daemon cannot write is a 409; a word that is not a
+    /// channel never reaches the file.
+    #[tokio::test]
+    async fn a_channel_switch_that_cannot_be_written_is_409_and_a_bad_word_is_refused() {
+        let owner = || direct(tailnet(vec![(address(9), caller(ME, &[]))]));
+        let (fleet, _) = channel_fleet("unmade", false);
+        let (status, body) = switch(owner(), fleet, r#"{"channel":"stable"}"#).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert!(body.contains("channel"), "{body}");
+
+        let (fleet, channel) = channel_fleet("beta", true);
+        let (status, _) = switch(owner(), fleet, r#"{"channel":"beta"}"#).await;
+        assert!(status.is_client_error(), "{status}");
+        assert!(!channel.exists());
+    }
+
     const JOINING: &str = "nJOIN0000000CNTRL";
 
     fn join_scratch(label: &str) -> PathBuf {
@@ -5532,6 +5655,7 @@ mod tests {
                 trigger: PathBuf::new(),
                 updater: PathBuf::new(),
                 progress: PathBuf::new(),
+                channel: PathBuf::new(),
             }),
             ..Fleet::default()
         }

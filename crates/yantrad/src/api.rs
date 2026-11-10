@@ -76,6 +76,7 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
         }
         Err(_) => None,
     };
+    let channel = crate::refresh::read_channel(&fleet.facts.channel).await;
     Json(About {
         version: about::VERSION,
         target: about::TARGET,
@@ -90,6 +91,7 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
         tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
         relay: fleet.facts.relay,
         published: Answer::of(snapshot.release.as_deref(), Published::of),
+        channel,
         update,
     })
 }
@@ -627,6 +629,9 @@ pub(crate) struct About {
     pub(crate) relay: bool,
     /// The newest release GitHub publishes, read hourly (ADR-0027 §2).
     pub(crate) published: Answer<Published>,
+    /// Which release the update unit installs (Y-662). `None` is a channel
+    /// file that names no channel; no file at all is stable.
+    pub(crate) channel: Option<update::Channel>,
     /// How far `yantra-update.service` has got (Y-612). `None` when nothing
     /// runs and the last run did not fail.
     pub(crate) update: Option<update::Progress>,
@@ -892,6 +897,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         newer: true,
                     },
                 },
+                channel: Some(update::Channel::Stable),
                 update: None,
             }),
         ),
@@ -1503,6 +1509,7 @@ pub(crate) mod tests {
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
                 progress: std::path::PathBuf::new(),
+                channel: std::path::PathBuf::new(),
             }),
             ..looking_at_machines(machines)
         }
@@ -2337,6 +2344,7 @@ pub(crate) mod tests {
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
                 progress: std::path::PathBuf::new(),
+                channel: std::path::PathBuf::new(),
             }),
             ..looking_at_machines(vec![
                 MachineInfo {
@@ -2433,6 +2441,7 @@ pub(crate) mod tests {
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
                 progress: dir.to_owned(),
+                channel: std::path::PathBuf::new(),
             }),
             ..Fleet::default()
         };
@@ -2498,6 +2507,7 @@ pub(crate) mod tests {
                 trigger: std::path::PathBuf::new(),
                 updater: std::path::PathBuf::new(),
                 progress: std::path::PathBuf::new(),
+                channel: std::path::PathBuf::new(),
             }),
             ..Fleet::default()
         };
