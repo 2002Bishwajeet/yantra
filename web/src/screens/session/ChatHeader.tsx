@@ -20,6 +20,7 @@ import { State } from '@/m3/mark/Mark'
 import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuSeparator, MenuTrigger } from '@/m3/menu/Menu'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
+import { useRegisterLoopCommands } from '@/shell/loopCommands'
 import { Checks } from './Checks'
 import { GitActions } from './GitActions'
 import { elapsed, groupThreads, prMark, threadTitle } from './threads'
@@ -84,6 +85,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   const groupId = useId()
   const noTerminal = useId()
 
+  useRegisterLoopCommands(into === null ? [] : [{ id: 'diff', disabled: false, reason: null }], () => diff.onToggle())
   if (into === null) return null
 
   const header = (
