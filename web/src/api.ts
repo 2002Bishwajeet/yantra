@@ -634,6 +634,14 @@ export type ThreadPrOpened = {
   url: string
   created: boolean
 }
+
+/** `POST /api/workspaces/{name}/threads/{thread}/merge` with `{ number }` (Y-496): a squash.
+ *  `branchDeleted` is false when the remote branch stayed. */
+export type ThreadPrMerged = {
+  number: number
+  url: string
+  branchDeleted: boolean
+}
 // ---------------------------------------------------------------------------
 // Y-342: the GitHub grant (ADR-0023). Appended as one block so a merge with
 // edits above it is trivial.

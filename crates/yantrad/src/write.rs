@@ -171,6 +171,15 @@ where
             "/workspaces/{name}/threads/{thread}/pr",
             post(opening_pr::<I>),
         )
+        // A merge writes GitHub alone, so a running turn does not refuse it either.
+        .route(
+            "/workspaces/{name}/threads/{thread}/merge",
+            post(merging_pr::<I>),
+        )
+        .route(
+            "/workspaces/{name}/threads/{thread}",
+            axum::routing::delete(removing::<I>),
+        )
         // Here for the chat registry: a running turn or revert refuses them.
         .route(
             "/workspaces/{name}/threads/{thread}/message",
@@ -1799,7 +1808,10 @@ fn from_github(error: &github::Error) -> StatusCode {
         github::Error::NotAnIssue { .. } | github::Error::IsAPull { .. } => StatusCode::BAD_REQUEST,
         github::Error::Status { status: 404, .. } => StatusCode::NOT_FOUND,
         // No commits between the branches; a lost race is answered before here.
-        github::Error::NoGrant | github::Error::Unprocessable { .. } => StatusCode::CONFLICT,
+        github::Error::NoGrant
+        | github::Error::Unprocessable { .. }
+        | github::Error::NotMergeable { .. }
+        | github::Error::HeadMoved => StatusCode::CONFLICT,
         github::Error::Refused
         | github::Error::Status { .. }
         | github::Error::Unreachable { .. }
@@ -1935,6 +1947,57 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MergeBody {
+    /// The PR the owner confirmed; another one open is refused.
+    number: u64,
+}
+
+/// `yantra pr merge <workspace> <thread>` on the wire (Y-496): a squash with the daemon's grant
+/// (ADR-0034 decision 1), then the remote branch is deleted.
+async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+    Json(MergeBody { number }): Json<MergeBody>,
+) -> Result<Json<ThreadPrMerged>, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let token = state
+        .fleet
+        .github
+        .token()
+        .await
+        .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
+    tracing::info!("pr merge {name} {id} #{number} for {}", caller.node);
+    let merged = commit::merge_pr_for(&name, &id, &github::Github::default(), &token, number)
+        .await
+        .map_err(refuse_commit)?;
+    Ok(Json(ThreadPrMerged {
+        number: merged.number,
+        url: merged.url,
+        branch_deleted: merged.kept.is_none(),
+    }))
+}
+
+/// Removes a thread's keeper, worktree and branch (Y-496). The keeper's reader ends with its
+/// pane, which lets the chat registry drop the thread.
+async fn removing<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    idle(&state.fleet.chats, &name, &id)?;
+    tracing::info!("thread remove {name} {id} for {}", caller.node);
+    commit::remove_for(&name, &id)
+        .await
+        .map_err(refuse_commit)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// A turn or a revert would race the commit for the worktree and its index.
 fn idle(chats: &crate::chat::Registry, name: &str, id: &str) -> Result<(), Refused> {
     if chats.occupied(&format!("chat/{name}/{id}")) {
@@ -1965,6 +2028,9 @@ fn from_commit(error: &commit::Failed) -> StatusCode {
         | commit::Failed::Diverged
         | commit::Failed::NotGithub
         | commit::Failed::NoTitle
+        | commit::Failed::NoPr
+        | commit::Failed::AlreadyMerged { .. }
+        | commit::Failed::NotThatPr { .. }
         | commit::Failed::Unseen { .. } => StatusCode::CONFLICT,
         commit::Failed::Github(github) => from_github(github),
         commit::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
@@ -2491,6 +2557,15 @@ struct ThreadPrOpened {
     url: String,
     /// `false` when the PR was already open.
     created: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadPrMerged {
+    number: u64,
+    url: String,
+    /// `false` when the merge kept the remote branch.
+    branch_deleted: bool,
 }
 
 /// What a `202` carries: where to watch. The session is
@@ -3077,6 +3152,15 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 number: 497,
                 url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
                 created: true,
+            }),
+        ),
+        (
+            "threadPrMerged",
+            "ThreadPrMerged",
+            of(&ThreadPrMerged {
+                number: 497,
+                url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
+                branch_deleted: true,
             }),
         ),
         (
@@ -4395,6 +4479,10 @@ mod tests {
                 .body(Body::from(r#"{"message":"Add x"}"#)),
             Request::post("/workspaces/site/threads/0a1b/push").body(Body::empty()),
             Request::post("/workspaces/site/threads/0a1b/pr").body(Body::empty()),
+            Request::post("/workspaces/site/threads/0a1b/merge")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"number":21}"#)),
+            Request::delete("/workspaces/site/threads/0a1b").body(Body::empty()),
         ] {
             let mut request = request.expect("a request");
             request
@@ -4595,6 +4683,77 @@ mod tests {
             .await
             .expect("a body");
         assert!(String::from_utf8_lossy(&said).contains("yantra github login"));
+    }
+
+    /// Y-496: a running turn refuses a removal, and not a merge, which touches no worktree;
+    /// with no grant the merge is the 409 that names the login.
+    #[tokio::test]
+    async fn a_busy_thread_refuses_its_removal_and_not_its_merge() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let fleet = Fleet::default();
+        fleet.chats.hold_for_test("chat/site/0a1b", true);
+        let app = router::<Fake, ()>(direct(tailnet(vec![(address(9), caller(ME, &[]))])), fleet);
+        let send = |request: Result<Request<Body>, axum::http::Error>| {
+            let app = app.clone();
+            async move {
+                let mut request = request.expect("a request");
+                request
+                    .extensions_mut()
+                    .insert(ConnectInfo(SocketAddr::from(([100, 64, 0, 9], 61620))));
+                let answered = app
+                    .oneshot(request)
+                    .await
+                    .expect("the router is infallible");
+                let status = answered.status();
+                let said = axum::body::to_bytes(answered.into_body(), usize::MAX)
+                    .await
+                    .expect("a body");
+                (status, String::from_utf8_lossy(&said).into_owned())
+            }
+        };
+
+        let (status, said) =
+            send(Request::delete("/workspaces/site/threads/0a1b").body(Body::empty())).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("a turn or a revert is running"), "{said}");
+
+        let (status, said) = send(
+            Request::post("/workspaces/site/threads/0a1b/merge")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"number":21}"#)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(said.contains("yantra github login"), "{said}");
+    }
+
+    #[test]
+    fn pr_merge_refusals_are_conflicts_with_githubs_words() {
+        for refused in [
+            commit::Failed::NoPr,
+            commit::Failed::AlreadyMerged { number: 21 },
+            commit::Failed::NotThatPr {
+                confirmed: 20,
+                open: 21,
+            },
+            commit::Failed::Github(github::Error::NotMergeable {
+                said: "Pull Request is not mergeable".to_owned(),
+            }),
+            commit::Failed::Github(github::Error::HeadMoved),
+        ] {
+            assert_eq!(from_commit(&refused), StatusCode::CONFLICT, "{refused}");
+        }
+        let said = chain(&commit::Failed::Github(github::Error::NotMergeable {
+            said: "Pull Request is not mergeable".to_owned(),
+        }));
+        assert!(said.contains("Pull Request is not mergeable"), "{said}");
+        let asked: MergeBody = serde_json::from_str(r#"{"number":21}"#).expect("a number");
+        assert_eq!(asked.number, 21);
+        assert!(serde_json::from_str::<MergeBody>("{}").is_err());
+        assert!(serde_json::from_str::<MergeBody>(r#"{"number":21,"method":"rebase"}"#).is_err());
     }
 
     #[test]

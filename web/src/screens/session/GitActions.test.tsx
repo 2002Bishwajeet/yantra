@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { threadCommitted, threadMessage, threadPrOpened, threadPushed } from '@/contract.gen'
+import { threadCommitted, threadMessage, threadPrMerged, threadPrOpened, threadPushed } from '@/contract.gen'
 import type { ThreadPr } from '@/api'
 import { answer } from '@/test/daemon'
 import { GitActions } from './GitActions'
@@ -13,14 +13,14 @@ const mine = '0a1b2c3d4e5f6a7b'
 const base = `/api/workspaces/site/threads/${mine}`
 
 type Reply = [number, unknown]
-type Routes = Partial<Record<'message' | 'commit' | 'push' | 'pr', Reply | (() => Reply)>>
+type Routes = Partial<Record<'message' | 'commit' | 'push' | 'pr' | 'merge' | 'remove', Reply | (() => Reply)>>
 
 /** Every call is answered by its route; the log keeps path and body in order. */
 function daemon(routes: Routes) {
-  const log: { path: string; body?: unknown }[] = []
+  const log: { path: string; method?: string; body?: unknown }[] = []
   const fetch = vi.fn((path: string, init?: RequestInit) => {
-    const verb = path.split('/').pop() as keyof Routes
-    log.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    const verb = (init?.method === 'DELETE' ? 'remove' : path.split('/').pop()) as keyof Routes
+    log.push({ path, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined })
     const route = routes[verb] ?? [404, 'no route']
     const [status, body] = typeof route === 'function' ? route() : route
     return Promise.resolve(answer(status, body))
@@ -33,19 +33,21 @@ type Props = Partial<{ thread: string | null; busy: boolean; diffs: number; list
 
 const open = (props: Props = {}) => {
   const refresh = vi.fn()
+  const onRemoved = vi.fn()
   const view = render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
       <GitActions
         busy={props.busy ?? false}
         diffs={props.diffs ?? 1}
         listed={props.listed}
+        onRemoved={onRemoved}
         refresh={refresh}
         thread={props.thread === undefined ? mine : props.thread}
         workspace="site"
       />
     </QueryClientProvider>,
   )
-  return { ...view, refresh }
+  return { ...view, refresh, onRemoved }
 }
 
 const dialog = () => screen.findByRole('dialog')
@@ -103,7 +105,15 @@ describe('the quick action', () => {
     await screen.findByRole('button', { name: 'Push' })
     view.rerender(
       <QueryClientProvider client={new QueryClient()}>
-        <GitActions busy={false} diffs={2} listed={undefined} refresh={view.refresh} thread={mine} workspace="site" />
+        <GitActions
+          busy={false}
+          diffs={2}
+          listed={undefined}
+          onRemoved={view.onRemoved}
+          refresh={view.refresh}
+          thread={mine}
+          workspace="site"
+        />
       </QueryClientProvider>,
     )
     expect(await screen.findByRole('button', { name: 'Commit' })).toBeTruthy()
@@ -355,5 +365,87 @@ describe('open PR', () => {
     await pick('Open PR')
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByRole('heading', { name: 'The daemon did not answer' })).toBeTruthy()
+  })
+})
+
+describe('merge', () => {
+  const listed = { state: 'open', ...openPr } as const
+  const confirm = async () => {
+    await pick('Merge PR #7')
+    return screen.findByRole('dialog', { name: 'Merge PR #7' })
+  }
+
+  it('asks first, merges the confirmed PR, then offers to remove the worktree', async () => {
+    const log = daemon({ merge: [200, { ...threadPrMerged, number: 7 }], remove: [204, undefined] })
+    const { refresh, onRemoved } = open({ diffs: 0, listed })
+    const asked = await confirm()
+    expect(asked.textContent).toMatch('Squash-merge PR #7 into the default branch and delete its remote branch.')
+    expect(log).toHaveLength(0)
+
+    fireEvent.click(within(asked).getByRole('button', { name: 'Merge' }))
+    const offer = await screen.findByRole('dialog', { name: 'PR #7 merged' })
+    expect(log[0]).toMatchObject({ path: `${base}/merge`, method: 'POST', body: { number: 7 } })
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(offer.textContent).toMatch("Remove this thread's worktree and branch?")
+    expect(within(offer).getByRole('button', { name: 'Keep' })).toBeTruthy()
+
+    fireEvent.click(within(offer).getByRole('button', { name: 'Remove worktree' }))
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledOnce())
+    expect(log[1]).toMatchObject({ path: base, method: 'DELETE' })
+  })
+
+  it('merges nothing on Cancel, and Keep leaves Remove worktree in the menu', async () => {
+    const log = daemon({ merge: [200, { ...threadPrMerged, number: 7, branchDeleted: false }] })
+    const { onRemoved } = open({ diffs: 0, listed })
+    fireEvent.click(within(await confirm()).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(log).toHaveLength(0)
+
+    fireEvent.click(within(await confirm()).getByRole('button', { name: 'Merge' }))
+    const offer = await screen.findByRole('dialog', { name: 'PR #7 merged' })
+    expect(offer.textContent).toMatch('Its remote branch stayed on GitHub.')
+    fireEvent.click(within(offer).getByRole('button', { name: 'Keep' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(onRemoved).not.toHaveBeenCalled()
+    fireEvent.click(menuTrigger())
+    expect(await screen.findByRole('menuitem', { name: 'Remove worktree' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /^Merge/ })).toBeNull()
+  })
+
+  it.each([
+    [409, 'GitHub will not merge the pull request: Pull Request is not mergeable', 'The merge was refused'],
+    [409, "the pull request's head moved after it was read; read it again and confirm the merge", 'The PR changed'],
+    [409, 'no GitHub grant — run `yantra github login`', 'No GitHub grant'],
+    [403, 'this node is not the owner', 'No GitHub grant'],
+    [502, 'GitHub answered 500 to the merge', 'GitHub did not merge'],
+    [503, 'ssh: no route to host', 'The machine did not answer'],
+  ] as const)('draws a %s merge saying "%s" in the dialog, and retries it', async (status, said, title) => {
+    let calls = 0
+    const log = daemon({ merge: () => (calls++ === 0 ? [status, said] : [200, { ...threadPrMerged, number: 7 }]) })
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    fireEvent.click(within(asked).getByRole('button', { name: 'Merge' }))
+    const alert = await within(asked).findByRole('alert')
+    expect(within(alert).getByRole('heading', { name: title })).toBeTruthy()
+    expect(within(alert).getByText(said)).toBeTruthy()
+    fireEvent.click(within(alert).getByRole('button', { name: /try again/i }))
+    expect(await screen.findByRole('dialog', { name: 'PR #7 merged' })).toBeTruthy()
+    expect(log).toHaveLength(2)
+  })
+
+  it.each([
+    [409, 'a turn or a revert is running in this thread; wait for it to end', 'A turn is running'],
+    [409, 'git worktree remove failed', 'The worktree was not removed'],
+    [503, 'ssh: no route to host', 'The machine did not answer'],
+  ] as const)('draws a %s removal saying "%s", and keeps the thread', async (status, said, title) => {
+    daemon({ remove: [status, said] })
+    const { onRemoved } = open({ diffs: 0, listed: { state: 'merged', ...openPr } })
+    await pick('Remove worktree')
+    const offer = await screen.findByRole('dialog', { name: 'PR #7 merged' })
+    fireEvent.click(within(offer).getByRole('button', { name: 'Remove worktree' }))
+    const alert = await within(offer).findByRole('alert')
+    expect(within(alert).getByRole('heading', { name: title })).toBeTruthy()
+    expect(within(alert).getByText(said)).toBeTruthy()
+    expect(onRemoved).not.toHaveBeenCalled()
   })
 })

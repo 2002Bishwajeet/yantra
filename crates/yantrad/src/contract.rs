@@ -100,6 +100,7 @@ import type {
   ThreadEvent,
   ThreadMessage,
   ThreadOpened,
+  ThreadPrMerged,
   ThreadPrOpened,
   ThreadPushed,
   ThreadState,

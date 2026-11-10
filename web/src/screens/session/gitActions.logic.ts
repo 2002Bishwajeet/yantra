@@ -6,7 +6,7 @@
  */
 import { whyOff } from './git'
 
-export type GitVerb = 'commit' | 'push' | 'pr'
+export type GitVerb = 'commit' | 'push' | 'pr' | 'merge' | 'remove'
 
 /** What this page knows. The daemon sends no dirty flag and no ahead count, so `changed`,
  *  `committed` and `pushed` come from what this page saw and did since it attached. */
@@ -54,11 +54,16 @@ export function resolveQuickAction(state: GitState): QuickAction {
 export function buildMenuItems(state: GitState): MenuItem[] {
   const reason = whyOff(state.thread ? 'thread' : null, state.busy)
   const off = reason !== null
-  return [
+  const { pr } = state
+  const items: MenuItem[] = [
     { id: 'commit', label: 'Commit', kind: 'commit', disabled: off, reason },
     { id: 'push', label: 'Push', kind: 'push', disabled: off, reason },
-    state.pr
-      ? { id: 'pr', label: `PR #${state.pr.number}`, kind: 'open_pr_link', disabled: false, reason: null }
+    pr
+      ? { id: 'pr', label: `PR #${pr.number}`, kind: 'open_pr_link', disabled: false, reason: null }
       : { id: 'pr', label: 'Open PR', kind: 'pr', disabled: off, reason },
   ]
+  // Y-496: an open PR is merged from here, and a merged one leaves a worktree to remove.
+  if (pr?.state === 'open') items.push({ id: 'merge', label: `Merge PR #${pr.number}`, kind: 'merge', disabled: off, reason })
+  if (pr?.state === 'merged') items.push({ id: 'remove', label: 'Remove worktree', kind: 'remove', disabled: off, reason })
+  return items
 }

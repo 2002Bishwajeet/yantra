@@ -6,7 +6,7 @@
  */
 import { asApiError } from '@/api/errors'
 
-export type GitAction = 'draft' | 'commit' | 'push' | 'pr'
+export type GitAction = 'draft' | 'commit' | 'push' | 'pr' | 'merge' | 'remove'
 
 /** One kind per action and status the daemon sends (Y-492, Y-449), then the three any action meets. */
 export type GitFailureKind =
@@ -20,6 +20,11 @@ export type GitFailureKind =
   | 'pushRefused'
   | 'prRefused'
   | 'prGithub'
+  | 'mergeRefused'
+  | 'mergeHeadMoved'
+  | 'mergeGithub'
+  | 'noGrant'
+  | 'removeRefused'
   | 'noThread'
   | 'unreachable'
   | 'network'
@@ -64,6 +69,23 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
     title: 'GitHub failed',
     next: 'GitHub did not take the pull request. Try again in a moment.',
   },
+  mergeRefused: {
+    title: 'The merge was refused',
+    next: 'GitHub will not merge it, or the PR is no longer the open one. Check the PR on github.com, then try again.',
+  },
+  mergeHeadMoved: {
+    title: 'The PR changed',
+    next: 'Someone pushed to the PR after it was read. Look at the new commits, then merge again.',
+  },
+  mergeGithub: { title: 'GitHub did not merge', next: 'GitHub did not take the merge. Try again in a moment.' },
+  noGrant: {
+    title: 'No GitHub grant',
+    next: 'The daemon cannot write to GitHub for you. Run `yantra github login` on the appliance, then try again.',
+  },
+  removeRefused: {
+    title: 'The worktree was not removed',
+    next: 'git on the machine kept the worktree or its branch. Try again, or remove it there.',
+  },
   noThread: { title: 'No such thread', next: 'The workspace holds no thread by this id. Reload the chat.' },
   unreachable: {
     title: 'The machine did not answer',
@@ -78,6 +100,8 @@ const byStatus: Record<GitAction, Partial<Record<number, GitFailureKind>>> = {
   commit: { 400: 'commitEmpty', 409: 'commitRefused' },
   push: { 409: 'pushRefused' },
   pr: { 409: 'prRefused', 502: 'prGithub' },
+  merge: { 401: 'noGrant', 403: 'noGrant', 409: 'mergeRefused', 502: 'mergeGithub' },
+  remove: { 409: 'removeRefused' },
 }
 
 /** What `ErrorSurface` draws: `describe()` is the next step, `said` the daemon's own words. */
@@ -107,6 +131,8 @@ export class GitFailure {
 function conflict(action: GitAction, said: string): GitFailureKind {
   if (/running/i.test(said)) return 'turnRunning'
   if (/tmux server/i.test(said)) return 'noLogin'
+  if (/github login/i.test(said)) return 'noGrant'
+  if (/head moved/i.test(said)) return 'mergeHeadMoved'
   if (action === 'draft') return /nothing to commit/i.test(said) ? 'draftNothing' : 'other'
   return byStatus[action][409] ?? 'other'
 }

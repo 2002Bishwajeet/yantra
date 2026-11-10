@@ -43,3 +43,17 @@
   align-items: center;
   gap: 2px;
 }
+
+/* A phone stacks the confirm's two buttons full width, the verb nearest the thumb. */
+@media (max-width: 599px) {
+  .git__confirm .m3-dialog__actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+}
+
+@media (pointer: coarse) {
+  .git__confirm .m3-dialog__actions > * {
+    height: 44px;
+  }
+}

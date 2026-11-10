@@ -24,6 +24,7 @@ yantra chat ls site              # the workspace's threads, each with its issue 
 yantra commit site 0a1b [-m MSG] [--draft]   # commit a thread's work; claude writes the message
 yantra push site 0a1b            # push a thread's branch and set its upstream
 yantra pr open site 0a1b         # open a PR for the pushed branch; Closes #n for an issue thread
+yantra pr merge site 0a1b        # squash-merge the thread's PR after you confirm, and delete its branch
 
 yantra ls machines               # the tailnet
 yantra ls dirs mac [/code] [--make NAME]   # one level of a machine, with the repositories marked

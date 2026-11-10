@@ -343,7 +343,8 @@ directory to walk.
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new,mentions,commands}`,
-`POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr}`, `POST /api/relay`,
+`POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr,merge}`,
+`DELETE /api/workspaces/{name}/threads/{thread}` (Y-496: the Chat's Remove worktree), `POST /api/relay`,
 `GET /api/workspaces/{name}/threads` (Y-649: each held thread's `{id, state, since}`, read from memory, no ssh),
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,
 `DELETE /api/github`, `POST`/`DELETE /api/github/client-id`, `POST /api/rooms`,
@@ -351,7 +352,7 @@ directory to walk.
 `POST /api/rooms/{room}/messages`, `PUT /api/layout`, `POST /api/join/forget-host-key` and
 `POST /api/update` — **the CLI's own
 verbs and nothing more**, being `yantra new`, `edit`, `up`, `down`, `resume`, `tokens`, `logs`,
-`repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
+`repair`, `chat ls`, `chat new` (Y-488), `commit --draft`, `commit`, `push` (Y-492), `pr open` (Y-449), `pr merge` (Y-496), `relay`, `clone`, `install`, `github login`, `github logout`, `github client-id` (Y-393),
 `room resume` (Y-534), `room post` (Y-536), `room new`, `room edit`, `room rm` (Y-550), `layout set` (Y-515),
 `forget-host-key` (Y-621) and `update` (Y-368). The daemon may do
 what `yantra` can already do, which is what stops it growing a richer API the CLI cannot reach. A new

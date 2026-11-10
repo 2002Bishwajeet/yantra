@@ -13,6 +13,11 @@ describe('gitFailure', () => {
     ['push', 409, 'pushRefused'],
     ['pr', 409, 'prRefused'],
     ['pr', 502, 'prGithub'],
+    ['merge', 409, 'mergeRefused'],
+    ['merge', 502, 'mergeGithub'],
+    ['merge', 401, 'noGrant'],
+    ['merge', 403, 'noGrant'],
+    ['remove', 409, 'removeRefused'],
   ])('%s with %s is %s', (action, status, kind) => {
     const failure = gitFailure(action, refused(status, 'daemon words'))
     expect(failure.kind).toBe(kind)
@@ -30,6 +35,15 @@ describe('gitFailure', () => {
     expect(gitFailure('draft', refused(409, said)).kind).toBe(kind)
   })
 
+  it.each<[GitAction, string, GitFailureKind]>([
+    ['merge', "the pull request's head moved after it was read; read it again and confirm the merge", 'mergeHeadMoved'],
+    ['merge', 'no GitHub grant — run `yantra github login`', 'noGrant'],
+    ['merge', 'GitHub will not merge the pull request: Pull Request is not mergeable', 'mergeRefused'],
+    ['remove', 'a turn or a revert is running in this thread; wait for it to end', 'turnRunning'],
+  ])('a %s 409 saying "%s" is %s', (action, said, kind) => {
+    expect(gitFailure(action, refused(409, said)).kind).toBe(kind)
+  })
+
   it.each<GitAction>(['draft', 'commit', 'push'])('a %s 409 saying a turn or a revert is running is turnRunning', (action) => {
     expect(gitFailure(action, refused(409, 'a turn or a revert is running')).kind).toBe('turnRunning')
   })
@@ -43,7 +57,7 @@ describe('gitFailure', () => {
     expect(failure).toMatchObject({ kind: 'noThread', retryable: false, said: 'no such thread' })
   })
 
-  it.each<GitAction>(['draft', 'commit', 'push', 'pr'])('%s with 503 is the machine unreachable', (action) => {
+  it.each<GitAction>(['draft', 'commit', 'push', 'pr', 'merge', 'remove'])('%s with 503 is the machine unreachable', (action) => {
     expect(gitFailure(action, refused(503, 'ssh: no route'))).toMatchObject({ kind: 'unreachable', retryable: true })
   })
 
@@ -91,14 +105,19 @@ describe('gitFailure', () => {
       ['pr', refused(503)],
       ['pr', new ApiError('network', '')],
       ['pr', refused(500)],
+      ['merge', refused(409)],
+      ['merge', refused(409, 'head moved')],
+      ['merge', refused(502)],
+      ['merge', refused(401)],
+      ['remove', refused(409)],
     ]
     for (const [action, error] of probes) {
       const failure = gitFailure(action, error)
       kinds.add(failure.kind)
       seen.add(failure.title)
     }
-    expect(kinds.size).toBe(14)
-    expect(seen.size).toBe(14)
+    expect(kinds.size).toBe(19)
+    expect(seen.size).toBe(19)
   })
 })
 

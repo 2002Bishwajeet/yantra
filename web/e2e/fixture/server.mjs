@@ -549,6 +549,28 @@ const routes = [
       return good
     },
   ]),
+  // Y-496: merge the thread's PR, then remove its worktree.
+  [
+    'POST',
+    /^\/api\/workspaces\/([^/]+)\/threads\/([^/]+)\/merge$/,
+    (s, [name], sent) => {
+      if (!findWorkspace(s, name)) return [404, notFound(name)]
+      if (s.gitFails) return [409, 'GitHub will not merge the pull request: Pull Request is not mergeable']
+      const pr = s.opened?.[name]
+      if (pr?.state !== 'open' || pr.number !== sent.number) return [409, "the thread's branch has no open PR"]
+      s.opened[name] = { ...pr, state: 'merged' }
+      return [200, { ...contract.threadPrMerged, number: pr.number, url: pr.url }]
+    },
+  ],
+  [
+    'DELETE',
+    /^\/api\/workspaces\/([^/]+)\/threads\/([^/]+)$/,
+    (s, [name]) => {
+      if (!findWorkspace(s, name)) return [404, notFound(name)]
+      if (s.gitFails) return [409, 'a turn or a revert is running in this thread; wait for it to end']
+      return [204]
+    },
+  ],
   [
     'POST',
     /^\/api\/workspaces\/([^/]+)\/threads\/new$/,

@@ -23,7 +23,7 @@
 use crate::agent;
 use crate::checkpoint::{self, DIFF_FLAGS, SNAPSHOT, capped};
 use crate::delegate::said;
-use crate::github::{self, Github, IssueRef, PullState, Token};
+use crate::github::{self, Conditional, Github, IssueRef, PullState, Token};
 use crate::ssh::{self, Exec, Os, Ssh};
 use crate::thread::{self, Place};
 use crate::tmux::{self, Tmux, run_shell, sq};
@@ -114,6 +114,27 @@ pub struct Opened {
     pub number: u64,
     pub url: String,
     pub created: bool,
+}
+
+/// A thread's open PR and the head the owner is asked to confirm.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pending {
+    pub owner: String,
+    pub repo: String,
+    pub number: u64,
+    pub url: String,
+    /// The upstream's branch, which the merge deletes.
+    pub branch: String,
+    pub head_sha: String,
+}
+
+/// A squash-merged PR. `kept` says why its branch is still on the remote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergedPr {
+    pub number: u64,
+    pub url: String,
+    pub branch: String,
+    pub kept: Option<String>,
 }
 
 /// A commit message for everything the worktree changed, untracked files
@@ -524,12 +545,7 @@ pub async fn open_pr<E: Exec>(
 ) -> Result<Opened, Failed> {
     let (url, branch) = found.upstream.as_ref().ok_or(Failed::NotPushed)?;
     let (owner, repo) = github::repo_of(url).ok_or(Failed::NotGithub)?;
-    let unseen = |error: github::Error| match error {
-        github::Error::Status { status: 404, .. } => Failed::Unseen {
-            repo: format!("{owner}/{repo}"),
-        },
-        other => other.into(),
-    };
+    let unseen = |error| unseen(&owner, &repo, error);
     let open = async || -> Result<Option<Opened>, Failed> {
         let pull = github
             .pull_for_head(token, &owner, &repo, branch)
@@ -591,6 +607,95 @@ pub async fn open_pr<E: Exec>(
     }
 }
 
+/// A 404 from GitHub is a repository the grant cannot see, not a missing thread.
+fn unseen(owner: &str, repo: &str, error: github::Error) -> Failed {
+    match error {
+        github::Error::Status { status: 404, .. } => Failed::Unseen {
+            repo: format!("{owner}/{repo}"),
+        },
+        other => other.into(),
+    }
+}
+
+/// The open PR of the thread's upstream, with its head (Y-496).
+pub async fn pending_pr(
+    found: &thread::Listed,
+    github: &Github,
+    token: &Token,
+) -> Result<Pending, Failed> {
+    let (url, branch) = found.upstream.as_ref().ok_or(Failed::NotPushed)?;
+    let (owner, repo) = github::repo_of(url).ok_or(Failed::NotGithub)?;
+    let unseen = |error| unseen(&owner, &repo, error);
+    let pull = github
+        .pull_for_head(token, &owner, &repo, branch)
+        .await
+        .map_err(unseen)?
+        .ok_or(Failed::NoPr)?;
+    let head = match github
+        .pull(token, &owner, &repo, pull.number, None)
+        .await
+        .map_err(unseen)?
+    {
+        Conditional::Fresh { value, .. } => value,
+        // No etag was sent, so GitHub has nothing to answer 304 to.
+        Conditional::NotModified => return Err(Failed::NoPr),
+    };
+    match head.state {
+        PullState::Open => Ok(Pending {
+            owner: owner.clone(),
+            repo: repo.clone(),
+            number: pull.number,
+            url: pull.url,
+            branch: branch.clone(),
+            head_sha: head.head_sha,
+        }),
+        PullState::Merged => Err(Failed::AlreadyMerged {
+            number: pull.number,
+        }),
+        PullState::Closed => Err(Failed::NoPr),
+    }
+}
+
+/// Squash-merges PR `number`, the one the owner confirmed, at the head read now, then deletes
+/// its branch. A delete that fails keeps the merge and says why in [`MergedPr::kept`].
+pub async fn merge_pr(
+    found: &thread::Listed,
+    github: &Github,
+    token: &Token,
+    number: u64,
+) -> Result<MergedPr, Failed> {
+    let pending = pending_pr(found, github, token).await?;
+    if pending.number != number {
+        return Err(Failed::NotThatPr {
+            confirmed: number,
+            open: pending.number,
+        });
+    }
+    let Pending {
+        owner,
+        repo,
+        url,
+        branch,
+        head_sha,
+        ..
+    } = pending;
+    github
+        .merge_pull(token, &owner, &repo, number, &head_sha)
+        .await
+        .map_err(|error| unseen(&owner, &repo, error))?;
+    let kept = github
+        .delete_branch(token, &owner, &repo, &branch)
+        .await
+        .err()
+        .map(|error| error.to_string());
+    Ok(MergedPr {
+        number,
+        url,
+        branch,
+        kept,
+    })
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Failed {
     #[error(transparent)]
@@ -621,6 +726,15 @@ pub enum Failed {
 
     #[error("the PR has no title, and the tip commit has no subject")]
     NoTitle,
+
+    #[error("the thread's branch has no open PR; open one first with `yantra pr open`")]
+    NoPr,
+
+    #[error("PR #{number} is already merged")]
+    AlreadyMerged { number: u64 },
+
+    #[error("the thread's open PR is #{open}, not #{confirmed}; confirm that one")]
+    NotThatPr { confirmed: u64, open: u64 },
 
     #[error("the GitHub grant cannot see {repo}, or the repository is gone")]
     Unseen { repo: String },
@@ -725,6 +839,36 @@ pub async fn open_pr_for(
 ) -> Result<Opened, Failed> {
     let (ssh, found) = find_listed(name, id).await?;
     open_pr(&ssh, &found, github, token, title, body).await
+}
+
+/// [`pending_pr`] for thread `id` of workspace `name`.
+pub async fn pending_pr_for(
+    name: &str,
+    id: &str,
+    github: &Github,
+    token: &Token,
+) -> Result<Pending, Failed> {
+    let (_, found) = find_listed(name, id).await?;
+    pending_pr(&found, github, token).await
+}
+
+/// [`merge_pr`] for thread `id` of workspace `name`.
+pub async fn merge_pr_for(
+    name: &str,
+    id: &str,
+    github: &Github,
+    token: &Token,
+    number: u64,
+) -> Result<MergedPr, Failed> {
+    let (_, found) = find_listed(name, id).await?;
+    merge_pr(&found, github, token, number).await
+}
+
+/// [`thread::remove`] for thread `id` of workspace `name`: its keeper, worktree, branch,
+/// checkpoints, journals and images.
+pub async fn remove_for(name: &str, id: &str) -> Result<(), Failed> {
+    let (ssh, place) = find(name, id).await?;
+    Ok(thread::remove(&ssh, &place).await?)
 }
 
 #[cfg(test)]
@@ -1671,6 +1815,166 @@ mod tests {
         let other: IssueRef = "x/y#9".parse().expect("an issue");
         assert!(!already_closes("Closes #9", &other, "o", "r"));
         assert!(already_closes("closes x/y#9", &other, "o", "r"));
+    }
+
+    const HEAD_OPEN: &str = r#"{"number":21,"state":"open","merged_at":null,"head":{"sha":"aaa111"},"user":{"login":"owner"}}"#;
+    const MERGED_LIST: &str = r#"[{"number":21,"html_url":"https://github.com/o/r/pull/21","state":"closed","merged_at":"2026-11-10T00:00:00Z"}]"#;
+    const SQUASHED: &str =
+        r#"{"sha":"bbb222","merged":true,"message":"Pull Request successfully merged"}"#;
+
+    fn pushed() -> thread::Listed {
+        listed(None, Some("git@github.com:o/r.git"))
+    }
+
+    /// Y-496: the merge is a squash at the head read now, then the head ref goes.
+    #[tokio::test]
+    async fn pr_merge_squashes_the_confirmed_pr_and_deletes_its_branch() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                reply("200 OK", OPEN),
+                reply("200 OK", HEAD_OPEN),
+                reply("200 OK", SQUASHED),
+                reply("204 No Content", ""),
+            ],
+        );
+
+        let merged = merge_pr(&pushed(), &at(address), &token(), 21)
+            .await
+            .expect("merged");
+
+        assert_eq!(
+            merged,
+            MergedPr {
+                number: 21,
+                url: "https://github.com/o/r/pull/21".to_owned(),
+                branch: UPSTREAM.to_owned(),
+                kept: None,
+            }
+        );
+        let seen = served.join().expect("the listener thread");
+        assert!(
+            seen[1].starts_with("GET /repos/o/r/pulls/21 "),
+            "{}",
+            seen[1]
+        );
+        assert!(
+            seen[2].starts_with("PUT /repos/o/r/pulls/21/merge "),
+            "{}",
+            seen[2]
+        );
+        let body: serde_json::Value =
+            serde_json::from_str(seen[2].rsplit("\r\n\r\n").next().unwrap_or_default())
+                .expect("a JSON body");
+        assert_eq!(
+            body,
+            serde_json::json!({"merge_method":"squash","sha":"aaa111"})
+        );
+        assert!(
+            seen[3].starts_with("DELETE /repos/o/r/git/refs/heads/yantra/42-11111111 "),
+            "{}",
+            seen[3]
+        );
+    }
+
+    /// The owner confirmed #20; #21 is what is open now, so nothing is merged.
+    #[tokio::test]
+    async fn pr_merge_refuses_a_pr_the_owner_did_not_confirm() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![reply("200 OK", OPEN), reply("200 OK", HEAD_OPEN)],
+        );
+
+        let refused = merge_pr(&pushed(), &at(address), &token(), 20)
+            .await
+            .expect_err("another PR");
+
+        assert!(
+            matches!(
+                refused,
+                Failed::NotThatPr {
+                    confirmed: 20,
+                    open: 21
+                }
+            ),
+            "{refused:?}"
+        );
+        assert_eq!(served.join().expect("the listener thread").len(), 2);
+    }
+
+    /// §B4: a second merge says the PR is merged, and no PR at all says so.
+    #[tokio::test]
+    async fn pr_merge_twice_says_already_merged_and_no_pr_says_none() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply("200 OK", MERGED_LIST),
+                reply(
+                    "200 OK",
+                    r#"{"number":21,"state":"closed","merged_at":"2026-11-10T00:00:00Z","head":{"sha":"aaa111"}}"#,
+                ),
+                reply("200 OK", NONE_OPEN),
+            ],
+        );
+        let github = at(address);
+
+        let again = merge_pr(&pushed(), &github, &token(), 21).await;
+        let none = merge_pr(&pushed(), &github, &token(), 21).await;
+
+        assert!(
+            matches!(again, Err(Failed::AlreadyMerged { number: 21 })),
+            "{again:?}"
+        );
+        assert!(matches!(none, Err(Failed::NoPr)), "{none:?}");
+        assert!(matches!(
+            merge_pr(&listed(None, None), &github, &token(), 21).await,
+            Err(Failed::NotPushed)
+        ));
+    }
+
+    /// A delete that fails after a good merge does not fail the merge.
+    #[tokio::test]
+    async fn pr_merge_keeps_the_merge_when_the_branch_delete_fails() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply("200 OK", OPEN),
+                reply("200 OK", HEAD_OPEN),
+                reply("200 OK", SQUASHED),
+                reply("403 Forbidden", r#"{"message":"Resource not accessible"}"#),
+            ],
+        );
+
+        let merged = merge_pr(&pushed(), &at(address), &token(), 21)
+            .await
+            .expect("merged");
+
+        assert_eq!(
+            merged.kept.as_deref(),
+            Some("GitHub answered 403 to the branch delete")
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_pr_reads_the_open_pr_and_its_head() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![reply("200 OK", OPEN), reply("200 OK", HEAD_OPEN)],
+        );
+
+        let pending = pending_pr(&pushed(), &at(address), &token())
+            .await
+            .expect("pending");
+
+        assert_eq!(pending.number, 21);
+        assert_eq!(pending.head_sha, "aaa111");
+        assert_eq!(pending.branch, UPSTREAM);
+        assert_eq!((pending.owner.as_str(), pending.repo.as_str()), ("o", "r"));
     }
 
     /// The tip command on a real git: pushed, ahead, behind, diverged, then
