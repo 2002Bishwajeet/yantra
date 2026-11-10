@@ -109,6 +109,7 @@ mod tests {
         assert!(said.contains("was already running"), "{said}");
         assert!(!said.contains("runs in your login session"), "{said}");
         assert!(said.contains(crate::tmux::launchd::PLIST), "{said}");
+        assert!(mac.log().contains("tmux -L yantra -N ls"), "{}", mac.log());
     }
 
     #[test]
@@ -116,7 +117,10 @@ mod tests {
         let mac = crate::tmux::launchd::Mac::new("join-none", false, false, None);
         let said = mac_tmux_on(&mac);
         assert!(mac.plist().is_some());
-        assert!(said.contains("tmux runs in your login session"), "{said}");
+        assert!(
+            said.contains("Yantra's tmux server (tmux -L yantra) runs in your login session"),
+            "{said}"
+        );
     }
 
     /// `sh -n` parses without running, so a syntax error fails here rather

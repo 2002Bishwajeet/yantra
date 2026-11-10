@@ -672,7 +672,7 @@ async fn hand_over(machine: &str, session: &str) -> Option<String> {
         .arg("--")
         .arg(machine)
         .arg(attach::remote_command(
-            plan.tmux.path(),
+            &plan.tmux.command(),
             &plan.session,
             plan.term.term(),
         ))

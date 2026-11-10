@@ -18,6 +18,9 @@
 //!   absolute path once per connection.
 //! - **I-40** — never set `default-terminal`. It is a *server* option, so a
 //!   per-session `set-option -t` reconfigures every session on the machine.
+//!
+//! On a Mac every call goes to the server named `yantra` with `-N`, so ssh
+//! never starts one, and only the LaunchAgent does (ADR-0018's 2026-11-09 note).
 
 use crate::ssh::Exec;
 
@@ -158,6 +161,9 @@ pub enum Error {
     #[error("could not parse a session from `{raw}`")]
     Listing { raw: String },
 
+    #[error("no one is logged in at the Mac's screen")]
+    NoLoginServer,
+
     #[error(transparent)]
     Ssh(#[from] crate::ssh::Error),
 }
@@ -194,16 +200,19 @@ const CANDIDATES: [&str; 7] = [
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tmux {
     path: String,
+    mac: bool,
 }
 
 impl Tmux {
-    /// Finds tmux on the far side in one round trip (I-34). Not a login shell:
-    /// `sh -lc` answers `NONE` on the machine that raised I-34.
+    /// Finds tmux on the far side, and whether that side is a Mac, in one
+    /// round trip (I-34). Not a login shell: `sh -lc` answers `NONE` on the
+    /// machine that raised I-34.
     pub async fn resolve<E: Exec>(exec: &E) -> Result<Self, Error> {
         // `exit` is safe: ADR-0006 runs this in a child shell, so it cannot
         // suppress the sentinel. `(/*)`, as in `agent::probe` (Y-634, Y-635).
         let probe = format!(
-            "p=$(command -v tmux 2>/dev/null)\n\
+            "printf '%s\\n' \"$(uname -s 2>/dev/null)\"\n\
+             p=$(command -v tmux 2>/dev/null)\n\
              case \"$p\" in (/*) printf '%s\\n' \"$p\"; exit 0 ;; esac\n\
              for d in {dirs}; do\n\
              \x20 [ -x \"$d/tmux\" ] && {{ printf '%s\\n' \"$d/tmux\"; exit 0; }}\n\
@@ -213,17 +222,35 @@ impl Tmux {
         );
 
         let out = exec.exec(&probe).await?;
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        let said = String::from_utf8_lossy(&out.stdout);
+        let (os, path) = said
+            .trim_end()
+            .rsplit_once('\n')
+            .unwrap_or(("", said.trim()));
         if out.success() && path.starts_with('/') {
-            return Ok(Self { path });
+            return Ok(Self {
+                path: path.to_owned(),
+                mac: os == "Darwin",
+            });
         }
         Err(Error::NotFound {
             searched: CANDIDATES.join(", "),
         })
     }
 
+    /// For display. A command starts with [`Tmux::command`].
     pub fn path(&self) -> &str {
         &self.path
+    }
+
+    /// The quoted binary, and on a Mac the named server that `-N` keeps ssh
+    /// from starting (I-44).
+    pub fn command(&self) -> String {
+        if self.mac {
+            format!("{} -L yantra -N", sq(&self.path))
+        } else {
+            sq(&self.path)
+        }
     }
 
     /// Opens `name` at `cwd`, running `startup` if the session had to be
@@ -249,13 +276,20 @@ impl Tmux {
         // way.
         let create = format!(
             "{} new-session -d -s {} -c {} -P -F {}",
-            sq(&self.path),
+            self.command(),
             sq(name),
             sq(cwd),
             sq(IDS)
         );
 
-        let out = exec.exec(&create).await?;
+        let mut out = exec.exec(&create).await?;
+        // The one place a missing Mac server is started, and only by launchd.
+        if self.mac && !out.success() && no_server(&String::from_utf8_lossy(&out.stderr)) {
+            if !self.login_server(exec).await? {
+                return Err(Error::NoLoginServer);
+            }
+            out = exec.exec(&create).await?;
+        }
         if out.success() {
             let session = parse_ids(name, &out.stdout)?;
             self.set_remain_on_exit(exec, &session).await?;
@@ -267,8 +301,11 @@ impl Tmux {
 
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_owned();
         if !stderr.contains("duplicate session:") {
-            // Verified executable at resolve time, so it moved since.
-            if stderr.contains("not found") || stderr.contains("No such file") {
+            // Verified executable at resolve time, so it moved since. A
+            // missing socket says `No such file` too.
+            if !no_server(&stderr)
+                && (stderr.contains("not found") || stderr.contains("No such file"))
+            {
                 return Err(Error::Vanished {
                     path: self.path.clone(),
                 });
@@ -283,7 +320,7 @@ impl Tmux {
         // I-1: the duplicate is the success case. The session was already there.
         let query = format!(
             "{} display-message -p -t {} -F {}",
-            sq(&self.path),
+            self.command(),
             sq(&format!("={name}:")),
             sq(IDS)
         );
@@ -303,7 +340,7 @@ impl Tmux {
         let out = exec
             .exec(&format!(
                 "{} list-sessions -F {}",
-                sq(&self.path),
+                self.command(),
                 sq(LIST_FORMAT)
             ))
             .await?;
@@ -340,7 +377,7 @@ impl Tmux {
     /// What `list-sessions` printed, or `None` when no server answers.
     async fn sessions<E: Exec>(&self, exec: &E) -> Result<Option<String>, Error> {
         let out = exec
-            .exec(&format!("{} list-sessions", sq(&self.path)))
+            .exec(&format!("{} list-sessions", self.command()))
             .await?;
         if out.success() {
             return Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()));
@@ -369,7 +406,7 @@ impl Tmux {
             Some(_) => true,
             None => false,
         };
-        let out = exec.exec(&login_server_command(&self.path)).await?;
+        let out = exec.exec(&login_server_command(self)).await?;
         if out.success() {
             return Ok(true);
         }
@@ -397,7 +434,7 @@ impl Tmux {
         let out = exec
             .exec(&format!(
                 "{} list-panes -s -t {} -F {}",
-                sq(&self.path),
+                self.command(),
                 sq(&format!("={name}")),
                 sq(PANE_FORMAT)
             ))
@@ -440,7 +477,7 @@ impl Tmux {
         let out = exec
             .exec(&format!(
                 "{} capture-pane -p -t {} | grep -qF -- {}",
-                sq(&self.path),
+                self.command(),
                 sq(pane_id),
                 sq(text)
             ))
@@ -454,7 +491,7 @@ impl Tmux {
         let out = exec
             .exec(&format!(
                 "{} kill-session -t {}",
-                sq(&self.path),
+                self.command(),
                 sq(&format!("={name}"))
             ))
             .await?;
@@ -476,7 +513,7 @@ impl Tmux {
     async fn set_remain_on_exit<E: Exec>(&self, exec: &E, session: &Session) -> Result<(), Error> {
         let out = exec
             .exec(&remain_on_exit(
-                &self.path,
+                &self.command(),
                 &session.session_id,
                 &session.window_id,
             ))
@@ -507,7 +544,7 @@ impl Tmux {
         let out = exec
             .exec(&format!(
                 "{} respawn-pane -k -t {} {}",
-                sq(&self.path),
+                self.command(),
                 sq(pane_id),
                 sq(command)
             ))
@@ -636,15 +673,16 @@ pub(crate) const LOGIN_SERVER: &str = include_str!("login_server.sh");
 /// [`LOGIN_SERVER`]'s status when there is no `gui/<uid>` domain.
 const NO_ONE_AT_THE_SCREEN: i32 = 3;
 
-pub(crate) fn login_server_command(tmux: &str) -> String {
-    format!("{LOGIN_SERVER}\nlogin_server {}\n", sq(tmux))
+/// The script adds the socket itself, so it gets the bare path.
+pub(crate) fn login_server_command(tmux: &Tmux) -> String {
+    format!("{LOGIN_SERVER}\nlogin_server {}\n", sq(&tmux.path))
 }
 
 /// The empty format keeps tmux's "Pane is dead" line off an attached terminal
 /// (Y-639); `-q` because tmux before 3.3 has no such option. The page draws its
 /// own header, so the status bar goes too (Y-644); it is a session option.
 fn remain_on_exit(tmux: &str, session_id: &str, window_id: &str) -> String {
-    let (tmux, session, window) = (sq(tmux), sq(session_id), sq(window_id));
+    let (session, window) = (sq(session_id), sq(window_id));
     format!(
         "{tmux} set-option -w -t {window} remain-on-exit on \\; \
          set-option -qw -t {window} remain-on-exit-format '' \\; \
@@ -667,16 +705,13 @@ pub(crate) fn sq(s: &str) -> String {
 /// Measured byte-identical on 3.5a and 3.7b, as is the absence of the command's
 /// own stderr — anything to be read back must be printed on stdout.
 ///
-/// With no server this fails with one of [`no_server`]'s spellings, which is the
-/// state [`crate::up::require_login_server`] ends, or refuses, ahead of it on macOS.
+/// `tmux` is [`Tmux::command`]. With no server this fails with one of
+/// [`no_server`]'s spellings, and on a Mac `-N` keeps it from starting one, so
+/// [`crate::up::require_login_server`] runs ahead of it there.
 ///
 /// [ADR-0018]: ../../../docs/adr/0018-the-tmux-server-carries-the-macos-login-session.md
 pub(crate) fn run_shell(tmux: &str, command: &str) -> String {
-    format!(
-        "{} run-shell {}",
-        sq(tmux),
-        sq(&format!("{command}; exit 0"))
-    )
+    format!("{tmux} run-shell {}", sq(&format!("{command}; exit 0")))
 }
 
 /// I-48, the reason [`signal_name`] exists at all.
@@ -732,7 +767,7 @@ mod tests {
     #[test]
     fn remain_on_exit_also_blanks_the_dead_pane_text_and_the_status_bar_in_one_round_trip() {
         assert_eq!(
-            remain_on_exit("/usr/bin/tmux", "$3", "@7"),
+            remain_on_exit("'/usr/bin/tmux'", "$3", "@7"),
             "'/usr/bin/tmux' set-option -w -t '@7' remain-on-exit on \\; \
              set-option -qw -t '@7' remain-on-exit-format '' \\; \
              set-option -t '$3' status off"
@@ -806,16 +841,133 @@ mod tests {
     #[test]
     fn a_run_shell_command_is_one_argument_and_never_reports_its_own_failure() {
         assert_eq!(
-            run_shell("/opt/homebrew/bin/tmux", "'/u/claude' auth status"),
-            "'/opt/homebrew/bin/tmux' run-shell ''\\''/u/claude'\\'' auth status; exit 0'"
+            run_shell(&tmux().command(), "'/u/claude' auth status"),
+            "'/opt/homebrew/bin/tmux' -L yantra -N run-shell ''\\''/u/claude'\\'' auth status; exit 0'"
         );
     }
 
     const TMUX: &str = "/opt/homebrew/bin/tmux";
 
+    const ON_THE_SOCKET: &str = "'/opt/homebrew/bin/tmux' -L yantra -N ";
+
     fn tmux() -> Tmux {
         Tmux {
             path: TMUX.to_owned(),
+            mac: true,
+        }
+    }
+
+    /// The probe's first line is `uname -s`, and only `Darwin` is a Mac.
+    #[tokio::test]
+    async fn resolve_knows_a_mac_by_its_uname_line() {
+        for (said, command) in [
+            ("Darwin\n/opt/homebrew/bin/tmux\n", ON_THE_SOCKET.trim_end()),
+            ("Linux\n/usr/bin/tmux\n", "'/usr/bin/tmux'"),
+            ("darwin\n/usr/bin/tmux\n", "'/usr/bin/tmux'"),
+            ("\n/usr/bin/tmux\n", "'/usr/bin/tmux'"),
+        ] {
+            let tmux = Tmux::resolve(&fake::Said(said)).await.expect("found");
+            assert_eq!(tmux.command(), command, "{said:?}");
+        }
+    }
+
+    /// Every call `Tmux` makes, with a session to find and a pane to read.
+    async fn every_call<E: Exec>(tmux: &Tmux, exec: &E) {
+        tmux.ensure(exec, "w", "/r", Some("claude"))
+            .await
+            .expect("opened");
+        tmux.list(exec).await.expect("listed");
+        tmux.running(exec).await.expect("answered");
+        tmux.pane(exec, "w").await.expect("read");
+        tmux.pane_shows(exec, "%1", "trust").await.expect("read");
+        tmux.kill(exec, "w").await.expect("killed");
+        tmux.respawn(exec, "%1", "claude").await.expect("respawned");
+        exec.exec(&run_shell(&tmux.command(), "true"))
+            .await
+            .expect("ran");
+    }
+
+    #[tokio::test]
+    async fn a_mac_sends_every_command_to_the_named_server_with_n() {
+        let mac = fake::Mac::new(fake::Server::Empty, 0);
+        every_call(&tmux(), &mac).await;
+        let asked = mac.asked();
+        assert_eq!(asked.len(), 10, "{asked:?}");
+        for command in &asked {
+            assert!(command.starts_with(ON_THE_SOCKET), "{command}");
+        }
+    }
+
+    #[tokio::test]
+    async fn linux_sends_neither_flag() {
+        let linux = fake::Mac::new(fake::Server::Empty, 0);
+        let tmux = Tmux {
+            path: "/usr/bin/tmux".to_owned(),
+            mac: false,
+        };
+        every_call(&tmux, &linux).await;
+        for command in linux.asked() {
+            assert!(command.starts_with("'/usr/bin/tmux' "), "{command}");
+            assert!(
+                !command.contains("-L") && !command.contains(" -N "),
+                "{command}"
+            );
+        }
+    }
+
+    fn creates(asked: &[String]) -> Vec<usize> {
+        (0..asked.len())
+            .filter(|&at| asked[at].contains("new-session"))
+            .collect()
+    }
+
+    /// I-56: the keeper reaches no gate of its own, so `ensure` kicks the
+    /// LaunchAgent and creates the session in the server it starts.
+    #[tokio::test]
+    async fn ensure_on_a_mac_with_no_server_sends_the_script_then_creates() {
+        let mac = fake::Mac::new(fake::Server::None, 0);
+        let opened = tmux().ensure(&mac, "w", "/r", None).await.expect("opened");
+        assert!(opened.was_created());
+        let asked = mac.asked();
+        let script = asked
+            .iter()
+            .position(|command| *command == login_server_command(&tmux()))
+            .expect("the script was sent");
+        assert_eq!(creates(&asked), [0, script + 1], "{asked:?}");
+    }
+
+    #[tokio::test]
+    async fn ensure_with_no_one_at_the_screen_is_no_login_server() {
+        let mac = fake::Mac::new(fake::Server::None, 3);
+        let err = tmux()
+            .ensure(&mac, "w", "/r", None)
+            .await
+            .expect_err("refused");
+        assert!(matches!(err, Error::NoLoginServer), "{err:?}");
+        assert_eq!(err.to_string(), "no one is logged in at the Mac's screen");
+        assert_eq!(creates(&mac.asked()), [0]);
+    }
+
+    /// `-N` on the second create too: ssh never starts the server itself.
+    #[tokio::test]
+    async fn a_server_that_stays_gone_is_an_error_and_not_a_create_without_n() {
+        let mac = fake::Mac::new(fake::Server::None, 0).stays_gone();
+        let err = tmux()
+            .ensure(&mac, "w", "/r", None)
+            .await
+            .expect_err("no server");
+        let Error::Command {
+            command, stderr, ..
+        } = &err
+        else {
+            panic!("{err:?}");
+        };
+        assert_eq!(command, "new-session");
+        assert!(no_server(stderr), "{stderr}");
+        let asked = mac.asked();
+        assert_eq!(creates(&asked).len(), 2, "{asked:?}");
+        for at in creates(&asked) {
+            assert!(asked[at].starts_with(ON_THE_SOCKET), "{}", asked[at]);
         }
     }
 
@@ -823,7 +975,7 @@ mod tests {
     async fn a_running_server_sends_no_launchctl() {
         let mac = fake::Mac::new(fake::Server::Running, 0);
         assert!(tmux().login_server(&mac).await.expect("answered"));
-        assert_eq!(mac.asked(), ["'/opt/homebrew/bin/tmux' list-sessions"]);
+        assert_eq!(mac.asked(), [format!("{ON_THE_SOCKET}list-sessions")]);
     }
 
     /// `tmux -D` keeps a server with no session, and `list-sessions` there
@@ -847,7 +999,7 @@ mod tests {
                 "{script}"
             );
             assert!(
-                mac.asked().contains(&login_server_command(TMUX)),
+                mac.asked().contains(&login_server_command(&tmux())),
                 "{script}"
             );
         }
@@ -859,7 +1011,7 @@ mod tests {
         assert!(!tmux().running(&mac).await.expect("answered"));
         assert!(tmux().login_server(&mac).await.expect("answered"));
         let asked = mac.asked();
-        assert_eq!(asked.last(), Some(&login_server_command(TMUX)));
+        assert_eq!(asked.last(), Some(&login_server_command(&tmux())));
         assert!(
             asked[asked.len() - 1].ends_with("\nlogin_server '/opt/homebrew/bin/tmux'\n"),
             "{asked:?}"
@@ -903,6 +1055,41 @@ mod tests {
         mac.run(&login_server_command(&mac.tmux()))
     }
 
+    /// The new job runs the named server in the login session, so its panes
+    /// can read the keychain, and an older Yantra's job is left as it was.
+    #[test]
+    fn the_job_serves_the_named_socket_beside_the_old_one() {
+        let mac = launchd::Mac::new("named", false, false, None);
+        let old = mac.dir.join(launchd::OLD_PLIST);
+        std::fs::create_dir_all(old.parent().expect("a parent")).expect("a directory");
+        std::fs::write(&old, "the old job").expect("a file");
+        let out = login_server_on(&mac);
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        let plist = mac.plist().expect("the plist was written");
+        assert!(
+            plist.contains("<string>io.github.2002bishwajeet.yantra-tmux-server</string>"),
+            "{plist}"
+        );
+        assert!(
+            plist.contains("while \"$0\" -L yantra ls")
+                && plist.contains("exec \"$0\" -L yantra -D"),
+            "{plist}"
+        );
+        assert!(
+            plist.contains("<key>ProcessType</key><string>Interactive</string>"),
+            "{plist}"
+        );
+        assert!(plist.contains("yantra-tmux-server.log"), "{plist}");
+        assert_eq!(std::fs::read_to_string(&old).expect("kept"), "the old job");
+        let log = mac.log();
+        assert!(!log.contains("yantra-tmux "), "{log}");
+        assert!(!log.contains("yantra-tmux\n"), "{log}");
+        for call in log.lines().filter(|line| line.starts_with("tmux ")) {
+            assert!(call.starts_with("tmux -L yantra -N "), "{call}");
+        }
+        assert!(log.contains("tmux -L yantra -N ls"), "{log}");
+    }
+
     /// Join runs the script on a Mac whose Terminal already holds a server.
     /// The job is installed anyway, and waits in its `ls` loop.
     #[test]
@@ -913,7 +1100,7 @@ mod tests {
         let plist = mac.plist().expect("the plist was written");
         assert!(plist.contains("<key>KeepAlive</key><true/>"), "{plist}");
         assert!(
-            plist.contains(&format!("<string>{}</string>", mac.tmux())),
+            plist.contains(&format!("<string>{}</string>", mac.tmux().path())),
             "{plist}"
         );
         let log = mac.log();
@@ -951,7 +1138,7 @@ mod tests {
     async fn an_empty_server_booted_out_by_a_failed_replacement_is_no_server() {
         let mac = launchd::Mac::new("older-empty-fails", true, true, Some("older"));
         mac.fail_bootstrap();
-        let tmux = Tmux { path: mac.tmux() };
+        let tmux = mac.tmux();
         let err = tmux
             .login_server(&mac)
             .await
@@ -1065,19 +1252,28 @@ pub(crate) mod fake {
     }
 
     pub(crate) struct Mac {
-        server: Server,
+        server: Mutex<Server>,
         script: i32,
+        starts: bool,
         asked: Mutex<Vec<String>>,
     }
 
     impl Mac {
-        /// `script` is the status the login-server script exits with.
+        /// `script` is the status the login-server script exits with. One that
+        /// exits 0 starts an empty server where none ran.
         pub(crate) fn new(server: Server, script: i32) -> Self {
             Self {
-                server,
+                server: Mutex::new(server),
                 script,
+                starts: true,
                 asked: Mutex::default(),
             }
+        }
+
+        /// The script exits 0 and no server answers.
+        pub(crate) fn stays_gone(mut self) -> Self {
+            self.starts = false;
+            self
         }
 
         pub(crate) fn asked(&self) -> Vec<String> {
@@ -1098,11 +1294,15 @@ pub(crate) mod fake {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(command.to_owned());
+            let mut server = self.server.lock().unwrap_or_else(PoisonError::into_inner);
             let (status, stdout, stderr) = if command.contains("\nlogin_server '") {
+                if self.script == 0 && self.starts && matches!(*server, Server::None) {
+                    *server = Server::Empty;
+                }
                 let said = if self.script == 0 { "" } else { SCRIPT_SAID };
                 (self.script, "", said)
             } else if command.contains("list-sessions") {
-                match self.server {
+                match *server {
                     Server::Running => (0, "main: 1 windows\n", ""),
                     Server::Empty => (0, "", ""),
                     Server::None => (1, "", "no server running on /private/tmp/tmux-501/default"),
@@ -1113,9 +1313,21 @@ pub(crate) mod fake {
                     ),
                 }
             } else if command.contains("command -v tmux") {
-                (0, "/opt/homebrew/bin/tmux\n", "")
+                (0, "Darwin\n/opt/homebrew/bin/tmux\n", "")
             } else if command.contains("new-session") {
-                (0, "$1 @1 %1\n", "")
+                match *server {
+                    Server::None if command.contains(" -N ") => {
+                        (1, "", "no server running on /private/tmp/tmux-501/yantra")
+                    }
+                    // Started over ssh, which is what `-N` is there to stop.
+                    Server::None => {
+                        *server = Server::Running;
+                        (0, "$1 @1 %1\n", "")
+                    }
+                    _ => (0, "$1 @1 %1\n", ""),
+                }
+            } else if command.contains("&& pwd") {
+                (0, "/Users/me/.yantra/keep/w/t\n", "")
             } else {
                 (0, "", "")
             };
@@ -1123,6 +1335,19 @@ pub(crate) mod fake {
                 status,
                 stdout: stdout.as_bytes().to_vec(),
                 stderr: stderr.as_bytes().to_vec(),
+            })
+        }
+    }
+
+    /// Prints `.0` to every command.
+    pub(crate) struct Said(pub(crate) &'static str);
+
+    impl Exec for Said {
+        async fn exec(&self, _: &str) -> Result<ssh::Output, ssh::Error> {
+            Ok(ssh::Output {
+                status: 0,
+                stdout: self.0.as_bytes().to_vec(),
+                stderr: Vec::new(),
             })
         }
     }
@@ -1136,6 +1361,10 @@ pub(crate) mod launchd {
     use std::path::{Path, PathBuf};
 
     pub(crate) const PLIST: &str =
+        "Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux-server.plist";
+
+    /// The job an older Yantra loaded, on the default socket.
+    pub(crate) const OLD_PLIST: &str =
         "Library/LaunchAgents/io.github.2002bishwajeet.yantra-tmux.plist";
 
     pub(crate) struct Mac {
@@ -1171,7 +1400,8 @@ esac
             write_tool(
                 &dir,
                 "tmux",
-                "#!/bin/sh\ntest -f \"$FAKE/server\" && exec cat \"$FAKE/server\"\n\
+                "#!/bin/sh\necho \"tmux $*\" >>\"$FAKE/log\"\n\
+                 test -f \"$FAKE/server\" && exec cat \"$FAKE/server\"\n\
                  echo \"no server running on $FAKE/socket\" >&2\nexit 1\n",
             );
             // A login shell that fails, so the plist holds the fixed PATH.
@@ -1194,8 +1424,11 @@ esac
             std::fs::write(self.dir.join("bootstrap-fails"), "").expect("a file");
         }
 
-        pub(crate) fn tmux(&self) -> String {
-            self.dir.join("bin/tmux").display().to_string()
+        pub(crate) fn tmux(&self) -> super::Tmux {
+            super::Tmux {
+                path: self.dir.join("bin/tmux").display().to_string(),
+                mac: true,
+            }
         }
 
         /// Replaces the account's login shell, which `$SHELL` names.

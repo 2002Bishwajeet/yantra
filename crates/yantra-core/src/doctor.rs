@@ -598,7 +598,7 @@ async fn asked_inside<E: Exec>(
         // run-shell ends in `exit 0`, so the status crosses as a mark on stdout.
         let command = format!("{} auth status >/dev/null 2>&1 && echo {FOUND}", sq(path));
         let out = exec
-            .exec(&tmux::run_shell(tmux.path(), &command))
+            .exec(&tmux::run_shell(&tmux.command(), &command))
             .await
             .map_err(|err| could_not(&err))?;
         if !out.success() {
@@ -970,7 +970,7 @@ async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Erro
         None => None,
     };
     let command = match (inside, os) {
-        (Some(tmux), _) => tmux::run_shell(tmux.path(), &probe),
+        (Some(tmux), _) => tmux::run_shell(&tmux.command(), &probe),
         (None, Os::Other) => probe,
         (None, Os::MacOs) => {
             return unknown(

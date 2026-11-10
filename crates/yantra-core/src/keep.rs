@@ -670,7 +670,7 @@ fn ending(tmux: &Tmux, keeper: &Keeper, run: &str, said: &str) -> String {
         keeper.dir(),
         sq(run),
         sq(said),
-        sq(tmux.path()),
+        tmux.command(),
         sq(&format!("={}", keeper.session()))
     )
 }
@@ -798,7 +798,7 @@ pub(crate) fn reading(tmux: &Tmux, keeper: &Keeper, pane: &str, at: u64) -> Stri
          echo {ENDED} >&2\n",
         dir = keeper.dir(),
         from = at + 1,
-        tmux = sq(tmux.path()),
+        tmux = tmux.command(),
         pane = sq(pane),
     )
 }
@@ -1287,6 +1287,38 @@ mod tests {
             state_dir: "/nonexistent".into(),
         })
         .expect("a short control path")
+    }
+
+    /// I-56: a Chat turn on a Mac with no login server goes through `ensure`,
+    /// which starts the LaunchAgent before it creates the keeper's session.
+    #[tokio::test]
+    async fn a_keeper_on_a_mac_with_no_server_starts_the_launch_agent() {
+        use crate::tmux::fake::{Mac, Server};
+        let mac = Mac::new(Server::None, 0);
+        let tmux = Tmux::resolve(&mac).await.expect("a tmux");
+        let started = start(
+            &mac,
+            &tmux,
+            &Keeper::new("w", "t"),
+            "claude",
+            "r1",
+            Limits::default(),
+        )
+        .await
+        .expect("started");
+        assert!(matches!(started, Started::Running { .. }));
+        let asked = mac.asked();
+        let script = asked
+            .iter()
+            .position(|command| command.contains("\nlogin_server '"))
+            .expect("the LaunchAgent was asked for");
+        assert!(asked[script + 1].contains("new-session"), "{asked:?}");
+        for command in asked.iter().filter(|command| command.contains("tmux' ")) {
+            assert!(
+                command.starts_with("'/opt/homebrew/bin/tmux' -L yantra -N "),
+                "{command}"
+            );
+        }
     }
 
     async fn some_tmux() -> Tmux {

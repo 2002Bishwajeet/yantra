@@ -155,7 +155,7 @@ impl Lab {
         args.push(format!("{USER}@{}", self.fixture.host()));
         args.push("--".to_owned());
         args.push(attach::remote_command(
-            self.tmux.path(),
+            &self.tmux.command(),
             SESSION,
             terminfo::FALLBACK,
         ));

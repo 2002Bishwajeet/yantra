@@ -203,7 +203,7 @@ async fn a_thread_commits_with_the_machines_identity_and_claudes_message() -> Re
     // both come back through `run-shell`.
     fixture.run("tmux new-session -d -s login")?;
     let tmux = Tmux::resolve(&ssh).await?;
-    let inside = commit::draft(&ssh, &place, Some(tmux.path())).await?;
+    let inside = commit::draft(&ssh, &place, Some(&tmux.command())).await?;
     assert_eq!(inside, message);
 
     // (f) A patch over 256 KiB reaches claude cut, with a line that says so.
@@ -221,7 +221,7 @@ async fn a_thread_commits_with_the_machines_identity_and_claudes_message() -> Re
     );
     fixture.run(&format!("mv {INSTALLED_AT} {INSTALLED_AT}.off"))?;
     assert!(matches!(
-        commit::draft(&ssh, &place, Some(tmux.path())).await,
+        commit::draft(&ssh, &place, Some(&tmux.command())).await,
         Err(Error::Claude { said }) if said.starts_with("claude was not found")
     ));
     Ok(())

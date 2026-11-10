@@ -126,7 +126,7 @@ fn started(plan: Plan, size: Size) -> Result<Terminal, Error> {
 
 /// The testable half — everything after the plan is resolved.
 pub fn on(ssh: &Ssh, plan: &Plan, size: Size) -> Result<Terminal, Error> {
-    let remote = attach::remote_command(plan.tmux.path(), &plan.session, plan.term.term());
+    let remote = attach::remote_command(&plan.tmux.command(), &plan.session, plan.term.term());
     spawned(ssh, &remote, plan.term.term(), size)
 }
 

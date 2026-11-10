@@ -469,7 +469,7 @@ async fn every_script() -> Vec<(String, String)> {
     );
     r.keep(
         "pty",
-        attach::remote_command(tmux.path(), "web", "xterm-256color"),
+        attach::remote_command(&tmux.command(), "web", "xterm-256color"),
     );
     r.keep(
         "pty",
