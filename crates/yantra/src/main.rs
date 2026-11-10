@@ -41,6 +41,7 @@ use yantra_core::update;
 use yantra_core::workspace::{self, Listing};
 
 mod dash;
+mod jobs;
 mod mcp;
 mod why;
 
@@ -255,6 +256,12 @@ enum Command {
         /// ssh destination to check. Every machine a workspace names, if omitted
         machine: Option<String>,
         /// Print the checks as JSON, for an installer or an agent to read
+        #[arg(long)]
+        json: bool,
+    },
+    /// List this machine's systemd user timers, each job's last result and its state file
+    Jobs {
+        /// Print the jobs as JSON
         #[arg(long)]
         json: bool,
     },
@@ -716,6 +723,7 @@ async fn main() -> ExitCode {
                 },
         }) => history_extract(&folder, &out),
         Some(Command::Doctor { machine, json }) => doctor(machine.as_deref(), json).await,
+        Some(Command::Jobs { json }) => jobs::run(json).await,
         Some(Command::FixTerminfo { machine }) => fix_terminfo(&machine).await,
         Some(Command::ForgetHostKey { machine }) => forget_host_key(&machine).await,
         Some(Command::SshIdentity {
@@ -4527,6 +4535,14 @@ mod tests {
             "{rendered}"
         );
         assert!(!rendered.contains("unreachable"), "{rendered}");
+    }
+
+    #[test]
+    fn jobs_takes_a_json_flag() {
+        let plain = Cli::try_parse_from(["yantra", "jobs"]).expect("a bare jobs parses");
+        assert!(matches!(plain.command, Some(Command::Jobs { json: false })));
+        let json = Cli::try_parse_from(["yantra", "jobs", "--json"]).expect("jobs --json parses");
+        assert!(matches!(json.command, Some(Command::Jobs { json: true })));
     }
 
     /// The machine is optional because a box being installed has no workspace
