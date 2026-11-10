@@ -43,7 +43,10 @@ export type Machine = {
   // The first Tailscale IPv4; null is a node that reported none (Y-343).
   address: string | null
   os: 'linux' | 'macOS' | 'iOS' | 'windows' | 'android' | (string & {})
+  // Tailscale's `Online`, or its `Active` path answers (Y-626).
   online: boolean
+  // Online only because the path answers: the control server cannot see it.
+  control_lost: boolean
   expired: boolean
   // RFC 3339; null is key expiry off.
   key_expires: string | null

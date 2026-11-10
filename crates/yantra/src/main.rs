@@ -4342,6 +4342,7 @@ mod tests {
             dns_name: format!("{name}.example.ts.net."),
             os,
             online,
+            control_lost: false,
             last_seen: seen.map(str::to_string),
             expired,
             key_expires: None,

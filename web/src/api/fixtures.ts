@@ -26,6 +26,7 @@ export function aMachine(overrides: Partial<Machine> = {}): Machine {
     address: '100.64.0.12',
     os: 'linux',
     online: true,
+    control_lost: false,
     expired: false,
     key_expires: null,
     last_seen: '2026-07-07T09:00:00Z',

@@ -40,7 +40,11 @@ pub struct MachineInfo {
     /// `DNSName` verbatim, trailing dot included.
     pub dns_name: String,
     pub os: Os,
+    /// Reachable: Tailscale's control server sees the node (`Online`), or its
+    /// direct path answers (`Active`).
     pub online: bool,
+    /// Tailscale's control server cannot see the node, but its path answers.
+    pub control_lost: bool,
     /// RFC 3339 as Tailscale reported it; `None` when it reported the zero
     /// time. An **online** peer can still carry a real value, so this says
     /// nothing about reachability on its own — read `online` for that.
@@ -320,6 +324,8 @@ struct Node {
     os: String,
     #[serde(rename = "Online")]
     online: bool,
+    #[serde(rename = "Active", default)]
+    active: bool,
     #[serde(rename = "LastSeen")]
     last_seen: Option<String>,
     /// Peers carry this; `Self` has no such key at all.
@@ -385,7 +391,8 @@ impl MachineInfo {
             id: node.id,
             name,
             os: Os::parse(&node.os),
-            online: node.online,
+            online: node.online || node.active,
+            control_lost: !node.online && node.active,
             last_seen: node.last_seen.filter(|t| t != ZERO_TIME),
             expired: node.expired,
             key_expires: node.key_expiry.filter(|t| t != ZERO_TIME),
@@ -612,6 +619,41 @@ mod tests {
             "Online": true
         }}"#;
         assert_eq!(parse(json).expect("parses")[0].key_expires, None);
+    }
+
+    /// Y-626, measured on the owner's Mac: Tailscale lost its control server,
+    /// so `Online` went false while `tailscale ping` answered in 34 ms.
+    fn peer_with(online: bool, active: bool) -> MachineInfo {
+        let json = format!(
+            r#"{{"Self": {{"ID": "n1", "DNSName": "box.example.ts.net.", "OS": "linux",
+                "Online": true}},
+              "Peer": {{"nodekey:01": {{"ID": "n2", "DNSName": "mac.example.ts.net.",
+                "OS": "macOS", "Online": {online}, "Active": {active}}}}}}}"#
+        );
+        parse(json.as_bytes())
+            .expect("parses")
+            .into_iter()
+            .find(|m| m.name == "mac")
+            .expect("the peer")
+    }
+
+    #[test]
+    fn a_peer_whose_path_answers_is_online_though_control_lost_it() {
+        let mac = peer_with(false, true);
+        assert!(mac.online, "{mac:?}");
+        assert!(mac.control_lost, "{mac:?}");
+    }
+
+    #[test]
+    fn a_peer_with_no_control_and_no_path_stays_offline() {
+        let mac = peer_with(false, false);
+        assert!(!mac.online, "{mac:?}");
+        assert!(!mac.control_lost, "{mac:?}");
+    }
+
+    #[test]
+    fn no_node_in_the_real_fixture_has_lost_its_control_server() {
+        assert!(machines().iter().all(|m| !m.control_lost));
     }
 
     #[test]

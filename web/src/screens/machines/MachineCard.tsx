@@ -161,6 +161,11 @@ export function MachineCard(props: MachineCardProps) {
       <Text render={<p />} className="machines__about" scale="body-small" tone="variant">
         {factsOf(machine, sessions)}
       </Text>
+      {machine.control_lost ? (
+        <Text render={<p />} className="machines__about" scale="body-small" tone="variant">
+          Tailscale lost its control server. The direct path still answers.
+        </Text>
+      ) : null}
 
       {pending ? (
         <div aria-busy="true" className="machines__pending">

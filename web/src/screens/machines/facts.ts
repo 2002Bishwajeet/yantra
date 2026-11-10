@@ -74,6 +74,7 @@ export function summary(one: Tally): string {
  *  is a reason it cannot be reached rather than a fourth state. */
 export function machineState(machine: Machine): { state: MarkState; word: string } {
   if (machine.expired) return { state: 'failed', word: 'key expired' }
+  if (machine.control_lost) return { state: 'running', word: 'online · control link lost' }
   return machine.online
     ? { state: 'running', word: 'online' }
     : { state: 'failed', word: 'unreachable' }

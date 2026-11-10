@@ -277,7 +277,11 @@ async fn fleet() -> Fleet {
                 false,
                 Some("2026-07-07T09:00:00Z"),
             ),
-            machine("n-3", "pi", true, None),
+            // Online only because its path answers (Y-626).
+            MachineInfo {
+                control_lost: true,
+                ..machine("n-3", "pi", true, None)
+            },
         ])))),
         workspaces: Some(Arc::new(Reading::new(Ok(Listing {
             workspaces: vec![
@@ -556,6 +560,7 @@ fn machine(id: &str, name: &str, online: bool, last_seen: Option<&str>) -> Machi
         dns_name: format!("{name}.<tailnet>.ts.net."),
         os: Os::Linux,
         online,
+        control_lost: false,
         last_seen: last_seen.map(str::to_owned),
         expired: false,
         key_expires: (id == "n-1").then(|| "2027-01-18T10:11:44Z".to_owned()),
