@@ -221,7 +221,9 @@
   overscroll-behavior: contain;
   scroll-padding-top: var(--m3-safe-top);
   scroll-padding-bottom: calc(136px + env(safe-area-inset-bottom, 0px));
-  padding: 0 var(--m3-gutter) calc(136px + env(safe-area-inset-bottom, 0px));
+  /* A phone held sideways: the Dynamic Island and the rounded corners sit inside the side insets. */
+  padding: 0 max(var(--m3-gutter), var(--m3-safe-right)) calc(136px + env(safe-area-inset-bottom, 0px))
+    max(var(--m3-gutter), var(--m3-safe-left));
 }
 
 /* Y-673: a route with a FAB docks it. `main` ends above the FAB (64 bar + 16 gap + 56 FAB + 8 air), so
@@ -240,6 +242,7 @@
   position: fixed;
   inset: auto 0 0;
   z-index: 5;
+  padding-inline: max(8px, var(--m3-safe-left)) max(8px, var(--m3-safe-right));
 }
 
 .shell__fab {
