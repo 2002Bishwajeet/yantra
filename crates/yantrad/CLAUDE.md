@@ -116,7 +116,7 @@ already *unknown* inside the check. `doctor::github` is a pure mapper over `GET 
 The look logs each change between accepted and refused, with the login and never the token (Y-648).
 
 **The grant itself is `GET /api/github`, and it never carries the token.** `connected`, the login,
-the profile image URL, the scopes and whether a device flow is pending, read from `github::Grant` in memory. `POST
+the profile image URL, the scopes, whether a device flow is pending and `expiring` (Y-695), read from `github::Grant` in memory. `POST
 /api/github/login` and `DELETE /api/github` are in `write.rs` on the gate; `GET /api/repos` is the
 repository list, a class on the same slow clock, and **the search box filters it in the browser** —
 a typed box polls, and a read handler never awaits the network.

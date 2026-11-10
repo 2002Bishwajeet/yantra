@@ -2,7 +2,7 @@ import { ExternalLink, LogIn } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { keys } from '@/api/keys'
-import { grant, signedIn } from '@/lib/github'
+import { APP_SETTINGS, EXPIRING, grant, signedIn } from '@/lib/github'
 import { useGithubLogin } from '@/api/mutations'
 import { useGithubReadiness } from '@/api/hooks'
 import { githubQuery, githubReadinessQuery } from '@/api/queries'
@@ -34,8 +34,10 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
     enabled: open && device !== undefined,
     refetchInterval: device === undefined ? false : device.interval * 1000,
   })
+  // A flow GitHub answered with an expiring token ends at once, with or without an earlier grant.
+  const expiring = device !== undefined && connection.data?.pending === false && connection.data.expiring
   // `pending` is true from the login write until the daemon ends the flow, and a failed flow ends too, keeping the old grant.
-  const ended = device !== undefined && connection.data?.connected === true && !connection.data.pending
+  const ended = device !== undefined && !expiring && connection.data?.connected === true && !connection.data.pending
   const client = useQueryClient()
   // Ended is not signed in: only a fresh look at GitHub says whether this flow landed or was abandoned.
   const [looked, setLooked] = useState<number | null>(null)
@@ -55,11 +57,12 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
   const accepted = settled && grant(connection.data, readiness).kind === 'accepted'
   const connected = accepted ? (connection.data ?? null) : null
   const failed = settled && !accepted
-  const now = useTick(open && device !== undefined && connected === null && !failed)
+  const stopped = failed || expiring
+  const now = useTick(open && device !== undefined && connected === null && !stopped)
   // The tick may predate the write by a few ms; elapsed never counts backwards.
   const elapsed = Math.max(0, Math.floor((now - login.submittedAt) / 1000))
   const left = device === undefined ? 0 : Math.max(0, device.expires_in - elapsed)
-  const expired = device !== undefined && connected === null && !failed && left === 0
+  const expired = device !== undefined && connected === null && !stopped && left === 0
 
   const close = (next: boolean) => {
     if (!next) login.reset()
@@ -83,8 +86,23 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
           <Text render={<p />} scale="title-medium" emphasized>
             {signedIn(connected.login)}.
           </Text>
-        ) : device === undefined || expired || failed ? (
+        ) : device === undefined || expired || stopped ? (
           <>
+            {expiring ? (
+              <>
+                <Text render={<p />} scale="body-medium" tone="error">
+                  {EXPIRING}
+                </Text>
+                <Button
+                  icon={<ExternalLink />}
+                  render={<a href={APP_SETTINGS} rel="noreferrer" target="_blank" />}
+                  size="m"
+                  variant="outlined"
+                >
+                  Open your OAuth Apps
+                </Button>
+              </>
+            ) : null}
             {failed ? (
               <Text render={<p />} scale="body-medium" tone="error">
                 The sign-in did not finish. GitHub has not accepted a new grant.

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
+import { EXPIRING } from '@/lib/github'
 import { type Answer, type Answers, mountSettings, sent, unmountSettings } from './harness'
 
 /** GitHub's is the only row with an enabled Connect: GitLab and OpenAI are
@@ -165,6 +166,27 @@ describe('Providers', () => {
     expect(sheet.queryByText(/Signed in/)).toBeNull()
     expect(sheet.queryByRole('button', { name: 'Done' })).toBeNull()
     expect(sheet.getByRole('button', { name: 'Sign in with GitHub' })).toBeTruthy()
+  }, 20000)
+
+  it('ends a first sign-in at once when GitHub issued a token that expires, and names the opt-out', async () => {
+    let started = false
+    mountSettings('desktop', '/settings/providers', {
+      'GET /api/github': () => [200, started ? { ...contract.disconnected, expiring: true } : contract.disconnected],
+      'POST /api/github/login': () => {
+        started = true
+        return [200, contract.device]
+      },
+    })
+    expect(await screen.findByText('Not connected')).toBeTruthy()
+    fireEvent.click(connect())
+    const sheet = within(await screen.findByRole('dialog', { name: 'Connect GitHub' }))
+    fireEvent.click(sheet.getByRole('button', { name: 'Sign in with GitHub' }))
+    expect(await sheet.findByText(EXPIRING, {}, { timeout: 14000 })).toBeTruthy()
+    expect(sheet.getByRole('link', { name: 'Open your OAuth Apps' }).getAttribute('href')).toBe(
+      'https://github.com/settings/developers',
+    )
+    expect(sheet.getByRole('button', { name: 'Sign in with GitHub' })).toBeTruthy()
+    expect(sheet.queryByText(/The code expired|did not finish|waiting/)).toBeNull()
   }, 20000)
 
   it('says GitHub was not asked when the login is unread and the check could not be made', async () => {

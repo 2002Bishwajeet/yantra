@@ -160,7 +160,7 @@ Rank the open rows in its §3 that an agent can finish alone today.
 Eligible: status ⬜ todo, every row in Depends is ✅ done or 🔵 review (a 🔵 review row has merged; only a release has not marked it), and an agent can prove the done condition on this Linux box with cargo, podman and Playwright.
 Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the owner, a phone, a Pi, audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, or an answer to an open question. A check on a Mac over ssh is eligible: \`ssh biswa@bishwajeets-macbook-pro\` reaches the real Mac.
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
-Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}.` : ''}
+Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}. An open PR does not rule a retried row out: it continues on that PR's branch.` : ''}
 
 Priority, from CLAUDE.md §B7: 1 = closes or unblocks an open milestone, 2 = a defect or a red suite, 3 = a feature whose dependencies are done, 4 = debt. Ties go to the lower Y-number.
 For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
@@ -175,7 +175,9 @@ const CLEANUP = `Afterwards remove only the test containers: those with label ya
 
 // Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
 // Y-493 parked because the agent read the log tail while the gate still ran, so the run must end in a sentinel line.
-const WAIT = (gateLog) => `Wait with Monitor and an until-loop on \`grep -q '^GATE_EXIT=' ${gateLog}\`, because a foreground sleep is blocked. Set timeout_ms to 1800000 on the Monitor call. When the Monitor expires and the GATE_EXIT line does not exist, arm it again. Judge pass from GATE_EXIT and the failing tests, never from a partial tail. If you must return before the line exists, return finished=false: the run sends another agent to wait.`
+// Y-704: a subagent's turn ends before a Monitor fires, so 18 wait agents on 2026-11-10 returned at once and waited for nothing.
+const BLOCK = (log, line) => `Wait with a blocking Bash call, not Monitor: \`timeout 570 bash -c "until grep -q '^${line}=' ${log}; do sleep 20; done"\` with the Bash timeout set to 600000. Exit 124 means the line is not there yet: run the same call again, up to 5 times.`
+const WAIT = (gateLog) => `${BLOCK(gateLog, 'GATE_EXIT')} Judge pass from GATE_EXIT and the failing tests, never from a partial tail. Return finished=false only after 5 calls end in 124: the run then sends another agent to wait.`
 const GATE_HOW = (wt, gateLog) => `CI can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then run the Then commands and the merge guard in a background shell: \`( bash ${GATE_SH} run ${wt} '<the Then commands, joined by &&>' && bash ${MERGE_GUARD} <pr number> ) > ${gateLog} 2>&1; echo "GATE_EXIT=$?" >> ${gateLog}\`. Leave out the gate.sh part when Then says nothing more. gate.sh sends the commands to an idle machine on the tailnet, or runs them here when none is idle, and its first line names the machine. ${WAIT(gateLog)}`
 
 // A counter, not the clock, names the log: a prompt that changes on every run defeats the resume cache.
@@ -271,8 +273,7 @@ async function verifyUntilGreen(row, wt, plan, rounds) {
 // Y-660: the gate runs against the fixture, so a visible row is also walked on the real product, and a machine row
 // also runs on the real Mac. walk.sh holds the paths that decide which, and its guard refuses the merge without it.
 const WALK = `${REPO}/.claude/workflows/walk.sh`
-// Y-674's walk was cut off on 2026-11-10 mid vite build: a Monitor with no timeout_ms expires after 5 minutes.
-const WALK_WAIT = (log) => `Wait with Monitor and an until-loop on \`grep -q '^WALK_EXIT=' ${log}\`, with timeout_ms 1800000. When the Monitor expires and the line does not exist, arm it again. Never return while it runs.`
+const WALK_WAIT = (log) => `${BLOCK(log, 'WALK_EXIT')} Never return while it runs.`
 async function walk(row, wt) {
   return serialWalk(() =>
     agent(
