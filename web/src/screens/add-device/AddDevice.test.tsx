@@ -266,7 +266,13 @@ describe('beat 2, joined', () => {
 
 /** Y-628, ADR-0046: the account that joins is the agents', so it is karigar. */
 describe('the account the join command runs as', () => {
-  const LINUX = ["sudo useradd --create-home --shell /bin/bash karigar", "sudo usermod -p '*' karigar", 'sudo -iu karigar']
+  const LINUX = [
+    'sudo systemctl enable --now sshd',
+    'sudo useradd --create-home --shell /bin/bash karigar',
+    "sudo usermod -p '*' karigar",
+    'sudo -iu karigar',
+    'sudo tailscale set --ssh=false',
+  ]
   const MACOS = [
     'brew install tmux git',
     'sudo sysadminctl -addUser karigar -fullName Karigar -password -',
@@ -287,8 +293,8 @@ describe('the account the join command runs as', () => {
       const shown = screen.getByText(command)
       expect(within(shown.closest('.m3-copyable')! as HTMLElement).getByRole('button', { name: /^Copy / })).toBeTruthy()
     }
-    const other = platform === 'linux' ? MACOS : LINUX
-    expect(screen.queryByText(other[1]!)).toBeNull()
+    const other = platform === 'linux' ? MACOS[1] : LINUX[1]
+    expect(screen.queryByText(other!)).toBeNull()
   })
 
   it('tells a Mac to log in as karigar at the screen once', async () => {

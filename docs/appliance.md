@@ -530,10 +530,26 @@ path owns the machine ([ADR-0046](adr/0046-the-owner-types-sudo-in-an-owner-term
 separate account named `karigar` with no sudo, and run the join command as that account.
 
 The join command skips each step that needs root when the account cannot use sudo, and still places
-the key and reports. So install `tmux`, `git` and `sshd` from your own admin account first. On Linux,
-`yantra-agent` needs root, so it stays off, and the dashboard has no heartbeat for that machine.
+the key and reports. So install `tmux`, `git` and `sshd` from your own admin account first, and
+start `sshd`. On Linux, `yantra-agent` needs root, so it stays off, and the dashboard has no
+heartbeat for that machine.
 
-**On Linux**, as your own admin account, with `tmux`, `git` and `sshd` installed:
+**On Linux**, as your own admin account, with `tmux`, `git` and `sshd` installed. Arch, Fedora and
+openSUSE do not start `sshd` when they install it, and `karigar` cannot start it, so start it first:
+
+```bash
+sudo systemctl enable --now sshd
+```
+
+Debian and Ubuntu start it on install, and name the unit `ssh`. If the machine runs Tailscale SSH and
+the tailnet's policy asks for a browser check, `karigar` cannot turn Tailscale SSH off either. Turn
+it off before the join:
+
+```bash
+sudo tailscale set --ssh=false
+```
+
+Then make `karigar` and switch to it:
 
 ```bash
 sudo useradd --create-home --shell /bin/bash karigar

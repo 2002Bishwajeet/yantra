@@ -7,10 +7,11 @@ import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
 import { forgetHostKey, joinFixes, reachWords } from '@/lib/checks'
 import { joinUrl } from '@/lib/join'
-import { apart, notYours } from '@/lib/platform'
+import { apart, notYours, platformOf } from '@/lib/platform'
 import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
+import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { List, ListItem } from '@/m3/list/List'
@@ -29,6 +30,7 @@ import { password } from '@/screens/add-device/beats'
 import { useAskOnArrival, useInstallOn } from '@/screens/add-device/install'
 import { SshSaid } from '@/screens/machine/ReachFailure'
 import { stamp } from '../dashboard/bands'
+import { AgentAccount } from './AgentAccount'
 import { Join } from './Join'
 import { REQUIRED, useChecklist } from './progress'
 import { marks, statusWord, TITLES, type Line, type Step } from './steps'
@@ -123,6 +125,23 @@ function hubWords(said: Line, name: string): string {
     default:
       return wordsOf(said, name)
   }
+}
+
+/** Y-628: a line's join command names karigar, with the commands that make it. */
+function JoinAs(props: { machine: Machine; url: string | null; about: { error: Error | null; data: unknown } }) {
+  const { machine, url, about } = props
+  return (
+    <>
+      <Disclosure
+        action="How"
+        className="setup__karigar"
+        summary={<Text scale="body-small">Run it as karigar, an account without sudo</Text>}
+      >
+        <AgentAccount platform={platformOf(machine) === 'macos' ? 'macos' : 'linux'} />
+      </Disclosure>
+      <Join about={about} url={url} what={`the join command for ${machine.name}`} />
+    </>
+  )
 }
 
 const bad = (said: Line): said is Extract<Line, { detail: string }> => 'detail' in said
@@ -464,7 +483,7 @@ export function Setup() {
                   {guests.map((one) => (
                     <MachineLine
                       events={events}
-                      join={<Join about={about} url={join} what={`the join command for ${one.machine.name}`} />}
+                      join={<JoinAs about={about} machine={one.machine} url={join} />}
                       key={one.machine.name}
                       line={one.line}
                       machine={one.machine}

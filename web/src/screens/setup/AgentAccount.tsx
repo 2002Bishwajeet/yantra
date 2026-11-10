@@ -13,7 +13,16 @@ function Note(props: { children: ReactNode }) {
 function Linux() {
   return (
     <>
-      <Note>As your own admin account, install tmux, git and sshd first, then make karigar and switch to it:</Note>
+      <Note>
+        As your own admin account, install tmux, git and sshd first. Then start sshd, because karigar cannot. Debian and
+        Ubuntu start it on install, and name the unit ssh.
+      </Note>
+      <Copyable text="sudo systemctl enable --now sshd" what="the command that starts sshd" />
+      <Note>
+        If Tailscale SSH is on here and the tailnet asks for a browser check, turn it off too, before the join:
+      </Note>
+      <Copyable text="sudo tailscale set --ssh=false" what="the command that turns off Tailscale SSH" />
+      <Note>Then make karigar and switch to it:</Note>
       <Copyable text="sudo useradd --create-home --shell /bin/bash karigar" what="the command that makes karigar" />
       <Copyable text="sudo usermod -p '*' karigar" what="the command that lets sshd take karigar's key" />
       <Note>karigar then has no password and is not locked, so sshd takes its key.</Note>

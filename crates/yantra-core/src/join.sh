@@ -54,6 +54,9 @@ can_sudo() {
     sudo -n true >/dev/null 2>&1
 }
 
+# karigar cannot start sshd, so the admin account does (docs/appliance.md).
+ADMIN_SSHD="From an admin account, install and start sshd: sudo systemctl enable --now sshd (the unit is ssh on Debian and Ubuntu). Then run this again."
+
 as_root() {
     if ! can_sudo; then
         say "this step needs root, and $user cannot use sudo, so it was skipped: $*"
@@ -405,10 +408,12 @@ use_sshd_instead() {
         sshd_listening || mac_remote_login
     elif ! sshd_listening && ! linux_sshd; then
         say "sshd did not start, so Tailscale SSH stays on and Yantra cannot reach this machine yet."
+        can_sudo || say "$ADMIN_SSHD"
         return 0
     fi
     if ! as_root tailscale set --ssh=false; then
         say "Tailscale SSH stays on, so Yantra cannot reach this machine yet."
+        say "From an admin account, run: sudo tailscale set --ssh=false. Then run this again, and on the appliance run sudo -u yantra -H yantra forget-host-key $machine."
         return 0
     fi
     say "Tailscale SSH is off, and the appliance logs in with its key."
@@ -433,6 +438,7 @@ elif [ "$os" = Darwin ]; then
     mac_remote_login
 elif ! linux_sshd; then
     say "sshd is not running, so Yantra cannot reach this machine yet. The rest goes on anyway."
+    can_sudo || say "$ADMIN_SSHD"
 fi
 
 place_key

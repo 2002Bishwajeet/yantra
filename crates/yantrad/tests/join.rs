@@ -262,6 +262,10 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         karigar.contains("karigar cannot use sudo, so it was skipped"),
         "{karigar}"
     );
+    assert!(
+        karigar.contains("From an admin account, install and start sshd"),
+        "{karigar}"
+    );
     assert_eq!(
         systemd.property("sshd.service", "ActiveState")?,
         "inactive",
