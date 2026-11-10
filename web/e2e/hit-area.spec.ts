@@ -1,5 +1,5 @@
 import { route } from "./lib/routes";
-import { expect, firstReading, scenario, test } from "./lib/test";
+import { expect, scenario, test } from "./lib/test";
 
 /** Y-674 (#663, research note 25 F5): every tappable element on the phone reaches 44 px in both directions. */
 const MIN = 44;
@@ -25,7 +25,8 @@ for (const one of PATHS) {
     test.skip(size !== "phone", "the 44 px rule is the phone rule");
     await scenario(page, one.scenario ?? "busy");
     await page.goto(one.path);
-    await firstReading(page);
+    await expect(page.locator(".m3-page").first()).toBeVisible();
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0);
 
     const offenders = await page.evaluate(
       ({ selector, min }) => {

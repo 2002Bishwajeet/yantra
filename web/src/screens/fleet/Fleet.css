@@ -84,6 +84,12 @@
   text-decoration: none;
 }
 
+/* The overlay grows leftwards only: one that grows right counts as overflow in the clipped name box. */
+.fleet__name.m3-hit::after,
+.fleet__machine.m3-hit::after {
+  inset-inline: min(0px, calc(100% - var(--md-sys-hit-area))) 0;
+}
+
 @media (hover: hover) and (pointer: fine) {
   a.fleet__name:hover,
   a.fleet__machine:hover {
