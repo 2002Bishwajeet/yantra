@@ -5,6 +5,10 @@
 #     curl -fsSL <url>/install.sh | bash
 #     wget -qO- <url>/install.sh | bash        # Debian 13 has no curl
 #
+# On a Mac it installs yantra-agent alone, as a LaunchAgent, with no root (Y-502):
+#
+#     curl -fsSL <url>/install.sh | YANTRA_DAEMON=<address>:7717 bash
+#
 # At a terminal it asks before it installs Tailscale, logs the box in, turns on
 # HTTPS, starts the units and prints the dashboard's address (Y-384). With no
 # terminal it asks nothing, enables nothing and ends by naming what is left.
@@ -84,6 +88,152 @@ if [ -n "$state" ]; then
     step resolving
 fi
 
+# What installs when nobody names a version. `/releases/latest` skips drafts and
+# pre-releases, so a hyphenated `rc` tag can never install itself (ADR-0027 §4).
+#
+# What resolving gives up, said plainly: the VERSION and COMMIT this replaced
+# were a person's choice in a reviewed commit, and the comment beside COMMIT
+# recorded that v0.1.0's tag was moved once. SHA256SUMS still proves the archive
+# arrived intact from the release it names. Nothing here proves that release is
+# the one the owner meant — what is left is trust in the repository and in
+# whoever can publish to it.
+# Stable reads /releases/latest. Nightly reads the rolling `nightly` release,
+# whose tag names no version, so the version is read off this target's archive.
+latest_version() {
+    local answer status tag path=latest
+    [ "$channel" = nightly ] && path=tags/nightly
+    answer=$(curl -sSL --proto '=https' --tlsv1.2 -w '\n%{http_code}' \
+        -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/$REPO/releases/$path") ||
+        fail "GitHub is unreachable, so no version was resolved and nothing was installed — name one with YANTRA_VERSION"
+    status=${answer##*$'\n'}
+    case "$status" in
+    200) ;;
+    403 | 429)
+        # 60 requests an hour per IP, shared with everything behind it, and the
+        # script sends no token (ADR-0027 §4).
+        fail "GitHub answered $status: the rate limit for an unauthenticated call. Nothing was installed — retry later, or name a version with YANTRA_VERSION"
+        ;;
+    *) fail "GitHub answered $status for the $channel release — nothing was installed. Name a version with YANTRA_VERSION" ;;
+    esac
+    answer=${answer%$'\n'*}
+    if [ "$channel" = nightly ]; then
+        tag=$(printf '%s' "$answer" |
+            grep -o "\"name\" *: *\"yantra-[^\"]*-$target\.tar\.gz\"" | head -n 1 |
+            cut -d '"' -f 4 | sed -e 's/^yantra-//' -e "s/-$target\.tar\.gz\$//")
+        [ -n "$tag" ] ||
+            fail "the nightly release carries no archive for $target — nothing was installed"
+    else
+        tag=$(printf '%s' "$answer" |
+            grep -o '"tag_name" *: *"[^"]*"' | head -n 1 | cut -d '"' -f 4)
+        [ -n "$tag" ] ||
+            fail "GitHub's release list named no tag_name — nothing was installed"
+    fi
+    printf '%s\n' "${tag#v}"
+}
+
+fetch() { curl -fsSL --proto '=https' --tlsv1.2 -o "$1" "$2"; }
+
+# Y-502: a Mac takes yantra-agent alone, as a LaunchAgent in the login session of
+# the account that runs this, so it needs no root. The label is join.sh's, so a
+# Mac that joined gets this shape and a second run attaches.
+mac() {
+    local label=io.github.2002bishwajeet.yantra-agent
+    local bin=$HOME/.local/bin/yantra-agent env=$HOME/.config/yantra/agent.env
+    local plist=$HOME/Library/LaunchAgents/$label.plist uid domain tries=0
+    uid=$(id -u)
+    domain=gui/$uid
+    [ "$uid" -ne 0 ] ||
+        fail "run this as the account logged in at this Mac, not as root — nothing was installed"
+    channel=stable
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+        --yes) ;;
+        --channel=*) channel=${1#--channel=} ;;
+        --channel)
+            channel=${2:-}
+            [ "$#" -lt 2 ] || shift
+            ;;
+        --uninstall) fail "on a Mac, remove the agent by hand: launchctl bootout $domain/$label; rm -f $plist $bin" ;;
+        *) fail "$1 is not an option on a Mac. The options are --yes and --channel stable." ;;
+        esac
+        shift
+    done
+    [ "$channel" = stable ] ||
+        fail "a Mac installs the stable channel alone: nightly builds carry no macOS archive. Nothing was installed."
+    for tool in curl tar shasum; do
+        command -v "$tool" >/dev/null 2>&1 || fail "$tool is not installed"
+    done
+    case "$(uname -m)" in
+    arm64) target=aarch64-apple-darwin ;;
+    *) target=x86_64-apple-darwin ;;
+    esac
+    VERSION="${YANTRA_VERSION:-$(latest_version)}"
+    archive="yantra-$VERSION-$target.tar.gz"
+    work=$(mktemp -d)
+    echo "install: yantra-agent v$VERSION, $target"
+
+    local download="https://github.com/$REPO/releases/download/v$VERSION"
+    fetch "$work/$archive" "$download/$archive"
+    fetch "$work/SHA256SUMS" "$download/SHA256SUMS"
+    # shasum, because older macOS has no sha256sum.
+    (cd "$work" && grep " $archive\$" SHA256SUMS | shasum -a 256 -c) ||
+        fail "$archive does not match SHA256SUMS — nothing was installed"
+    tar -C "$work" -xzf "$work/$archive"
+
+    mkdir -p "${bin%/*}" "${env%/*}" "${plist%/*}" "$HOME/Library/Logs"
+    install -m 755 "$work/yantra-$VERSION-$target/yantra-agent" "$bin.new"
+    mv -f "$bin.new" "$bin"
+    # ADR-0013 §4: an existing file is never rewritten.
+    if [ -e "$env" ]; then
+        echo "install: $env was already here and was left alone."
+    else
+        local line="#YANTRA_DAEMON=100.x.x.x:$PORT"
+        [ -n "${YANTRA_DAEMON:-}" ] && line="YANTRA_DAEMON=$YANTRA_DAEMON"
+        cat >"$env" <<ENV
+# The address of the machine running yantrad, and the agent's whole
+# configuration (ADR-0013 §4). An address, never a MagicDNS name.
+$line
+ENV
+    fi
+    # launchd has no EnvironmentFile, so sh reads agent.env the way systemd does.
+    cat >"$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$label</string>
+    <key>ProgramArguments</key><array>
+        <string>/bin/sh</string><string>-c</string><string>set -a; . "\$1"; exec "\$2"</string>
+        <string>sh</string><string>$env</string><string>$bin</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardErrorPath</key><string>$HOME/Library/Logs/yantra-agent.log</string>
+</dict>
+</plist>
+PLIST
+
+    if ! grep -q '^YANTRA_DAEMON=' "$env"; then
+        echo "install: $env names no daemon, so yantra-agent is not loaded. Add: YANTRA_DAEMON=<yantrad's address>:$PORT"
+        echo "install: then load it: launchctl bootstrap $domain $plist"
+        return 0
+    fi
+    launchctl bootout "$domain/$label" 2>/dev/null || true
+    # bootout returns before launchd lets the label go, and a bootstrap then fails.
+    until launchctl bootstrap "$domain" "$plist" 2>/dev/null; do
+        tries=$((tries + 1))
+        [ "$tries" -lt 10 ] || fail "launchctl did not load $plist. Load it by hand: launchctl bootstrap $domain $plist"
+        sleep 1
+    done
+    echo "install: yantra-agent is running, and reports to $(sed -n 's/^YANTRA_DAEMON=//p' "$env" | tail -n 1)."
+}
+
+if [ "$(uname -s)" = Darwin ]; then
+    mac "$@"
+    exit 0
+fi
+
 if [ "$(id -u)" -eq 0 ]; then
     as_root() { "$@"; }
 else
@@ -105,7 +255,7 @@ for tool in curl tar sha256sum systemctl; do
 done
 
 [ "$(uname -s)" = Linux ] ||
-    fail "$(uname -s) is not a target: yantrad and yantra are Linux-only and macOS ships the agent alone"
+    fail "$(uname -s) is not a target: releases are built for Linux and macOS"
 
 case "$(uname -m)" in
 aarch64 | arm64) target=aarch64-unknown-linux-musl ;;
@@ -298,50 +448,6 @@ if [ "$interactive" = yes ]; then
     echo "install: it asks before it installs Tailscale or turns on HTTPS, then starts the dashboard and prints its address."
 fi
 
-# What installs when nobody names a version. `/releases/latest` skips drafts and
-# pre-releases, so a hyphenated `rc` tag can never install itself (ADR-0027 §4).
-#
-# What resolving gives up, said plainly: the VERSION and COMMIT this replaced
-# were a person's choice in a reviewed commit, and the comment beside COMMIT
-# recorded that v0.1.0's tag was moved once. SHA256SUMS still proves the archive
-# arrived intact from the release it names. Nothing here proves that release is
-# the one the owner meant — what is left is trust in the repository and in
-# whoever can publish to it.
-# Stable reads /releases/latest. Nightly reads the rolling `nightly` release,
-# whose tag names no version, so the version is read off this target's archive.
-latest_version() {
-    local answer status tag path=latest
-    [ "$channel" = nightly ] && path=tags/nightly
-    answer=$(curl -sSL --proto '=https' --tlsv1.2 -w '\n%{http_code}' \
-        -H 'Accept: application/vnd.github+json' \
-        "https://api.github.com/repos/$REPO/releases/$path") ||
-        fail "GitHub is unreachable, so no version was resolved and nothing was installed — name one with YANTRA_VERSION"
-    status=${answer##*$'\n'}
-    case "$status" in
-    200) ;;
-    403 | 429)
-        # 60 requests an hour per IP, shared with everything behind it, and the
-        # script sends no token (ADR-0027 §4).
-        fail "GitHub answered $status: the rate limit for an unauthenticated call. Nothing was installed — retry later, or name a version with YANTRA_VERSION"
-        ;;
-    *) fail "GitHub answered $status for the $channel release — nothing was installed. Name a version with YANTRA_VERSION" ;;
-    esac
-    answer=${answer%$'\n'*}
-    if [ "$channel" = nightly ]; then
-        tag=$(printf '%s' "$answer" |
-            grep -o "\"name\" *: *\"yantra-[^\"]*-$target\.tar\.gz\"" | head -n 1 |
-            cut -d '"' -f 4 | sed -e 's/^yantra-//' -e "s/-$target\.tar\.gz\$//")
-        [ -n "$tag" ] ||
-            fail "the nightly release carries no archive for $target — nothing was installed"
-    else
-        tag=$(printf '%s' "$answer" |
-            grep -o '"tag_name" *: *"[^"]*"' | head -n 1 | cut -d '"' -f 4)
-        [ -n "$tag" ] ||
-            fail "GitHub's release list named no tag_name — nothing was installed"
-    fi
-    printf '%s\n' "${tag#v}"
-}
-
 # `MAJOR MINOR PATCH RANK STAMP`, so semver's order is a numeric sort: a
 # nightly (rank 0) sorts below the release of its own number (rank 1).
 order() {
@@ -385,8 +491,6 @@ work=$(mktemp -d)
 here=${state:-$work}
 
 echo "install: yantra v$VERSION, $target, $channel"
-
-fetch() { curl -fsSL --proto '=https' --tlsv1.2 -o "$1" "$2"; }
 
 download="https://github.com/$REPO/releases/download/v$VERSION"
 if [ "$channel" = nightly ] && [ -z "${YANTRA_VERSION:-}" ]; then
