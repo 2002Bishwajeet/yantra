@@ -83,8 +83,10 @@ PLIST
         mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" || return 1
         printf '%s\n' "$job" >"$plist" || return 1
     fi
+    # A bootstrap fails 5 when a concurrent call loaded the job first.
     launchctl print "$domain/$label" >/dev/null 2>&1 ||
-        launchctl bootstrap "$domain" "$plist" || return 1
+        launchctl bootstrap "$domain" "$plist" ||
+        launchctl print "$domain/$label" >/dev/null 2>&1 || return 1
     launchctl kickstart "$domain/$label" || return 1
     for _ in 1 2 3 4 5; do
         "$tmux" -L yantra -N ls >/dev/null 2>&1 && return 0

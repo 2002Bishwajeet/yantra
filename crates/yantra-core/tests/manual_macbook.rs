@@ -10,8 +10,10 @@
 //!
 //! ```text
 //! YANTRA_MAC=<ssh destination> \
-//!   cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture
+//!   cargo test -p yantra-core --test manual_macbook -- --ignored --nocapture --test-threads 1
 //! ```
+//!
+//! One at a time, because some of them end the server the others use.
 //!
 //! **Two of these need a person at that machine first**: Y-139's transcript
 //! measurement and Y-151's gate both want a tmux server started from a GUI
@@ -750,8 +752,8 @@ fn fresh_session_id() -> anyhow::Result<String> {
 /// `claude` in a keeper, read and written through it. Y-634 broke every one
 /// for 29 days while each suite stayed green.
 ///
-/// It skips when the tmux server's panes find no credential (I-44): start the
-/// server at the Mac's screen, or let `up` start it through the LaunchAgent.
+/// It starts the server through the LaunchAgent when there is none, and skips
+/// when that server's panes find no credential (I-44).
 #[tokio::test]
 #[ignore = "needs the real MacBook with claude signed in; set YANTRA_MAC=user@host"]
 async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
@@ -766,6 +768,10 @@ async fn a_chat_turn_answers_on_the_mac() -> anyhow::Result<()> {
     anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
     let tmux = Tmux::resolve(&ssh).await?;
     let claude = Claude::resolve(&ssh).await?;
+    anyhow::ensure!(
+        tmux.login_server(&ssh).await?,
+        "no one is logged in at {dest}'s screen"
+    );
     let auth = claude.auth(&ssh, &tmux, Os::MacOs).await?;
     if !auth.logged_in {
         println!(

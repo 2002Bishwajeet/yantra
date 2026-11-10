@@ -1170,6 +1170,18 @@ mod tests {
         assert!(!tmux.running(&mac).await.expect("answered"));
     }
 
+    /// Two Chat turns on a Mac with no server both bootstrap the job. The
+    /// later bootstrap fails 5 on the real Mac, and its turn still starts.
+    #[tokio::test]
+    async fn a_bootstrap_that_loses_a_race_still_starts_the_server() {
+        let mac = launchd::Mac::new("raced", false, false, None);
+        mac.lose_bootstrap_race();
+        let tmux = mac.tmux();
+        assert!(tmux.login_server(&mac).await.expect("started"));
+        assert!(mac.log().contains("launchctl kickstart"), "{}", mac.log());
+        assert!(tmux.running(&mac).await.expect("answered"));
+    }
+
     #[test]
     fn an_older_job_with_no_server_is_replaced() {
         let mac = launchd::Mac::new("older-idle", false, true, Some("older"));
@@ -1415,6 +1427,11 @@ echo "launchctl $*" >>"$FAKE/log"
 case "$1" in
 print) case "$2" in */*/*) test -f "$FAKE/loaded" ;; *) exit 0 ;; esac ;;
 bootstrap)
+    if test -f "$FAKE/bootstrap-raced"; then
+        touch "$FAKE/loaded"
+        echo "Bootstrap failed: 5: Input/output error" >&2
+        exit 5
+    fi
     if test -f "$FAKE/bootstrap-fails"; then
         echo "Bootstrap failed: 5: Input/output error" >&2
         exit 5
@@ -1450,6 +1467,12 @@ esac
 
         pub(crate) fn fail_bootstrap(&self) {
             std::fs::write(self.dir.join("bootstrap-fails"), "").expect("a file");
+        }
+
+        /// Another caller loads the job between this one's `print` and its
+        /// `bootstrap`, which then fails as launchd fails a loaded job.
+        pub(crate) fn lose_bootstrap_race(&self) {
+            std::fs::write(self.dir.join("bootstrap-raced"), "").expect("a file");
         }
 
         pub(crate) fn tmux(&self) -> super::Tmux {
