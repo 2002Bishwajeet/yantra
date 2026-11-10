@@ -297,12 +297,15 @@
 
 /* Y-678: a route change slides the content by direction while the chrome
    stays put. Each named piece gets its own transition group; without a type
-   (Firefox before it has types) the root keeps the browser's plain fade. */
-.shell__bar { view-transition-name: shell-bar; }
-.m3-navigation-bar { view-transition-name: shell-nav; }
-.rail { view-transition-name: shell-rail; }
-.shell__fab { view-transition-name: shell-fab; }
-.shell__rail-fab { view-transition-name: shell-rail-fab; }
+   (Firefox before it has types) the root keeps the browser's plain fade.
+   The names apply only during a transition: a standing name changed text rendering. */
+:root:active-view-transition {
+  .shell__bar { view-transition-name: shell-bar; }
+  .m3-navigation-bar { view-transition-name: shell-nav; }
+  .rail { view-transition-name: shell-rail; }
+  .shell__fab { view-transition-name: shell-fab; }
+  .shell__rail-fab { view-transition-name: shell-rail-fab; }
+}
 
 ::view-transition-old(root),
 ::view-transition-new(root) {
