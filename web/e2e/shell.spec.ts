@@ -91,25 +91,6 @@ test.describe('the tablet rail on a scrolling page', () => {
     expect(inset.y + inset.height).toBe(await page.evaluate(() => window.innerHeight))
   })
 
-  test('scrolls its own items on a short landscape screen', async ({ page }) => {
-    await page.setViewportSize({ width: 1024, height: 400 })
-    await page.goto('/fleet')
-    await expect(heading(page, 'Fleet')).toBeVisible()
-
-    const box = (await rail(page).boundingBox())!
-    expect(box.height).toBe(await page.evaluate(() => window.innerHeight))
-    const overflow = await rail(page).evaluate((el) => [el.scrollHeight, el.clientHeight])
-    expect(overflow[0]).toBeGreaterThan(overflow[1])
-
-    const account = rail(page).getByRole('button', { name: 'Account' })
-    await account.scrollIntoViewIfNeeded()
-    await expect(account).toBeInViewport()
-    await account.click({ trial: true })
-
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-    await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
-    expect((await rail(page).boundingBox())!.y).toBe(box.y)
-  })
 })
 
 test('draws no FAB while yantrad cannot be reached', async ({ page }) => {
@@ -417,6 +398,52 @@ test.describe('the account button', () => {
     await expect(account(page).locator('svg')).toBeVisible()
     await expect(account(page).locator('img')).toHaveCount(0)
     expect(await account(page).boundingBox()).toEqual(icon)
+  })
+})
+
+/** Y-675: a short window without touch keeps the rail; a touch screen this short gets the phone shell. */
+test.describe('the tablet rail on a short window', () => {
+  test.beforeEach(async ({ size }) => {
+    test.skip(size !== 'desktop', 'the desktop project has no touch, and 1024 px is under 1240')
+  })
+
+  const rail = (page: Page) => page.locator('.m3-rail')
+  const scrollY = (page: Page) => page.evaluate(() => window.scrollY)
+
+  test('scrolls its own items on a short landscape screen', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 400 })
+    await page.goto('/fleet')
+    await expect(heading(page, 'Fleet')).toBeVisible()
+
+    const box = (await rail(page).boundingBox())!
+    expect(box.height).toBe(await page.evaluate(() => window.innerHeight))
+    const overflow = await rail(page).evaluate((el) => [el.scrollHeight, el.clientHeight])
+    expect(overflow[0]).toBeGreaterThan(overflow[1])
+
+    const account = rail(page).getByRole('button', { name: 'Account' })
+    await account.scrollIntoViewIfNeeded()
+    await expect(account).toBeInViewport()
+    await account.click({ trial: true })
+
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
+    expect((await rail(page).boundingBox())!.y).toBe(box.y)
+  })
+})
+
+/** Y-675: a phone held sideways is a phone, whatever its width. */
+test.describe('the phone shell on a phone held sideways', () => {
+  test('is chosen on a touch screen under 480 px tall, and not on a mouse', async ({ page, size }) => {
+    await page.setViewportSize({ width: 844, height: 390 })
+    await page.goto('/')
+    const shell = page.locator('[data-shell]')
+    if (size === 'desktop') {
+      await expect(shell).toHaveAttribute('data-shell', 'tablet')
+      return
+    }
+    await expect(shell).toHaveAttribute('data-shell', 'phone')
+    await expect(page.locator('nav.m3-navigation-bar')).toBeVisible()
+    await expect(page.locator('.m3-rail')).toHaveCount(0)
   })
 })
 

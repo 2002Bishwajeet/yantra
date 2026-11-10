@@ -621,7 +621,7 @@ it talks to speaks the protocol and knows nothing of a pty.
 
 [`formFactor.ts`](src/shell/formFactor.ts) is Material's window size classes at
 the brief's three widths: **phone** under 600 px, **tablet** to 1239 px,
-**desktop** from 1240 px. Two media queries through `useSyncExternalStore`, which
+**desktop** from 1240 px. A touch screen held sideways under 480 px tall also gets the phone shell. Three media queries through `useSyncExternalStore`, which
 is why narrowing a window changes the shape without a reload.
 
 **The shell reads it once and the router never does** (ADR-0024, consequences).
@@ -898,7 +898,7 @@ src/
     Palette.tsx      the search pill and `⌘K`; the popup is its own chunk
     Bell.tsx  BellPopover.tsx  NotificationsScreen.tsx
                      one set of notifications, at three widths
-    formFactor.ts    phone / tablet / desktop, from two media queries
+    formFactor.ts    phone / tablet / desktop, from three media queries
     prefs.ts         `localStorage` under one versioned key (ADR-0024 §5)
   screens/
     dashboard/       `/` — the bands, the status strip, and the first run

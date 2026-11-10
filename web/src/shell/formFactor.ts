@@ -1,15 +1,17 @@
 import { useSyncExternalStore } from 'react'
 
 /** Material's window size classes, at the brief's three widths: compact under
- *  600, medium and expanded to 1239, large from 1240. The shell reads this
+ *  600, medium and expanded to 1239, large from 1240; a touch screen held
+ *  sideways under 480 px tall is a phone. The shell reads this
  *  once; the router never does (ADR-0024, consequences). */
 export type FormFactor = 'phone' | 'tablet' | 'desktop'
 
 const DESKTOP = '(min-width: 1240px)'
 const TABLET = '(min-width: 600px)'
+const SIDEWAYS = '(pointer: coarse) and (orientation: landscape) and (max-height: 479px)'
 
 function subscribe(notify: () => void) {
-  const queries = [matchMedia(DESKTOP), matchMedia(TABLET)]
+  const queries = [matchMedia(DESKTOP), matchMedia(SIDEWAYS), matchMedia(TABLET)]
   for (const query of queries) query.addEventListener('change', notify)
   return () => {
     for (const query of queries) query.removeEventListener('change', notify)
@@ -18,6 +20,7 @@ function subscribe(notify: () => void) {
 
 function snapshot(): FormFactor {
   if (matchMedia(DESKTOP).matches) return 'desktop'
+  if (matchMedia(SIDEWAYS).matches) return 'phone'
   if (matchMedia(TABLET).matches) return 'tablet'
   return 'phone'
 }
