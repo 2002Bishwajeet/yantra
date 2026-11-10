@@ -40,6 +40,10 @@ const NO_BROWSER: &str = "the appliance has no browser";
 const CHECK_MODE: &str = "/srv/check-mode";
 /// `listen.py` appends each readiness check and forgotten host key here.
 const ASKED: &str = "/srv/asked";
+/// Y-628: the account docs/appliance.md says to join, with no sudo.
+const KARIGAR: &str = "karigar";
+const NO_ROOT_AGENT: &str =
+    "yantra-agent needs root, and karigar cannot use sudo, so it was not installed.";
 
 /// Per process: two runs on one box (`just test` beside `just test-embedded`)
 /// sharing a directory swap the key under each other's container.
@@ -71,14 +75,18 @@ fn fake_tailscale(systemd: &Systemd, run_ssh: bool) -> Result<()> {
 /// `curl | sh` as the person types it. `HOME` is set because a terminal has
 /// one and `podman exec` is not a login.
 fn run_join(systemd: &Systemd, answer: Option<&str>) -> Result<Output> {
-    let mut env = vec![format!("HOME=/home/{UNPRIVILEGED}")];
+    run_join_as(systemd, UNPRIVILEGED, answer)
+}
+
+fn run_join_as(systemd: &Systemd, user: &str, answer: Option<&str>) -> Result<Output> {
+    let mut env = vec![format!("HOME=/home/{user}")];
     if let Some(answer) = answer {
         env.push(format!("YANTRA_JOIN_ANSWER={answer}"));
     }
     let mut argv = vec!["env"];
     argv.extend(env.iter().map(String::as_str));
     argv.extend(["sh", "-c", "cat /fixture/join.sh | sh"]);
-    systemd.exec_as(UNPRIVILEGED, &argv)
+    systemd.exec_as(user, &argv)
 }
 
 fn succeeded(out: &Output, run: &str) -> Result<String> {
@@ -98,10 +106,11 @@ fn sh(systemd: &Systemd, script: &str) -> Result<String> {
 }
 
 fn keys_line_count(systemd: &Systemd, key: &str) -> Result<usize> {
-    let keys = sh(
-        systemd,
-        &format!("cat /home/{UNPRIVILEGED}/.ssh/authorized_keys"),
-    )?;
+    keys_line_count_of(systemd, UNPRIVILEGED, key)
+}
+
+fn keys_line_count_of(systemd: &Systemd, user: &str, key: &str) -> Result<usize> {
+    let keys = sh(systemd, &format!("cat /home/{user}/.ssh/authorized_keys"))?;
     Ok(keys.lines().filter(|line| *line == key).count())
 }
 
@@ -211,6 +220,11 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         "the machine has to start bare, or turning sshd on proves nothing"
     );
 
+    // `*` is no password and not locked, so sshd still takes karigar's key.
+    sh(
+        &systemd,
+        &format!("useradd -m -s /bin/bash {KARIGAR}; usermod -p '*' {KARIGAR}"),
+    )?;
     let accounts = sh(&systemd, "sha256sum /etc/passwd")?;
 
     // A run with no terminal and no answer takes no step that needs root, and
@@ -238,6 +252,39 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
             )
         )?,
         format!("700 {UNPRIVILEGED}\n600 {UNPRIVILEGED}\n")
+    );
+
+    // Y-628: yes to every question from an account without sudo skips each
+    // root step, and still places the key and reports.
+    let karigar = succeeded(&run_join_as(&systemd, KARIGAR, Some("y"))?, "karigar")?;
+    assert!(karigar.contains(NO_ROOT_AGENT), "{karigar}");
+    assert!(
+        karigar.contains("karigar cannot use sudo, so it was skipped"),
+        "{karigar}"
+    );
+    assert_eq!(
+        systemd.property("sshd.service", "ActiveState")?,
+        "inactive",
+        "{karigar}"
+    );
+    assert!(
+        !systemd
+            .exec(&["test", "-e", "/usr/local/bin/yantra-agent"])?
+            .status
+            .success(),
+        "{karigar}"
+    );
+    assert_eq!(
+        keys_line_count_of(&systemd, KARIGAR, &prepared.public_key)?,
+        1,
+        "{karigar}"
+    );
+    let reports = sh(&systemd, &format!("cat {REPORTS}"))?;
+    let last = reports.lines().last().context("nothing was reported")?;
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(last)?,
+        serde_json::json!({ "user": KARIGAR }),
+        "{reports}"
     );
 
     // Yes to every question: sshd comes on, and the agent is installed. A
