@@ -69,6 +69,8 @@ systemd units, so `install.sh` refuses it by name.
 reads which release is current, and it verifies what it fetched against `SHA256SUMS`. At a terminal,
 it asks before it installs Tailscale and turns on HTTPS. Then it starts the units and prints the
 dashboard's address ([docs/appliance.md](docs/appliance.md)). `install.sh --uninstall` reverses it.
+On a Mac, the same script installs `yantra-agent` alone, as a LaunchAgent that needs no root
+([docs/appliance.md](docs/appliance.md#on-a-mac)).
 A browser that opens the plain address on `:7717` moves to the HTTPS address on `:8443`, where the
 microphone works.
 

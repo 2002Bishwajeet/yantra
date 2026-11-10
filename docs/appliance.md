@@ -325,6 +325,26 @@ README, a LICENSE, `install.sh` and the four units — [`release.yml`](../.githu
 beside the binaries they start, so `SHA256SUMS` covers the files that decide what runs as root.
 The macOS archives carry none: they ship `yantra-agent` alone and no systemd reads a unit there.
 
+### On a Mac
+
+**[Y-502](../tracker.md): on a Mac, `install.sh` installs `yantra-agent` alone.** Run it as the
+account logged in at the Mac, and name the daemon's tailnet address:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_DAEMON=<address>:7717 bash
+```
+
+It needs no root, and it refuses to run as root. It writes the binary to `~/.local/bin/yantra-agent`
+and a LaunchAgent to `~/Library/LaunchAgents/io.github.2002bishwajeet.yantra-agent.plist`. launchd
+has no `EnvironmentFile=`, so the LaunchAgent starts the agent through `sh`, which reads
+`~/.config/yantra/agent.env` first. The script writes that file only when it is missing, as on Linux.
+With no `YANTRA_DAEMON` set, it takes the address from the LaunchAgent the join command wrote.
+It loads the LaunchAgent only when the file names a daemon. A second run rewrites the LaunchAgent and
+restarts the agent; it does not add a second one. Nightly builds carry no macOS archive, so
+`--channel nightly` is refused. `--uninstall` is refused too, and it prints the two commands that
+remove the agent by hand. [`macos.rs`](../crates/yantra-core/tests/macos.rs) runs the script on CI's
+Mac runner.
+
 Before that the script fetched them from `raw.githubusercontent.com` at a `COMMIT` pinned beside
 `VERSION`. It pinned them honestly — a tag is a mutable ref, and v0.1.0's was deleted and re-cut the
 day it was published — but **those two files were outside `SHA256SUMS`**, which lists archives and
@@ -448,7 +468,10 @@ needs root: it turns on `sshd`, places the key in that account's `authorized_key
 from the caller's tailnet address and appends its `Host` block, with `User`, to the `yantra`
 account's config. **If a block already names the machine, it is kept**, and the script warns when
 that block logs in as a different account. The agent's unit is `DynamicUser=yes`, so a joined
-machine gains no account for it.
+machine gains no account for it. On a Mac, the join command still writes the address into the
+LaunchAgent itself, and writes no `agent.env`. A run of `install.sh` there
+([On a Mac](#on-a-mac)) moves that address into a new `agent.env` and replaces the LaunchAgent with
+the one that reads it.
 
 **The box itself needs no join command** (Y-598). `yantrad` lists this box's sessions over ssh, so
 [step 9](#what-it-does-at-a-terminal) of the install does here what the join command does elsewhere,

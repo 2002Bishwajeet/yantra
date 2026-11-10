@@ -52,7 +52,7 @@ jobs:
           rust='^(crates/|box/|\.cargo/|\.github/actions/|\.github/workflows/ci\.yml$|Cargo\.(toml|lock)$|rust-toolchain\.toml$|rustfmt\.toml$|deny\.toml$|justfile$|install\.sh$|web/src/contract\.gen\.ts$)'
           if grep -qE "$rust" <<<"$files"; then echo rust=true; else echo rust=false; fi >> "$GITHUB_OUTPUT"
           # What a Mac runs differently: the remote scripts and the code that sends them (Y-661).
-          macos='^(crates/yantra-core/src/((agent|chat|claude|doctor|install|keep|probe|remote|shells|ssh|tmux)[^/]*|[^/]*\.sh)$|crates/yantra-core/tests/macos\.rs$|crates/yantrad/src/chat\.rs$|\.github/actions/|\.github/workflows/ci\.yml$|justfile$|rust-toolchain\.toml$)'
+          macos='^(crates/yantra-core/src/((agent|chat|claude|doctor|install|keep|probe|remote|shells|ssh|tmux)[^/]*|[^/]*\.sh)$|crates/yantra-core/tests/macos\.rs$|crates/yantrad/src/chat\.rs$|install\.sh$|\.github/actions/|\.github/workflows/ci\.yml$|justfile$|rust-toolchain\.toml$)'
           if grep -qE "$macos" <<<"$files"; then echo macos=true; else echo macos=false; fi >> "$GITHUB_OUTPUT"
 
   fmt:
