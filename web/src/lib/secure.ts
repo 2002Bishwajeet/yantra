@@ -21,7 +21,7 @@ export type Page = {
 }
 
 // The keys go through the daemon's memory (carry.rs), so the address and the
-// browser's history hold only a one-time id. A link must not choose a
+// browser's history hold only a short-lived id. A link must not choose a
 // permission mode, so `yantra.chat.mode.*` stays on :7717.
 const CARRY = '#yantra-carry='
 const CARRIED = /^yantra\.(prefs|editor|chat\.interaction\..+|chat\.draft\..+)$/
@@ -97,7 +97,7 @@ export async function toSecure(page: Page = window, timeoutMs = 3000): Promise<S
   return { kind: 'moved', to, carried }
 }
 
-/** `lost` is a slot the daemon no longer holds: taken, expired, or a restart. */
+/** `lost` is a slot the daemon no longer holds: expired, evicted, or a restart. */
 export type Arrived =
   | { kind: 'none' }
   | { kind: 'arrived'; kept: number }

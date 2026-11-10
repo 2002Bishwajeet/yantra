@@ -465,8 +465,8 @@ question nobody asks.
 
 **`POST /api/carry` and `POST /api/carry/{id}` are the third** (Y-652). A dashboard on `:7717` hands
 its browser keys, drafts among them, to itself on `:8443`, because the two origins share no storage.
-[`carry.rs`](src/carry.rs) holds at most 8 slots of 5 minutes in `Fleet`, a slot is taken once, and
-nothing reaches a disk or a log, because a draft is the owner's words.
+[`carry.rs`](src/carry.rs) holds at most 8 slots of 5 minutes in `Fleet`. A take leaves the slot until it expires, because
+`:7717` has already removed its copy and a lost answer must not lose the drafts. Nothing reaches a disk or a log, because a draft is the owner's words.
 
 Authorisation is [ADR-0016](../../docs/adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md):
 the caller's address is resolved **live** through `whois`, and anything that is not this owner's own

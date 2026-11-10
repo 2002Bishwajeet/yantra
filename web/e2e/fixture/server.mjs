@@ -277,7 +277,7 @@ const noRoom = (name) => `no room ${name}: it was never made, or yantrad has res
 /** Route table: method, path pattern, handler. A handler answers
  *  `[status, body]` — a string is `text/plain`, an object JSON — or `[status]`
  *  for an empty body. */
-// Y-652: carry.rs, in memory and taken once. Not per scenario, because the
+// Y-652: carry.rs, in memory, and a take leaves the slot. Not per scenario, because the
 // two origins of one move share no scenario cookie.
 const carried = new Map()
 const strings = (sent) =>
@@ -300,7 +300,6 @@ const routes = [
     (_, [id]) => {
       const kept = carried.get(id)
       if (!kept) return [404, { error: 'nothing is carried under that id' }]
-      carried.delete(id)
       return [200, kept]
     },
   ],

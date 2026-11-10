@@ -3,7 +3,9 @@
 //!
 //! The two origins share no storage, and a URL fragment would put a draft in
 //! the browser's history. So the old page leaves the keys here and the new page
-//! takes them once. **In memory only**, and never logged: a draft is the
+//! takes them. **A take leaves the slot until it expires**: the old page has
+//! already removed its copy, so a take whose answer is lost on the way must be
+//! able to ask again. **In memory only**, and never logged: a draft is the
 //! owner's words, so no body reaches a trace (Q5).
 
 use std::collections::{BTreeMap, VecDeque};
@@ -115,11 +117,10 @@ async fn take<I: Inventory + Clone + Send + Sync + 'static>(
     Path(id): Path<String>,
 ) -> Result<Response, Refused> {
     allowed(&state.authoriser, from.ip(), &headers).await?;
-    let mut slots = state.slots.lock().await;
-    let at = slots.iter().position(|slot| slot.id == id);
-    let slot = at.and_then(|at| slots.remove(at));
+    let slots = state.slots.lock().await;
+    let slot = slots.iter().find(|slot| slot.id == id);
     Ok(match slot {
-        Some(slot) if slot.made.elapsed() < LIVES => Json(slot.kept).into_response(),
+        Some(slot) if slot.made.elapsed() < LIVES => Json(&slot.kept).into_response(),
         _ => failed(StatusCode::NOT_FOUND, "nothing is carried under that id"),
     })
 }
@@ -190,16 +191,22 @@ mod tests {
         json!({"yantra.chat.draft.site": "half a thought"})
     }
 
-    #[tokio::test]
-    async fn a_slot_is_taken_once_and_then_is_404() {
+    #[tokio::test(start_paused = true)]
+    async fn a_take_whose_answer_was_lost_can_ask_again_until_the_slot_expires() {
         let app = owner(&Slots::default());
         let id = keep(&app, draft()).await;
         assert_eq!(id.len(), 32, "128 bits in hex");
         assert!(id.bytes().all(|b| b.is_ascii_hexdigit()), "{id}");
 
+        // The first answer is the one a slow link loses on the way back.
         let (status, body) = post(&app, &format!("/carry/{id}"), Body::empty()).await;
         assert_eq!((status, body), (StatusCode::OK, draft()));
 
+        tokio::time::advance(LIVES - Duration::from_secs(1)).await;
+        let (status, body) = post(&app, &format!("/carry/{id}"), Body::empty()).await;
+        assert_eq!((status, body), (StatusCode::OK, draft()), "the retry");
+
+        tokio::time::advance(Duration::from_secs(1)).await;
         let (status, body) = post(&app, &format!("/carry/{id}"), Body::empty()).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert!(body["error"].is_string(), "{body}");

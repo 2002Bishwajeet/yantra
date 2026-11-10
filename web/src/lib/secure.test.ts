@@ -53,7 +53,7 @@ function landing(hash: string, localStorage: Landing['localStorage'] = store(), 
 type Answer = (init?: RequestInit) => Promise<Response>
 
 /** The daemon on both ports: `/api/about`, the probe of `/healthz`, and the
- *  carry, held in memory and taken once as carry.rs does. */
+ *  carry, held in memory, and a take leaves the slot as carry.rs does. */
 function stub({
   about: aboutAnswer = served(ORIGIN),
   probe = answers,
@@ -72,7 +72,6 @@ function stub({
     const id = path.replace('/api/carry/', '')
     if (take) return take(init)
     const body = slots.get(id)
-    slots.delete(id)
     return Promise.resolve(body ? answer(200, JSON.parse(body)) : answer(404, { error: 'nothing is carried' }))
   })
   vi.stubGlobal('fetch', asked)
@@ -237,16 +236,45 @@ describe('arrive', () => {
     expect(asked).not.toHaveBeenCalled()
   })
 
-  it('takes the keys once, and the draft is what the composer recalls', async () => {
-    stub()
+  it('takes the keys, and the draft is what the composer recalls', async () => {
+    const asked = stub()
     const here = page(false, { 'yantra.chat.draft.workspace/site': 'half a thought', 'yantra.editor': 'zed' })
-    const there = landing(new URL(movedTo(await toSecure(here))).hash, localStorage)
+    const session = store()
+    const there = landing(new URL(movedTo(await toSecure(here))).hash, localStorage, session)
     expect(await arrive(there)).toEqual({ kind: 'arrived', kept: 2 })
     expect(there.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/machines/pi?tab=talk#mic')
     expect(recallDraft('workspace/site')).toBe('half a thought')
     expect(localStorage.getItem('yantra.editor')).toBe('zed')
 
-    expect(await arrive(landing(carried(), store()))).toEqual({ kind: 'lost' })
+    // A reload after the take asks nothing, so an older value never comes back.
+    const calls = asked.mock.calls.length
+    expect(await arrive(landing('#mic', localStorage, session))).toEqual({ kind: 'none' })
+    expect(asked).toHaveBeenCalledTimes(calls)
+  })
+
+  it('takes the keys on the reload after the daemon answered a take too late', async () => {
+    const asked = stub()
+    const daemon = asked.getMockImplementation()
+    let late = true
+    asked.mockImplementation((path: string, init?: RequestInit) => {
+      const answered = daemon?.(path, init) ?? rejects()
+      if (!late || path !== `/api/carry/${ID}`) return answered
+      late = false
+      // The daemon has served the take, but the answer comes after the page gave up.
+      return hangs(init)
+    })
+    const here = page(false, { 'yantra.chat.draft.t-1': 'half a thought', 'yantra.prefs': '{"theme":"dark"}' })
+    const moved = await toSecure(here)
+    expect(here.held.size).toBe(0)
+
+    const session = store()
+    const failed = await arrive(landing(new URL(movedTo(moved)).hash, store(), session), 10)
+    expect(failed.kind === 'failed' && failed.error.kind).toBe('network')
+
+    const kept = store()
+    expect(await arrive(landing('#mic', kept, session))).toEqual({ kind: 'arrived', kept: 2 })
+    expect(kept.held.get('yantra.chat.draft.t-1')).toBe('half a thought')
+    expect(kept.held.get('yantra.prefs')).toBe('{"theme":"dark"}')
   })
 
   it('replaces what this origin holds with the carried value, which is newer', async () => {

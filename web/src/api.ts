@@ -435,7 +435,7 @@ export type Here = {
 }
 
 /** `POST /api/carry` (Y-652): the slot a page on :7717 left its keys in, for
- *  the page on :8443 to take once with `POST /api/carry/{id}`. */
+ *  the page on :8443 to take with `POST /api/carry/{id}` until it expires. */
 export type Carried = {
   id: string
 }
