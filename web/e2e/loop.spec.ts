@@ -117,7 +117,7 @@ async function fitsTheScreen(page: Page, dialog: Locator) {
 
 /** The daemon's refusal, drawn inside the dialog that asked for the verb. */
 const refusal = (dialog: Locator, title: string, said: string) =>
-  dialog.getByRole('alert').filter({ has: dialog.getByRole('heading', { name: title }), hasText: said })
+  dialog.getByRole('alert').filter({ has: dialog.page().getByRole('heading', { name: title }), hasText: said })
 
 test('an open PR is merged after the owner confirms, and the Chat offers to remove its worktree', async ({ page }) => {
   await scenario(page, 'busy')
