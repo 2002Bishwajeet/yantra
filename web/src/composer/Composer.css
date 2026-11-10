@@ -838,6 +838,11 @@
 }
 
 /* An error above the card shares the card's column. */
+/* Y-672: the document scrolls here, so the dock lifts itself; the phone shell shrinks instead. */
+[data-shell]:not([data-shell="phone"]) .composer-dock {
+  bottom: var(--m3-keyboard-inset, 0px);
+}
+
 .composer-dock > .m3-error {
   box-sizing: border-box;
   width: 100%;

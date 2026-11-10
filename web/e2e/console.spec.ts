@@ -24,6 +24,11 @@ const ALLOWED = /^Failed to load resource: the server responded with a status of
 /** WebKit words a read that the next navigation cancelled as a refusal (Y-660). */
 const CANCELLED_IN_WEBKIT = / due to access control checks\.$/
 
+/** WebKit does not know `interactive-widget` in the viewport meta (index.html, Y-672) and logs
+ *  it on every load. Chromium honours the key, which is why it stays. */
+const UNKNOWN_VIEWPORT_KEY_IN_WEBKIT =
+  /^Viewport argument key "interactive-widget" not recognized and ignored\.$/
+
 const PATHS = [
   ...new Set(ROUTES.map((one) => one.path)),
   '/w/landing?view=spend',
@@ -52,6 +57,7 @@ for (const name of SCENARIOS) {
       const type = message.type()
       if (type !== 'error' && type !== 'warning') return
       if (ALLOWED.test(message.text())) return
+      if (browserName === 'webkit' && UNKNOWN_VIEWPORT_KEY_IN_WEBKIT.test(message.text())) return
       seen.push(`${path}: ${type} ${message.text()}`)
     })
 

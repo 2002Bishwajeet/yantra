@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
-import { aMachine, looked } from '@/api/fixtures'
+import { aListed, aMachine, aWorkspace, looked } from '@/api/fixtures'
 import type { Readiness } from '@/api'
 import { writePrefs } from '@/shell/prefs'
 import { READY } from '@/lib/ready'
@@ -174,6 +174,21 @@ describe('step 2, where the code comes from', () => {
     expect(screen.getByRole('button', { name: 'Continue' }).getAttribute('aria-describedby')).toBeNull()
     fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/yantra/ }))
     expect(screen.getByRole('status').textContent).toBe('On cachyos-g14 at ~/Github/yantra')
+  })
+
+  it('points a folder a workspace already works in at that workspace chat', async () => {
+    const mine = aListed(aWorkspace({ name: 'yantra', machine: 'cachyos-g14', repo: `${HOME}/Github/yantra` }))
+    mountNew('desktop', '/new', { 'GET /api/workspaces': [200, looked.ok([mine])] })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    const rows = within(await screen.findByRole('list', { name: 'Repositories' }))
+    fireEvent.click(await rows.findByRole('button', { name: /2002Bishwajeet\/scratch/ }))
+    expect(screen.queryByText(/already works in this folder/)).toBeNull()
+    fireEvent.click(rows.getByRole('button', { name: /2002Bishwajeet\/yantra/ }))
+    expect(await screen.findByText('yantra already works in this folder. Start a thread in its chat.')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Open yantra' }).getAttribute('href')).toBe('/w/yantra?view=chat')
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
   })
 
   it('sends nobody to GitHub without a grant, and draws GitLab as later', async () => {

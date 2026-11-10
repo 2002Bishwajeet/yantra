@@ -425,6 +425,46 @@ test.describe('the composer', () => {
     expect(await at()).toBeGreaterThanOrEqual(viewport - 1)
     await expect(dock).toBeInViewport({ ratio: 1 })
   })
+
+  test.describe('with the keyboard open (Y-672)', () => {
+    test.beforeEach(({ size }) => {
+      test.skip(size !== 'phone', 'only the phone shell pins the dock above a keyboard')
+    })
+
+    const bottom = async (page: Page) => {
+      const box = (await page.locator('.composer-dock').boundingBox())!
+      return Math.round(box.y + box.height)
+    }
+
+    test('stays in view when the keyboard resizes the layout viewport', async ({ page }) => {
+      await composer(page).focus()
+      await page.setViewportSize({ width: 390, height: 508 })
+      await expect.poll(() => bottom(page)).toBeLessThanOrEqual(508)
+      await expect(page.locator('.composer-dock')).toBeInViewport({ ratio: 1 })
+    })
+
+    test('clears a keyboard that shrinks only the visual viewport, as iOS does', async ({ page }) => {
+      await page.evaluate(() => {
+        const w = window as unknown as { __vv: { height: number; offsetTop: number } }
+        w.__vv = { height: window.innerHeight, offsetTop: 0 }
+        Object.defineProperty(VisualViewport.prototype, 'height', { configurable: true, get: () => w.__vv.height })
+        Object.defineProperty(VisualViewport.prototype, 'offsetTop', { configurable: true, get: () => w.__vv.offsetTop })
+      })
+      await composer(page).focus()
+      await page.evaluate(() => {
+        const w = window as unknown as { __vv: { height: number } }
+        w.__vv.height = 508
+        window.visualViewport!.dispatchEvent(new Event('resize'))
+      })
+      await expect.poll(() => bottom(page)).toBeLessThanOrEqual(508)
+      const hit = await composer(page).evaluate((field) => {
+        const r = field.getBoundingClientRect()
+        const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+        return at === field || field.contains(at)
+      })
+      expect(hit).toBe(true)
+    })
+  })
 })
 
 test.describe('the composer, running a turn with a plan', () => {
