@@ -125,6 +125,14 @@ test.describe('the session screen, chat first', () => {
     await expect(page.getByRole('button', { name: 'Harness: Claude, kept by this chat' })).toBeDisabled()
   })
 
+  test('a short link in a chat turn is 44 px in both directions', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the 44 px rule is the phone rule')
+    await page.goto(`${PATH}?thread=${THREAD}`)
+    const box = await page.getByRole('link', { name: '#663' }).boundingBox()
+    expect(box?.width).toBeGreaterThanOrEqual(44)
+    expect(box?.height).toBeGreaterThanOrEqual(44)
+  })
+
   test('a thread the workspace does not have is refused by name', async ({ page }) => {
     await page.goto(`${PATH}?thread=ffffffff`)
     const alert = page.getByRole('alert')

@@ -963,7 +963,7 @@ const THREAD = '1a2b3c4d'
 const LOGGED_OUT = { gemini: 'run gemini and sign in' }
 const HISTORY = [
   ['user_text', 'Is the core crate green?'],
-  ['assistant_text', 'Yes. `cargo test -p yantra-core` passed, **326** tests in all.'],
+  ['assistant_text', 'Yes. `cargo test -p yantra-core` passed, **326** tests in all. See [#663](https://example.test/663).'],
 ]
 
 function converse(state, request, socket, head, name, thread, after) {

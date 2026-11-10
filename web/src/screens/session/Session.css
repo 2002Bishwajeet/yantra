@@ -244,6 +244,8 @@
   display: inline-flex;
   align-items: center;
   min-height: var(--md-sys-hit-area);
+  min-width: var(--md-sys-hit-area);
+  justify-content: center;
   color: var(--md-sys-color-primary);
   text-decoration: underline;
 }
