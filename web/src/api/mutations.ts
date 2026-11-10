@@ -389,7 +389,7 @@ export function useOpenPr(name: string) {
 }
 
 /** `…/merge` with the PR number the owner confirmed (Y-496): a squash, then the remote branch
- *  goes. 409 is no open PR, another PR, a moved head or one GitHub will not merge; 502 is GitHub. */
+ *  goes. 409 is no open PR, another PR, a head that moved during the merge or one GitHub will not merge; 502 is GitHub. */
 export function useMergePr(name: string) {
   return useMutation<ThreadPrMerged, ApiError, { id: string; number: number }>({
     mutationFn: ({ id, number }) =>
@@ -397,7 +397,7 @@ export function useMergePr(name: string) {
   })
 }
 
-/** `DELETE …/threads/{id}`: the keeper, worktree and branch go. 409 is a running turn. */
+/** `DELETE …/threads/{id}`, `yantra chat rm`: the keeper, worktree and branch go. 409 is a running turn. */
 export function useRemoveThread(name: string) {
   const client = useQueryClient()
   return useMutation<void, ApiError, string>({

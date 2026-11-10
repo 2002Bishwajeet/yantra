@@ -173,6 +173,7 @@ yantra probe mac /code/site      # is that directory there, and what git origin 
 yantra mic mac                   # stream this laptop's microphone into a session there until Ctrl-C
 yantra chat new site --issue o/r#7   # open a thread from a GitHub issue, and print its draft prompt
 yantra chat ls site              # the workspace's threads, each with its issue and PR
+yantra chat rm site 0a1b         # remove a thread's worktree and branch after you confirm
 yantra commit site 0a1b [-m MSG] [--draft]   # commit a thread's work; claude writes the message
 yantra push site 0a1b            # push a thread's branch and set its upstream
 yantra pr open site 0a1b         # open a PR for the pushed branch; Closes #n for an issue thread

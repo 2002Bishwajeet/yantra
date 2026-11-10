@@ -75,7 +75,7 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
   },
   mergeHeadMoved: {
     title: 'The PR changed',
-    next: 'Someone pushed to the PR after it was read. Look at the new commits, then merge again.',
+    next: 'New commits reached the PR while the merge ran. Look at them on github.com, then merge again.',
   },
   mergeGithub: { title: 'GitHub did not merge', next: 'GitHub did not take the merge. Try again in a moment.' },
   noGrant: {

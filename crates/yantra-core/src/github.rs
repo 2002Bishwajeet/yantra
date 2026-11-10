@@ -858,8 +858,8 @@ impl Github {
         .await
     }
 
-    /// `PUT /repos/{o}/{r}/pulls/{n}/merge` as one squash (ADR-0034 decision 1). `sha` is the
-    /// head the owner confirmed, so GitHub refuses with 409 a head that moved after it.
+    /// `PUT /repos/{o}/{r}/pulls/{n}/merge` as one squash (ADR-0034 decision 1). GitHub answers
+    /// 409 when the PR's head is no longer `sha`.
     pub async fn merge_pull(
         &self,
         token: &Token,
@@ -2383,7 +2383,7 @@ pub(crate) mod tests {
             .expect("a JSON body")
     }
 
-    /// Y-496: a squash, guarded by the head the owner confirmed.
+    /// Y-496: a squash, guarded by the head it names.
     #[tokio::test]
     async fn merge_puts_a_squash_with_the_confirmed_head() {
         let (listener, address) = listen();

@@ -248,7 +248,7 @@ export function GitActions(props: {
             </>
           }
           className="git__confirm"
-          description={`Squash-merge PR #${pr?.number} into the default branch and delete its remote branch.`}
+          description={`Squash-merge PR #${pr?.number} as it is on GitHub now into the default branch, and delete its remote branch.`}
           finalFocus={returnTo}
           title={`Merge PR #${pr?.number}`}
         >

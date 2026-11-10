@@ -1955,7 +1955,8 @@ struct MergeBody {
 }
 
 /// `yantra pr merge <workspace> <thread>` on the wire (Y-496): a squash with the daemon's grant
-/// (ADR-0034 decision 1), then the remote branch is deleted.
+/// (ADR-0034 decision 1), then the remote branch is deleted. The dialog shows the number and no
+/// commits, so the merge takes the head the daemon reads, not one the owner saw.
 async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,
@@ -1971,7 +1972,7 @@ async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
         .await
         .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
     tracing::info!("pr merge {name} {id} #{number} for {}", caller.node);
-    let merged = commit::merge_pr_for(&name, &id, &github::Github::default(), &token, number)
+    let merged = commit::merge_pr_for(&name, &id, &github::Github::default(), &token, number, None)
         .await
         .map_err(refuse_commit)?;
     Ok(Json(ThreadPrMerged {
@@ -1981,8 +1982,8 @@ async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
-/// Removes a thread's keeper, worktree and branch (Y-496). The keeper's reader ends with its
-/// pane, which lets the chat registry drop the thread.
+/// `yantra chat rm <workspace> <thread>` on the wire (Y-496): the thread's keeper, worktree and
+/// branch go. The keeper's reader ends with its pane, which lets the chat registry drop the thread.
 async fn removing<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<SocketAddr>,

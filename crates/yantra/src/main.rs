@@ -380,6 +380,17 @@ enum ChatAction {
         /// Workspace name, without the `.toml`
         workspace: String,
     },
+    /// Remove a thread after a confirmation: its keeper, worktree, branch,
+    /// checkpoints, journals and images
+    Rm {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// The thread's id, as `yantra chat ls` prints it
+        thread: String,
+        /// Remove without asking; needed when stdin is not a terminal
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -650,6 +661,14 @@ async fn main() -> ExitCode {
         Some(Command::Chat {
             action: ChatAction::Ls { workspace },
         }) => chat_ls(&workspace).await,
+        Some(Command::Chat {
+            action:
+                ChatAction::Rm {
+                    workspace,
+                    thread,
+                    yes,
+                },
+        }) => chat_rm(&workspace, &thread, yes).await,
         Some(Command::Commit {
             workspace,
             thread,
@@ -2615,6 +2634,44 @@ async fn chat_ls(workspace: &str) -> ExitCode {
     }
 }
 
+async fn chat_rm(workspace: &str, thread: &str, yes: bool) -> ExitCode {
+    let answer = || {
+        print!("{}", remove_question(workspace, thread));
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).map(|_| line).ok()
+    };
+    match confirmed(yes, std::io::stdin().is_terminal(), answer) {
+        Confirmed::Yes => {}
+        Confirmed::No => {
+            eprintln!("yantra: nothing removed");
+            return ExitCode::FAILURE;
+        }
+        Confirmed::NoTerminal => {
+            eprintln!(
+                "yantra: chat rm asks first, and stdin is not a terminal; pass --yes to remove"
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+    match commit::remove_for(workspace, thread).await {
+        Ok(()) => {
+            println!("removed thread {thread}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn remove_question(workspace: &str, thread: &str) -> String {
+    format!(
+        "Remove thread {thread} of {workspace}: its worktree, its branch and every uncommitted change? [y/N] "
+    )
+}
+
 fn render_threads(threads: &[thread::Thread]) -> String {
     if threads.is_empty() {
         return "no threads\n".to_owned();
@@ -2751,7 +2808,16 @@ async fn pr_merge(workspace: &str, thread: &str, yes: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    match commit::merge_pr_for(workspace, thread, &github, &token, pending.number).await {
+    match commit::merge_pr_for(
+        workspace,
+        thread,
+        &github,
+        &token,
+        pending.number,
+        Some(&pending.head_sha),
+    )
+    .await
+    {
         Ok(merged) => {
             print!("{}", render_merged(&merged));
             ExitCode::SUCCESS
@@ -5397,6 +5463,23 @@ mod tests {
             ls.command,
             Some(Command::Chat { action: ChatAction::Ls { workspace } }) if workspace == "site"
         ));
+    }
+
+    /// Y-496: `chat rm` is the CLI verb behind the daemon's `DELETE …/threads/{thread}`.
+    #[test]
+    fn chat_rm_takes_a_workspace_a_thread_and_yes() {
+        let parsed =
+            Cli::try_parse_from(["yantra", "chat", "rm", "site", "0a1b", "--yes"]).expect("parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Chat { action: ChatAction::Rm { workspace, thread, yes: true } })
+                if workspace == "site" && thread == "0a1b"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "chat", "rm", "site"]).is_err());
+        assert_eq!(
+            remove_question("site", "0a1b"),
+            "Remove thread 0a1b of site: its worktree, its branch and every uncommitted change? [y/N] "
+        );
     }
 
     #[test]

@@ -379,7 +379,7 @@ describe('merge', () => {
     const log = daemon({ merge: [200, { ...threadPrMerged, number: 7 }], remove: [204, undefined] })
     const { refresh, onRemoved } = open({ diffs: 0, listed })
     const asked = await confirm()
-    expect(asked.textContent).toMatch('Squash-merge PR #7 into the default branch and delete its remote branch.')
+    expect(asked.textContent).toMatch('Squash-merge PR #7 as it is on GitHub now into the default branch, and delete its remote branch.')
     expect(log).toHaveLength(0)
 
     fireEvent.click(within(asked).getByRole('button', { name: 'Merge' }))

@@ -656,13 +656,15 @@ pub async fn pending_pr(
     }
 }
 
-/// Squash-merges PR `number`, the one the owner confirmed, at the head read now, then deletes
-/// its branch. A delete that fails keeps the merge and says why in [`MergedPr::kept`].
+/// Squash-merges PR `number`, the one the owner confirmed, then deletes its branch. With `seen`,
+/// the head the owner was shown, a head that moved since is refused; without it the merge takes
+/// the head read now. A delete that fails keeps the merge and says why in [`MergedPr::kept`].
 pub async fn merge_pr(
     found: &thread::Listed,
     github: &Github,
     token: &Token,
     number: u64,
+    seen: Option<&str>,
 ) -> Result<MergedPr, Failed> {
     let pending = pending_pr(found, github, token).await?;
     if pending.number != number {
@@ -670,6 +672,9 @@ pub async fn merge_pr(
             confirmed: number,
             open: pending.number,
         });
+    }
+    if seen.is_some_and(|seen| seen != pending.head_sha) {
+        return Err(github::Error::HeadMoved.into());
     }
     let Pending {
         owner,
@@ -859,9 +864,10 @@ pub async fn merge_pr_for(
     github: &Github,
     token: &Token,
     number: u64,
+    seen: Option<&str>,
 ) -> Result<MergedPr, Failed> {
     let (_, found) = find_listed(name, id).await?;
-    merge_pr(&found, github, token, number).await
+    merge_pr(&found, github, token, number, seen).await
 }
 
 /// [`thread::remove`] for thread `id` of workspace `name`: its keeper, worktree, branch,
@@ -1826,7 +1832,7 @@ mod tests {
         listed(None, Some("git@github.com:o/r.git"))
     }
 
-    /// Y-496: the merge is a squash at the head read now, then the head ref goes.
+    /// Y-496: the merge is a squash at the head the owner was shown, then the head ref goes.
     #[tokio::test]
     async fn pr_merge_squashes_the_confirmed_pr_and_deletes_its_branch() {
         let (listener, address) = listen();
@@ -1840,7 +1846,7 @@ mod tests {
             ],
         );
 
-        let merged = merge_pr(&pushed(), &at(address), &token(), 21)
+        let merged = merge_pr(&pushed(), &at(address), &token(), 21, Some("aaa111"))
             .await
             .expect("merged");
 
@@ -1878,6 +1884,26 @@ mod tests {
         );
     }
 
+    /// The owner was shown head `zzz999`; a push moved it to `aaa111`, so nothing is merged.
+    #[tokio::test]
+    async fn pr_merge_refuses_a_head_the_owner_was_not_shown() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![reply("200 OK", OPEN), reply("200 OK", HEAD_OPEN)],
+        );
+
+        let refused = merge_pr(&pushed(), &at(address), &token(), 21, Some("zzz999"))
+            .await
+            .expect_err("a moved head");
+
+        assert!(
+            matches!(refused, Failed::Github(github::Error::HeadMoved)),
+            "{refused:?}"
+        );
+        assert_eq!(served.join().expect("the listener thread").len(), 2);
+    }
+
     /// The owner confirmed #20; #21 is what is open now, so nothing is merged.
     #[tokio::test]
     async fn pr_merge_refuses_a_pr_the_owner_did_not_confirm() {
@@ -1887,7 +1913,7 @@ mod tests {
             vec![reply("200 OK", OPEN), reply("200 OK", HEAD_OPEN)],
         );
 
-        let refused = merge_pr(&pushed(), &at(address), &token(), 20)
+        let refused = merge_pr(&pushed(), &at(address), &token(), 20, None)
             .await
             .expect_err("another PR");
 
@@ -1921,8 +1947,8 @@ mod tests {
         );
         let github = at(address);
 
-        let again = merge_pr(&pushed(), &github, &token(), 21).await;
-        let none = merge_pr(&pushed(), &github, &token(), 21).await;
+        let again = merge_pr(&pushed(), &github, &token(), 21, None).await;
+        let none = merge_pr(&pushed(), &github, &token(), 21, None).await;
 
         assert!(
             matches!(again, Err(Failed::AlreadyMerged { number: 21 })),
@@ -1930,7 +1956,7 @@ mod tests {
         );
         assert!(matches!(none, Err(Failed::NoPr)), "{none:?}");
         assert!(matches!(
-            merge_pr(&listed(None, None), &github, &token(), 21).await,
+            merge_pr(&listed(None, None), &github, &token(), 21, None).await,
             Err(Failed::NotPushed)
         ));
     }
@@ -1949,7 +1975,7 @@ mod tests {
             ],
         );
 
-        let merged = merge_pr(&pushed(), &at(address), &token(), 21)
+        let merged = merge_pr(&pushed(), &at(address), &token(), 21, None)
             .await
             .expect("merged");
 
