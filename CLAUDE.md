@@ -303,7 +303,10 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   CI tests only what a row changed: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607).
 - **CI is the gate.** A row pushes its branch and opens its PR, and its checks on CI are the gate.
   Rows verify on CI in parallel. Only merges run one at a time, because each rebase must see the
-  merge before it. The laptop runs only the walk and `just test-mac`. Owner, 2026-11-09 (Y-694).
+  merge before it. The laptop runs the walk and `just test-mac`. Owner, 2026-11-09 (Y-694).
+  A row's own extra checks go through [`gate.sh`](.claude/workflows/gate.sh) to an idle tailnet
+  machine, one gate at a time on each machine, under `nice` and a memory cap. The laptop is the
+  fallback, and the report names the machine (Y-703).
 - **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a Pi,
   audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, a changed
   invariant, or an answer to an open question. A parked row keeps its branch and appears in the
