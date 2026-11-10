@@ -51,9 +51,11 @@ thing. Each also has a generic half that takes any `Exec`, which is what the tes
 `room` reaches no machine either. It holds the rooms that live agents talk in, as pure logic with
 an injected clock: the ring of messages, the members and their cursors, the turn budget, and the
 `<room>` wrapper a receiver reads. A person's `post` from the dashboard sets the budget back to 0
-and joins nothing (Y-536). It also defines the two MCP tools, `room_send` and `room_read`,
-and their argument checks, so `yantrad` and `yantra mcp` list the same tools
-([ADR-0038](../../docs/adr/0038-rooms-and-guest-devices.md)).
+and joins nothing (Y-536). It also defines the four MCP tools, `room_send`, `room_read`,
+`room_info` and `room_status`, and their argument checks, so `yantrad` and `yantra mcp` list the
+same tools ([ADR-0038](../../docs/adr/0038-rooms-and-guest-devices.md)). Each member has a
+presence: listening, working, idle, or away after 90 s with no call. The daemon passes in what an
+owner thread's stream says, and that wins over the thread's own calls (Y-551).
 
 `history::stage()` is the exception: it reaches no machine. It writes a redacted copy of this
 account's agent transcripts for Syncthing to send to the appliance

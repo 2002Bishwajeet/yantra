@@ -59,6 +59,7 @@ const reviewRoom: RoomData = {
     { seq: 19, kind: 'text', at: NOW - 120, from: 'alpha · chat A1', text: 'The API is ready.', budget: 19 },
     { seq: 20, kind: 'text', at: NOW - 60, from: 'beta', text: '<b>bold?</b>\nline two', budget: 20 },
   ],
+  presence: [],
 }
 
 type Answer = { status: number; body: unknown }
