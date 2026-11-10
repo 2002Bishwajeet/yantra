@@ -22,7 +22,8 @@
 //! measurement and Y-151's gate both want a tmux server started from a GUI
 //! login, and both refuse without one. Their own doc comments say why and what
 //! to run. Y-632's, Y-640's and Y-667's need the owner logged in at the screen,
-//! and end every session on Yantra's `-L yantra` server there. The owner's own
+//! and end every session on Yantra's `-L yantra` server there. Y-639's needs
+//! the owner logged in too, and ends only its own session. The owner's own
 //! tmux, on the default socket, is never touched.
 
 use std::path::PathBuf;
@@ -31,9 +32,10 @@ use std::time::{Duration, Instant};
 use yantra_core::agent::{Claude, TRUST_PROMPT};
 use yantra_core::logs::{self, Who};
 use yantra_core::ssh::{self, Exec as _, Machine, Os, Ssh};
+use yantra_core::status::{self, Verdict};
 use yantra_core::terminfo::{self, Chosen};
 use yantra_core::tmux::Tmux;
-use yantra_core::{doctor, up, workspace};
+use yantra_core::{doctor, down, up, workspace};
 
 /// Long enough to be nobody's real workspace, and legal under `validate_name`.
 const E2E: &str = "yantra-manual-e2e";
@@ -451,6 +453,120 @@ async fn the_agents_hooks_find_their_commands_on_the_mac() -> anyhow::Result<()>
     anyhow::ensure!(
         inside.lines().filter(|line| line.starts_with('/')).count() == 2,
         "the server's PATH lacks node or claude-mem: {inside}"
+    );
+    Ok(())
+}
+
+/// **Y-639's done condition on macOS**, and the half of Y-640 that says the
+/// hook runs: a real Claude reads as running, and after a `SIGTERM` it reads as
+/// stopped with no raw tmux text on its pane. Needs the owner logged in at the
+/// Mac's screen, and [`Q12_REPO`] trusted there (I-49).
+///
+/// **It ends the `yantra-manual-e2e` session on Yantra's `-L yantra` server**,
+/// and starts that server through the LaunchAgent when none runs.
+#[tokio::test]
+#[ignore = "needs the real MacBook with the owner logged in at its screen; set YANTRA_MAC=user@host"]
+async fn a_claude_session_reads_running_then_stopped_on_the_mac() -> anyhow::Result<()> {
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest.clone(),
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y639"),
+    })?;
+    anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
+    let tmux = Tmux::resolve(&ssh).await?;
+    let claude = Claude::resolve(&ssh).await?;
+    ssh.exec(&format!("mkdir -p '{Q12_REPO}'")).await?;
+
+    let _leaves = Leaves::session_only(&dest, &tmux.command(), E2E);
+    let ws = workspace::Workspace {
+        name: E2E.to_owned(),
+        machine: dest.clone(),
+        repo: PathBuf::from(Q12_REPO),
+        startup: None,
+    };
+    let agent = format!(
+        "exec '{}' --session-id '{}'",
+        claude.path(),
+        fresh_session_id()?
+    );
+    let pane = up::open(&ssh, &tmux, &ws, Some(&agent), Os::MacOs)
+        .await?
+        .session()
+        .pane_id
+        .clone();
+
+    let started = Instant::now();
+    let running = loop {
+        let report = status::of(&ssh, &tmux, ws.clone()).await?;
+        match report.verdict {
+            Verdict::Running => break report,
+            Verdict::AwaitingTrust => anyhow::bail!(
+                "the agent holds at the trust dialog for {Q12_REPO} (I-49). Answer it once at the \
+                 Mac — `cd {Q12_REPO} && claude`, trust the folder, quit — and run this again."
+            ),
+            other if started.elapsed() > Duration::from_secs(40) => {
+                anyhow::bail!("not running after 40 s: {other:?}, pane {:?}", report.pane)
+            }
+            _ => tokio::time::sleep(Duration::from_secs(2)).await,
+        }
+    };
+    println!(
+        "running after {}s: {:?}",
+        started.elapsed().as_secs(),
+        running.agent
+    );
+    // Read now and asserted last, so a hook fault does not hide Y-639's result.
+    let hook_failed = tmux.pane_shows(&ssh, &pane, "hook error").await?;
+
+    // `down::stop` kills the session once it has read it, so the dead pane is
+    // read here, between the signal and the kill.
+    let pid = running
+        .pane
+        .and_then(|pane| pane.pid)
+        .ok_or_else(|| anyhow::anyhow!("a running pane names no pid"))?;
+    ssh.exec(&format!("kill -TERM {pid}")).await?;
+    let started = Instant::now();
+    let stopped = loop {
+        let report = status::of(&ssh, &tmux, ws.clone()).await?;
+        if report.pane.as_ref().is_none_or(|pane| pane.dead)
+            || started.elapsed() > Duration::from_secs(10)
+        {
+            break report;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    println!(
+        "after SIGTERM: {:?}, pane {:?}",
+        stopped.verdict, stopped.pane
+    );
+    anyhow::ensure!(
+        stopped.verdict == Verdict::Stopped,
+        "a stopped claude reads {:?}",
+        stopped.verdict
+    );
+    anyhow::ensure!(
+        !tmux.pane_shows(&ssh, &pane, "Pane is dead").await?,
+        "the stopped pane shows tmux's raw `Pane is dead` text"
+    );
+
+    let down = down::stop(&ssh, &tmux, ws.clone()).await?;
+    anyhow::ensure!(
+        down.ending == Some(Verdict::Stopped),
+        "down reads {:?}",
+        down.ending
+    );
+    let after = status::of(&ssh, &tmux, ws).await?;
+    anyhow::ensure!(
+        after.verdict == Verdict::NoSession,
+        "after down: {:?}",
+        after.verdict
+    );
+    anyhow::ensure!(
+        !hook_failed,
+        "a hook failed in a pane of the LaunchAgent's server (Y-640)"
     );
     Ok(())
 }
