@@ -27,7 +27,8 @@ test.describe('install from the machine page', () => {
     // pi-5 still has no gh installed, so the next thing is gh, and a session may start.
     await expect(ready(page).getByRole('heading', { name: 'gh installed is missing' })).toBeVisible({ timeout: 15_000 })
     await expect(ready(page).getByText(/^8 of 10 · asked/)).toBeVisible()
-    await expect(ready(page).getByText('installed by Yantra')).toBeVisible()
+    await ready(page).getByRole('button', { name: /^Show What ssh said/ }).click()
+    await expect(ready(page).getByText(/installed by Yantra/)).toBeVisible()
     await expect(ready(page).getByRole('link', { name: 'New session' })).toBeVisible()
     await expect(page.getByText('pi-5 is ready for sessions')).toBeVisible()
     await page.getByRole('button', { name: 'Dismiss' }).click()

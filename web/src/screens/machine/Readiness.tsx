@@ -39,10 +39,11 @@ function CheckLine(props: { check: Check; machine: string }) {
       <Text className="machine__word" scale="label-small">
         {rowWord(check)}
       </Text>
-      <Text className="machine__detail" scale="body-small" tone="variant">
-        {withoutSignIn(check.detail)}
-        {check.took_ms === undefined ? null : <span> · {tookOf(check.took_ms)}</span>}
-      </Text>
+      {check.took_ms === undefined ? null : (
+        <Text className="machine__detail" scale="body-small" tone="variant">
+          {tookOf(check.took_ms)}
+        </Text>
+      )}
       {fix?.by === 'command' ? (
         <div className="machine__fix">
           <Text scale="body-small" tone="variant">
@@ -70,6 +71,21 @@ function Checks(props: { checks: Check[]; machine: string }) {
         <CheckLine check={check} key={check.check} machine={props.machine} />
       ))}
     </ul>
+  )
+}
+
+/** Y-676: the probes' raw words, one press away, so a phone's page is not a wall of them. */
+function ProbeSaid(props: { checks: Check[] }) {
+  const said = props.checks.filter((one) => one.detail)
+  if (said.length === 0) return null
+  return (
+    <Disclosure summary="What ssh said">
+      {said.map((one) => (
+        <div className="m3-mono m3-wrap" key={one.check}>
+          {nameOf(one.check)}: {withoutSignIn(one.detail)}
+        </div>
+      ))}
+    </Disclosure>
   )
 }
 
@@ -385,11 +401,27 @@ function Body(props: {
       )
     case 'ready':
       return (
-        <Disclosure summary={folded(checks)}>
-          <Checks checks={checks} machine={name} />
-        </Disclosure>
+        <>
+          <Disclosure summary={folded(checks)}>
+            <Checks checks={checks} machine={name} />
+          </Disclosure>
+          <ProbeSaid checks={checks} />
+        </>
       )
-    default:
-      return <Checks checks={checks} machine={name} />
+    default: {
+      const first = sorted(checks).find((one) => one.state === 'absent')
+      const rest = checks.filter((one) => one !== first)
+      return (
+        <>
+          {first ? <Checks checks={[first]} machine={name} /> : null}
+          {rest.length > 0 ? (
+            <Disclosure summary={folded(rest)}>
+              <Checks checks={rest} machine={name} />
+            </Disclosure>
+          ) : null}
+          <ProbeSaid checks={checks} />
+        </>
+      )
+    }
   }
 }
