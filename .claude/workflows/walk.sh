@@ -30,6 +30,12 @@ up)
   wt=$(realpath "$1") dir="$(realpath "$1")/.walk"
   mkdir -p "$dir"
   [ -f "$dir/daemon.pid" ] && "$0" down "$wt"
+  # Y-697: a daemon left by another row answers the health check below, and the walk then shoots that row's build.
+  if [ -n "$(ss -ltnH "sport = :$port")" ]; then
+    echo "walk: port $port is already in use; stop that daemon with 'walk.sh down <its worktree>' or set WALK_PORT" >&2
+    ss -ltnpH "sport = :$port" >&2
+    exit 1
+  fi
   (cd "$wt" && CARGO_TARGET_DIR="$wt/target" cargo build --bin yantrad)
   (cd "$wt/web" && { [ -d node_modules ] || npm ci --prefer-offline; } && npx vite build)
   # The developer's own yantrad holds 7717 on the tailnet addresses, so this one runs in its own network
