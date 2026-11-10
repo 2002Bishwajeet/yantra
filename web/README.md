@@ -729,6 +729,8 @@ text, and `errors.ts` maps them by hand.
 every `--md-sys-color-*`, `--md-sys-shape-*`, `--md-sys-typescale-*` and
 `--md-sys-motion-*` role, and the three faces.
 
+Route changes use the router's view transitions (Y-678): the content slides by direction, forward or back, and the shell's bars, rail and button stay still. `prefers-reduced-motion: reduce` turns it off.
+
 - **Brass light and dark are precomputed and shipped as CSS** (Y-383), from the
   owner's palette by [`scripts/brass.mjs`](scripts/brass.mjs), which also writes
   [`palette-brass.json`](../docs/design/palette-brass.json). One declaration
