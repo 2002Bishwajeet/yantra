@@ -32,7 +32,7 @@ const UNKNOWN_REMOTELY: &str = "xterm-ghostty";
 const BIN_DIR: &str = "/home/yantra/.local/bin";
 
 struct Lab {
-    _fixture: SshFixture,
+    fixture: SshFixture,
     ssh: Ssh,
     dir: std::path::PathBuf,
 }
@@ -52,11 +52,7 @@ impl Lab {
             identity: Some(fixture.key_path()),
             state_dir: dir.clone(),
         })?;
-        Ok(Some(Self {
-            _fixture: fixture,
-            ssh,
-            dir,
-        }))
+        Ok(Some(Self { fixture, ssh, dir }))
     }
 
     /// Installs a stub where an installer would put it, so finding it exercises
@@ -123,10 +119,10 @@ impl Drop for Lab {
     }
 }
 
-/// The thirteen checks D2 §3.1 lists, in the order `doctor` reports them. Asserted
+/// The fourteen checks D2 §3.1 lists, in the order `doctor` reports them. Asserted
 /// on every path below, because the list *and its order* are the contract an
 /// installer and an agent read (D2.2).
-const EXPECTED: [&str; 13] = [
+const EXPECTED: [&str; 14] = [
     "reachable",
     "sshd",
     "tmux",
@@ -139,6 +135,7 @@ const EXPECTED: [&str; 13] = [
     "mic",
     "folder-access",
     "hooks",
+    "no-sudo",
     "heartbeat",
 ];
 
@@ -256,6 +253,8 @@ async fn a_bare_machine_tells_missing_apart_from_unaskable() -> Result<()> {
     assert_state(&checks, "folder-access", State::Present);
     // Y-640: no settings.json and no plugin, so no hook names a program.
     assert_state(&checks, "hooks", State::Present);
+    // Y-628: `yantra` has sudo installed and no sudoers line.
+    assert_state(&checks, "no-sudo", State::Present);
     // ADR-0031 §9: optional, and the detail says so.
     assert_state(&checks, "mic", State::Absent);
     assert!(
@@ -298,6 +297,50 @@ async fn a_hook_whose_program_is_missing_is_named() -> Result<()> {
         "{detail}"
     );
     assert!(!detail.contains("`sh`"), "{detail}");
+    Ok(())
+}
+
+/// Y-628 against a real sudo: an account in no sudo group and with no sudoers
+/// line is *present*, and a `NOPASSWD` rule makes it *absent* (ADR-0046 3.1).
+#[tokio::test]
+async fn a_nopasswd_rule_is_an_account_that_can_use_sudo() -> Result<()> {
+    let Some(lab) = Lab::start("sudo-rule")? else {
+        return Ok(());
+    };
+    let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
+    assert_state(&checks, "no-sudo", State::Present);
+    assert_eq!(
+        look(&checks, "no-sudo").detail,
+        "not root, in no sudo, wheel or admin group, and sudo -n did not run"
+    );
+
+    lab.fixture.arrange_as_root(
+        "printf 'yantra ALL=(ALL) NOPASSWD: ALL\\n' > /etc/sudoers.d/yantra \
+         && chmod 440 /etc/sudoers.d/yantra",
+    )?;
+    let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
+    assert_state(&checks, "no-sudo", State::Absent);
+    assert_eq!(
+        look(&checks, "no-sudo").detail,
+        "sudo -n runs without a password"
+    );
+    Ok(())
+}
+
+/// Y-628: a sudo group is *absent* and named. The group is added before the
+/// first login, because an ssh master keeps the groups it logged in with.
+#[tokio::test]
+async fn an_account_in_wheel_is_named_as_one_that_can_use_sudo() -> Result<()> {
+    let Some(lab) = Lab::start("sudo-group")? else {
+        return Ok(());
+    };
+    lab.fixture.arrange_as_root("addgroup yantra wheel")?;
+    let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
+    assert_state(&checks, "no-sudo", State::Absent);
+    assert_eq!(
+        look(&checks, "no-sudo").detail,
+        "the account is in the wheel group"
+    );
     Ok(())
 }
 
