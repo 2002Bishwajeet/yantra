@@ -19,6 +19,7 @@
 use crate::inventory::{Inventory, MachineInfo, Os, Tailscale};
 use crate::keep;
 use crate::ssh::{self, Ssh};
+use crate::thread;
 use crate::tmux::{self, Summary, Tmux};
 use crate::workspace;
 
@@ -27,17 +28,20 @@ use crate::workspace;
 #[derive(Debug)]
 pub struct MachineSessions {
     pub machine: String,
-    /// Every session but the Chat keepers, which no person started.
+    /// Every session but the Chat keepers and thread terminals, which no
+    /// workspace claims.
     pub sessions: Result<Vec<Summary>, Error>,
     /// The keepers' session names (ADR-0035 decision 1), which the daemon
     /// adopts and the session list hides.
     pub keepers: Vec<String>,
 }
 
-/// Takes the Chat keepers out of a tmux listing.
+/// Takes the Chat keepers out of a tmux listing, and drops the thread
+/// terminals (Y-498): the thread owns those, and the daemon adopts none.
 pub fn split(listed: Vec<Summary>) -> (Vec<Summary>, Vec<String>) {
     let (keepers, sessions): (Vec<Summary>, Vec<Summary>) = listed
         .into_iter()
+        .filter(|summary| !summary.name.starts_with(thread::TERMINAL))
         .partition(|summary| keep::is_keeper(&summary.name));
     (
         sessions,
@@ -265,6 +269,28 @@ mod tests {
             ["web", "scratch"]
         );
         assert_eq!(keepers, ["yantra-keep-web-1a2b3c4d5e6f7a8b"]);
+    }
+
+    /// Y-498: no workspace is named `yantra-term-…`, so a thread's terminal
+    /// listed here would show as an unclaimed session with a Kill button.
+    #[test]
+    fn a_thread_terminal_is_neither_a_session_nor_a_keeper() {
+        let summary = |name: &str| Summary {
+            name: name.to_owned(),
+            windows: 1,
+            attached: 0,
+            created: String::new(),
+            created_at: 0,
+        };
+        let (sessions, keepers) = split(vec![
+            summary("web"),
+            summary("yantra-term-web-1a2b3c4d5e6f7a8b"),
+        ]);
+        assert_eq!(
+            sessions.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["web"]
+        );
+        assert!(keepers.is_empty());
     }
 
     /// A phone runs no sshd and no tmux, so asking it can only fail — and it
