@@ -181,13 +181,13 @@ async fn chat<I: Inventory + Clone + Send + Sync + 'static>(
         authoriser,
         registry,
     }): State<Chats<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<crate::write::Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     uri: Uri,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&authoriser, &from, &headers).await?;
     let query = read_query(&uri);
     tracing::info!("chat {name} for {}", caller.node);
 
@@ -6441,14 +6441,17 @@ mod tests {
         };
         let app = Router::new().nest(
             "/api",
-            router(Authoriser::new(fake, &[]), Registry::default()),
+            router(
+                Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock")),
+                Registry::default(),
+            ),
         );
         let listener = TcpListener::bind((LOCAL, 0)).await.expect("a free port");
         let address = listener.local_addr().expect("it is bound");
         tokio::spawn(async move {
             let _ = axum::serve(
                 listener,
-                app.into_make_service_with_connect_info::<SocketAddr>(),
+                app.into_make_service_with_connect_info::<crate::write::Peer>(),
             )
             .await;
         });
@@ -6493,7 +6496,11 @@ mod tests {
     async fn a_socket_the_daemon_ends_gets_a_close_frame() {
         use crate::terminal::tests::{TEXT, connect_to, frame, tailnet};
         let api = router(
-            Authoriser::new(tailnet(vec![(LOCAL, caller(ME, &[]))]), &[]),
+            Authoriser::new(
+                tailnet(vec![(LOCAL, caller(ME, &[]))]),
+                &[],
+                std::path::Path::new("yantrad.sock"),
+            ),
             Registry::default(),
         );
         let mut socket = connect_to(

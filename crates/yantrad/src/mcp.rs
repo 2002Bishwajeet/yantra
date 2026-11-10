@@ -22,7 +22,7 @@
 //! **A tool's failure is a result with `isError`**, as MCP asks, so the agent
 //! reads it; only the identity check refuses with an HTTP status.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -42,7 +42,7 @@ use yantra_core::room_file::{self, Definition};
 use yantra_core::workspace;
 
 use crate::room::Rooms;
-use crate::write::{Authoriser, Refused, allowed};
+use crate::write::{Authoriser, Peer, Refused, allowed};
 
 const THREAD: &str = "x-yantra-thread";
 const SESSION: &str = "mcp-session-id";
@@ -118,20 +118,20 @@ where
 /// The spec lets a server refuse the event stream.
 async fn stream<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Response, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     Ok((StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "POST")]).into_response())
 }
 
 async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let Ok(message) = serde_json::from_slice::<Value>(&body) else {
         return Ok(refused(&Value::Null, PARSE_ERROR, "Parse error"));
     };
@@ -371,11 +371,11 @@ fn session_of(headers: &HeaderMap) -> Option<String> {
 
 async fn resume<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     state.rooms.resume(&name).map_err(|error| Refused::Verb {
         status: StatusCode::NOT_FOUND,
         said: error.to_string(),
@@ -595,11 +595,11 @@ fn defined(error: &room_file::Error) -> Refused {
 /// The owner defines a room in a workspace (ADR-0039 decision 1).
 async fn create<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     body: Result<Json<Create>, JsonRejection>,
 ) -> Result<(StatusCode, Json<RoomSummary>), Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let asked = json_only(body, "{\"name\", \"workspace\", \"brief\"?, \"base\"?}")?;
     let definition = Definition {
         name: asked.name,
@@ -633,12 +633,12 @@ async fn create<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn edit<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     body: Result<Json<Edit>, JsonRejection>,
 ) -> Result<Json<RoomSummary>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let asked = json_only(body, "{\"brief\": \"...\" | null}")?;
     let summary = state
         .rooms
@@ -650,11 +650,11 @@ async fn edit<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn end<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<RoomRemoved>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let removed = state.rooms.end(&name).map_err(|error| defined(&error))?;
     tracing::info!("room {name}: ended for {}, removed {removed}", caller.node);
     Ok(Json(RoomRemoved { removed }))
@@ -662,10 +662,10 @@ async fn end<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn list<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RoomSummary>>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     Ok(Json(
         state
             .rooms
@@ -678,11 +678,11 @@ async fn list<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn view<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<RoomView>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let (summary, messages) = state.rooms.view(&name).map_err(missing)?;
     let presence = state.rooms.presence(&name).map_err(missing)?;
     Ok(Json(RoomView {
@@ -696,12 +696,12 @@ async fn view<I: Inventory + Clone + Send + Sync + 'static>(
 /// waits. It joins no one and moves no cursor.
 async fn events<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     RawQuery(query): RawQuery,
 ) -> Result<Json<RoomEvents>, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let (after, wait) = poll(query.as_deref()).map_err(|said| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said: said.to_owned(),
@@ -725,12 +725,12 @@ async fn events<I: Inventory + Clone + Send + Sync + 'static>(
 /// A person's message. The label is the caller's machine, never the body.
 async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(name): Path<String>,
     post: Result<Json<Post>, JsonRejection>,
 ) -> Result<Json<RoomPosted>, Refused> {
-    let caller = allowed(&state.authoriser, from.ip(), &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let post = json_only(post, "{\"text\": \"...\"}")?;
     let machine = machine_of(&state.authoriser, &caller.node)
         .await
@@ -919,6 +919,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Method, Request};
     use std::net::IpAddr;
+    use std::net::SocketAddr;
     use tower::ServiceExt as _;
     use yantra_core::inventory::{self, Caller, Fake, MachineInfo, Os, Ownership};
 
@@ -1021,7 +1022,7 @@ mod tests {
         let closing = watch::Sender::new(false);
         App {
             router: routes(
-                Authoriser::new(inventory, &[]),
+                Authoriser::new(inventory, &[], std::path::Path::new("yantrad.sock")),
                 rooms,
                 locate(),
                 resolve(),
@@ -1051,7 +1052,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((from, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((from, 61620)))));
         let response = app
             .router
             .clone()
@@ -1750,7 +1751,7 @@ mod tests {
             .expect("a request");
         forged
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((ALPHA, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
         let refused = app
             .router
             .clone()
@@ -1783,7 +1784,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((from, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((from, 61620)))));
         let response = app
             .router
             .clone()
@@ -2137,7 +2138,7 @@ mod tests {
             ))
             .expect("a request");
         form.extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((ALPHA, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
         let response = app.router.clone().oneshot(form).await.expect("infallible");
         assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
         let (_, said) = send(&app, Method::GET, "/rooms", None, ALPHA, None).await;

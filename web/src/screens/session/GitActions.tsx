@@ -3,6 +3,7 @@ import { ChevronDown, GitCommitHorizontal, GitMerge, GitPullRequest, Trash2, Upl
 import { useCommit, useDraftMessage, useMergePr, useOpenPr, usePush, useRemoveThread } from '@/api/mutations'
 import type { ThreadPr } from '@/api'
 import { Button } from '@/m3/button/Button'
+import { useRegisterLoopCommands } from '@/shell/loopCommands'
 import { Dialog, DialogClose, DialogPopup } from '@/m3/dialog/Dialog'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -172,6 +173,20 @@ export function GitActions(props: {
       setMergeAsk(true)
     } else askRemove()
   }
+
+  // The palette and the chords run a verb through `run`, so Commit asks for its message and Merge for its confirmation.
+  const reasonOff = (id: GitVerb) => {
+    const item = items.find((one) => one.id === id)
+    if (item === undefined) return pr?.state === 'merged' ? 'The PR is merged already.' : 'There is no open PR to merge.'
+    return item.kind === 'open_pr_link' ? 'A PR is open already.' : item.reason
+  }
+  useRegisterLoopCommands(
+    (['commit', 'push', 'pr', 'merge'] as const).map((id) => {
+      const reason = reasonOff(id)
+      return { id, disabled: reason !== null, reason }
+    }),
+    (id) => run(id as GitVerb, null),
+  )
 
   const draftFailure = draft.isError ? gitFailure('draft', draft.error) : null
   const commitFailure = commit.isError ? gitFailure('commit', commit.error) : null

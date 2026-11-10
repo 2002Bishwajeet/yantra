@@ -1824,7 +1824,8 @@ async fn join_script() -> ExitCode {
     if prepared.generated {
         eprintln!("key: {}, generated", prepared.key.display());
     }
-    match join::daemon_address(&addresses).and_then(|d| join::script(d, &prepared.public_key)) {
+    match join::daemon_address(&addresses).and_then(|d| join::script(d, &prepared.public_key, None))
+    {
         Ok(script) => {
             print!("{script}");
             ExitCode::SUCCESS

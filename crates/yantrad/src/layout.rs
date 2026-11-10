@@ -6,7 +6,6 @@
 //! names the `rev` it read, and an older `rev` gets 409 with the layout on
 //! disk. The lock makes the read, the compare and the write one step.
 
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -20,7 +19,7 @@ use tokio::sync::Mutex;
 use yantra_core::inventory::Inventory;
 use yantra_core::layout::{self, Error, Layout};
 
-use crate::write::{Authoriser, Refused, allowed, chain};
+use crate::write::{Authoriser, Peer, Refused, allowed, chain};
 
 /// A layout is a few kilobytes; 64 KiB leaves room and refuses a flood.
 const BODY_LIMIT: usize = 64 * 1024;
@@ -76,11 +75,11 @@ async fn read<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn replace<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Layouts<I>>,
-    ConnectInfo(from): ConnectInfo<SocketAddr>,
+    ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Refused> {
-    allowed(&state.authoriser, from.ip(), &headers).await?;
+    allowed(&state.authoriser, &from, &headers).await?;
     let sent = match Layout::parse(&body) {
         Ok(sent) => sent,
         Err(error) => return Ok(answer(error)),
@@ -124,6 +123,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Method, Request, header};
+    use std::net::SocketAddr;
     use tower::ServiceExt as _;
 
     use crate::terminal::tests::{LOCAL, ME, caller, direct};
@@ -144,7 +144,7 @@ mod tests {
             .expect("a request");
         request
             .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from((LOCAL, 61620))));
+            .insert(ConnectInfo(Peer::from(SocketAddr::from((LOCAL, 61620)))));
         let response = app
             .clone()
             .oneshot(request)

@@ -480,6 +480,11 @@ export function Shell() {
           <PhoneBottom fab={button} />
         ) : null}
       </div>
+      {factor === 'desktop' ? null : (
+        <Guarded title="Search could not be drawn">
+          <Palette pill={false} />
+        </Guarded>
+      )}
       <StatusAnnouncer />
       <LiveRegion />
     </>

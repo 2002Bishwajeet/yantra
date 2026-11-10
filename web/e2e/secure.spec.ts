@@ -39,6 +39,8 @@ const test = base.extend<{ engine: Engine; phone: Page }>({
     const shape = webkit ? { ...devices['iPhone 15'], ...SIZES.phone } : SIZES.phone
     const context = await (webkit ?? browser).newContext({ ...shape, serviceWorkers: 'block' })
     await provide(await context.newPage())
+    // A route.fetch still in flight when the test ends is an error outside any test.
+    await context.unrouteAll({ behavior: 'ignoreErrors' })
     await context.close()
     await webkit?.close()
   },

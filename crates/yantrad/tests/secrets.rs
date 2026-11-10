@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, UnixStream};
 use yantra_core::SECRETS;
 
 const DAEMON: &str = "127.0.0.1:7717";
@@ -52,8 +52,7 @@ impl Host {
         let lock = fs::File::create(std::env::temp_dir().join("yantra-chat-keeper.lock"))?;
         lock.lock()
             .context("waiting for the other cases that bind 7717")?;
-        // Short: the control socket's path budget is 90 bytes (I-28).
-        let root = PathBuf::from(format!("/tmp/yks-{}", std::process::id()));
+        let root = root();
         if root.exists() {
             fs::remove_dir_all(&root)?;
         }
@@ -110,6 +109,7 @@ impl Host {
             .env("PATH", path)
             .env("HOME", self.root.join("home"))
             .env("XDG_RUNTIME_DIR", self.root.join("run"))
+            .env("RUNTIME_DIRECTORY", self.root.join("run"))
             .env("RUST_LOG", "info")
             .env(yantra_core::github::TOKEN, "gho_notarealtoken")
             .env(yantra_core::notify::RELAY_TOKEN, "tk_notarealtoken")
@@ -161,6 +161,17 @@ impl Drop for Host {
     }
 }
 
+/// Short: the control socket's path budget is 90 bytes (I-28).
+fn root() -> PathBuf {
+    PathBuf::from(format!("/tmp/yks-{}", std::process::id()))
+}
+
+/// ADR-0042: this host's own address is refused over TCP, so the requests go
+/// on the daemon's socket, as the account that runs it.
+fn daemon_socket() -> PathBuf {
+    root().join("run/yantrad.sock")
+}
+
 /// A `yantrad` that a failed assertion does not leave holding port 7717.
 struct Daemon(Child);
 
@@ -174,7 +185,7 @@ impl Drop for Daemon {
 /// Opens a terminal socket and sends the window it must open with, which sends
 /// the daemon to ssh. What it answers does not matter here.
 async fn knock(path: &str) -> Result<()> {
-    let mut stream = BufReader::new(TcpStream::connect(DAEMON).await?);
+    let mut stream = BufReader::new(UnixStream::connect(daemon_socket()).await?);
     stream
         .get_mut()
         .write_all(

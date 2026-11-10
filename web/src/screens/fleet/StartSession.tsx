@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import type { Item, Workspace } from '@/api'
 import { loaded, useWorkspaces } from '@/api/hooks'
@@ -44,22 +45,44 @@ const explain = (error: ApiError) => ({
 
 /** Y-489: Start session on an inbox issue. The picker lists the workspaces
  *  that hold the repository, best machine first. */
-export function StartSession(props: { item: Item }) {
-  const { item } = props
+export function StartSession(props: {
+  item: Item
+  /** Controlled, as the palette opens it: the trigger is not drawn. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
+  const { item, open, onOpenChange } = props
+  const controlled = open !== undefined
   const issue = `${item.repo}#${item.number}`
   const workspaces = loaded(useWorkspaces())
   const placement = usePlacement()
   const ask = () => placement.mutate({ repo: item.repo })
+
+  const { mutate } = placement
+  useEffect(() => {
+    if (open) mutate({ repo: item.repo })
+  }, [open, item.repo, mutate])
 
   const settled = placement.isSuccess || placement.isError
   const picks =
     workspaces.looked === 'ok' && settled ? pickWorkspaces(workspaces.data, item.repo, placement.data ?? null) : null
 
   return (
-    <Dialog onOpenChange={(open) => (open ? ask() : placement.reset())}>
-      <DialogTrigger render={<Button aria-label={`Start session on ${issue}`} variant="tonal" />}>
-        Start session
-      </DialogTrigger>
+    <Dialog
+      onOpenChange={(next) => {
+        if (!controlled) {
+          if (next) ask()
+          else placement.reset()
+        }
+        onOpenChange?.(next)
+      }}
+      open={open}
+    >
+      {controlled ? null : (
+        <DialogTrigger render={<Button aria-label={`Start session on ${issue}`} variant="tonal" />}>
+          Start session
+        </DialogTrigger>
+      )}
       <DialogPopup
         actions={<DialogClose render={<Button variant="text" />}>Cancel</DialogClose>}
         description={item.title}
