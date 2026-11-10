@@ -103,7 +103,8 @@ account. The script says so first, because the dashboard cannot exist before the
    script makes the `yantra` account's key and a `Host` block for this box, and places the public key
    in the `authorized_keys` of the account that ran the script. It then tries one real login and says
    how that went. It asks nothing, and a failure here does not stop the install.
-   [The ssh identity section](#the-appliances-ssh-identity) says more.
+   [The ssh identity section](#the-appliances-ssh-identity) says more. Agents run as that account,
+   so [join an account without sudo](#join-an-account-without-sudo) to keep them off root.
 10. It ends on one line: the dashboard's URL — `https://<machine>.<tailnet>.ts.net:8443`, or
    `http://<tailnet address>:7717` if HTTPS is not on. A browser that opens `:7717` while HTTPS is
    on moves to `:8443`, where the microphone works. If `qrencode` is installed, the URL also
@@ -456,8 +457,8 @@ The ssh identity the appliance uses to reach the fleet — a key, a config and a
 typed. Without it the daemon starts and every verb that reaches a machine fails.
 
 **The join command prepares it, one machine at a time** (Y-387,
-[ADR-0029](adr/0029-a-machine-joins-itself.md)). In a terminal on the new machine, as the account
-Yantra is to log in as:
+[ADR-0029](adr/0029-a-machine-joins-itself.md)). In a terminal on the new machine, as `karigar`,
+the account without sudo that Yantra is to log in as ([below](#join-an-account-without-sudo)):
 
 ```bash
 curl -fsSL https://<appliance>.<tailnet>.ts.net:8443/join | sh
@@ -488,8 +489,10 @@ the one that reads it.
 
 **The box itself needs no join command** (Y-598). `yantrad` lists this box's sessions over ssh, so
 [step 9](#what-it-does-at-a-terminal) of the install does here what the join command does elsewhere,
-for the account that ran the install. `yantra` itself has the shell `/usr/sbin/nologin` and stays
-that way: it holds the key to the whole fleet, and the sessions are not on that account.
+for the account that ran the install. To run agents as `karigar` there instead, see
+[Join an account without sudo](#join-an-account-without-sudo). `yantra` itself has the shell
+`/usr/sbin/nologin` and stays that way: it holds the key to the whole fleet, and the sessions are
+not on that account.
 
 - **A run with no answers skips it.** With no terminal and no `--yes`, and in an update, nothing
   writes under either `.ssh`.
@@ -530,6 +533,76 @@ it.
 `StrictHostKeyChecking=accept-new`, so first contact records the host key with nobody there to
 answer a prompt. A machine whose host key later *changes* is then a hard refusal — deliberately, and
 it is a support call rather than something to configure away.
+
+### Join an account without sudo
+
+**Agents run as the account that joins, so that account must not use sudo** (owner, 2026-11-04,
+[Y-628](../tracker.md#3-task-board)). An agent reads issues, pull requests, web pages and tool
+output all day, and any of them can carry a prompt injection. A prompt-injected agent with any root
+path owns the machine ([ADR-0046](adr/0046-the-owner-types-sudo-in-an-owner-terminal.md)). Make a
+separate account named `karigar` with no sudo, and run the join command as that account.
+
+The join command skips each step that needs root when the account cannot use sudo, and still places
+the key and reports. So install `tmux`, `git` and `sshd` from your own admin account first, and
+start `sshd`. On Linux, `yantra-agent` needs root, so it stays off, and the dashboard has no
+heartbeat for that machine.
+
+**On Linux**, as your own admin account, with `tmux`, `git` and `sshd` installed. Arch, Fedora and
+openSUSE do not start `sshd` when they install it, and `karigar` cannot start it, so start it first:
+
+```bash
+sudo systemctl enable --now sshd
+```
+
+Debian and Ubuntu start it on install, and name the unit `ssh`. If the machine runs Tailscale SSH and
+the tailnet's policy asks for a browser check, `karigar` cannot turn Tailscale SSH off either. Turn
+it off before the join:
+
+```bash
+sudo tailscale set --ssh=false
+```
+
+Then make `karigar` and switch to it:
+
+```bash
+sudo useradd --create-home --shell /bin/bash karigar
+sudo usermod -p '*' karigar
+sudo -iu karigar
+```
+
+`usermod -p '*'` gives `karigar` no password and does not lock it, so `sshd` takes its key. Run the
+join command in the shell that `sudo -iu` opens.
+
+**On a Mac**, as your admin account:
+
+```bash
+brew install tmux git
+sudo sysadminctl -addUser karigar -fullName Karigar -password -
+```
+
+`sysadminctl` asks for a password and makes a Standard account. Then:
+
+1. Allow `karigar` in System Settings → General → Sharing → Remote Login.
+2. Log in as `karigar` at the Mac's screen once. The tmux server and the keychain need its login
+   session ([ADR-0018](adr/0018-the-tmux-server-carries-the-macos-login-session.md)).
+3. In Terminal there, give its shell Homebrew's `PATH`, then open a new window:
+
+   ```bash
+   echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+   ```
+
+4. Run `claude` and sign in, then run the join command.
+
+**The machine card warns when the joined account can use sudo.** The `no-sudo` check in
+`yantra doctor` is *absent* for root, for a member of the `sudo`, `wheel` or `admin` group, and for
+an account whose `sudo -n true` runs, which is a `NOPASSWD` rule. Yantra asks the groups on each
+sweep. It asks `sudo -n` at most once an hour per machine, because each refusal writes a line to
+the auth log. The warning does not stop a session.
+
+**On the hub, edit the `Host` block first.** [Step 9](#what-it-does-at-a-terminal) of the install
+writes a block for the account that ran the install. The join command keeps a block that exists,
+so a `karigar` join there warns that the kept block logs in as another account, and stops. Change
+that block's `User` to `karigar` in `~yantra/.ssh/config`, then run the join command as `karigar`.
 
 ### The workspace files
 

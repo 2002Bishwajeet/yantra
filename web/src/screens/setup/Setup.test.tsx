@@ -290,7 +290,11 @@ describe('the steps', () => {
 
   it('says the one step that runs in a terminal is the join command', async () => {
     await draw(base())
-    expect(screen.getByText(/One step runs in a terminal: the join command/)).toBeTruthy()
+    expect(
+      screen.getByText(
+        'One step runs in a terminal: the join command, once on each new machine, as an account without sudo named karigar. Each step here re-checks itself every few seconds.',
+      ),
+    ).toBeTruthy()
   })
 })
 
@@ -552,6 +556,35 @@ describe('the machine lines', () => {
     expect(await screen.findByText('Permission denied (publickey)')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
     expect(screen.getAllByText(COMMAND)).toHaveLength(1)
+  })
+
+  /** Y-628: the join command on a line names karigar, and opens the commands that make it. */
+  it('tells a Linux line to join as karigar, with the commands that make it and start sshd', async () => {
+    const refused = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
+    await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
+    const how = screen.getByRole('button', { name: /How Run it as karigar, an account without sudo/ })
+    expect(how.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(how)
+    expect(how.getAttribute('aria-expanded')).toBe('true')
+    for (const command of [
+      'sudo systemctl enable --now sshd',
+      'sudo useradd --create-home --shell /bin/bash karigar',
+      "sudo usermod -p '*' karigar",
+      'sudo -iu karigar',
+    ]) {
+      expect(screen.getByText(command)).toBeTruthy()
+    }
+    expect(screen.queryByText(/sysadminctl/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
+  })
+
+  it('tells a Mac line to join as a Standard account named karigar', async () => {
+    const refused = { machine: upToo.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
+    await draw({ ...base([upToo]), 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
+    fireEvent.click(screen.getByRole('button', { name: /How Run it as karigar/ }))
+    expect(screen.getByText('sudo sysadminctl -addUser karigar -fullName Karigar -password -')).toBeTruthy()
+    expect(screen.queryByText(/useradd/)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy the join command for macbook' })).toBeTruthy()
   })
 
   /** D7 §4.1: the first machine with only Install-able checks missing gets

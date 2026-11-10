@@ -10,7 +10,8 @@
 #     curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yantra/join | sh
 #
 # Run it in a terminal on this machine, as the account Yantra is to log in as.
-# It asks before each step that needs root, and your own sudo answers.
+# It asks before each step that needs root, and your own sudo answers. An
+# account without sudo skips those steps, and still joins.
 #
 # YANTRA_JOIN_ANSWER=y (or n) answers every question at once, for a test or a
 # run with no terminal. With neither, it takes no step that needs root.
@@ -49,8 +50,23 @@ ask() {
     esac
 }
 
+# The groups doctor's no-sudo check reads, or a NOPASSWD rule.
+can_sudo() {
+    command -v sudo >/dev/null 2>&1 || return 1
+    case " $(id -Gn) " in
+    (*' sudo '* | *' wheel '* | *' admin '*) return 0 ;;
+    esac
+    sudo -n true >/dev/null 2>&1
+}
+
+# karigar cannot start sshd, so the admin account does (docs/appliance.md).
+ADMIN_SSHD="From an admin account, install and start sshd: sudo systemctl enable --now sshd (the unit is ssh on Debian and Ubuntu). Then run this again."
+
 as_root() {
-    command -v sudo >/dev/null 2>&1 || fail "this step needs root and there is no sudo here: $*"
+    if ! can_sudo; then
+        say "this step needs root, and $user cannot use sudo, so it was skipped: $*"
+        return 1
+    fi
     sudo "$@"
 }
 
@@ -260,6 +276,10 @@ linux_agent() {
         return 0
         ;;
     esac
+    if ! can_sudo; then
+        say "yantra-agent needs root, and $user cannot use sudo, so it was not installed. Sessions work without it; only the heartbeat stays off."
+        return 0
+    fi
     writes="/usr/local/bin/yantra-agent and /etc/systemd/system/yantra-agent.service"
     [ -e /etc/yantra/agent.env ] || writes="$writes, and /etc/yantra/agent.env naming $DAEMON"
     say "yantra-agent is the heartbeat that tells the dashboard this machine is awake."
@@ -414,9 +434,14 @@ use_sshd_instead() {
         sshd_listening || mac_remote_login
     elif ! sshd_listening && ! linux_sshd; then
         say "sshd did not start, so Tailscale SSH stays on and Yantra cannot reach this machine yet."
+        can_sudo || say "$ADMIN_SSHD"
         return 0
     fi
-    as_root tailscale set --ssh=false
+    if ! as_root tailscale set --ssh=false; then
+        say "Tailscale SSH stays on, so Yantra cannot reach this machine yet."
+        say "From an admin account, run: sudo tailscale set --ssh=false. Then run this again, and on the appliance run sudo -u yantra -H yantra forget-host-key $machine."
+        return 0
+    fi
     say "Tailscale SSH is off, and the appliance logs in with its key."
     # sshd answers with another host key, which yantrad would refuse as changed.
     if ! daemon_curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
@@ -442,6 +467,7 @@ elif [ "$os" = Darwin ]; then
     mac_remote_login
 elif ! linux_sshd; then
     say "sshd is not running, so Yantra cannot reach this machine yet. The rest goes on anyway."
+    can_sudo || say "$ADMIN_SSHD"
 fi
 
 place_key

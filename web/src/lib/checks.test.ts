@@ -35,6 +35,7 @@ describe('the check name table', () => {
         'mic',
         'folder-access',
         'hooks',
+        'no-sudo',
         'heartbeat',
       ].map(nameOf),
     ).toEqual([
@@ -50,6 +51,7 @@ describe('the check name table', () => {
       'microphone',
       'folder access',
       'agent hooks',
+      'account without sudo',
       'usage reports',
     ])
   })
@@ -76,6 +78,11 @@ describe('the check name table', () => {
         'Install the command where the agent finds it, or put its directory on PATH in your login shell. Yantra reads that PATH when it next starts tmux.',
     })
     expect(sessionNeeds('hooks')).toBe(false)
+    expect(fixOf({ check: 'no-sudo' }, 'mbp')).toEqual({
+      by: 'hand',
+      words: 'Agents run as the account that joined. Join a separate account without sudo, named karigar: Add a device shows how.',
+    })
+    expect(sessionNeeds('no-sudo')).toBe(false)
   })
 
   /** Y-619: on a Mac with no login tmux server, both keychain checks are
@@ -122,7 +129,7 @@ describe('the check name table', () => {
 
   /** Y-390 review: GitHub and `yantra-agent` are optional for a session. */
   it('lists doctor’s ids in order, and says which of them a session needs', () => {
-    expect(CHECK_IDS).toHaveLength(13)
+    expect(CHECK_IDS).toHaveLength(14)
     expect(CHECK_IDS.filter(sessionNeeds)).toEqual(['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session'])
     expect(sessionNeeds('docker')).toBe(false)
   })

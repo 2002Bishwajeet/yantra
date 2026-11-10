@@ -177,6 +177,16 @@ server is *unknown*, because only the LaunchAgent's server has the agent's `PATH
 is *absent*, and the detail names it, its events and its plugin. The dashboard warns and does not
 block a session. The list is now thirteen names.
 
+**2026-11-10, [Y-628](../../tracker.md#3-task-board): `no-sudo` is a check, after `hooks`.**
+Agents run as the account that joined, and a prompt-injected agent with any root path owns the
+machine ([ADR-0046](../adr/0046-the-owner-types-sudo-in-an-owner-terminal.md)). The check is
+*absent* when that account can use sudo. One round trip on every sweep asks `id -u` and `id -Gn`:
+root, or a `sudo`, `wheel` or `admin` group, is *absent*, and the detail names the group. Only when
+neither is found does `sudo -n true` decide, to catch a `NOPASSWD` rule (ADR-0046 decision 3.1).
+The daemon asks that at most once an hour per machine, because each refused `sudo -n` writes an
+auth-log line, and a sweep every 30 s would write 2,880 a day. The dashboard warns and does not
+block a session. The list is now fourteen names.
+
 ### 3.2 What it must not do
 
 `doctor` is a **read**. It changes nothing, installs nothing, and logs no credential. `yantra doctor
