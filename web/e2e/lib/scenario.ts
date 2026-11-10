@@ -19,6 +19,8 @@ export type Scenario =
   | 'setup'
   | 'difffails'
   | 'gitfails'
+  | 'mergefails'
+  | 'removefails'
   | 'rooms'
   | 'composer'
   | 'background'
