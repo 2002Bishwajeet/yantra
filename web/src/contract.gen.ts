@@ -457,6 +457,7 @@ export const github = {
   "client_id": null,
   "client_id_custom": false,
   "connected": true,
+  "expiring": false,
   "login": "2002Bishwajeet",
   "pending": false,
   "scopes": []
@@ -487,6 +488,7 @@ export const disconnected = {
   "client_id": null,
   "client_id_custom": false,
   "connected": false,
+  "expiring": false,
   "login": null,
   "pending": false,
   "scopes": []

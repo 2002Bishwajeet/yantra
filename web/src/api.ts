@@ -671,7 +671,8 @@ export type ThreadTerminal = {
  *  account, and both are `null` until the grant's first `GET /user` has
  *  answered.
  *  `scopes` is empty for a grant read from the environment. `pending` is a
- *  device flow waiting for its code to be typed at github.com.
+ *  device flow waiting for its code to be typed at github.com. `expiring` says
+ *  the last flow ended because GitHub issued a token that expires (Y-695).
  *
  *  `client_id` is the OAuth App a sign-in would use — `null` is none
  *  configured — and `client_id_custom` says it came from a self-hoster's own
@@ -685,6 +686,7 @@ export type Connection = {
   avatar_url: string | null
   scopes: string[]
   pending: boolean
+  expiring: boolean
   client_id: string | null
   client_id_custom: boolean
 }
