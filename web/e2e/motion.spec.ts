@@ -111,6 +111,8 @@ test.describe('route changes with motion', () => {
     test.skip(size === 'tablet', 'the phone bar and the desktop links are enough')
     await scenario(page, 'busy')
     await watchTransitions(page)
+    await page.goto('/')
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible()
     const bar = page.getByRole('navigation', { name: 'Main' })
     const before = size === 'phone' ? await bar.boundingBox() : null
     await goMachines(page, size)
