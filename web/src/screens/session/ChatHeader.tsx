@@ -7,7 +7,7 @@
  */
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { Link } from '@tanstack/react-router'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { ChevronDown, Diff, Plus, RefreshCw } from 'lucide-react'
 import { useThreads } from '@/api/mutations'
 import { useThreadStates } from '@/api/queries'
@@ -49,6 +49,7 @@ export function ChatHeader(props: ChatHeaderProps) {
   const active = thread ?? urlThread ?? null
   const threads = useThreads(workspace)
   const { mutate } = threads
+  const navigate = useNavigate()
   // A refresh keeps the last list on screen until the new one lands.
   const [shown, setShown] = useState(threads.data)
   if (threads.data && threads.data !== shown) setShown(threads.data)
@@ -206,6 +207,10 @@ export function ChatHeader(props: ChatHeaderProps) {
         diffs={diffs}
         key={thread ?? ''}
         listed={pr}
+        onRemoved={() => {
+          mutate()
+          void navigate({ to: '/w/$name', params: { name: workspace }, search: { view: 'chat' }, replace: true })
+        }}
         refresh={() => mutate()}
         thread={thread}
         workspace={workspace}

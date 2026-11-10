@@ -1,0 +1,10 @@
+{
+  "extends": "gitfails",
+  "opened": {
+    "yantra-web": {
+      "state": "merged",
+      "number": 497,
+      "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
+    }
+  }
+}

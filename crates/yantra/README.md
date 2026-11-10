@@ -21,9 +21,11 @@ yantra clone <url> --machine mac --into ~/code/site   # git clone there, inside 
 yantra mic mac                   # stream this laptop's microphone into mac's virtual mic until Ctrl-C
 yantra chat new site --issue o/r#7   # open a thread from a GitHub issue; print its draft prompt
 yantra chat ls site              # the workspace's threads, each with its issue and PR
+yantra chat rm site 0a1b         # remove a thread's worktree and branch after you confirm
 yantra commit site 0a1b [-m MSG] [--draft]   # commit a thread's work; claude writes the message
 yantra push site 0a1b            # push a thread's branch and set its upstream
 yantra pr open site 0a1b         # open a PR for the pushed branch; Closes #n for an issue thread
+yantra pr merge site 0a1b        # squash-merge the thread's PR after you confirm, and delete its branch
 
 yantra ls machines               # the tailnet
 yantra ls dirs mac [/code] [--make NAME]   # one level of a machine, with the repositories marked

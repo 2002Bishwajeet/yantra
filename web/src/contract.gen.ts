@@ -51,6 +51,7 @@ import type {
   ThreadEvent,
   ThreadMessage,
   ThreadOpened,
+  ThreadPrMerged,
   ThreadPrOpened,
   ThreadPushed,
   ThreadState,
@@ -983,6 +984,12 @@ export const threadPrOpened = {
   "number": 497,
   "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
 } satisfies ThreadPrOpened
+
+export const threadPrMerged = {
+  "branchDeleted": true,
+  "number": 497,
+  "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
+} satisfies ThreadPrMerged
 
 export const cloning = {
   "machine": "cachyos-g14",

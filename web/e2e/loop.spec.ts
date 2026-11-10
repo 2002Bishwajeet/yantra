@@ -1,6 +1,6 @@
 import { axe, expect, scenario, test } from './lib/test'
 import { route } from './lib/routes'
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 
 /** The coding loop (Y-489): an inbox issue to a thread in Chat. The fixture
  *  answers the daemon's `threads`, `threads/new` and `placement` routes. */
@@ -96,6 +96,86 @@ test('each failed git action is drawn with the daemon text', async ({ page }) =>
   await gitMenu(page, 'Open PR')
   await expect(failure('The pull request was refused', 'not pushed to its upstream')).toBeVisible()
   await axe(page)
+})
+
+/** Y-496: a confirm dialog fits the screen, and on a phone its buttons stack full width at 44 px. */
+async function fitsTheScreen(page: Page, dialog: Locator) {
+  await expect(dialog).toBeInViewport({ ratio: 1 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  if (page.viewportSize()!.width >= 600) return
+  const actions = dialog.locator('.m3-dialog__actions')
+  const row = (await actions.boundingBox())!
+  const buttons = actions.locator(':scope > *')
+  await expect(buttons).toHaveCount(2)
+  const [first, second] = [(await buttons.nth(0).boundingBox())!, (await buttons.nth(1).boundingBox())!]
+  for (const one of [first, second]) {
+    expect(one.width).toBeGreaterThanOrEqual(row.width - 1)
+    expect(one.height).toBeGreaterThanOrEqual(44)
+  }
+  expect(Math.abs(first.y - second.y)).toBeGreaterThanOrEqual(44)
+}
+
+/** The daemon's refusal, drawn inside the dialog that asked for the verb. */
+const refusal = (dialog: Locator, title: string, said: string) =>
+  dialog.getByRole('alert').filter({ has: dialog.page().getByRole('heading', { name: title }), hasText: said })
+
+test('an open PR is merged after the owner confirms, and the Chat offers to remove its worktree', async ({ page }) => {
+  await scenario(page, 'busy')
+  await page.goto(ATTACHED)
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+  await gitMenu(page, 'Open PR')
+  await expect(page.locator('.chat__header').getByRole('link', { name: 'PR #497' })).toBeVisible()
+
+  await gitMenu(page, 'Merge PR #497')
+  const confirm = page.getByRole('dialog', { name: 'Merge PR #497' })
+  await expect(
+    confirm.getByText(
+      'Squash-merge PR #497 as it is on GitHub now into the default branch, and delete its remote branch.',
+      { exact: true },
+    ),
+  ).toBeVisible()
+  await fitsTheScreen(page, confirm)
+  await axe(page)
+  await confirm.getByRole('button', { name: 'Merge', exact: true }).click()
+  await expect(confirm).toBeHidden()
+
+  const offer = page.getByRole('dialog', { name: 'PR #497 merged' })
+  await expect(offer.getByText("Remove this thread's worktree and branch?", { exact: true })).toBeVisible()
+  await expect(offer.getByRole('button', { name: 'Keep' })).toBeVisible()
+  await fitsTheScreen(page, offer)
+  await axe(page)
+  await offer.getByRole('button', { name: 'Remove worktree' }).click()
+  await expect(offer).toBeHidden()
+  await expect(page).toHaveURL(/\/w\/yantra-web\?view=chat$/)
+})
+
+test('a refused merge is drawn in its dialog with the daemon text', async ({ page }) => {
+  await scenario(page, 'mergefails')
+  await page.goto(ATTACHED)
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+  await gitMenu(page, 'Merge PR #497')
+  const confirm = page.getByRole('dialog', { name: 'Merge PR #497' })
+  await confirm.getByRole('button', { name: 'Merge', exact: true }).click()
+  await expect(refusal(confirm, 'The merge was refused', 'Pull Request is not mergeable')).toBeVisible()
+  await fitsTheScreen(page, confirm)
+  await axe(page)
+  await confirm.getByRole('button', { name: 'Cancel' }).click()
+  await expect(confirm).toBeHidden()
+})
+
+test('a refused removal is drawn in its dialog, and the thread stays', async ({ page }) => {
+  await scenario(page, 'removefails')
+  await page.goto(ATTACHED)
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+  await gitMenu(page, 'Remove worktree')
+  const offer = page.getByRole('dialog', { name: 'PR #497 merged' })
+  await offer.getByRole('button', { name: 'Remove worktree' }).click()
+  await expect(refusal(offer, 'A turn is running', 'a turn or a revert is running')).toBeVisible()
+  await fitsTheScreen(page, offer)
+  await axe(page)
+  await offer.getByRole('button', { name: 'Keep' }).click()
+  await expect(offer).toBeHidden()
+  await expect(page).toHaveURL(new RegExp(`thread=${THREAD}`))
 })
 
 /** Y-495: the thread's PR checks and review comments from the watch, and Fix with agent. */

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ChevronDown, GitCommitHorizontal, GitPullRequest, Upload } from 'lucide-react'
-import { useCommit, useDraftMessage, useOpenPr, usePush } from '@/api/mutations'
+import { ChevronDown, GitCommitHorizontal, GitMerge, GitPullRequest, Trash2, Upload } from 'lucide-react'
+import { useCommit, useDraftMessage, useMergePr, useOpenPr, usePush, useRemoveThread } from '@/api/mutations'
 import type { ThreadPr } from '@/api'
 import { Button } from '@/m3/button/Button'
 import { Dialog, DialogClose, DialogPopup } from '@/m3/dialog/Dialog'
@@ -19,10 +19,16 @@ function Failure(props: { failure: GitFailure; retry: () => void }) {
   return <ErrorSurface.Inline className="git__fail" error={failure} reset={retry} title={failure.title} />
 }
 
-const ICON = { commit: <GitCommitHorizontal />, push: <Upload />, pr: <GitPullRequest /> }
+const ICON = {
+  commit: <GitCommitHorizontal />,
+  push: <Upload />,
+  pr: <GitPullRequest />,
+  merge: <GitMerge />,
+  remove: <Trash2 />,
+}
 
 /** Commit, push and open a PR for the chat's thread (Y-493), as T3 Code lays them out: one quick
- *  action for the next step, and a menu for all three. A person asks for each verb; none runs by itself.
+ *  action for the next step, and a menu for every verb, merge and worktree removal too (Y-496). A person asks for each verb; none runs by itself.
  *  The daemon sends no git status, so the next step comes from what this page saw (Y-633). */
 export function GitActions(props: {
   workspace: string
@@ -34,8 +40,10 @@ export function GitActions(props: {
   listed: ThreadPr | undefined
   /** Read the thread list again, as a PR opened here changes it. */
   refresh: () => void
+  /** The thread's worktree is gone: leave it for the workspace's chat. */
+  onRemoved: () => void
 }) {
-  const { workspace, thread, busy, diffs, listed, refresh } = props
+  const { workspace, thread, busy, diffs, listed, refresh, onRemoved } = props
   const whyId = useId()
   const menuWhyId = useId()
   const [note, setNote] = useState('')
@@ -56,6 +64,11 @@ export function GitActions(props: {
   const commit = useCommit(workspace)
   const push = usePush(workspace)
   const openPr = useOpenPr(workspace)
+  const merge = useMergePr(workspace)
+  const remove = useRemoveThread(workspace)
+  const [mergeAsk, setMergeAsk] = useState(false)
+  const [removeAsk, setRemoveAsk] = useState(false)
+  const [branchKept, setBranchKept] = useState(false)
   const [dialog, setDialog] = useState(false)
   const [message, setMessage] = useState('')
   const box = useRef<HTMLTextAreaElement>(null)
@@ -120,16 +133,51 @@ export function GitActions(props: {
       },
     })
   }
+  const mergeIt = () => {
+    if (thread === null || pr === null) return
+    merge.mutate(
+      { id: thread, number: pr.number },
+      {
+        onSuccess: (done) => {
+          setOpened({ ...pr, state: 'merged' })
+          setBranchKept(!done.branchDeleted)
+          setNote(`Merged PR #${done.number}`)
+          refresh()
+          setMergeAsk(false)
+          askRemove()
+        },
+      },
+    )
+  }
+  const askRemove = () => {
+    remove.reset()
+    setRemoveAsk(true)
+  }
+  const removeIt = () => {
+    if (thread === null) return
+    remove.mutate(thread, {
+      onSuccess: () => {
+        setRemoveAsk(false)
+        onRemoved()
+      },
+    })
+  }
   const run = (verb: GitVerb, from: HTMLElement | null) => {
     returnTo.current = from
     if (verb === 'commit') changeDialog(true)
     else if (verb === 'push') pushIt()
-    else openIt()
+    else if (verb === 'pr') openIt()
+    else if (verb === 'merge') {
+      merge.reset()
+      setMergeAsk(true)
+    } else askRemove()
   }
 
   const draftFailure = draft.isError ? gitFailure('draft', draft.error) : null
   const commitFailure = commit.isError ? gitFailure('commit', commit.error) : null
   const clean = draftFailure?.kind === 'draftNothing'
+  const mergeFailure = merge.isError ? gitFailure('merge', merge.error) : null
+  const removeFailure = remove.isError ? gitFailure('remove', remove.error) : null
 
   // The quick action and the menu item run one verb, so they share its pending word.
   const busyWord = (verb: GitVerb, label: string) =>
@@ -187,6 +235,42 @@ export function GitActions(props: {
               ) : null}
             </>
           )}
+        </DialogPopup>
+      </Dialog>
+      <Dialog onOpenChange={setMergeAsk} open={mergeAsk}>
+        <DialogPopup
+          actions={
+            <>
+              <DialogClose render={<Button variant="text" />}>Cancel</DialogClose>
+              <Button disabled={merge.isPending} icon={ICON.merge} onClick={mergeIt}>
+                {merge.isPending ? 'Merging…' : 'Merge'}
+              </Button>
+            </>
+          }
+          className="git__confirm"
+          description={`Squash-merge PR #${pr?.number} as it is on GitHub now into the default branch, and delete its remote branch.`}
+          finalFocus={returnTo}
+          title={`Merge PR #${pr?.number}`}
+        >
+          {mergeFailure ? <Failure failure={mergeFailure} retry={mergeIt} /> : null}
+        </DialogPopup>
+      </Dialog>
+      <Dialog onOpenChange={setRemoveAsk} open={removeAsk}>
+        <DialogPopup
+          actions={
+            <>
+              <DialogClose render={<Button variant="text" />}>Keep</DialogClose>
+              <Button disabled={remove.isPending} icon={ICON.remove} onClick={removeIt}>
+                {remove.isPending ? 'Removing…' : 'Remove worktree'}
+              </Button>
+            </>
+          }
+          className="git__confirm"
+          description={`Remove this thread's worktree and branch?${branchKept ? ' Its remote branch stayed on GitHub.' : ''}`}
+          finalFocus={returnTo}
+          title={`PR #${pr?.number} merged`}
+        >
+          {removeFailure ? <Failure failure={removeFailure} retry={removeIt} /> : null}
         </DialogPopup>
       </Dialog>
       <div className="git__split">

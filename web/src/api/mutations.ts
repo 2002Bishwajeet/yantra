@@ -21,6 +21,7 @@ import type {
   ThreadCommitted,
   ThreadMessage,
   ThreadOpened,
+  ThreadPrMerged,
   ThreadPrOpened,
   ThreadPushed,
   Workspace,
@@ -384,6 +385,24 @@ export function usePush(name: string) {
 export function useOpenPr(name: string) {
   return useMutation<ThreadPrOpened, ApiError, string>({
     mutationFn: (id) => fetchJson<ThreadPrOpened>(thread(name, id, 'pr'), { method: 'POST', ...json({}) }),
+  })
+}
+
+/** `…/merge` with the PR number the owner confirmed (Y-496): a squash, then the remote branch
+ *  goes. 409 is no open PR, another PR, a head that moved during the merge or one GitHub will not merge; 502 is GitHub. */
+export function useMergePr(name: string) {
+  return useMutation<ThreadPrMerged, ApiError, { id: string; number: number }>({
+    mutationFn: ({ id, number }) =>
+      fetchJson<ThreadPrMerged>(thread(name, id, 'merge'), { method: 'POST', ...json({ number }) }),
+  })
+}
+
+/** `DELETE …/threads/{id}`, `yantra chat rm`: the keeper, worktree and branch go. 409 is a running turn. */
+export function useRemoveThread(name: string) {
+  const client = useQueryClient()
+  return useMutation<void, ApiError, string>({
+    mutationFn: (id) => fetchJson<void>(workspace(name, `/threads/${encodeURIComponent(id)}`), { method: 'DELETE' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.threadStates(name) }),
   })
 }
 

@@ -324,6 +324,12 @@ pub enum Conditional<T> {
     Fresh { etag: Option<String>, value: T },
 }
 
+/// A squash merge's commit on the base branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Merged {
+    pub sha: String,
+}
+
 /// `GET /pulls/{n}`, cut to what the PR watch acts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullHead {
@@ -443,6 +449,13 @@ pub enum Error {
     /// title or the body that was sent.
     #[error("GitHub refused the pull request: {said}")]
     Unprocessable { said: String },
+
+    /// A 405 to a merge: a check, a review rule or a conflict holds the PR.
+    #[error("GitHub will not merge the pull request: {said}")]
+    NotMergeable { said: String },
+
+    #[error("the pull request's head moved after it was read; read it again and confirm the merge")]
+    HeadMoved,
 
     #[error("could not read {what} from what GitHub sent")]
     Parse {
@@ -845,6 +858,74 @@ impl Github {
         .await
     }
 
+    /// `PUT /repos/{o}/{r}/pulls/{n}/merge` as one squash (ADR-0034 decision 1). GitHub answers
+    /// 409 when the PR's head is no longer `sha`.
+    pub async fn merge_pull(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        sha: &str,
+    ) -> Result<Merged, Error> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls/{number}/merge", self.api);
+        let token = token.clone();
+        let sent = serde_json::json!({"merge_method": "squash", "sha": sha});
+        blocking(move || {
+            let mut response = headed(agent().put(&url), Some(&token))
+                .header("Content-Type", "application/json")
+                .send(sent.to_string())
+                .map_err(unreachable)?;
+            match response.status().as_u16() {
+                200 => {}
+                401 => return Err(Error::Refused),
+                405 => {
+                    let refusal: Refusal = read_json(&mut response, "the refusal")?;
+                    return Err(Error::NotMergeable {
+                        said: refusal.said(),
+                    });
+                }
+                409 => return Err(Error::HeadMoved),
+                status => {
+                    return Err(Error::Status {
+                        status,
+                        what: "the merge",
+                    });
+                }
+            }
+            let merged: Sha = read_json(&mut response, "the merge")?;
+            Ok(Merged { sha: merged.sha })
+        })
+        .await
+    }
+
+    /// `DELETE /repos/{o}/{r}/git/refs/heads/{branch}`. A ref already gone is a 422 or a 404, as
+    /// on a repository that deletes head branches itself, and counts as deleted.
+    pub async fn delete_branch(
+        &self,
+        token: &Token,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<(), Error> {
+        let url = format!("{}/repos/{owner}/{repo}/git/refs/heads/{branch}", self.api);
+        let token = token.clone();
+        blocking(move || {
+            let response = headed(agent().delete(&url), Some(&token))
+                .call()
+                .map_err(unreachable)?;
+            match response.status().as_u16() {
+                204 | 404 | 422 => Ok(()),
+                401 => Err(Error::Refused),
+                status => Err(Error::Status {
+                    status,
+                    what: "the branch delete",
+                }),
+            }
+        })
+        .await
+    }
+
     /// The work inbox over the REST API. Three independent reads, so they are
     /// three blocking threads rather than one that triples the worst case.
     pub async fn attention(&self, token: &Token) -> Result<Attention, Error> {
@@ -1083,7 +1164,7 @@ impl Refusal {
             Reason::Object { message } => message,
         });
         match (self.message.trim(), first) {
-            ("", None) => "422 with no reason".to_owned(),
+            ("", None) => "no reason given".to_owned(),
             (message, None) => message.to_owned(),
             ("", Some(first)) => first,
             (message, Some(first)) => format!("{message}: {first}"),
@@ -2295,6 +2376,110 @@ pub(crate) mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    fn sent_body(request: &str) -> serde_json::Value {
+        serde_json::from_str(request.rsplit("\r\n\r\n").next().unwrap_or_default())
+            .expect("a JSON body")
+    }
+
+    /// Y-496: a squash, guarded by the head it names.
+    #[tokio::test]
+    async fn merge_puts_a_squash_with_the_confirmed_head() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![reply(
+                "200 OK",
+                r#"{"sha":"bbb222","merged":true,"message":"Pull Request successfully merged"}"#,
+            )],
+        );
+
+        let merged = at(address)
+            .merge_pull(&token(), "o", "r", 21, "aaa111")
+            .await
+            .expect("merged");
+
+        assert_eq!(
+            merged,
+            Merged {
+                sha: "bbb222".to_owned()
+            }
+        );
+        let seen = served.join().expect("the listener thread").remove(0);
+        assert!(
+            seen.starts_with("PUT /repos/o/r/pulls/21/merge HTTP/1.1\r\n"),
+            "{seen}"
+        );
+        let headers = seen.to_lowercase();
+        assert!(
+            headers.contains("authorization: bearer gho_notarealtoken"),
+            "{headers}"
+        );
+        assert_eq!(
+            sent_body(&seen),
+            serde_json::json!({"merge_method":"squash","sha":"aaa111"})
+        );
+    }
+
+    #[tokio::test]
+    async fn a_merge_refused_names_why_and_a_moved_head_is_its_own_answer() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply(
+                    "405 Method Not Allowed",
+                    r#"{"message":"Pull Request is not mergeable","documentation_url":"https://docs.github.com"}"#,
+                ),
+                reply(
+                    "409 Conflict",
+                    r#"{"message":"Head branch was modified. Review and try the merge again."}"#,
+                ),
+                reply("401 Unauthorized", r#"{"message":"Bad credentials"}"#),
+            ],
+        );
+        let (github, token) = (at(address), token());
+        let merge = || github.merge_pull(&token, "o", "r", 21, "aaa111");
+
+        match merge().await.expect_err("405") {
+            Error::NotMergeable { said } => assert_eq!(said, "Pull Request is not mergeable"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(merge().await, Err(Error::HeadMoved)));
+        assert!(matches!(merge().await, Err(Error::Refused)));
+    }
+
+    /// A 422 is a ref already gone, as on a repository that deletes head branches itself.
+    #[tokio::test]
+    async fn delete_branch_removes_the_head_ref_and_a_gone_one_counts() {
+        let (listener, address) = listen();
+        let served = serve(
+            listener,
+            vec![
+                reply("204 No Content", ""),
+                reply(
+                    "422 Unprocessable Entity",
+                    r#"{"message":"Reference does not exist"}"#,
+                ),
+                reply("500 Internal Server Error", "{}"),
+            ],
+        );
+        let (github, token) = (at(address), token());
+        let delete = || github.delete_branch(&token, "o", "r", "yantra/42-11111111");
+
+        delete().await.expect("deleted");
+        delete().await.expect("already gone");
+        assert!(matches!(
+            delete().await,
+            Err(Error::Status { status: 500, .. })
+        ));
+        let seen = served.join().expect("the listener thread");
+        assert!(
+            seen[0].starts_with("DELETE /repos/o/r/git/refs/heads/yantra/42-11111111 HTTP/1.1\r\n"),
+            "{}",
+            seen[0]
+        );
     }
 
     const HEAD: &str = r#"{"number":21,"state":"open","merged_at":null,"title":"Secret plan","body":"Do not log","head":{"sha":"aaa111","ref":"fix-7"},"user":{"login":"owner"}}"#;

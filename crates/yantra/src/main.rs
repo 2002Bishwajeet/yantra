@@ -380,6 +380,17 @@ enum ChatAction {
         /// Workspace name, without the `.toml`
         workspace: String,
     },
+    /// Remove a thread after a confirmation: its keeper, worktree, branch,
+    /// checkpoints, journals and images
+    Rm {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// The thread's id, as `yantra chat ls` prints it
+        thread: String,
+        /// Remove without asking; needed when stdin is not a terminal
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -397,6 +408,17 @@ enum PrAction {
         /// The PR's body; the tip commit's body when absent
         #[arg(long)]
         body: Option<String>,
+    },
+    /// Squash-merge the thread's open PR after a confirmation, then delete
+    /// its remote branch
+    Merge {
+        /// Workspace name, without the `.toml`
+        workspace: String,
+        /// The thread's id, as `yantra chat ls` prints it
+        thread: String,
+        /// Merge without asking; needed when stdin is not a terminal
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -639,6 +661,14 @@ async fn main() -> ExitCode {
         Some(Command::Chat {
             action: ChatAction::Ls { workspace },
         }) => chat_ls(&workspace).await,
+        Some(Command::Chat {
+            action:
+                ChatAction::Rm {
+                    workspace,
+                    thread,
+                    yes,
+                },
+        }) => chat_rm(&workspace, &thread, yes).await,
         Some(Command::Commit {
             workspace,
             thread,
@@ -655,6 +685,14 @@ async fn main() -> ExitCode {
                     body,
                 },
         }) => pr_open(&workspace, &thread, title.as_deref(), body.as_deref()).await,
+        Some(Command::Pr {
+            action:
+                PrAction::Merge {
+                    workspace,
+                    thread,
+                    yes,
+                },
+        }) => pr_merge(&workspace, &thread, yes).await,
         Some(Command::History {
             action: HistoryAction::Stage,
         }) => history_stage(),
@@ -2596,6 +2634,44 @@ async fn chat_ls(workspace: &str) -> ExitCode {
     }
 }
 
+async fn chat_rm(workspace: &str, thread: &str, yes: bool) -> ExitCode {
+    let answer = || {
+        print!("{}", remove_question(workspace, thread));
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).map(|_| line).ok()
+    };
+    match confirmed(yes, std::io::stdin().is_terminal(), answer) {
+        Confirmed::Yes => {}
+        Confirmed::No => {
+            eprintln!("yantra: nothing removed");
+            return ExitCode::FAILURE;
+        }
+        Confirmed::NoTerminal => {
+            eprintln!(
+                "yantra: chat rm asks first, and stdin is not a terminal; pass --yes to remove"
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+    match commit::remove_for(workspace, thread).await {
+        Ok(()) => {
+            println!("removed thread {thread}");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn remove_question(workspace: &str, thread: &str) -> String {
+    format!(
+        "Remove thread {thread} of {workspace}: its worktree, its branch and every uncommitted change? [y/N] "
+    )
+}
+
 fn render_threads(threads: &[thread::Thread]) -> String {
     if threads.is_empty() {
         return "no threads\n".to_owned();
@@ -2699,6 +2775,95 @@ fn render_pr(opened: &commit::Opened) -> String {
     } else {
         format!("already open {}\n", opened.url)
     }
+}
+
+async fn pr_merge(workspace: &str, thread: &str, yes: bool) -> ExitCode {
+    let Some(token) = grant() else {
+        return ExitCode::FAILURE;
+    };
+    let github = Github::default();
+    let pending = match commit::pending_pr_for(workspace, thread, &github, &token).await {
+        Ok(pending) => pending,
+        Err(err) => {
+            report_error(&err);
+            return ExitCode::FAILURE;
+        }
+    };
+    let answer = || {
+        print!("{}", merge_question(&pending));
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).map(|_| line).ok()
+    };
+    match confirmed(yes, std::io::stdin().is_terminal(), answer) {
+        Confirmed::Yes => {}
+        Confirmed::No => {
+            eprintln!("yantra: nothing merged");
+            return ExitCode::FAILURE;
+        }
+        Confirmed::NoTerminal => {
+            eprintln!(
+                "yantra: pr merge asks first, and stdin is not a terminal; pass --yes to merge"
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+    match commit::merge_pr_for(
+        workspace,
+        thread,
+        &github,
+        &token,
+        pending.number,
+        Some(&pending.head_sha),
+    )
+    .await
+    {
+        Ok(merged) => {
+            print!("{}", render_merged(&merged));
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn merge_question(pending: &commit::Pending) -> String {
+    format!(
+        "Squash-merge PR #{} {} and delete branch {}? [y/N] ",
+        pending.number, pending.url, pending.branch
+    )
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Confirmed {
+    Yes,
+    No,
+    NoTerminal,
+}
+
+/// `--yes`, or a `y` typed at a terminal. A pipe is never asked: what it holds was not typed
+/// after the PR was shown.
+fn confirmed(yes: bool, terminal: bool, answer: impl FnOnce() -> Option<String>) -> Confirmed {
+    if yes {
+        return Confirmed::Yes;
+    }
+    if !terminal {
+        return Confirmed::NoTerminal;
+    }
+    match answer().as_deref().map(str::trim) {
+        Some("y" | "Y" | "yes") => Confirmed::Yes,
+        _ => Confirmed::No,
+    }
+}
+
+fn render_merged(merged: &commit::MergedPr) -> String {
+    let branch = match &merged.kept {
+        None => format!("branch {} deleted", merged.branch),
+        Some(why) => format!("branch {} kept: {why}", merged.branch),
+    };
+    format!("merged {}\n{branch}\n", merged.url)
 }
 
 fn grant_note() -> String {
@@ -5300,6 +5465,23 @@ mod tests {
         ));
     }
 
+    /// Y-496: `chat rm` is the CLI verb behind the daemon's `DELETE …/threads/{thread}`.
+    #[test]
+    fn chat_rm_takes_a_workspace_a_thread_and_yes() {
+        let parsed =
+            Cli::try_parse_from(["yantra", "chat", "rm", "site", "0a1b", "--yes"]).expect("parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Chat { action: ChatAction::Rm { workspace, thread, yes: true } })
+                if workspace == "site" && thread == "0a1b"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "chat", "rm", "site"]).is_err());
+        assert_eq!(
+            remove_question("site", "0a1b"),
+            "Remove thread 0a1b of site: its worktree, its branch and every uncommitted change? [y/N] "
+        );
+    }
+
     #[test]
     fn a_new_thread_prints_where_it_is_then_the_draft_after_a_blank_line() {
         let opened = thread::Opened {
@@ -5450,6 +5632,82 @@ mod tests {
                 if workspace == "site" && thread == "0a1b" && title == "Fix it"
         ));
         assert!(Cli::try_parse_from(["yantra", "pr", "open", "site"]).is_err());
+    }
+
+    #[test]
+    fn pr_merge_takes_a_workspace_a_thread_and_yes() {
+        let parsed = Cli::try_parse_from(["yantra", "pr", "merge", "site", "0a1b", "--yes"])
+            .expect("parses");
+        assert!(matches!(
+            parsed.command,
+            Some(Command::Pr { action: PrAction::Merge { workspace, thread, yes: true } })
+                if workspace == "site" && thread == "0a1b"
+        ));
+        let asks = Cli::try_parse_from(["yantra", "pr", "merge", "site", "0a1b"]).expect("parses");
+        assert!(matches!(
+            asks.command,
+            Some(Command::Pr {
+                action: PrAction::Merge { yes: false, .. }
+            })
+        ));
+        assert!(Cli::try_parse_from(["yantra", "pr", "merge", "site"]).is_err());
+    }
+
+    /// Y-496: no `--yes` and no terminal refuses without reading stdin.
+    #[test]
+    fn pr_merge_refuses_without_a_confirmation() {
+        let read = std::cell::Cell::new(false);
+        let unread = || {
+            read.set(true);
+            None
+        };
+        assert_eq!(confirmed(false, false, unread), Confirmed::NoTerminal);
+        assert_eq!(confirmed(true, false, unread), Confirmed::Yes);
+        assert!(!read.get(), "a pipe is never read");
+        for (typed, want) in [
+            ("y\n", Confirmed::Yes),
+            ("yes\n", Confirmed::Yes),
+            ("\n", Confirmed::No),
+            ("n\n", Confirmed::No),
+        ] {
+            assert_eq!(
+                confirmed(false, true, || Some(typed.to_owned())),
+                want,
+                "{typed:?}"
+            );
+        }
+        assert_eq!(confirmed(false, true, || None), Confirmed::No);
+    }
+
+    #[test]
+    fn pr_merge_asks_then_prints_the_merge_and_the_branch() {
+        let pending = commit::Pending {
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+            number: 21,
+            url: "https://github.com/o/r/pull/21".to_owned(),
+            branch: "yantra/7-0a1b".to_owned(),
+            head_sha: "aaa111".to_owned(),
+        };
+        assert_eq!(
+            merge_question(&pending),
+            "Squash-merge PR #21 https://github.com/o/r/pull/21 and delete branch yantra/7-0a1b? [y/N] "
+        );
+        let mut merged = commit::MergedPr {
+            number: 21,
+            url: "https://github.com/o/r/pull/21".to_owned(),
+            branch: "yantra/7-0a1b".to_owned(),
+            kept: None,
+        };
+        assert_eq!(
+            render_merged(&merged),
+            "merged https://github.com/o/r/pull/21\nbranch yantra/7-0a1b deleted\n"
+        );
+        merged.kept = Some("GitHub answered 403 to the branch delete".to_owned());
+        assert_eq!(
+            render_merged(&merged),
+            "merged https://github.com/o/r/pull/21\nbranch yantra/7-0a1b kept: GitHub answered 403 to the branch delete\n"
+        );
     }
 
     #[test]

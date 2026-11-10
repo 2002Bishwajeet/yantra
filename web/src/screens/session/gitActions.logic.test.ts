@@ -56,7 +56,27 @@ describe('buildMenuItems', () => {
   })
 
   it('swaps Open PR for a link to the PR', () => {
-    const last = buildMenuItems({ ...idle, pr: { number: 9, state: 'merged' } }).at(-1)
-    expect(last).toEqual({ id: 'pr', label: 'PR #9', kind: 'open_pr_link', disabled: false, reason: null })
+    const link = buildMenuItems({ ...idle, pr: { number: 9, state: 'merged' } }).find((one) => one.id === 'pr')
+    expect(link).toEqual({ id: 'pr', label: 'PR #9', kind: 'open_pr_link', disabled: false, reason: null })
+  })
+
+  it('offers Merge PR #n for an open PR, off while a turn runs', () => {
+    const merge = (over: Partial<GitState>) =>
+      buildMenuItems({ ...idle, pr: { number: 9, state: 'open' }, ...over }).find((one) => one.id === 'merge')
+    expect(merge({})).toEqual({ id: 'merge', label: 'Merge PR #9', kind: 'merge', disabled: false, reason: null })
+    expect(merge({ busy: true })).toMatchObject({ disabled: true, reason: expect.stringMatching(/turn is running/) })
+  })
+
+  it('offers Remove worktree for a merged PR, and neither without a PR', () => {
+    const ids = (pr: GitState['pr']) => buildMenuItems({ ...idle, pr }).map((one) => one.id)
+    expect(ids({ number: 9, state: 'merged' })).toEqual(['commit', 'push', 'pr', 'remove'])
+    expect(buildMenuItems({ ...idle, pr: { number: 9, state: 'merged' } }).at(-1)).toEqual({
+      id: 'remove',
+      label: 'Remove worktree',
+      kind: 'remove',
+      disabled: false,
+      reason: null,
+    })
+    expect(ids(null)).toEqual(['commit', 'push', 'pr'])
   })
 })
