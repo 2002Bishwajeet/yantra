@@ -12,12 +12,14 @@ min_free_gb=${GATE_MIN_FREE_GB:-6}
 ssh_=(ssh -o BatchMode=yes -o ConnectTimeout=10)
 
 # The tools a command needs. yantra-box has Node 20 and no cargo-deny (2026-11-10), so it takes Rust checks only.
+# It has no ~/.ssh/id_yantra either, so `just test-mac` runs on the laptop (Y-679).
 tools() {
   local t='git flock systemd-run nice'
   grep -qE 'cargo|just' <<<"$1" && t+=' cargo cargo-nextest just'
   grep -qE 'npm|npx|node|web' <<<"$1" && t+=' node22'
   grep -qE 'deny' <<<"$1" && t+=' cargo-deny'
   grep -qE 'podman' <<<"$1" && t+=' podman'
+  grep -qE 'test-mac' <<<"$1" && t+=' id_yantra'
   echo "$t"
 }
 
@@ -31,6 +33,7 @@ awk -v l="$l1" -v n="$n" "BEGIN { exit !(l < n / 2) }" || { echo "load $l1 on $n
 for t in $tools; do
   case $t in
   node22) node -e "const [a, b] = process.versions.node.split(\".\").map(Number); process.exit(Number(a === 22 ? b < 18 : a < 24 || (a === 24 && b < 11)))" 2>/dev/null || { echo "no Node 22.18 or 24.11"; exit 1; } ;;
+  id_yantra) [ -r ~/.ssh/id_yantra ] || { echo "no ~/.ssh/id_yantra to reach the Mac"; exit 1; } ;;
   *) command -v "$t" >/dev/null || { echo "no $t"; exit 1; } ;;
   esac
 done'
