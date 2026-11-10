@@ -825,7 +825,7 @@
   gap: 12px;
   min-height: 48px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: var(--m3-row-radius);
   background: var(--md-sys-color-surface-container-high);
   cursor: pointer;
   touch-action: manipulation;
