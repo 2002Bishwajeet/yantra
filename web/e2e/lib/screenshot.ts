@@ -21,7 +21,7 @@ export async function screenshot(
   // A full-page capture resizes the viewport under a sticky dock, and the Chat scrolls itself as the page resizes,
   // so two captures differ. A viewport as tall as the page needs no resize: the dock rests at the foot of it.
   const before = page.viewportSize()
-  // The phone scrolls `.shell__main`, which a full-page capture does not follow, so it grows the viewport to the whole of it too.
+  // The phone scrolls `.shell__main`, which a full-page capture does not follow, so it grows the viewport to the whole of it too, plus the margin that leaves the FAB band below.
   const phone = !options.overlay && before !== null && (await page.locator('[data-shell="phone"] .shell__main').count()) > 0
   const docked = phone || (!options.overlay && before !== null && (await page.locator('.composer-dock').first().isVisible()))
   if (docked) {
@@ -34,7 +34,7 @@ export async function screenshot(
         await frame()
         const height = await page.evaluate(() => {
           const main = document.querySelector('[data-shell="phone"] .shell__main')
-          return main ? Math.ceil(main.getBoundingClientRect().top + main.scrollHeight) : document.documentElement.scrollHeight
+          return main ? Math.ceil(main.getBoundingClientRect().top + main.scrollHeight + parseFloat(getComputedStyle(main).marginBottom)) : document.documentElement.scrollHeight
         })
         if (page.viewportSize()!.height !== height) {
           agreed = 0

@@ -412,11 +412,6 @@
   padding: 0 4px;
 }
 
-/* Finish setup above the hero pushes the headline down into the FAB's band. */
-[data-shell="phone"] .dash:has(.dash__setup) .dash__hero-words {
-  padding: 0 var(--shell-fab-reach) 0 0;
-}
-
 [data-shell="phone"] .dash__hero .m3-row,
 [data-shell="phone"] .dash__running .m3-row,
 [data-shell="phone"] .dash__unclaimed {
