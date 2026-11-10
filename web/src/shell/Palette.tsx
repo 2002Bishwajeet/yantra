@@ -4,7 +4,7 @@ import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { Kbd } from '@/m3/kbd/Kbd'
 import { Pill } from '@/m3/pill/Pill'
 import { matchHelp } from '@/screens/session/keys'
-import { PALETTE_EVENT } from './loopCommands'
+import { PALETTE_EVENT, useLoopChords } from './loopCommands'
 
 const PalettePopup = lazy(() =>
   import('./PalettePopup').then((it) => ({ default: it.PalettePopup })),
@@ -21,6 +21,8 @@ export function Palette(props: { pill?: boolean }) {
   const [open, setOpen] = useState(false)
   const [help, setHelp] = useState(false)
   const [seed, setSeed] = useState<{ query: string } | null>(null)
+  // Here, not in the Chat: Start from issue is offered on every page.
+  useLoopChords()
 
   useEffect(() => {
     const pressed = (event: KeyboardEvent) => {

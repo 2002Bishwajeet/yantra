@@ -30,6 +30,16 @@ describe('the loop chords', () => {
     expect(matchChord(press({ ...chordOf(id), metaKey: true, ctrlKey: false }))).toBe(id)
   })
 
+  it('on a Mac the Alt chords take Control, never Command, which DevTools and the OS keep', () => {
+    for (const one of KEYS.filter((key) => key.alt)) {
+      const init = { code: one.code, altKey: true }
+      expect(matchChord(press({ ...init, ctrlKey: true }), true)).toBe(one.id)
+      expect(matchChord(press({ ...init, metaKey: true }), true)).toBeNull()
+    }
+    // The diff chord has no Alt, so Command stays: ⌘D.
+    expect(matchChord(press({ code: 'KeyD', metaKey: true }), true)).toBe('diff')
+  })
+
   it('needs the modifier, and the same Alt state as the chord', () => {
     expect(matchChord(press({ code: 'KeyC', altKey: true }))).toBeNull()
     expect(matchChord(press({ code: 'KeyC', ctrlKey: true }))).toBeNull()

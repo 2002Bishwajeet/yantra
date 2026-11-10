@@ -49,7 +49,7 @@ export const PALETTE_EVENT = 'yantra:palette'
 /** Opens the palette with a query in it, as the issue chord does. */
 export const openPalette = (query: string) => document.dispatchEvent(new CustomEvent(PALETTE_EVENT, { detail: query }))
 
-/** The chords for the loop verbs; bound only where the loop is on screen. */
+/** The chords for the loop verbs; the shell binds them once, and a verb the page does not register does nothing. */
 export function useLoopChords() {
   useEffect(() => {
     const pressed = (event: KeyboardEvent) => {

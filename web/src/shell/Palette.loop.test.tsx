@@ -1,7 +1,7 @@
 /** M16 (Y-499): the palette lists the loop's verbs, and a verb opens its own dialog. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { useLoopChords, useRegisterLoopCommands } from './loopCommands'
+import { useRegisterLoopCommands } from './loopCommands'
 import { KEYS } from '@/screens/session/keys'
 import { mount, unmount } from './harness'
 
@@ -14,7 +14,6 @@ const merge = vi.fn()
 
 /** Stands for the Chat: it registers the verbs the way GitActions and the header do. */
 function Chat(props: { off?: boolean }) {
-  useLoopChords()
   useRegisterLoopCommands(
     [
       { id: 'diff', disabled: false, reason: null },
@@ -98,14 +97,50 @@ describe('the palette and the loop', () => {
   })
 
   it('the issue chord opens the palette with the issue rows', async () => {
+    // No chat is mounted: the chord belongs to the shell, so it works on the dashboard too.
     mount('desktop')
-    render(<Chat />)
     await screen.findByRole('button', { name: /Search anything/ })
     const issue = KEYS.find((one) => one.id === 'issue')!
     fireEvent.keyDown(document, { code: issue.code, altKey: true, ctrlKey: true })
     const dialog = within(await screen.findByRole('dialog', { name: 'Search' }))
     expect((dialog.getByRole('combobox') as HTMLInputElement).value).toBe('Start from issue')
     expect(await dialog.findByRole('option', { name: /^Start from issue/ })).toBeTruthy()
+  })
+})
+
+describe('the issue row when no issue is listed', () => {
+  const said = async (body: unknown) => {
+    mount('desktop', '/', { overrides: { '/api/attention': { body } } })
+    const dialog = await search('issue')
+    return (await dialog.findByRole('option', { name: /^Start from issue/ })).textContent ?? ''
+  }
+
+  it('says GitHub could not be asked, not that nothing is assigned', async () => {
+    const text = await said({ looked: 'failed', age_seconds: 0, error: 'no GitHub grant' })
+    expect(text).toContain('GitHub could not be asked')
+    expect(text).not.toContain('No issue is assigned to you.')
+  })
+
+  it('says the read has not happened yet', async () => {
+    expect(await said({ looked: 'never' })).toContain('The issues have not been read yet.')
+  })
+
+  it('says nothing is assigned only when the read came back empty', async () => {
+    const text = await said({ looked: 'ok', age_seconds: 0, data: { issues: [], reviews: [], prs: [] } })
+    expect(text).toContain('No issue is assigned to you.')
+  })
+})
+
+describe('the picker', () => {
+  it('closes when the page navigates, so it does not cover the new page', async () => {
+    mount('desktop')
+    const dialog = await search('issue')
+    await dialog.findByRole('option', { name: /^Start from issue/ })
+    fireEvent.keyDown(dialog.getByRole('combobox'), { key: 'Enter' })
+    await screen.findByRole('dialog', { name: /^Start a session on/ })
+    history.pushState(null, '', '/new')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Start a session on/ })).toBeNull())
   })
 })
 

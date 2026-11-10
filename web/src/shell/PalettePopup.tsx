@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
+import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { Cpu, FileText, Play, Search } from 'lucide-react'
 import type { Item } from '@/api'
 import { loaded, useAgents, useAttention, useMachines, useWorkspaces, type Reading } from '@/api/hooks'
@@ -39,6 +39,14 @@ type Entry = {
 type Group = { label: string; entries: Entry[] }
 
 const NO_ISSUE = 'No issue is assigned to you.'
+
+/** An empty list is told apart from a list nobody could read. */
+function noIssue(looked: Reading<unknown>['looked']): string {
+  if (looked === 'pending') return 'The issues are still being read.'
+  if (looked === 'never') return 'The issues have not been read yet.'
+  if (looked === 'failed') return 'GitHub could not be asked, so no issue is listed.'
+  return NO_ISSUE
+}
 
 const PAGES = [
   { to: '/', label: 'Dashboard' },
@@ -93,6 +101,14 @@ export function PalettePopup(props: {
   // A verb waits for the palette to finish closing, so its dialog is not opened under the focus the palette hands back.
   const after = useRef<(() => void) | null>(null)
 
+  // A pick or the New session link navigates away; the dialog must not outlive the page it was asked on.
+  const href = useRouterState({ select: (state) => state.location.href })
+  const [seen, setSeen] = useState(href)
+  if (href !== seen) {
+    setSeen(href)
+    setStarting(null)
+  }
+
   const [seeded, setSeeded] = useState<typeof seed>(null)
   if (seed !== seeded) {
     setSeeded(seed)
@@ -110,6 +126,7 @@ export function PalettePopup(props: {
     else to()
   }
 
+  const noneReason = noIssue(attention.looked)
   const issues = attention.looked === 'ok' ? attention.data.issues : []
   const startKey = keyOf('issue')
   const commands: Entry[] = [
@@ -130,8 +147,8 @@ export function PalettePopup(props: {
           {
             key: 'c:issue',
             label: startKey.label,
-            supporting: NO_ISSUE,
-            off: NO_ISSUE,
+            supporting: noneReason,
+            off: noneReason,
             chord: startKey.display,
             verb: true,
             go: () => {},

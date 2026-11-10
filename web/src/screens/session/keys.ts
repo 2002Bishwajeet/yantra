@@ -13,13 +13,14 @@ type Key = { id: LoopId; label: string; code: string; alt: boolean; display: str
 const MAC = navigator.userAgent.includes('Mac')
 
 // Chrome keeps Ctrl+Shift+I, C and J, so only the diff chord goes without Alt. `code`, not `key`,
-// because Option+C types "ç" on a Mac.
+// because Option+C types "ç" on a Mac. On a Mac the Alt chords use Control, not Command: ⌘⌥I, C and J
+// open DevTools and ⌘⌥M minimises every window, while ⌃⌥ letters belong to no browser.
 const chord = (id: LoopId, label: string, letter: string, alt: boolean): Key => ({
   id,
   label,
   code: `Key${letter}`,
   alt,
-  display: MAC ? `⌘${alt ? '⌥' : ''}${letter}` : `Ctrl ${alt ? 'Alt ' : ''}${letter}`,
+  display: MAC ? `${alt ? '⌃⌥' : '⌘'}${letter}` : `Ctrl ${alt ? 'Alt ' : ''}${letter}`,
 })
 
 export const KEYS: readonly Key[] = [
@@ -46,8 +47,10 @@ const inField = (at: Element | null) =>
   at instanceof HTMLElement && (at.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(at.tagName))
 
 /** Every chord has a modifier, so a text field does not stop one; the terminal does. */
-export function matchChord(event: KeyboardEvent): LoopId | null {
-  if (!(event.metaKey || event.ctrlKey) || event.shiftKey) return null
+export function matchChord(event: KeyboardEvent, mac = MAC): LoopId | null {
+  if (event.shiftKey) return null
+  const modified = mac && event.altKey ? event.ctrlKey && !event.metaKey : event.metaKey || event.ctrlKey
+  if (!modified) return null
   if (inTerminal(document.activeElement)) return null
   return KEYS.find((one) => one.code === event.code && one.alt === event.altKey)?.id ?? null
 }
