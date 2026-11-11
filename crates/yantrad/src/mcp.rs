@@ -195,23 +195,29 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
             let arguments = params.get("arguments").unwrap_or(&Value::Null);
             match room::call(name, arguments) {
                 Err(why) => error(id, INVALID_PARAMS, &why),
-                Ok(call) => match machine_of(&state.authoriser, &caller.node).await {
-                    Err(said) => result(id, outcome(Err(said))),
-                    Ok(machine) => {
-                        let thread = thread_of(&headers, &machine, &state).await;
-                        let label = match &thread {
-                            Some(thread) => format!("{} · chat {}", machine.name, thread.thread),
-                            None => machine.name,
-                        };
-                        let session = thread.is_none().then(|| session_of(&headers)).flatten();
-                        let reader = Reader {
-                            node: caller.node,
-                            thread,
-                            session,
-                        };
-                        result(id, tool(&state, &reader, &label, call).await)
+                Ok(call) => {
+                    // Send would make a room it does not find, in no workspace.
+                    may_reach(&who, &state.rooms, room_named(&call))?;
+                    match machine_of(&state.authoriser, &caller.node).await {
+                        Err(said) => result(id, outcome(Err(said))),
+                        Ok(machine) => {
+                            let thread = thread_of(&headers, &machine, &state).await;
+                            let label = match &thread {
+                                Some(thread) => {
+                                    format!("{} · chat {}", machine.name, thread.thread)
+                                }
+                                None => machine.name,
+                            };
+                            let session = thread.is_none().then(|| session_of(&headers)).flatten();
+                            let reader = Reader {
+                                node: caller.node,
+                                thread,
+                                session,
+                            };
+                            result(id, tool(&state, &reader, &label, call).await)
+                        }
                     }
-                },
+                }
             }
         }
         _ => error(id, METHOD_NOT_FOUND, "Method not found"),
@@ -328,6 +334,15 @@ fn may_reach(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
         Ok(())
     } else {
         Err(Refused::AgentScope)
+    }
+}
+
+fn room_named(call: &Call) -> &str {
+    match call {
+        Call::Send { room, .. }
+        | Call::Read { room, .. }
+        | Call::Info { room }
+        | Call::Status { room, .. } => room,
     }
 }
 
@@ -1056,6 +1071,22 @@ mod tests {
         woke: crate::room::tests::Woken,
         pauses: tokio::sync::mpsc::UnboundedReceiver<yantra_core::notify::Message>,
     ) -> App {
+        serve_keyed(
+            inventory,
+            rooms,
+            woke,
+            pauses,
+            crate::passkey::Passkeys::trusting(),
+        )
+    }
+
+    fn serve_keyed<I: Inventory + Clone + Send + Sync + 'static>(
+        inventory: I,
+        rooms: Rooms,
+        woke: crate::room::tests::Woken,
+        pauses: tokio::sync::mpsc::UnboundedReceiver<yantra_core::notify::Message>,
+        passkeys: crate::passkey::Passkeys,
+    ) -> App {
         let closing = watch::Sender::new(false);
         App {
             router: routes(
@@ -1063,7 +1094,7 @@ mod tests {
                     inventory,
                     &[],
                     std::path::Path::new("yantrad.sock"),
-                    crate::passkey::Passkeys::trusting(),
+                    passkeys,
                 ),
                 rooms,
                 locate(),
@@ -1134,6 +1165,62 @@ mod tests {
 
     fn text(result: &Value) -> &str {
         result["content"][0]["text"].as_str().expect("a text block")
+    }
+
+    /// ADR-0044 decision 12: with no `X-Yantra-Thread`, an agent token still
+    /// reaches only its own workspace's rooms, and makes none.
+    #[tokio::test]
+    async fn an_agent_token_calls_tools_only_on_its_own_workspaces_rooms() {
+        let passkeys = crate::passkey::Passkeys::memory();
+        let minted = passkeys.mint_agent("wa");
+        let (rooms, woke, pauses) = rooms();
+        for (name, workspace) in [("home", "wa"), ("away", "wb")] {
+            rooms
+                .create(&Definition {
+                    name: name.to_owned(),
+                    workspace: workspace.to_owned(),
+                    brief: None,
+                    base: None,
+                    made_at: 0,
+                })
+                .expect("defined");
+        }
+        let app = serve_keyed(fake(), rooms.clone(), woke, pauses, passkeys);
+        let call = |name: &str, room: &str| {
+            let body = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                              "params": {"name": name,
+                                         "arguments": {"room": room, "text": "hi", "doing": "x"}}});
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri("/mcp")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {}", minted.token))
+                .body(Body::from(body.to_string()))
+                .expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
+            app.router.clone().oneshot(request)
+        };
+
+        for tool in ["room_send", "room_read", "room_info", "room_status"] {
+            let status = call(tool, "away").await.expect("infallible").status();
+            assert_eq!(status, StatusCode::FORBIDDEN, "{tool} on another workspace");
+        }
+        let status = call("room_send", "made")
+            .await
+            .expect("infallible")
+            .status();
+        assert_eq!(status, StatusCode::NOT_FOUND, "a room it does not find");
+        assert!(rooms.view("made").is_err(), "the agent made no room");
+
+        let response = call("room_send", "home").await.expect("infallible");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .expect("in memory");
+        let answer: Value = serde_json::from_slice(&body).expect("JSON");
+        assert_eq!(answer["result"]["isError"], false, "{answer}");
     }
 
     #[tokio::test]
