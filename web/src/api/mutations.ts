@@ -416,6 +416,17 @@ export function useThreadTerminal(name: string) {
   })
 }
 
+/** `DELETE /api/machines/{m}/threads/{id}`: a home thread's keeper, journals and row go
+ *  (ADR-0046 decision 1.7). 404 is no such thread, 409 a running turn, 503 the machine. */
+export function useRemoveHomeThread(machine: string) {
+  const client = useQueryClient()
+  return useMutation<void, ApiError, string>({
+    mutationFn: (id) =>
+      fetchJson<void>(`/api/machines/${encodeURIComponent(machine)}/threads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.machineThreads(machine) }),
+  })
+}
+
 const room = (name: string, tail: string) => `/api/rooms/${encodeURIComponent(name)}/${tail}`
 
 /** Y-536, `yantra room post`. The daemon labels it from this browser's node,

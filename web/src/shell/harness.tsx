@@ -50,9 +50,12 @@ export function mount(
       const override = options.overrides?.[path]
       if (override) return Promise.resolve(responded(override.status ?? 200, override.body))
       const status = /^\/api\/workspaces\/([^/]+)\/status$/.exec(path)
+      const threads = /^\/api\/machines\/([^/]+)\/threads$/.exec(path)
       const answer = status
         ? contract.agents.find((one) => one.data.workspace === status[1])
-        : {
+        : threads
+          ? contract.machineThreads
+          : {
             '/api/workspaces': contract.workspaces,
             '/api/machines': contract.machines,
             '/api/sessions': contract.sessions,

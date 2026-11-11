@@ -106,6 +106,28 @@ describe('step 1, the name and the machine', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
   })
 
+  it('offers Chat in home folder once a machine is chosen, as a link to its home chat', async () => {
+    mountNew('desktop', '/new', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
+    await screen.findByRole('dialog', { name: 'New session' })
+    expect(screen.queryByRole('link', { name: 'Chat in home folder' })).toBeNull()
+    fireEvent.click(within(screen.getByRole('group', { name: 'Machine' })).getByRole('button', { name: 'cachyos-g14' }))
+    const link = await screen.findByRole('link', { name: 'Chat in home folder' })
+    expect(link.getAttribute('href')).toBe('/m/cachyos-g14/home')
+    // A link has no hover-only state and the m3 hit area gives it 44 px or more.
+    expect(link.className).toContain('m3-interactive')
+  })
+
+  it('offers no home chat on a machine the chips do not show', async () => {
+    mountNew('desktop', '/new?machine=an-iphone', {
+      'GET /api/machines': [
+        200,
+        { ...contract.machines, data: [...contract.machines.data, aMachine({ name: 'an-iphone', os: 'iOS' })] },
+      ],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    expect(screen.queryByRole('link', { name: 'Chat in home folder' })).toBeNull()
+  })
+
   it('says so when the machines cannot be read', async () => {
     mountNew('desktop', '/new', {
       'GET /api/machines': [200, { looked: 'failed', age_seconds: 0, error: 'tailscale: not running' }],

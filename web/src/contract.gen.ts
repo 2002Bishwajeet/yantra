@@ -25,12 +25,14 @@ import type {
   Device,
   Event,
   Here,
+  HomeOpened,
   Joined,
   Listed,
   Listing,
   Looked,
   Machine,
   MachineSessions,
+  MachineThread,
   Mentions,
   Opened,
   Placement,
@@ -973,6 +975,47 @@ export const threadsOffline = [
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/6a1b2c3d4e5f6a7b"
   }
 ] satisfies Thread[]
+
+export const machineThreads = [
+  {
+    "branch": "yantra/chat/site/5a1b2c3d4e5f6a7b",
+    "from": null,
+    "id": "5a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "said": "the machine is offline",
+      "state": "unknown"
+    },
+    "presence": "offline",
+    "seen": 1790000100000,
+    "since": null,
+    "state": "idle",
+    "title": "Keep a thread store",
+    "workspace": "site",
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/5a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "",
+    "from": null,
+    "id": "6a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "state": "none"
+    },
+    "presence": "here",
+    "seen": 1790000100000,
+    "since": null,
+    "state": "idle",
+    "title": "Say hello",
+    "workspace": null,
+    "worktree": ""
+  }
+] satisfies MachineThread[]
+
+export const homeOpened = {
+  "machine": "mac",
+  "thread": "6a1b2c3d4e5f6a7b"
+} satisfies HomeOpened
 
 export const threadsFound = [
   {

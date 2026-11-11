@@ -203,6 +203,10 @@ function findWorkspace(state, name) {
   return list.data.find((one) => one.name === name) ?? null
 }
 
+function findMachine(state, name) {
+  return state.machines.looked === 'ok' ? (state.machines.data.find((one) => one.name === name) ?? null) : null
+}
+
 function sessionsOf(state, machine) {
   if (state.sessions.looked !== 'ok') return null
   return state.sessions.data.find((one) => one.machine === machine) ?? null
@@ -571,6 +575,34 @@ const routes = [
       findWorkspace(s, name)
         ? [200, contract.threadStates.map((one, at) => (at === 0 ? { ...one, id: THREAD, workspace: 'cargo-zig', machine: 'thinkpad' } : one))]
         : [404, notFound(name)],
+  ],
+  // Y-700 (ADR-0046): a machine's threads from the store. The workspace row is the contract's; the home rows are the ones this scenario's home chat named.
+  [
+    'GET',
+    /^\/api\/machines\/([^/]+)\/threads$/,
+    (s, [machine]) =>
+      findMachine(s, machine)
+        ? [
+            200,
+            [
+              contract.machineThreads[0],
+              ...(s.homes ?? [])
+                .filter((one) => one.machine === machine)
+                .map(({ id, title }) => ({ ...contract.machineThreads[1], id, title })),
+            ],
+          ]
+        : [404, `no machine named \`${machine}\``],
+  ],
+  [
+    'DELETE',
+    /^\/api\/machines\/([^/]+)\/threads\/([^/]+)$/,
+    (s, [machine, id]) => {
+      const at = (s.homes ?? []).findIndex((one) => one.machine === machine && one.id === id)
+      if (at < 0) return [404, `${machine} has no home thread ${id}`]
+      if (s.gitFails) return [409, 'a turn is running in this thread; wait for it to end']
+      s.homes.splice(at, 1)
+      return [204]
+    },
   ],
   // Y-493: Y-492's and Y-449's git routes. The scenario `gitfails` refuses each as the daemon does.
   ...[
@@ -974,13 +1006,14 @@ const BRANCH_DIFF = {
  *  a Claude thread, and replays two turns of its transcript first. An image
  *  is attached as yantrad attaches it. */
 const THREAD = '1a2b3c4d'
+const HOME_THREAD = '6a1b2c3d4e5f6a7b'
 const LOGGED_OUT = { gemini: 'run gemini and sign in' }
 const HISTORY = [
   ['user_text', 'Is the core crate green?'],
   ['assistant_text', 'Yes. `cargo test -p yantra-core` passed, **326** tests in all. See [#663](https://example.test/663).'],
 ]
 
-function converse(state, request, socket, head, name, thread, after) {
+function converse(state, request, socket, head, name, thread, after, home = false) {
   if (state.outageUntil > Date.now()) {
     // Y-668: a daemon that is away, as a phone that slept finds it.
     socket.destroy()
@@ -1027,12 +1060,14 @@ function converse(state, request, socket, head, name, thread, after) {
   sockets.handleUpgrade(request, socket, head, (ws) => {
     const say = (frame) => ws.send(JSON.stringify(frame), { binary: false })
     const fail = (kind, said) => say({ type: 'error', kind, said })
-    if (!findWorkspace(state, name)) {
-      fail('unreachable', notFound(name))
+    // ADR-0046: `name` is a machine for a home chat, whose threads are the ones the scenario holds.
+    if (home ? !findMachine(state, name) : !findWorkspace(state, name)) {
+      fail('unreachable', home ? `no machine named \`${name}\`` : notFound(name))
       ws.close()
       return
     }
-    if (thread && thread !== THREAD) {
+    const mine = home ? HOME_THREAD : THREAD
+    if (thread && (home ? !(state.homes ?? []).some((one) => one.machine === name && one.id === thread) : thread !== THREAD)) {
       fail('unknownThread', `${name} has no chat thread ${thread}`)
       ws.close()
       return
@@ -1046,7 +1081,7 @@ function converse(state, request, socket, head, name, thread, after) {
     open.add(ws)
     ws.on('close', () => open.delete(ws))
     if (thread) {
-      const started = { threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness: 'claude' } }
+      const started = { threadId: mine, type: 'thread.started', payload: { thread: mine, harness: 'claude' } }
       const at = after ? keeper.log.findIndex((one) => one.cursor === after) : -1
       if (at >= 0) {
         say({ ...started, cursor: after })
@@ -1071,7 +1106,8 @@ function converse(state, request, socket, head, name, thread, after) {
     const play = (events) =>
       events.forEach((one) => {
         emit(one)
-        if (one.type === 'turn.completed' && one.payload.state === 'completed') {
+        // A home thread has no worktree, so the daemon keeps no checkpoint and sends no diff.
+        if (!home && one.type === 'turn.completed' && one.payload.state === 'completed') {
           say({ ...contract.chatCheckpoints[0], payload: { ...contract.chatCheckpoints[0].payload, turn: keeper.sent } })
         }
       })
@@ -1101,12 +1137,13 @@ function converse(state, request, socket, head, name, thread, after) {
             return say({
               ...contract.chatNotLoggedIn,
               harness,
-              machine: findWorkspace(state, name).machine,
+              machine: home ? name : findWorkspace(state, name).machine,
               command: LOGGED_OUT[harness],
             })
           }
-          known = THREAD
-          say({ threadId: THREAD, type: 'thread.started', payload: { thread: THREAD, harness } })
+          known = mine
+          if (home) (state.homes ??= []).push({ machine: name, id: mine, title: frame.text.split('\n')[0].slice(0, 60) })
+          say({ threadId: mine, type: 'thread.started', payload: { thread: mine, harness } })
         }
         keeper.sent += 1
         keeper.log = []
@@ -1137,6 +1174,8 @@ function converse(state, request, socket, head, name, thread, after) {
         emit({ threadId: THREAD, type: 'thread.background.updated', payload: { tasks: tasks.filter((one) => one.taskId !== frame.taskId) } })
       } else if (frame?.type === 'stopAll') {
         emit({ threadId: THREAD, type: 'thread.background.updated', payload: { tasks: [] } })
+      } else if (home && (frame?.type === 'revert' || frame?.type === 'diff')) {
+        fail('badFrame', `a home chat has no ${frame.type}: it has no worktree`)
       } else if (frame?.type === 'revert' && typeof frame.turn === 'number') {
         if (running.has(THREAD)) return fail('busy', elsewhere)
         say({ threadId: THREAD, type: 'thread.reverted', payload: { turn: frame.turn } })
@@ -1163,6 +1202,20 @@ server.on('upgrade', (request, socket, head) => {
   const session = url.pathname.match(/^\/api\/machines\/([^/]+)\/sessions\/([^/]+)\/terminal$/)
   const step = url.pathname.match(/^\/api\/machines\/([^/]+)\/install\/(\d+)\/terminal$/)
   const chat = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/chat$/)
+  const homeChat = url.pathname.match(/^\/api\/machines\/([^/]+)\/chat$/)
+  if (homeChat) {
+    converse(
+      state,
+      request,
+      socket,
+      head,
+      decodeURIComponent(homeChat[1]),
+      url.searchParams.get('thread'),
+      url.searchParams.get('after'),
+      true,
+    )
+    return
+  }
   if (chat) {
     converse(
       state,

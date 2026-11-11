@@ -69,6 +69,8 @@ const web: Workspace = {
   startup: null,
 }
 
+const onWeb = { kind: 'workspace', workspace: web.name } as const
+
 const render = (ui: ReactElement) =>
   bare(<QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>{ui}</QueryClientProvider>)
 
@@ -83,7 +85,7 @@ const started = (harness: Harness = 'claude') => ({ ...of('thread.started'), pay
 const frames = () => server.heard.map((frame) => ('text' in frame ? JSON.parse(frame.text) : frame))
 
 async function open(thread?: string) {
-  render(<Chat onThread={onThread} thread={thread} workspace={web} />)
+  render(<Chat onThread={onThread} thread={thread} target={onWeb} workspace={web} />)
   await settled(() => expect(server.asked).toHaveLength(1))
   // The empty line appears once the socket is open.
   await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
@@ -110,7 +112,7 @@ afterEach(async () => {
 
 describe('the initial draft', () => {
   it('seeds the composer with the issue text and leaves it editable', async () => {
-    render(<Chat initialDraft="Work on o/r#1: a title" onThread={onThread} workspace={web} />)
+    render(<Chat initialDraft="Work on o/r#1: a title" onThread={onThread} target={onWeb} workspace={web} />)
     await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
     const composer = screen.getByLabelText('Message Claude in yantra-web') as HTMLTextAreaElement
     expect(composer.value).toBe('Work on o/r#1: a title')
@@ -253,11 +255,11 @@ describe('permission modes', () => {
     await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
     cleanup()
 
-    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
     await settled(() => expect(screen.getByRole('button', { name: 'Permissions: Auto' })).toBeTruthy())
     cleanup()
 
-    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    render(<Chat onThread={onThread} thread="ffffffff" target={onWeb} workspace={web} />)
     await settled(() => expect(screen.getByRole('button', { name: 'Permissions: Supervised' })).toBeTruthy())
   })
 
@@ -269,7 +271,7 @@ describe('permission modes', () => {
       throw new DOMException('denied', 'SecurityError')
     })
     try {
-      render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+      render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
       // The picker waits for the socket to open.
       await settled(() =>
         expect(screen.getByRole('button', { name: 'Permissions: Supervised' })).toHaveProperty('disabled', false),
@@ -324,7 +326,7 @@ describe('plan mode', () => {
     await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
     cleanup()
 
-    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
     // Until the daemon says whose the thread is, no harness can plan.
     await settled(() => expect(server.asked).toHaveLength(2))
     await settled(() => expect(toggle().getAttribute('title')).toBe('Plan mode needs Claude'))
@@ -332,7 +334,7 @@ describe('plan mode', () => {
     await settled(() => expect(screen.getByRole('button', { name: 'Plan' })).toBeTruthy())
     cleanup()
 
-    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    render(<Chat onThread={onThread} thread="ffffffff" target={onWeb} workspace={web} />)
     await settled(() => expect(screen.getByRole('button', { name: 'Build' })).toBeTruthy())
   })
 
@@ -421,14 +423,14 @@ describe("Claude's model and effort", () => {
     await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
     cleanup()
 
-    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(2))
     say(started())
     await settled(() => expect(screen.getByRole('button', { name: 'Model: Haiku' })).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Effort: Low' })).toBeTruthy()
     cleanup()
 
-    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    render(<Chat onThread={onThread} thread="ffffffff" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(3))
     say(started())
     await settled(() => expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy())
@@ -437,7 +439,7 @@ describe("Claude's model and effort", () => {
   it('falls back to the default for a stored value it does not know', async () => {
     localStorage.setItem('yantra.chat.model.1a2b3c4d', 'gpt-9')
     localStorage.setItem('yantra.chat.effort.1a2b3c4d', 'ultra')
-    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(1))
     say(started())
     await settled(() => expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy())
@@ -522,13 +524,13 @@ describe("the thread's context length", () => {
     await settled(() => expect(onThread).toHaveBeenCalledWith('1a2b3c4d'))
     cleanup()
 
-    render(<Chat onThread={onThread} thread="1a2b3c4d" workspace={web} />)
+    render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(2))
     say(started())
     await settled(() => expect(screen.getByRole('button', { name: 'Context: 1M' })).toBeTruthy())
     cleanup()
 
-    render(<Chat onThread={onThread} thread="ffffffff" workspace={web} />)
+    render(<Chat onThread={onThread} thread="ffffffff" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(3))
     say(started())
     await settled(() => expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy())
@@ -921,7 +923,7 @@ describe('the chat', () => {
   it('draws a refused socket, with nothing to retry', async () => {
     const port = server.port
     await server.stop()
-    render(<Chat onThread={onThread} workspace={web} />)
+    render(<Chat onThread={onThread} target={onWeb} workspace={web} />)
     const alert = await settled(() => screen.getByRole('alert'))
     expect(alert.textContent).toContain('The daemon refused the chat')
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
@@ -1572,7 +1574,7 @@ describe('the composer', () => {
   it('says why it cannot send in each state: not connected, answering, uploading and empty', async () => {
     URL.createObjectURL = (() => 'blob:preview/1') as typeof URL.createObjectURL
     URL.revokeObjectURL = () => {}
-    render(<Chat onThread={onThread} workspace={web} />)
+    render(<Chat onThread={onThread} target={onWeb} workspace={web} />)
     expect(reasonOf('Send')).toBe('The chat is not connected, so nothing can be sent.')
     await settled(() => expect(server.asked).toHaveLength(1))
     await settled(() => expect(reasonOf('Send')).toBe('Type a message to send it.'))
@@ -1636,7 +1638,7 @@ describe('the composer', () => {
   })
 
   it('words the empty field for each state', async () => {
-    render(<Chat onThread={onThread} workspace={web} />)
+    render(<Chat onThread={onThread} target={onWeb} workspace={web} />)
     const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
     expect(field.placeholder).toBe('Connecting to the chat…')
     await settled(() => expect(field.placeholder).toBe('Ask for changes or attach images'))
@@ -1713,7 +1715,7 @@ describe('the draft', () => {
     cleanup()
     expect(localStorage.getItem('yantra.chat.draft.workspace/yantra-web')).toBe('half a thought')
 
-    render(<Chat onThread={onThread} workspace={web} />)
+    render(<Chat onThread={onThread} target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(2))
     await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false))
     const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web')
@@ -1735,7 +1737,7 @@ describe('the draft', () => {
 
   it('lets the issue text in only over an empty kept draft', async () => {
     localStorage.setItem('yantra.chat.draft.workspace/yantra-web', 'my own words')
-    render(<Chat initialDraft="Work on o/r#1: a title" onThread={onThread} workspace={web} />)
+    render(<Chat initialDraft="Work on o/r#1: a title" onThread={onThread} target={onWeb} workspace={web} />)
     await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
     expect(screen.getByLabelText<HTMLTextAreaElement>('Message Claude in yantra-web').value).toBe('my own words')
   })
@@ -2113,5 +2115,68 @@ describe('an offline thread (ADR-0045)', () => {
     await open('1a2b3c4d')
     await settled(() => expect(document.querySelector('.chat__readonly')?.textContent).toMatch(/machine is offline/))
     expect(screen.getByRole('combobox', { name: /^Message / }).hasAttribute('disabled')).toBe(true)
+  })
+})
+
+describe('a home chat (ADR-0046)', () => {
+  const home = { kind: 'home', machine: 'mac' } as const
+
+  async function openHome(thread?: string) {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json([])))
+    render(<Chat onThread={onThread} target={home} thread={thread} />)
+    await settled(() => expect(server.asked).toHaveLength(1))
+    await settled(() => expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy())
+  }
+
+  it('opens the machine socket, not a workspace one, and attaches with ?thread=', async () => {
+    await openHome('6a1b2c3d')
+    expect(server.asked[0]).toBe('/api/machines/mac/chat?thread=6a1b2c3d')
+  })
+
+  it('says Claude works in the home folder, with no repository', async () => {
+    await openHome()
+    expect(screen.getByText('Claude works in the home folder on mac, with no repository. Ask it something.')).toBeTruthy()
+  })
+
+  it('draws no Diff, Commit, Push, Open PR, Checks, terminal or harness control', async () => {
+    await openHome()
+    say(started())
+    await settled(() => expect(onThread).toHaveBeenCalled())
+    const names = screen.queryAllByRole('button').map((one) => one.getAttribute('aria-label') ?? one.textContent ?? '')
+    for (const git of [/^Diff/, /^Commit/, /^Push/, /^Open PR/, /^Git actions/, /^Checks/, /^Terminal/, /^Harness/]) {
+      expect(names.filter((name) => git.test(name))).toEqual([])
+    }
+    expect(screen.getByLabelText('Message Claude in mac')).toBeTruthy()
+  })
+
+  it('draws no changed-files card or Revert for a turn that changed files', async () => {
+    await openHome()
+    say(started())
+    say(chatCheckpoints[0])
+    await settled(() => expect(onThread).toHaveBeenCalled())
+    expect(screen.queryByRole('article', { name: 'What turn 1 changed' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Revert/ })).toBeNull()
+  })
+
+  it('keeps the draft under the machine until a thread is named', async () => {
+    await openHome()
+    fireEvent.change(screen.getByLabelText('Message Claude in mac'), { target: { value: 'half a thought' } })
+    cleanup()
+    expect(localStorage.getItem('yantra.chat.draft.home:mac')).toBe('half a thought')
+  })
+
+  it('opens no mentions menu on @ or /', async () => {
+    await openHome()
+    const field = screen.getByLabelText<HTMLTextAreaElement>('Message Claude in mac')
+    fireEvent.change(field, { target: { value: '@src', selectionStart: 4 } })
+    fireEvent.change(field, { target: { value: '/he', selectionStart: 3 } })
+    expect(screen.queryByRole('listbox')).toBeNull()
+  })
+
+  it('sends a turn as Claude', async () => {
+    await openHome()
+    fireEvent.change(screen.getByLabelText('Message Claude in mac'), { target: { value: 'hello' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await settled(() => expect(frames().some((frame) => frame.harness === 'claude' && frame.text === 'hello')).toBe(true))
   })
 })

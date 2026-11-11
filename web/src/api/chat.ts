@@ -130,11 +130,18 @@ export class AttachError extends Error {
   }
 }
 
+/** What a chat talks to: a workspace's worktree, or a machine's home folder (ADR-0046). */
+export type ChatTarget = { kind: 'workspace'; workspace: string } | { kind: 'home'; machine: string }
+
 /** `after` is the last cursor drawn, so the daemon sends only what follows
  *  it (ADR-0035 decision 8). It is read only with a thread. */
-export function chatAddress(workspace: string, thread?: string, after?: string): string {
+export function chatAddress(target: ChatTarget, thread?: string, after?: string): string {
   const daemon = location.origin.replace(/^http/, 'ws')
-  const base = `${daemon}/api/workspaces/${encodeURIComponent(workspace)}/chat`
+  // ADR-0046: a home chat is a machine's, and has no workspace.
+  const base =
+    target.kind === 'home'
+      ? `${daemon}/api/machines/${encodeURIComponent(target.machine)}/chat`
+      : `${daemon}/api/workspaces/${encodeURIComponent(target.workspace)}/chat`
   if (!thread) return base
   const query = `${base}?thread=${encodeURIComponent(thread)}`
   return after ? `${query}&after=${encodeURIComponent(after)}` : query

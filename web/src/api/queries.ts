@@ -1,4 +1,4 @@
-import { keepPreviousData, type QueryClient, queryOptions, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, type QueryClient, queryOptions, useQuery, useQueries } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
@@ -10,6 +10,7 @@ import type {
   Looked,
   Machine,
   MachineSessions,
+  MachineThread,
   Mentions,
   Probed,
   Readiness,
@@ -146,6 +147,7 @@ export const statusQuery = (name: string) =>
  *  wave of reads is theirs too. */
 export async function readAgain(client: QueryClient) {
   await client.invalidateQueries()
+  await readHomesAgain(client)
   const listed = client.getQueryData(workspacesQuery().queryKey)
   if (listed?.looked !== 'ok') return
   const names = listed.data.map((one) => one.name)
@@ -155,6 +157,20 @@ export async function readAgain(client: QueryClient) {
     return answer !== undefined && answer !== MISSING && answer.looked === 'failed'
   })
   await Promise.all(failed.map((name) => client.refetchQueries({ queryKey: statusQuery(name).queryKey })))
+}
+
+/** The rail's home-thread reads wait for the machine list, as the status reads wait for the
+ *  workspace list, so their first ask can come after the tap and fail with it. */
+async function readHomesAgain(client: QueryClient) {
+  const listed = client.getQueryData(machinesQuery().queryKey)
+  if (listed?.looked !== 'ok') return
+  const reads = listed.data.map((one) => machineThreadsQuery(one.name))
+  await Promise.all(reads.map((read) => client.fetchQuery(read).catch(() => undefined)))
+  await Promise.all(
+    reads
+      .filter((read) => client.getQueryState(read.queryKey)?.status === 'error')
+      .map((read) => client.refetchQueries({ queryKey: read.queryKey })),
+  )
 }
 
 /** `POST …/tokens` reads a whole transcript over ssh, and the page stamps its
@@ -262,6 +278,16 @@ export const useThreadStates = (name: string, on: boolean) =>
     enabled: on,
     refetchInterval: on ? 5_000 : false,
     staleTime: 0,
+    retry: false,
+  })
+
+/** ADR-0046 decision 1.7: every thread the store keeps for a machine. It reads the store and
+ *  asks no machine (ADR-0019), so it is a GET and never polls. */
+export const machineThreadsQuery = (machine: string) =>
+  queryOptions<MachineThread[], ApiError>({
+    queryKey: keys.machineThreads(machine),
+    queryFn: ({ signal }) => fetchJson<MachineThread[]>(`/api/machines/${encodeURIComponent(machine)}/threads`, { signal }),
+    staleTime: 5_000,
     retry: false,
   })
 
@@ -417,3 +443,36 @@ export const roomQuery = (name: string) =>
     staleTime: 0,
     refetchInterval: ROOM_POLL_MS,
   })
+
+const homeOnly = (threads: MachineThread[]) => threads.filter((one) => one.workspace === null)
+
+/** One machine's home threads, for the Chat header's menu. */
+export const useMachineHomeThreads = (machine: string) =>
+  useQuery({ ...machineThreadsQuery(machine), select: homeOnly })
+
+export type HomeThread = { machine: string; thread: MachineThread }
+
+export type HomeThreads =
+  | { state: 'pending' }
+  // The machine list failed, and every surface that needs it already says so.
+  | { state: 'unknown' }
+  | { state: 'ok'; threads: HomeThread[] }
+  | { state: 'failed'; error: ApiError; retry: () => void }
+
+/** Every machine's home threads, for the Sessions rail: one read per machine the list names. */
+export function useHomeThreads(): HomeThreads {
+  const machines = useQuery(machinesQuery())
+  const names = machines.data?.looked === 'ok' ? machines.data.data.map((one) => one.name) : []
+  const reads = useQueries({
+    queries: names.map((name) => ({ ...machineThreadsQuery(name), select: homeOnly })),
+  })
+
+  if (machines.data !== undefined && machines.data.looked !== 'ok') return { state: 'unknown' }
+  const failed = reads.find((one) => one.error)
+  if (failed?.error) return { state: 'failed', error: failed.error, retry: () => reads.forEach((one) => void one.refetch()) }
+  if (machines.data === undefined || reads.some((one) => one.data === undefined)) return { state: 'pending' }
+  return {
+    state: 'ok',
+    threads: reads.flatMap((one, n) => (one.data ?? []).map((thread) => ({ machine: names[n], thread }))),
+  }
+}

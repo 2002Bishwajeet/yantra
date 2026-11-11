@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useReducer, useRef, useState } from 'react'
-import { AttachError, ChatError, chatAddress, openChat, type ChatSocket } from '@/api/chat'
+import { AttachError, ChatError, chatAddress, openChat, type ChatSocket, type ChatTarget } from '@/api/chat'
 import type { ChatBranchDiff, Decision } from '@/api/thread'
 import { DiffError } from './diff/errors'
 import { empty, reduce, type Timeline } from './timeline'
@@ -20,7 +20,9 @@ export type Branch =
  *  it — so the URL changing under a live socket never opens a second one. A
  *  socket that drops reopens by itself after the last cursor drawn, and the
  *  turn runs on meanwhile (ADR-0035). */
-export function useChat(workspace: string, thread: string | undefined, onThread: (id: string) => void) {
+export function useChat(target: ChatTarget, thread: string | undefined, onThread: (id: string) => void) {
+  const home = target.kind === 'home'
+  const name = target.kind === 'home' ? target.machine : target.workspace
   const [timeline, dispatch] = useReducer(reduce, thread, (id): Timeline => ({ ...empty, thread: id ?? null }))
   const [error, setError] = useState<ChatError | null>(null)
   const [link, setLink] = useState<Link>('connecting')
@@ -36,7 +38,7 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
   })
 
   useEffect(() => {
-    const live = openChat((after) => chatAddress(workspace, attach.current, after), {
+    const live = openChat((after) => chatAddress(home ? { kind: 'home', machine: name } : { kind: 'workspace', workspace: name }, attach.current, after), {
       onOpen: () => {
         setLink('open')
         // A diff asked on a dropped socket got no reply (ADR-0035), so it is asked again.
@@ -95,7 +97,7 @@ export function useChat(workspace: string, thread: string | undefined, onThread:
       live.close()
       socket.current = null
     }
-  }, [workspace, opened])
+  }, [home, name, opened])
 
   return {
     timeline,

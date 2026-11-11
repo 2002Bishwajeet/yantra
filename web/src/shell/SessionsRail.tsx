@@ -2,6 +2,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { Plus } from 'lucide-react'
 import type { AgentRow, MachineSessions } from '@/api'
+import { useHomeThreads, type HomeThreads } from '@/api/queries'
+import { threadTitle } from '@/screens/session/threads'
 import { fromReading } from '@/api/client'
 import { loaded, useAgents, useSessions, useWorkspaces, type Reading } from '@/api/hooks'
 import { ago } from '@/lib/time'
@@ -59,6 +61,58 @@ function Group(props: { label: string; rows: AgentRow[]; sessions: Reading<Machi
   )
 }
 
+/** ADR-0046 decision 1.3: the home chats of every machine, by title, each naming its machine. */
+function Home(props: { threads: HomeThreads; open: { machine: string; thread: string | undefined } | null }) {
+  const { threads, open } = props
+  if (threads.state === 'unknown') return null
+  return (
+    <section className="rail__group" aria-label="Home">
+      <Eyebrow render={<h3 />}>Home</Eyebrow>
+      {threads.state === 'pending' ? (
+        <div className="rail__list" aria-busy="true">
+          <Skeleton shape="row" />
+        </div>
+      ) : threads.state === 'failed' ? (
+        <ErrorSurface.Inline
+          action={
+            threads.error.retryable ? undefined : (
+              <Button onClick={threads.retry} variant="text">
+                Try again
+              </Button>
+            )
+          }
+          error={threads.error}
+          reset={threads.retry}
+          title="Home chats could not be read"
+        />
+      ) : threads.threads.length === 0 ? (
+        <p className="rail__note">No home chats yet.</p>
+      ) : (
+        <ul className="rail__list">
+          {threads.threads.map(({ machine, thread }) => (
+            <li key={`${machine}/${thread.id}`}>
+              <Row
+                role="link"
+                render={<Link params={{ machine }} search={{ thread: thread.id }} to="/m/$machine/home" />}
+                tone={open?.machine === machine && open.thread === thread.id ? 'selected' : 'lowest'}
+              >
+                <RowText
+                  headline={threadTitle(thread)}
+                  supporting={
+                    <State size="small" state={thread.state === 'working' ? 'running' : 'idle'}>
+                      {thread.state === 'working' ? 'working' : 'idle'} · {machine}
+                    </State>
+                  }
+                />
+              </Row>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 /** The desktop's left rail on `/` and `/new` (BRIEF.md, Shell): every
  *  workspace, live ones first, and a way to the fleet for the rest. */
 export function SessionsRail() {
@@ -66,6 +120,16 @@ export function SessionsRail() {
   const agents = useAgents(loaded(useWorkspaces()))
   const sessions = useSessions()
   const now = useTick(true)
+  const homes = useHomeThreads()
+  const home = useRouterState({
+    select: (state) => {
+      const at = /^\/m\/([^/]+)\/home$/.exec(state.location.pathname)
+      if (!at) return null
+      const thread = (state.location.search as { thread?: unknown }).thread
+      return { machine: decodeURIComponent(at[1]), thread: typeof thread === 'string' ? thread : undefined }
+    },
+    structuralSharing: true,
+  })
   const open = useRouterState({
     select: (state) => /^\/w\/([^/]+)/.exec(state.location.pathname)?.[1] ?? null,
   })
@@ -101,6 +165,7 @@ export function SessionsRail() {
       ) : (
         <p className="rail__note">Sessions have not been read yet.</p>
       )}
+      <Home open={home} threads={homes} />
       <Link className="rail__all m3-hit" to="/fleet">
         All sessions →
       </Link>

@@ -233,6 +233,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
               key={`${name}:${epoch}`}
               onThread={chatNamed}
               slot={view === 'chat' ? slot : null}
+              target={{ kind: 'workspace', workspace: name }}
               thread={thread}
               workspace={workspace}
             />
