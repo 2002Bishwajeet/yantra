@@ -949,9 +949,8 @@ async fn hook_commands<E: Exec>(exec: &E) -> Result<Uses, Check> {
 const UNRESOLVED: &str = "yantra-unresolved";
 
 /// Y-640: a hook whose program the agent's `PATH` lacks fails each time the
-/// agent starts. That `PATH` is the tmux server's, so a running server is
-/// asked through `run-shell` (I-55). With none, Linux's next server inherits
-/// ssh's, and a Mac's is the LaunchAgent's, which cannot be asked yet.
+/// agent starts. The probe runs with the `PATH` a pane gets (Y-707): ssh's on
+/// Linux, and on a Mac the running server's, which cannot be asked without one.
 async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Error>) -> Check {
     let could_not =
         |err: &dyn std::fmt::Display| unknown(HOOKS, format!("could not be asked: {err}"));
@@ -972,23 +971,21 @@ async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Erro
         Ok(os) => *os,
         Err(err) => return could_not(err),
     };
-    let inside = match tmux {
-        Some(tmux) => match tmux.running(exec).await {
-            Ok(running) => running.then_some(tmux),
+    let no_server = || {
+        unknown(
+            HOOKS,
+            "an agent on this Mac gets the PATH of the tmux server Yantra's LaunchAgent \
+             starts, and it cannot be asked until that server runs",
+        )
+    };
+    let command = match (tmux, os) {
+        (_, Os::Other) => probe,
+        (Some(tmux), Os::MacOs) => match tmux.running(exec).await {
+            Ok(true) => format!("{}{probe}", tmux.pane_path()),
+            Ok(false) => return no_server(),
             Err(err) => return could_not(&err),
         },
-        None => None,
-    };
-    let command = match (inside, os) {
-        (Some(tmux), _) => tmux::run_shell(&tmux.command(), &probe),
-        (None, Os::Other) => probe,
-        (None, Os::MacOs) => {
-            return unknown(
-                HOOKS,
-                "an agent on this Mac gets the PATH of the tmux server Yantra's LaunchAgent \
-                 starts, and it cannot be asked until that server runs",
-            );
-        }
+        (None, Os::MacOs) => return no_server(),
     };
 
     let out = match exec.exec(&command).await {
@@ -1863,7 +1860,16 @@ mod tests {
                     ),
                 }
             } else if command.contains("command -v tmux") {
-                (0, "/opt/homebrew/bin/tmux\n".to_owned(), String::new())
+                let uname = if self.os == Os::MacOs {
+                    "Darwin"
+                } else {
+                    "Linux"
+                };
+                (
+                    0,
+                    format!("{uname}\n/opt/homebrew/bin/tmux\n"),
+                    String::new(),
+                )
             } else {
                 (1, String::new(), String::new())
             };
@@ -2020,27 +2026,34 @@ mod tests {
         assert_eq!(found.state, State::Unknown, "{}", found.detail);
     }
 
-    /// The agent's PATH is the tmux server's, so a running server answers.
+    /// Y-707: a pane on a Mac gets the running server's PATH, so the probe
+    /// runs with it, over ssh and not through `run-shell`.
     #[tokio::test]
-    async fn a_running_server_is_asked_inside() {
-        for os in [Os::MacOs, Os::Other] {
-            let mut agent = Agent::new(ENABLED, CLAUDE_MEM, "node\n");
-            (agent.os, agent.server) = (os, true);
-            let found = agent.check().await;
-            assert_eq!(found.state, State::Absent, "{os:?}: {}", found.detail);
-            let probe = &agent.asked(UNRESOLVED)[0];
-            assert!(probe.contains("run-shell"), "{probe}");
+    async fn a_mac_with_a_server_asks_with_the_servers_path() {
+        let mut agent = Agent::new(ENABLED, CLAUDE_MEM, "node\n");
+        (agent.os, agent.server) = (Os::MacOs, true);
+        let found = agent.check().await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        let probe = &agent.asked(UNRESOLVED)[0];
+        assert!(probe.contains("show-environment -g PATH"), "{probe}");
+        assert!(agent.asked("run-shell").is_empty(), "{probe}");
+    }
+
+    /// A pane on Linux gets ssh's PATH, server or not, so ssh answers.
+    #[tokio::test]
+    async fn linux_asks_over_ssh_with_or_without_a_server() {
+        for server in [false, true] {
+            let mut linux = Agent::new(ENABLED, CLAUDE_MEM, "");
+            linux.server = server;
+            assert_eq!(linux.check().await.state, State::Present);
+            assert!(linux.asked("run-shell").is_empty());
+            assert!(linux.asked("show-environment").is_empty());
         }
     }
 
-    /// Linux's next server inherits ssh's PATH, so ssh answers. A Mac's next
-    /// server is the LaunchAgent's, whose PATH ssh does not have.
+    /// A Mac's next server is the LaunchAgent's, whose PATH ssh does not have.
     #[tokio::test]
-    async fn with_no_server_linux_asks_over_ssh_and_a_mac_cannot_ask() {
-        let linux = Agent::new(ENABLED, CLAUDE_MEM, "");
-        assert_eq!(linux.check().await.state, State::Present);
-        assert!(!linux.asked(UNRESOLVED)[0].contains("run-shell"));
-
+    async fn with_no_server_a_mac_cannot_ask() {
         let mut mac = Agent::new(ENABLED, CLAUDE_MEM, "node\n");
         mac.os = Os::MacOs;
         let found = mac.check().await;

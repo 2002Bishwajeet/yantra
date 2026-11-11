@@ -565,6 +565,54 @@ async fn the_launch_agent_starts_the_tmux_server() -> Result<()> {
     Ok(())
 }
 
+/// Y-707: a pane that `ensure` starts over ssh gets the LaunchAgent server's
+/// `PATH`. The pane's shell may append to it.
+#[tokio::test]
+#[ignore = "needs a disposable Mac; set YANTRA_MAC_RUNNER (CI's macos job does)"]
+async fn a_pane_gets_the_launch_agents_path() -> Result<()> {
+    let lab = Lab::start("pane").await?;
+    let tmux = lab.tmux.command();
+    lab.run(&format!("{tmux} kill-server 2>/dev/null; true"))
+        .await?;
+    let started = lab.tmux.login_server(&lab.ssh).await;
+    let opened = lab
+        .tmux
+        .ensure(
+            &lab.ssh,
+            "yantra-ci-pane",
+            "/tmp",
+            Some("echo \"$PATH\" > /tmp/ym-pane-path; sleep 60"),
+        )
+        .await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let pane = lab.run("cat /tmp/ym-pane-path").await;
+    let server = lab.run(&format!("{tmux} show-environment -g PATH")).await;
+    let ssh = lab.run("printf '%s' \"$PATH\"").await?;
+    lab.run(&format!(
+        "launchctl bootout gui/$(id -u)/{LABEL} 2>/dev/null; \
+         rm -f \"$HOME/Library/LaunchAgents/{LABEL}.plist\" /tmp/ym-pane-path; \
+         {tmux} kill-server 2>/dev/null; true"
+    ))
+    .await?;
+
+    ensure!(
+        started?,
+        "login_server found no one at the screen: the runner has no gui domain"
+    );
+    opened?;
+    let (pane, server) = (pane?, server?);
+    let server = server
+        .trim()
+        .strip_prefix("PATH=")
+        .with_context(|| format!("the server has no PATH: {server}"))?;
+    println!("pane: {}\nserver: {server}\nssh: {ssh}", pane.trim());
+    ensure!(
+        pane.trim().starts_with(server),
+        "the pane's PATH is not the server's"
+    );
+    Ok(())
+}
+
 /// The LaunchAgent `install.sh` writes for the agent, the label join.sh uses.
 const AGENT_LABEL: &str = "io.github.2002bishwajeet.yantra-agent";
 

@@ -177,6 +177,11 @@ server is *unknown*, because only the LaunchAgent's server has the agent's `PATH
 is *absent*, and the detail names it, its events and its plugin. The dashboard warns and does not
 block a session. The list is now thirteen names.
 
+> **2026-11-10, [Y-707](../../tracker.md#3-task-board):** a pane does not get the server's `PATH`.
+> tmux gives a new pane the `PATH` of the ssh client that asks for it, so on Linux the check asks
+> over ssh even when a server runs. On a Mac, Yantra now starts each pane with the server's `PATH`,
+> and the check asks over ssh with that `PATH`. A Mac with no server is still *unknown*.
+
 **2026-11-10, [Y-628](../../tracker.md#3-task-board): `no-sudo` is a check, after `hooks`.**
 Agents run as the account that joined, and a prompt-injected agent with any root path owns the
 machine ([ADR-0046](../adr/0046-the-owner-types-sudo-in-an-owner-terminal.md)). The check is

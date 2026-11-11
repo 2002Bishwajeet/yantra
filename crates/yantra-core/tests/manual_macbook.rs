@@ -15,6 +15,9 @@
 //!
 //! One at a time, because some of them end the server the others use.
 //!
+//! Y-707's needs the owner logged in at the Mac's screen and `Q12_REPO`
+//! trusted there, and ends only its own sessions.
+//!
 //! **Two of these need a person at that machine first**: Y-139's transcript
 //! measurement and Y-151's gate both want a tmux server started from a GUI
 //! login, and both refuse without one. Their own doc comments say why and what
@@ -836,6 +839,104 @@ async fn a_chat_turn_with_no_login_server_starts_the_launch_agent_on_the_mac() -
         job == server,
         "Yantra's server is not the job's, so it is not the login session's"
     );
+    Ok(())
+}
+
+/// Y-707's scratch session, which prints the `PATH` its pane gets.
+const PANE_PATH: &str = "yantra-manual-path";
+
+/// **Y-707's done condition**: a Claude session that `up` opens on the Mac runs
+/// its `SessionStart` hooks without a `hook error`, and a pane Yantra starts
+/// gets the server's `PATH` rather than ssh's.
+#[tokio::test]
+#[ignore = "needs the real MacBook with the owner logged in at its screen and claude signed in; set YANTRA_MAC=user@host"]
+async fn a_claude_sessions_hooks_run_on_the_mac() -> anyhow::Result<()> {
+    use yantra_core::status::{self, Verdict};
+
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest.clone(),
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y707"),
+    })?;
+    anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
+    let tmux = Tmux::resolve(&ssh).await?;
+    let claude = Claude::resolve(&ssh).await?;
+    ssh.exec(&format!("mkdir -p '{Q12_REPO}'")).await?;
+
+    let _leaves = Leaves::session_only(&dest, &tmux.command(), E2E);
+    let ws = workspace::Workspace {
+        name: E2E.to_owned(),
+        machine: dest.clone(),
+        repo: PathBuf::from(Q12_REPO),
+        startup: None,
+    };
+    let launch = format!(
+        "exec '{}' --session-id '{}'",
+        claude.path(),
+        fresh_session_id()?
+    );
+    let opened = up::open(&ssh, &tmux, &ws, Some(&launch), Os::MacOs).await?;
+    anyhow::ensure!(
+        opened.was_created(),
+        "{E2E} was already open, so its agent is not this run's"
+    );
+    let pane = opened.session().pane_id.clone();
+
+    let started = Instant::now();
+    loop {
+        match status::of(&ssh, &tmux, ws.clone()).await?.verdict {
+            Verdict::Running => break,
+            Verdict::AwaitingTrust => anyhow::bail!(
+                "the agent holds at the trust dialog for {Q12_REPO} (I-49). Answer it once at \
+                 the Mac: `cd {Q12_REPO} && claude`, trust the folder, quit, and run this again."
+            ),
+            verdict if started.elapsed() > Duration::from_secs(60) => {
+                anyhow::bail!("the agent is not running after 60 s: {verdict:?}")
+            }
+            _ => tokio::time::sleep(Duration::from_secs(2)).await,
+        }
+    }
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    let errored = tmux.pane_shows(&ssh, &pane, "hook error").await?;
+    println!("a SessionStart hook error on the screen: {errored}");
+    anyhow::ensure!(!errored, "the agent's screen shows a hook error");
+
+    let _scratch = Leaves::session_only(&dest, &tmux.command(), PANE_PATH);
+    let file = format!("{Q12_REPO}/pane-path");
+    let opened = tmux
+        .ensure(
+            &ssh,
+            PANE_PATH,
+            Q12_REPO,
+            Some(&format!("echo \"$PATH\" > '{file}'")),
+        )
+        .await?;
+    anyhow::ensure!(opened.was_created(), "{PANE_PATH} was already open");
+    for _ in 0..20 {
+        if tmux.pane(&ssh, PANE_PATH).await?.is_some_and(|p| p.dead) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let got = ssh.exec(&format!("cat '{file}'; rm -f '{file}'")).await?;
+    let got = String::from_utf8_lossy(&got.stdout).trim().to_owned();
+    let server = ssh
+        .exec(&format!("{} show-environment -g PATH", tmux.command()))
+        .await?;
+    let server = String::from_utf8_lossy(&server.stdout);
+    let server = server.trim().strip_prefix("PATH=").unwrap_or_default();
+    println!("the pane's PATH: {got}\nthe server's PATH: {server}");
+    // The pane's shell runs `~/.zshenv`, which may append to it.
+    anyhow::ensure!(
+        !server.is_empty() && got.starts_with(server),
+        "the pane's PATH does not start with the server's"
+    );
+
+    let stopped = yantra_core::down::stop(&ssh, &tmux, ws).await?;
+    println!("stopped: {:?}", stopped.ending);
     Ok(())
 }
 
