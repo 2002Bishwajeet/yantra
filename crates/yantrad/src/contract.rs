@@ -100,6 +100,7 @@ import type {
   Thread,
   ThreadCommitted,
   ThreadEvent,
+  ThreadFound,
   ThreadMessage,
   ThreadOpened,
   ThreadPrMerged,

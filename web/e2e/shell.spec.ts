@@ -1,6 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
 import type { Scenario } from './lib/scenario'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
+import { at } from './lib/sizes'
 import { scrollTo } from './lib/scroller'
 
 /** The shell (Y-345): the four destinations at three widths, the palette,
@@ -166,7 +167,7 @@ test.describe('the shell on busy', () => {
     await expect(dialog).toBeVisible()
     await dialog.getByRole('combobox').fill('lan')
     await expect(dialog.getByRole('option', { name: /^landing running/ })).toBeVisible()
-    await expect(dialog.getByText('Finds a place, or runs a step of the coding loop.')).toBeVisible()
+    await expect(dialog.getByText('Finds a place or a thread by its title, or runs a step of the coding loop.')).toBeVisible()
     // The palette is a surface over the page: a full-page shot scrolls the
     // page under it and sometimes catches the dashboard alone.
     await screenshot(page, 'shell-palette', 'busy', size, { overlay: true })
@@ -616,4 +617,30 @@ test.describe('the FAB on the phone never covers content', () => {
       }
     })
   }
+})
+
+/** Y-689: the palette finds a thread by its title, from the store, on a machine that is offline. */
+test.describe('the palette on a phone finds a thread', () => {
+  test.use(at('phone'))
+
+  test('lists an offline machine’s thread, fits 390 px, and opens it', async ({ page }) => {
+    await scenario(page, 'busy')
+    await page.goto('/')
+    await expect(heading(page, 'Dashboard')).toBeVisible()
+    await page.keyboard.press('ControlOrMeta+k')
+    const dialog = page.getByRole('dialog', { name: 'Search' })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('combobox').fill('thread store')
+
+    const row = dialog.getByRole('option', { name: /Keep a thread store/ })
+    await expect(row).toBeVisible()
+    await expect(row).toContainText('site · bishwajeets-macbook-pro · offline')
+    await expect(dialog.getByText('Finds a place or a thread by its title, or runs a step of the coding loop.')).toBeVisible()
+    const fits = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
+    expect(fits).toBe(true)
+    await axe(page)
+
+    await row.tap()
+    await expect(page).toHaveURL(/\/w\/site\?view=chat&thread=1a2b3c4d$/)
+  })
 })

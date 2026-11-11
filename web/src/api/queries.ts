@@ -1,4 +1,4 @@
-import { type QueryClient, queryOptions, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, type QueryClient, queryOptions, useQuery } from '@tanstack/react-query'
 import type {
   Attention,
   Broken,
@@ -17,6 +17,7 @@ import type {
   Room,
   RoomSummary,
   Spend,
+  ThreadFound,
   ThreadState,
   Transcript,
   WorkspaceStatus,
@@ -263,6 +264,23 @@ export const useThreadStates = (name: string, on: boolean) =>
     staleTime: 0,
     retry: false,
   })
+
+/** Y-689. The threads whose title holds `q`, read from the daemon's store: no ssh, so a
+ *  thread of an offline machine is found (ADR-0019). The last answer stays on screen
+ *  while the next one loads. */
+export const threadSearchQuery = (q: string) =>
+  queryOptions<ThreadFound[], ApiError>({
+    queryKey: keys.threadSearch(q),
+    queryFn: ({ signal }) =>
+      fetchJson<ThreadFound[]>(`/api/threads?q=${encodeURIComponent(q)}`, { signal }),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+
+export const useThreadSearch = (q: string, enabled: boolean) =>
+  useQuery({ ...threadSearchQuery(q), enabled })
 
 /** Y-563. Claude's slash commands for the composer's `/` menu, asked as
  *  {@link mentionsQuery} is: once when the trigger opens, held for a few minutes. */

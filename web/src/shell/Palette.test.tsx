@@ -96,7 +96,7 @@ describe('the command palette', () => {
     const dialog = await open()
     expect(await dialog.findByRole('group', { name: 'Machines' })).toBeTruthy()
     expect(dialog.getByRole('group', { name: 'Pages' })).toBeTruthy()
-    expect(dialog.getByText('Finds a place, or runs a step of the coding loop.')).toBeTruthy()
+    expect(dialog.getByText('Finds a place or a thread by its title, or runs a step of the coding loop.')).toBeTruthy()
   })
 
   /** D3 §3.2: every place the palette offers is opened, and the daemon is
@@ -120,5 +120,69 @@ describe('the command palette', () => {
     // late enough for this assertion to see it.
     const READS = /\/api\/viewing$|\/(logs|tokens)$/
     expect(asked.filter((one) => !one.startsWith('GET ') && !READS.test(one))).toEqual([])
+  })
+
+  /** Y-689: a thread of an offline machine is found from the store, and picking it opens the chat. */
+  describe('threads', () => {
+    const found = [
+      {
+        workspace: 'site',
+        machine: 'bishwajeets-macbook-pro',
+        id: '5a1b',
+        title: 'Keep a thread store',
+        status: 'idle',
+        seen: Date.now() - 180_000,
+      },
+    ]
+    const at = (body: unknown, status = 200, q = 'store') => ({
+      [`/api/threads?q=${q}`]: { status, body },
+    })
+
+    it('lists the thread, says the machine is offline and when it was seen, and opens it', async () => {
+      mount('desktop', '/', { overrides: at(found) })
+      await screen.findByRole('button', { name: /Search anything/ })
+      const dialog = await open()
+      fireEvent.change(dialog.getByRole('combobox'), { target: { value: 'store' } })
+      const option = await dialog.findByRole('option', { name: /Keep a thread store/ })
+      expect(dialog.getByRole('group', { name: 'Threads' })).toBeTruthy()
+      expect(option.textContent).toMatch(/site · bishwajeets-macbook-pro · offline · seen 3m \d\ds ago/)
+      fireEvent.keyDown(dialog.getByRole('combobox'), { key: 'Enter' })
+      await waitFor(() => expect(location.pathname + location.search).toBe('/w/site?view=chat&thread=5a1b'))
+    })
+
+    it('opens the thread on a click', async () => {
+      mount('desktop', '/', { overrides: at(found) })
+      await screen.findByRole('button', { name: /Search anything/ })
+      const dialog = await open()
+      fireEvent.change(dialog.getByRole('combobox'), { target: { value: 'store' } })
+      fireEvent.click(await dialog.findByRole('option', { name: /Keep a thread store/ }))
+      await waitFor(() => expect(location.pathname + location.search).toBe('/w/site?view=chat&thread=5a1b'))
+    })
+
+    it('says a gone thread is gone', async () => {
+      mount('desktop', '/', { overrides: at([{ ...found[0], status: 'gone' }]) })
+      await screen.findByRole('button', { name: /Search anything/ })
+      const dialog = await open()
+      fireEvent.change(dialog.getByRole('combobox'), { target: { value: 'store' } })
+      const option = await dialog.findByRole('option', { name: /Keep a thread store/ })
+      expect(option.textContent).toContain('· gone')
+    })
+
+    it('names a failed read in the footer and keeps the other groups', async () => {
+      mount('desktop', '/', { overrides: at('the daemon keeps no thread store', 503, 'sit') })
+      await screen.findByRole('button', { name: /Search anything/ })
+      const dialog = await open()
+      fireEvent.change(dialog.getByRole('combobox'), { target: { value: 'sit' } })
+      expect(await dialog.findByText(/Threads could not be read\./)).toBeTruthy()
+      expect(dialog.getByRole('group', { name: 'Workspaces' })).toBeTruthy()
+    })
+
+    it('shows the empty state when nothing matches', async () => {
+      mount('desktop', '/', { overrides: at([]) })
+      await screen.findByRole('button', { name: /Search anything/ })
+      const dialog = await open()
+      fireEvent.change(dialog.getByRole('combobox'), { target: { value: 'store' } })
+      expect(await dialog.findByText('Nothing matches')).toBeTruthy()
+    })
   })
 })

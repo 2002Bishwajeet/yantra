@@ -17,6 +17,9 @@ use yantra_core::thread::Place;
 /// A title longer than this is cut (ADR-0045 decision 2).
 const TITLE: usize = 80;
 
+/// The most rows a search returns.
+const FOUND: usize = 20;
+
 /// Run in order under `PRAGMA user_version`. Append; never edit one that shipped.
 const MIGRATIONS: &[&str] = &["CREATE TABLE threads (
         workspace TEXT NOT NULL,
@@ -65,7 +68,7 @@ pub enum Status {
 }
 
 impl Status {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Running => "running",
             Self::Waiting => "waiting",
@@ -358,6 +361,25 @@ impl Store {
         .await
     }
 
+    /// Threads of any workspace whose title holds `text`, newest activity first,
+    /// at most [`FOUND`]. Home rows are left out until `/w/$name` can open them (Y-699).
+    pub async fn search(&self, text: &str) -> Result<Vec<Row>, Error> {
+        let like = text
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        self.call(move |db| {
+            db.prepare(&format!(
+                "SELECT {COLUMNS} FROM threads
+                 WHERE workspace <> '' AND title LIKE '%' || ?1 || '%' ESCAPE '\\'
+                 ORDER BY active DESC, id LIMIT {FOUND}"
+            ))?
+            .query_map(params![like], row)?
+            .collect()
+        })
+        .await
+    }
+
     /// Forgets a thread the daemon removed. `false` is a row it did not have.
     pub async fn remove(&self, workspace: &str, id: &str) -> Result<bool, Error> {
         let (workspace, id) = (workspace.to_owned(), id.to_owned());
@@ -600,5 +622,61 @@ pub(crate) mod tests {
             rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
             ["b"]
         );
+    }
+
+    async fn kept(store: &Store, workspace: &str, id: &str, title: &str, active: i64) {
+        let mut one = live(id, Some(title), None);
+        one.workspace = workspace.to_owned();
+        one.active = active;
+        store.adopt(vec![one]).await.expect("adopted");
+    }
+
+    #[tokio::test]
+    async fn search_matches_a_title_in_any_case_across_workspaces() {
+        let (store, _) = scratch();
+        kept(&store, "web", "a", "Fix the Login form", 1).await;
+        kept(&store, "api", "b", "Add a store", 2).await;
+        let found = store.search("LOGIN").await.expect("rows");
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            (found[0].workspace.as_str(), found[0].id.as_str()),
+            ("web", "a")
+        );
+    }
+
+    #[tokio::test]
+    async fn search_reads_percent_underscore_and_backslash_literally() {
+        let (store, _) = scratch();
+        kept(&store, "web", "a", "Cut 50% of the cost", 1).await;
+        kept(&store, "web", "b", "Cut 50 of the cost", 2).await;
+        kept(&store, "web", "c", "snake_case names", 3).await;
+        kept(&store, "web", "d", "snakeXcase names", 4).await;
+        kept(&store, "web", "e", "path a\\b", 5).await;
+        let ids = |rows: Vec<Row>| rows.into_iter().map(|r| r.id).collect::<Vec<_>>();
+        assert_eq!(ids(store.search("%").await.unwrap()), ["a"]);
+        assert_eq!(ids(store.search("e_c").await.unwrap()), ["c"]);
+        assert_eq!(ids(store.search("a\\b").await.unwrap()), ["e"]);
+    }
+
+    #[tokio::test]
+    async fn search_skips_home_rows_and_orders_by_activity() {
+        let (store, _) = scratch();
+        kept(&store, "", "h", "home thread", 9).await;
+        kept(&store, "web", "a", "old thread", 1).await;
+        kept(&store, "web", "b", "new thread", 5).await;
+        let found = store.search("thread").await.expect("rows");
+        let ids: Vec<_> = found.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["b", "a"]);
+    }
+
+    #[tokio::test]
+    async fn search_with_no_text_returns_the_newest_twenty() {
+        let (store, _) = scratch();
+        for n in 0..25 {
+            kept(&store, "web", &format!("t{n:02}"), "a thread", n).await;
+        }
+        let found = store.search("").await.expect("rows");
+        assert_eq!(found.len(), 20);
+        assert_eq!(found[0].id, "t24");
     }
 }

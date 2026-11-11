@@ -51,6 +51,7 @@ import type {
   Thread,
   ThreadCommitted,
   ThreadEvent,
+  ThreadFound,
   ThreadMessage,
   ThreadOpened,
   ThreadPrMerged,
@@ -972,6 +973,17 @@ export const threadsOffline = [
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/6a1b2c3d4e5f6a7b"
   }
 ] satisfies Thread[]
+
+export const threadsFound = [
+  {
+    "id": "5a1b2c3d4e5f6a7b",
+    "machine": "bishwajeets-macbook-pro",
+    "seen": 1790000100000,
+    "status": "idle",
+    "title": "Keep a thread store",
+    "workspace": "site"
+  }
+] satisfies ThreadFound[]
 
 export const threadStates = [
   {

@@ -549,6 +549,20 @@ const routes = [
           )]
         : [404, notFound(name)],
   ],
+  // Y-689: the palette's thread search, from the store. The first hit is the chat's thread.
+  [
+    'GET',
+    /^\/api\/threads$/,
+    (_s, _params, _sent, _request, url) => {
+      const q = (url.searchParams.get('q') ?? '').toLowerCase()
+      return [
+        200,
+        contract.threadsFound
+          .filter((one) => (one.title ?? '').toLowerCase().includes(q))
+          .map((one, at) => (at === 0 ? { ...one, id: THREAD } : one)),
+      ]
+    },
+  ],
   // Y-649: what each thread is doing, which the thread menu polls while it is open.
   [
     'GET',

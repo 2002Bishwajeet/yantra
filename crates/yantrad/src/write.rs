@@ -292,6 +292,7 @@ where
         .route("/join/forget-host-key", post(forget_host_key::<I>))
         .route("/update", post(renew::<I>))
         .route("/update/channel", put(rechannel::<I>))
+        .route("/threads", get(threads_found::<I>))
         // Here for the grant: a thread's PR and its issue are read with it.
         .route(
             "/workspaces/{name}/threads",
@@ -1998,6 +1999,99 @@ async fn thread_states<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(Json(states))
 }
 
+/// The threads whose title holds `?q=`, from the store alone (Y-689). It asks no
+/// machine, so a thread of an offline machine is found, and it is a `GET`
+/// ([ADR-0019]).
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn threads_found<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Result<Json<Vec<ThreadFound>>, Refused> {
+    allowed(&state.authoriser, &from, &headers).await?;
+    let store = state.fleet.store.as_ref().ok_or_else(|| Refused::Verb {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        said: "the daemon keeps no thread store".to_owned(),
+    })?;
+    let rows = store
+        .search(&query_value(&uri, "q"))
+        .await
+        .map_err(|error| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        })?;
+    Ok(Json(rows.into_iter().map(ThreadFound::of).collect()))
+}
+
+/// The decoded value of `<key>=` in the query, empty when it is absent. `Query`
+/// is not enabled (see [`forced`]).
+fn query_value(uri: &Uri, key: &str) -> String {
+    let Some(raw) = uri
+        .query()
+        .into_iter()
+        .flat_map(|q| q.split('&'))
+        .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
+    else {
+        return String::new();
+    };
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let decoded = match bytes[at] {
+            b'+' => Some(b' '),
+            b'%' => bytes
+                .get(at + 1..at + 3)
+                .and_then(|hex| std::str::from_utf8(hex).ok())
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok()),
+            _ => None,
+        };
+        match decoded {
+            Some(byte) if bytes[at] == b'%' => {
+                out.push(byte);
+                at += 3;
+            }
+            Some(byte) => {
+                out.push(byte);
+                at += 1;
+            }
+            None => {
+                out.push(bytes[at]);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// One hit of [`threads_found`]. `status` is the store's word, and `seen` is the
+/// last time the machine answered, in Unix milliseconds.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadFound {
+    workspace: String,
+    machine: String,
+    id: String,
+    title: Option<String>,
+    status: &'static str,
+    seen: Option<u64>,
+}
+
+impl ThreadFound {
+    fn of(row: Row) -> Self {
+        Self {
+            workspace: row.workspace,
+            machine: row.machine,
+            id: row.id,
+            title: row.title,
+            status: row.status.name(),
+            seen: row.seen.and_then(|at| u64::try_from(at).ok()),
+        }
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FromIssue {
@@ -3417,6 +3511,24 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                     )
                 })
                 .collect::<Vec<_>>()),
+        ),
+        (
+            "threadsFound",
+            "ThreadFound[]",
+            of(&[ThreadFound::of(Row {
+                workspace: "site".to_owned(),
+                id: "5a1b2c3d4e5f6a7b".to_owned(),
+                machine: "bishwajeets-macbook-pro".to_owned(),
+                branch: "yantra/chat/site/5a1b2c3d4e5f6a7b".to_owned(),
+                worktree: "/home/<user>/.yantra/worktrees/chat/site/5a1b2c3d4e5f6a7b".to_owned(),
+                harness: Some("claude".to_owned()),
+                session: None,
+                title: Some("Keep a thread store".to_owned()),
+                status: Status::Idle,
+                created: SEEN,
+                active: SEEN,
+                seen: Some(SEEN),
+            })]),
         ),
         (
             "threadStates",
@@ -5095,6 +5207,104 @@ mod tests {
         assert_eq!(states[1]["id"], "1c2d");
         assert_eq!(states[1]["state"], "idle");
         assert!(states[1]["since"].is_null());
+    }
+
+    /// Y-689: the search reads the store alone, for the owner only.
+    #[tokio::test]
+    async fn the_thread_search_reads_the_store_for_the_owner_only() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let (store, _) = crate::store::tests::scratch();
+        store
+            .adopt(vec![
+                crate::store::tests::live("a", Some("Fix the login"), None),
+                crate::store::tests::live("b", Some("Cut 50% of cost"), None),
+            ])
+            .await
+            .expect("adopted");
+        let ask = |uri: &str, last: u8| {
+            let mut request = Request::get(uri).body(Body::empty()).expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(Peer::from(SocketAddr::new(
+                    address(last),
+                    61620,
+                ))));
+            request
+        };
+        let fleet = Fleet {
+            store: Some(store),
+            ..Fleet::default()
+        };
+        let app = router::<Fake, ()>(direct(mine(3)), fleet);
+        let read = |response: Response| async move {
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), 4096)
+                .await
+                .expect("a body");
+            (status, String::from_utf8_lossy(&body).into_owned())
+        };
+
+        let (status, _) = read(
+            app.clone()
+                .oneshot(ask("/threads?q=x", 9))
+                .await
+                .expect("infallible"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, body) = read(
+            app.clone()
+                .oneshot(ask("/threads?q=LOG", 3))
+                .await
+                .expect("infallible"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let found: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(found.as_array().expect("a list").len(), 1, "{found}");
+        assert_eq!(found[0]["workspace"], "web");
+        assert_eq!(found[0]["machine"], "m");
+        assert_eq!(found[0]["id"], "a");
+        assert_eq!(found[0]["status"], "idle");
+
+        let (_, body) = read(
+            app.clone()
+                .oneshot(ask("/threads?q=50%25", 3))
+                .await
+                .expect("infallible"),
+        )
+        .await;
+        let found: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(found[0]["id"], "b", "{found}");
+
+        let (_, body) = read(app.oneshot(ask("/threads", 3)).await.expect("infallible")).await;
+        let found: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(found.as_array().expect("a list").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_thread_search_without_a_store_says_so() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let mut request = Request::get("/threads?q=x")
+            .body(Body::empty())
+            .expect("a request");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(Peer::from(SocketAddr::new(address(3), 61620))));
+        let app = router::<Fake, ()>(direct(mine(3)), Fleet::default());
+        let response = app.oneshot(request).await.expect("infallible");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .expect("a body");
+        assert_eq!(&body[..], b"the daemon keeps no thread store");
     }
 
     /// Y-492: drafting, committing and pushing refuse a stranger before any
