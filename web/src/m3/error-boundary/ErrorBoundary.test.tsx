@@ -58,6 +58,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>,
     )
     expect(await screen.findByText('Something in this part of the page broke.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }))
     expect(screen.getByText('RangeError')).toBeTruthy()
     expect(screen.queryByText(/Fleet\.tsx/)).toBeNull()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()

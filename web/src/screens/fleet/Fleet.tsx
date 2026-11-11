@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { ChevronDown, RefreshCw } from 'lucide-react'
 import type { MachineSessions, Session } from '@/api'
 import { fromReading } from '@/api/client'
+import { PrimaryAction } from '@/shell/PrimaryAction'
 import {
   loaded,
   type Reading,
@@ -27,7 +28,7 @@ import { answerFailure, reachWords } from '@/lib/checks'
 import { Eyebrow, Mono, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
-import { type Band, speaks, unreachable, work, type WorkRow } from '@/work'
+import { type Band, daemonCouldNotRead, speaks, unreachable, work, type WorkRow } from '@/work'
 import { Looked, Since } from './age'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { Github } from './Github'
@@ -78,12 +79,12 @@ export function Fleet() {
     return (
       <Page>
         <PageHeader title="Fleet" />
+        <PrimaryAction action={null} />
         <ErrorSurface.Page
-          error={fromReading(listed)!}
+          error={daemonCouldNotRead(nothing)}
           eyebrow="Workspaces read"
           reset={() => void client.invalidateQueries()}
-          title="Nothing here can be reached"
-          unknowns={['off the tailnet', 'yantrad down']}
+          title="The daemon could not read the fleet"
         />
       </Page>
     )

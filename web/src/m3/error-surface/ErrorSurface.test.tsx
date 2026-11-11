@@ -11,28 +11,71 @@ import { ErrorSurface } from './ErrorSurface'
 const network = new ApiError('network', 'fetch failed')
 
 describe('ErrorSurface', () => {
-  it('is an alert with the sentence, the words, the meta and both buttons', () => {
+  it('draws one cause and one action, and keeps the raw words behind Details', () => {
     const reset = vi.fn()
     render(
       <ErrorSurface.Page
         eyebrow="Fleet"
-        title="Nothing here can be reached"
+        title="The daemon could not read the fleet"
         error={network}
         reset={reset}
         unknowns={['off the tailnet', 'yantrad down']}
         meta="last good read 2m ago"
-        action={<Button variant="text">Open Tailscale</Button>}
       />,
     )
     const alert = screen.getByRole('alert')
     expect(alert.dataset.layout).toBe('page')
     expect(screen.getByText('The daemon did not answer.')).toBeTruthy()
+    for (const hidden of ['fetch failed', 'last good read 2m ago']) expect(screen.queryByText(hidden)).toBeNull()
+    expect(screen.queryAllByText('unknown')).toHaveLength(0)
+    // The toggle and Try again: no second action.
+    expect(screen.getAllByRole('button').map((one) => one.textContent)).toEqual(['Try again', 'Details'])
+
+    const toggle = screen.getByRole('button', { name: 'Details' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBeTruthy()
     expect(screen.getByText('fetch failed')).toBeTruthy()
     expect(screen.getAllByText('unknown')).toHaveLength(2)
     expect(screen.getByText('last good read 2m ago')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(reset).toHaveBeenCalledOnce()
+  })
+
+  it('draws the caller action in place of Try again, never beside it', () => {
+    render(
+      <ErrorSurface.Page
+        title="This device cannot reach Yantra"
+        error={network}
+        reset={() => {}}
+        action={<Button>Open Tailscale</Button>}
+      />,
+    )
     expect(screen.getByRole('button', { name: 'Open Tailscale' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it('draws no Details toggle when there is nothing behind it', () => {
+    render(<ErrorSurface.Page title="No such machine" error={new ApiError('missing', '')} />)
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull()
+  })
+
+  it('keeps the card whole: sentence, words, unknowns and both buttons, no toggle', () => {
+    render(
+      <ErrorSurface.Card
+        title="Usage"
+        error={network}
+        reset={() => {}}
+        unknowns={['off the tailnet']}
+        action={<Button variant="text">Open Tailscale</Button>}
+      />,
+    )
+    expect(screen.getByText('fetch failed')).toBeTruthy()
+    expect(screen.getAllByText('unknown')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open Tailscale' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull()
   })
 
   it('draws the whole of a long inline sentence, wrapped and never clipped', () => {
@@ -71,6 +114,20 @@ describe('ErrorSurface', () => {
     const block = (selector: string) => css.match(new RegExp(`${selector.replace(/[[\]".]/g, '\\$&')}\\s*\\{([^}]*)\\}`))?.[1] ?? ''
     expect(block('.m3-error[data-layout="page"]')).not.toMatch(/max-inline-size/)
     expect(block('.m3-error[data-layout="page"] .m3-error__text')).toMatch(/max-inline-size:\s*var\(--m3-measure\)/)
+  })
+
+  // jsdom applies no stylesheet, so the rules are read as text (Y-721).
+  it('rings only on :focus-visible, and a plain link rings in the shape of its control', () => {
+    const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8')
+    for (const path of ['src/m3/tokens.css', 'src/m3/error-surface/ErrorSurface.css', 'src/m3/button/Button.css']) {
+      const bare = [...read(path).matchAll(/([^{}]*:focus(?!-visible)[^{}]*)\{([^}]*)\}/g)]
+      expect(bare.filter(([, , body]) => /outline\s*:(?!\s*none)/.test(body!))).toEqual([])
+    }
+    const css = read('src/m3/tokens.css')
+    const hit = css.match(/\.m3-hit:focus-visible\s*\{([^}]*)\}/)?.[1] ?? ''
+    expect(hit).toMatch(/outline:\s*var\(--md-sys-focus-ring-width\)/)
+    expect(hit).toMatch(/outline-offset:\s*var\(--md-sys-focus-ring-offset\)/)
+    expect(hit).toMatch(/border-radius:/)
   })
 
   it('has an inline row', () => {

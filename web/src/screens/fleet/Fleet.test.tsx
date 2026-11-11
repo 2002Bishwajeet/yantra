@@ -228,10 +228,15 @@ describe('/fleet when nothing can be reached', () => {
   it('is one page-sized error rather than one per card', async () => {
     mount('desktop', '/fleet', scenario('unreachable'))
     const alert = await screen.findByRole('alert', {}, { timeout: 2000 })
-    expect(alert.textContent).toContain('Nothing here can be reached')
-    expect(alert.textContent).toContain('failed to connect to local tailscaled')
+    expect(alert.textContent).toContain('The daemon could not read the fleet')
     expect(screen.getAllByRole('alert')).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(alert.textContent).not.toContain('failed to connect to local tailscaled')
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }))
+    expect(alert.textContent).toContain('failed to connect to local tailscaled')
+    expect(alert.textContent).not.toContain('off the tailnet')
+    expect(screen.queryByRole('link', { name: /new session/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'New' })).toBeNull()
   })
 })
 

@@ -7,6 +7,7 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
+import { ApiError } from '@/api/errors'
 import type { Reading } from '@/api/hooks'
 
 /** D3 §4: who must act next — you, the agent, nobody. `unknown` is the fourth
@@ -164,6 +165,10 @@ export function speaks(attention: Reading<Attention>): boolean {
   const { reviews, issues, notifications } = attention.data
   return reviews.length + issues.length + notifications > 0
 }
+
+/** What the Dashboard and Fleet say when the daemon answered and every read failed. */
+export const daemonCouldNotRead = (said: string) =>
+  new ApiError('network', said, { sentence: 'The daemon answered, but every read of the fleet failed the same way.' })
 
 /** D3 §7.2. Off the tailnet the service worker serves the shell and every fetch
  *  fails, and the page drew that as one failure per section — seven copies of

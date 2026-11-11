@@ -5,7 +5,7 @@ import { ROUTES } from './lib/routes'
  *  screen. The shell owns it, so a route that reads nothing swept — Settings,
  *  Notifications — draws it too, and no screen draws a second alert under it. */
 
-const TITLE = 'Yantra cannot be reached'
+const TITLE = 'yantrad is not answering'
 
 /** The four destinations, which keep their navigation on every shell. A
  *  pushed screen on the phone has a back button instead. */
@@ -26,19 +26,22 @@ for (const one of ROUTES) {
     await expect(board).toHaveCount(1)
     // Row 79: the live region is the whole announcement, so nothing takes focus.
     await expect(page.getByRole('heading', { name: TITLE })).not.toBeFocused()
-    for (const words of [
-      'yantrad was not reached: HTTP 502',
-      'off the tailnet',
-      'yantrad down',
-      'retrying every 5 s',
-    ]) {
+    // One button, and the raw text, the unknowns and the retry line wait behind Details.
+    await expect(board.getByRole('button')).toHaveText(['Try again', 'Details'])
+    for (const words of ['yantrad was not reached: HTTP 502', 'retrying every 5 s']) {
+      await expect(board.getByText(words)).toHaveCount(0)
+    }
+    // Walk before any click: a click moves the tab start point past the last stop.
+    if (one.id === 'dashboard') {
+      await keyboardWalk(page, 6)
+      await screenshot(page, 'daemon-unreachable', 'down', size)
+    }
+    await board.getByRole('button', { name: 'Details' }).click()
+    for (const words of ['yantrad was not reached: HTTP 502', 'retrying every 5 s']) {
       await expect(board.getByText(words).first()).toBeVisible()
     }
-    await expect(board.getByRole('button', { name: 'Try again' })).toBeVisible()
-    await expect(board.getByRole('link', { name: 'Open Tailscale' })).toHaveAttribute(
-      'href',
-      'https://login.tailscale.com/admin/machines',
-    )
+    await board.getByRole('button', { name: 'Details' }).click()
+    await expect(board.getByRole('link', { name: 'Open Tailscale' })).toHaveCount(0)
 
     // Nothing is still loading, and nothing of the fleet is on screen.
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
@@ -52,9 +55,5 @@ for (const one of ROUTES) {
     }
 
     await axe(page)
-    if (one.id === 'dashboard') {
-      await keyboardWalk(page, 6)
-      await screenshot(page, 'daemon-unreachable', 'down', size)
-    }
   })
 }

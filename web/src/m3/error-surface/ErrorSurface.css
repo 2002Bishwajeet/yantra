@@ -141,3 +141,28 @@
   align-items: center;
   gap: 8px;
 }
+
+.m3-error__details {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  inline-size: 100%;
+  max-inline-size: var(--m3-measure);
+  text-align: left;
+}
+
+/* One button: full width on a phone, 48 px tall. */
+.m3-error[data-layout="page"] > .m3-button {
+  min-block-size: 48px;
+}
+
+@media (max-width: 599px) {
+  .m3-error[data-layout="page"] > .m3-button:not(.m3-error__toggle) {
+    inline-size: 100%;
+  }
+
+  .m3-error[data-layout="page"] .m3-error__unknowns {
+    min-width: 0;
+  }
+}
