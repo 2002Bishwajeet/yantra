@@ -2040,25 +2040,22 @@ fn query_value(uri: &Uri, key: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;
     while at < bytes.len() {
-        let decoded = match bytes[at] {
-            b'+' => Some(b' '),
-            b'%' => bytes
-                .get(at + 1..at + 3)
-                .and_then(|hex| std::str::from_utf8(hex).ok())
-                .and_then(|hex| u8::from_str_radix(hex, 16).ok()),
-            _ => None,
-        };
-        match decoded {
-            Some(byte) if bytes[at] == b'%' => {
+        let hex = (bytes[at] == b'%')
+            .then(|| bytes.get(at + 1..at + 3))
+            .flatten()
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match (bytes[at], hex) {
+            (_, Some(byte)) => {
                 out.push(byte);
                 at += 3;
             }
-            Some(byte) => {
-                out.push(byte);
+            (b'+', None) => {
+                out.push(b' ');
                 at += 1;
             }
-            None => {
-                out.push(bytes[at]);
+            (byte, None) => {
+                out.push(byte);
                 at += 1;
             }
         }
