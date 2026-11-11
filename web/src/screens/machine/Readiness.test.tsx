@@ -105,6 +105,8 @@ async function draw(
 }
 
 const card = () => within(screen.getByRole('region', { name: 'Readiness' }))
+/** The microphone's box and Install wait inside the closed Optional row on a machine that can start sessions. */
+const showOptional = () => fireEvent.click(card().getByRole('button', { name: /^Show Optional: microphone/ }))
 
 /** The folded checks; the button named "What ssh said" is the other disclosure. */
 const openChecks = () => fireEvent.click(card().getByRole('button', { name: /^Show (?!What ssh said)/ }))
@@ -164,6 +166,7 @@ describe('the Readiness card', () => {
     await draw(report([...checks(), { check: 'mic', state: 'absent', detail: 'not installed — the microphone is optional' }]))
     expect(card().getByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
+    showOptional()
     const box = card().getByRole('checkbox', { name: 'Microphone' }) as HTMLInputElement
     expect(box.checked).toBe(false)
     box.focus()
@@ -185,6 +188,7 @@ describe('the Readiness card', () => {
     await draw(report([...checks(absent), { check: 'mic', state: 'absent', detail: 'not installed' }]))
     expect(card().getByRole('heading', { name: title })).toBeTruthy()
     expect(card().getByText(new RegExp(`^${count} · asked`))).toBeTruthy()
+    showOptional()
     const install = card().getByRole('button', { name: 'Install' })
     expect(install.hasAttribute('disabled')).toBe(true)
     fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
@@ -209,6 +213,7 @@ describe('the Readiness card', () => {
     const mic: Check = { check: 'mic', state: 'absent', detail: 'not installed' }
     daemon([202], [...checks(), mic])
     const client = await draw(report([...checks(), mic]))
+    showOptional()
     fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
     fireEvent.click(card().getByRole('button', { name: 'Install' }))
     await card().findByRole('heading', { name: 'Installing on pi' })
@@ -232,6 +237,7 @@ describe('the Readiness card', () => {
     const mic: Check = { check: 'mic', state: 'absent', detail: 'not installed' }
     daemon([202], [...checks(), mic])
     const client = await draw(report([...checks(), mic]))
+    showOptional()
     fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
     fireEvent.click(card().getByRole('button', { name: 'Install' }))
     await card().findByRole('heading', { name: 'Installing on pi' })
@@ -677,10 +683,14 @@ describe('a ready machine', () => {
     await draw(report(withMic))
     expect(card().queryByText(/Run Install with Microphone ticked/)).toBeNull()
     expect(card().queryByText('ok')).toBeNull()
+    expect(card().queryByRole('checkbox', { name: 'Microphone' })).toBeNull()
+    expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
     const open = card().getByRole('button', { name: /^Show Optional: microphone/ })
     expect(open.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(open)
     expect(card().getByText(/Run Install with Microphone ticked/)).toBeTruthy()
+    expect(card().getByRole('checkbox', { name: 'Microphone' })).toBeTruthy()
+    expect(card().getByRole('button', { name: 'Install' })).toBeTruthy()
     expect(filled()).toHaveLength(1)
   })
 

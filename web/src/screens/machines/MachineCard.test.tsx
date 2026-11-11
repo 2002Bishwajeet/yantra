@@ -149,4 +149,12 @@ describe("a machine ssh cannot reach (Y-714)", () => {
     const said = screen.getByText(/No route to host/);
     expect(said.classList.contains("m3-mono")).toBe(false);
   });
+
+  it("gives an offline machine the same one sentence, not a wall of unknown checks", async () => {
+    renderCard(aMachine({ online: false }), checks);
+    await screen.findByText(/can’t reach cachyos-g14 over ssh/);
+    expect(screen.queryByText("tmux")).toBeNull();
+    expect(screen.queryByText(/could not be asked/)).toBeNull();
+    expect(screen.queryByText(/of 4/)).toBeNull();
+  });
 });

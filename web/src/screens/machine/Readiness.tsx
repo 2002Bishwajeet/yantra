@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { type ReactNode, useEffect, useId, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import type { Check, Event, Readiness as Report } from '@/api'
 import { fromReading, type Reading } from '@/api/client'
@@ -91,12 +91,13 @@ function ProbeSaid(props: { checks: Check[] }) {
 }
 
 /** ADR-0031 §9: the microphone is optional, so it waits behind a closed row. A Mac never offers it. */
-function Optional(props: { checks: Check[]; machine: string; fix: boolean }) {
+function Optional(props: { checks: Check[]; machine: string; fix: boolean; action: ReactNode }) {
   const optional = props.checks.filter(optionalAbsent)
   if (optional.length === 0) return null
   return (
     <Disclosure summary="Optional: microphone">
       <Checks checks={optional} fix={props.fix} machine={props.machine} />
+      {props.action ? <div className="readiness__actions">{props.action}</div> : null}
     </Disclosure>
   )
 }
@@ -201,6 +202,29 @@ export function ReadinessCard(props: {
   // One filled action: New session when a session can start, else Check again on a manual machine.
   const sessionFirst = verdict.kind === 'ready' || (verdict.kind === 'manual' && verdict.ready)
   const checkFirst = verdict.kind === 'manual' && !verdict.ready
+  // The microphone is optional: on a machine that can start sessions its fix waits inside the closed Optional row.
+  const inside = startable(verdict) && offerMic
+  const micBox = (
+    <label className="readiness__mic" htmlFor={micId}>
+            <input checked={mic} id={micId} onChange={(event) => setMic(event.target.checked)} type="checkbox" />
+            <Text scale="label-large">Microphone</Text>
+          </label>
+  )
+  const installButton = (
+    <Button
+            // Until the first read, the newest result is unknown, and an older
+            // one would be taken for this press's answer.
+            disabled={install.isPending || notifications.isPending || nothingAsked}
+            onClick={press}
+            variant={verdict.kind === 'missing' ? 'filled' : 'tonal'}
+          >
+            {install.isPending
+              ? 'Starting…'
+              : verdict.kind === 'sudo' || (verdict.kind === 'missing' && verdict.result)
+                ? 'Install again'
+                : 'Install'}
+          </Button>
+  )
   const corner = !['asleep', 'expired', 'unasked', 'installing', 'pending'].includes(verdict.kind)
 
   return (
@@ -290,6 +314,7 @@ export function ReadinessCard(props: {
         join={join}
         lastSeen={lastSeen}
         micFix={state.os !== 'macOS'}
+        micAction={inside ? <>{micBox}{installButton}</> : null}
         name={name}
         readiness={readiness}
         retry={() => ask(name)}
@@ -314,27 +339,12 @@ export function ReadinessCard(props: {
             Stop waiting
           </Button>
         ) : null}
-        {installable && offerMic ? (
-          <label className="readiness__mic" htmlFor={micId}>
-            <input checked={mic} id={micId} onChange={(event) => setMic(event.target.checked)} type="checkbox" />
-            <Text scale="label-large">Microphone</Text>
-          </label>
-        ) : null}
-        {installable ? (
-          <Button
-            // Until the first read, the newest result is unknown, and an older
-            // one would be taken for this press's answer.
-            disabled={install.isPending || notifications.isPending || nothingAsked}
-            onClick={press}
-            variant={verdict.kind === 'missing' ? 'filled' : 'tonal'}
-          >
-            {install.isPending
-              ? 'Starting…'
-              : verdict.kind === 'sudo' || (verdict.kind === 'missing' && verdict.result)
-                ? 'Install again'
-                : 'Install'}
-          </Button>
-        ) : null}
+        {inside ? null : (
+          <>
+            {installable && offerMic ? micBox : null}
+            {installable ? installButton : null}
+          </>
+        )}
         {verdict.kind === 'unasked' ? <Doctor first machine={name} variant="tonal" /> : null}
         {verdict.kind === 'ready' || verdict.kind === 'manual' ? (
           <Button render={<Link to="/new" />} role="link" variant={sessionFirst ? 'filled' : 'tonal'}>
@@ -372,9 +382,10 @@ function Body(props: {
   lastSeen: string | null
   join: string | null
   micFix: boolean
+  micAction: ReactNode
   retry: () => void
 }) {
-  const { verdict, name, checks, readiness, lastSeen, join, micFix, retry } = props
+  const { verdict, name, checks, readiness, lastSeen, join, micFix, micAction, retry } = props
   const failing = checks.filter((one) => one.state !== 'present')
   switch (verdict.kind) {
     case 'pending':
@@ -417,7 +428,7 @@ function Body(props: {
     case 'ready':
       return (
         <>
-          <Optional checks={checks} fix={micFix} machine={name} />
+          <Optional action={micAction} checks={checks} fix={micFix} machine={name} />
           <ProbeSaid checks={checks} />
         </>
       )
@@ -428,7 +439,7 @@ function Body(props: {
         <>
           {first ? <Checks checks={[first]} machine={name} /> : null}
           {rest.length > 0 ? <Checks checks={rest} fix={false} machine={name} /> : null}
-          <Optional checks={checks} fix={micFix} machine={name} />
+          <Optional action={micAction} checks={checks} fix={micFix} machine={name} />
           <ProbeSaid checks={checks} />
         </>
       )

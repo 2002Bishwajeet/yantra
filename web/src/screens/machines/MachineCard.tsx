@@ -148,6 +148,7 @@ export function MachineCard(props: MachineCardProps) {
   })
   const chip = chipOf(verdict, seen?.text ?? null)
   // The machine cannot be reached, so a tally of checks nobody could ask says nothing.
+  const reachable = checkNamed(checks, 'reachable')
   const reach =
     verdict.kind === 'refused' ||
     verdict.kind === 'unjoined' ||
@@ -155,7 +156,10 @@ export function MachineCard(props: MachineCardProps) {
     verdict.kind === 'changed' ||
     verdict.kind === 'unreachable'
       ? verdict
-      : null
+      : // An offline machine that ssh also failed to reach has the same one sentence (Y-714).
+        verdict.kind === 'asleep' && reachable?.state === 'absent'
+        ? { kind: reachableFailure(reachable.detail), detail: reachable.detail }
+        : null
 
   return (
     <Card aria-labelledby={`machine-${machine.name}`} className="machines__card">
