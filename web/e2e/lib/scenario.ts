@@ -7,6 +7,7 @@ export type Scenario =
   | 'down'
   | 'nogrant'
   | 'refused'
+  | 'ownaddress'
   | 'flaky'
   | 'contract'
   | 'broken'

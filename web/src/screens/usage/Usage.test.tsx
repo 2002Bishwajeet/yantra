@@ -159,6 +159,28 @@ describe('/usage when a read is refused', () => {
   })
 })
 
+const OWN =
+  "a request from this machine's own address may not act, because any account here could have sent it. From this machine, send it on the socket: curl --unix-socket /run/yantra.sock http://yantra/…. Through HTTPS, point the proxy at the socket: tailscale serve --bg --https=8443 unix:/run/yantra.sock"
+const PROXY = "The proxy in front of Yantra sends from this machine's own address, so the daemon cannot tell who is calling."
+
+describe('/usage when the proxy hides who is calling', () => {
+  it('says it once, above the boards, and repeats it under no workspace', async () => {
+    mount('desktop', '/usage', refusing(403, OWN))
+    fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
+    const alert = await screen.findByRole('alert', {}, { timeout: 2000 })
+    expect(within(alert).getByRole('heading', { name: 'The proxy hides who is calling' })).toBeTruthy()
+    expect(alert.textContent).toContain(PROXY)
+    expect(alert.textContent).toContain('10 workspaces held back')
+    expect(alert.textContent).toContain(OWN)
+    expect(screen.getAllByText(PROXY)).toHaveLength(1)
+    expect(document.querySelectorAll('.usage__reason')).toHaveLength(0)
+    expect(screen.queryByText(/not on a node/)).toBeNull()
+    const columns = document.querySelector('.usage__columns')!
+    expect(alert.compareDocumentPosition(columns) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(card('By workspace').getByText('Nothing was counted')).toBeTruthy()
+  })
+})
+
 describe('/usage on an empty fleet', () => {
   it('says there is no spend yet', async () => {
     mount('desktop', '/usage', scenario('empty'))

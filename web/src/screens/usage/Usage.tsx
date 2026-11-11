@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { on } from '@/lib/time'
+import { isOwnAddress, PROXY_HEADLINE, PROXY_SENTENCE } from '@/api/errors'
 import { loaded, useWorkspaces } from '@/api/hooks'
 import { daemonCouldNotRead } from '@/work'
 import { Button } from '@/m3/button/Button'
@@ -151,12 +152,35 @@ function Refusals(props: { rows: Row[] }) {
       {said.map((row) => (
         <li key={row.workspace.name}>
           <State size="small" state={row.read === 'nothing' ? 'idle' : 'failed'}>
-            {row.workspace.name}
+            <span className="usage__who" title={row.workspace.name}>{row.workspace.name}</span>
           </State>
           <Mono className="usage__reason m3-wrap">{row.said}</Mono>
         </li>
       ))}
     </ul>
+  )
+}
+
+type Refused = Extract<Row, { read: 'refused' }>
+const ownAddress = (row: Row): row is Refused => row.read === 'refused' && isOwnAddress(row.status, row.said)
+
+/** Every workspace behind the one proxy gets the same refusal, so it is said once, above the boards. */
+function ProxyRefusal(props: { held: Refused[] }) {
+  const { held } = props
+  const error = {
+    kind: 'refused',
+    said: held[0]!.said,
+    retryable: false,
+    headline: PROXY_HEADLINE,
+    describe: () => PROXY_SENTENCE,
+  }
+  return (
+    <ErrorSurface.Card
+      error={error}
+      eyebrow="Usage"
+      meta={`${held.length} workspace${held.length === 1 ? '' : 's'} held back`}
+      title={PROXY_HEADLINE}
+    />
   )
 }
 
@@ -180,15 +204,18 @@ function Read(props: { fanned: Fanned; factor: FormFactor; read: () => void }) {
       </Card>
     )
   }
-  const table = lines(fanned.rows)
+  const held = fanned.rows.filter(ownAddress)
+  const rows = fanned.rows.filter((row) => !ownAddress(row))
+  const table = lines(rows)
   return (
     <>
+      {held.length > 0 ? <ProxyRefusal held={held} /> : null}
       <div className="usage__columns">
         <ErrorBoundary eyebrow="Usage" title="By workspace could not be drawn">
-          <ByWorkspace rows={fanned.rows} />
+          <ByWorkspace rows={rows} />
         </ErrorBoundary>
         <ErrorBoundary eyebrow="Usage" title="By model could not be drawn">
-          <ByModel rows={fanned.rows} />
+          <ByModel rows={rows} />
         </ErrorBoundary>
       </div>
       <ErrorBoundary eyebrow="Usage" title="The sessions table could not be drawn">

@@ -7,6 +7,24 @@ import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/tes
 
 const card = (page: Page, name: string) => page.getByRole('region', { name })
 
+/** Y-728: no text box on the page sits on another, so a State name never crowds a wrapped reason. */
+async function expectNoTextOverlaps(page: Page) {
+  const boxes = await page
+    .locator('.usage__who, .usage__reason, .usage__name, .usage__where, .m3-error__title, .m3-error__sentence')
+    .evaluateAll((all) =>
+      all.map((el) => {
+        const r = el.getBoundingClientRect()
+        return { x: r.x, y: r.y, w: r.width, h: r.height }
+      }),
+    )
+  for (const [i, a] of boxes.entries()) {
+    for (const b of boxes.slice(i + 1)) {
+      const apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y
+      expect(apart).toBe(true)
+    }
+  }
+}
+
 test.describe('usage on a busy fleet', () => {
   test.beforeEach(async ({ page }) => {
     await scenario(page, 'busy')
@@ -156,6 +174,26 @@ test.describe('usage when a read is refused', () => {
     await expect(
       workspaces.getByText(/node biswas-iphone is on this tailnet but is not yours/).first(),
     ).toBeVisible()
+    await expectNoTextOverlaps(page)
+    await axe(page)
+  })
+})
+
+test.describe('usage behind a proxy that hides who is calling', () => {
+  test('says it once, above the boards', async ({ page }) => {
+    await scenario(page, 'ownaddress')
+    await page.goto('/usage')
+    await page.getByRole('button', { name: 'Read spend' }).click()
+    const sentence = page.locator('.m3-error__sentence', { hasText: "The proxy in front of Yantra sends from this machine's own address" })
+    await expect(sentence).toHaveCount(1)
+    await expect(page.getByRole('heading', { name: 'The proxy hides who is calling' })).toBeVisible()
+    await expect(page.getByText(/not on a node/)).toHaveCount(0)
+    await expect(page.locator('.usage__reason')).toHaveCount(0)
+
+    const said = (await sentence.boundingBox())!
+    const boards = (await page.locator('.usage__columns').boundingBox())!
+    expect(said.y + said.height).toBeLessThanOrEqual(boards.y)
+    await expectNoTextOverlaps(page)
     await axe(page)
   })
 })

@@ -15,6 +15,8 @@ export type Scenario = Record<string, Envelope> & {
   status: Record<string, Envelope>
   refuse?: { status: number; text: string }
   install?: { status: number; text: string }
+  /** A GET the daemon refuses, by path. */
+  refuseReads?: Record<string, { status: number; text: string }>
   /** What `POST …/readiness` answers for a machine the sweep has not reached. */
   asked?: Record<string, unknown>
 }
@@ -38,6 +40,8 @@ const ok = (data: unknown) => ({ looked: 'ok', age_seconds: 0, data })
 
 function answer(state: Scenario, method: string, path: string): [number, unknown] {
   if (method !== 'GET' && state.refuse) return [state.refuse.status, state.refuse.text]
+  const refusedRead = state.refuseReads?.[path]
+  if (refusedRead) return [refusedRead.status, refusedRead.text]
   const status = /^\/api\/workspaces\/([^/]+)\/status$/.exec(path)
   if (status) return state.status[status[1]!] ? [200, state.status[status[1]!]] : [404, 'no']
   const readiness = /^\/api\/machines\/([^/]+)\/readiness$/.exec(path)

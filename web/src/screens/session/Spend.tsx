@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Link } from '@tanstack/react-router'
 import { RefreshCw } from 'lucide-react'
 import type { Counts, Spend as Read, Workspace } from '@/api'
+import { isOwnAddress, PROXY_HEADLINE } from '@/api/errors'
 import { type Asked, refusal } from '@/lib/spend'
 import { at, on } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -214,7 +215,7 @@ export function Spend(props: SpendProps) {
                 {workspace.machine}
               </Button>
             }
-            error={{ kind: 'refused', said: asked.said, retryable: true, describe: () => refusal(asked.status) }}
+            error={{ kind: 'refused', said: asked.said, retryable: true, describe: () => refusal(asked.status, asked.said), headline: isOwnAddress(asked.status, asked.said) ? PROXY_HEADLINE : undefined }}
             eyebrow={`on ${workspace.machine}`}
             reset={onAsk}
             title="The spend could not be read"

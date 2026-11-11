@@ -10,6 +10,18 @@ import { ErrorSurface } from './ErrorSurface'
 
 const network = new ApiError('network', 'fetch failed')
 
+describe('ErrorSurface headline', () => {
+  it('draws the error’s own headline, and the caller’s title when it has none', () => {
+    const own = new ApiError('refused', "a request from this machine's own address may not act", { status: 403 })
+    const { unmount } = render(<ErrorSurface error={own} title="Events could not be read" />)
+    expect(screen.getByRole('heading', { name: 'The proxy hides who is calling' })).toBeTruthy()
+    expect(screen.queryByText('Events could not be read')).toBeNull()
+    unmount()
+    render(<ErrorSurface error={new ApiError('refused', 'node x is not yours', { status: 403 })} title="Events could not be read" />)
+    expect(screen.getByRole('heading', { name: 'Events could not be read' })).toBeTruthy()
+  })
+})
+
 describe('ErrorSurface', () => {
   it('draws one cause and one action, and keeps the raw words behind Details', () => {
     const reset = vi.fn()

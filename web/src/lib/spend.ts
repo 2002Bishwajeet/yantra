@@ -1,4 +1,5 @@
 import type { Spend, Workspace } from '@/api'
+import { isOwnAddress, PROXY_SENTENCE } from '@/api/errors'
 
 /** What one ask produced, and nothing before the first one. `at` is when the
  *  answer arrived here, since the route stamps no age of its own. */
@@ -22,7 +23,8 @@ const refusals: Record<number, string> = {
   503: 'The machine could not be asked, so nothing was counted.',
 }
 
-export function refusal(status: number | null): string {
+export function refusal(status: number | null, said = ''): string {
+  if (isOwnAddress(status, said)) return PROXY_SENTENCE
   if (status === null) return 'The daemon did not answer.'
   return refusals[status] ?? 'The read failed.'
 }
