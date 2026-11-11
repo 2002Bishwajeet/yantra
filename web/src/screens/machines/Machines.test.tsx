@@ -47,7 +47,7 @@ describe('/machines on the busy fleet', () => {
     expect(short.getByText('missing')).toBeTruthy()
     // The check name table (`lib/checks.ts`), never a raw id (D7 §3.5).
     expect(short.getByText('claude')).toBeTruthy()
-    expect(short.getByText('no claude on PATH there')).toBeTruthy()
+    expect(short.getByText('not found')).toBeTruthy()
     expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeTruthy()
     // `git` is not in pi-5's report at all, so it counts as missing too (D7 §3.3).
     expect(short.getByText('2 missing')).toBeTruthy()

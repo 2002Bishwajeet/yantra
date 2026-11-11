@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import type { Check, Machine } from '@/api'
 import { useAbout, useNotifications } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { nameOf, reachableFailure, reachWords } from '@/lib/checks'
+import { causeOf, nameOf, reachableFailure, reachWords } from '@/lib/checks'
 import { joinCommand, joinUrl } from '@/lib/join'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -22,8 +22,8 @@ import { CARD_CHECKS, checkNamed, factsOf, markOf, rowWord, summary, tally } fro
 
 /** `pressable` is false on a machine that is off: D7 §3.3 gives that card
  *  nothing to press, and its machine page holds the raw text. */
-function CheckLine(props: { check: Check; machine: string; pressable: boolean }) {
-  const { check, machine, pressable } = props
+function CheckLine(props: { check: Check; pressable: boolean }) {
+  const { check, pressable } = props
   const failed = check.check === 'reachable' && check.state === 'absent'
   return (
     <li className="machines__check">
@@ -33,8 +33,8 @@ function CheckLine(props: { check: Check; machine: string; pressable: boolean })
       <Text className="machines__word" scale="label-small">
         {rowWord(check)}
       </Text>
-      <Text className="machines__detail m3-wrap" scale="body-small" tone="variant">
-        {failed ? reachWords(reachableFailure(check.detail), machine).cause : check.detail.replaceAll('`', '')}
+      <Text className="machines__detail" scale="body-small" tone="variant">
+        {causeOf(check)}
       </Text>
       {failed && pressable ? <SshSaid detail={check.detail} /> : null}
     </li>
@@ -201,7 +201,6 @@ export function MachineCard(props: MachineCardProps) {
                 <CheckLine
                   check={check}
                   key={check.check}
-                  machine={machine.name}
                   pressable={verdict.kind !== 'asleep' && verdict.kind !== 'expired'}
                 />
               ))}
@@ -209,7 +208,7 @@ export function MachineCard(props: MachineCardProps) {
           )}
           {sudo?.state === 'absent' ? (
             <Text render={<p role="note" />} className="machines__about" scale="body-small" tone="error">
-              Agents here can use sudo: {sudo.detail}. Join a separate account without sudo, named karigar.
+              Agents here can use sudo
             </Text>
           ) : null}
           {verdict.kind === 'unasked' || reach ? null : (

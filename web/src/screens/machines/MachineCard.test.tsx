@@ -105,9 +105,9 @@ describe("the joined account and sudo (Y-628)", () => {
   it("warns, in words and not on hover, when agents can use sudo", async () => {
     renderCard(aMachine(), withSudo("absent", "the account is in the wheel group"));
     const note = await screen.findByRole("note");
-    expect(note.textContent).toBe(
-      "Agents here can use sudo: the account is in the wheel group. Join a separate account without sudo, named karigar.",
-    );
+    expect(note.textContent).toBe("Agents here can use sudo");
+    expect(note.getAttribute("role")).toBe("note");
+    expect(note.textContent).not.toContain("wheel");
   });
 
   it("says nothing when the account cannot use sudo", async () => {
@@ -176,17 +176,18 @@ describe("a ready machine with gaps (Y-714)", () => {
     expect(screen.queryByText("tmux")).toBeNull();
     expect(screen.queryByText("terminfo")).toBeNull();
     expect(screen.queryByText("ok")).toBeNull();
-    expect(screen.getByText("no hooks file")).toBeTruthy();
+    expect(screen.getByText("hook command not on PATH")).toBeTruthy();
   });
 
   it("shows the sudo gap once, in its note, and keeps the other gaps as lines", async () => {
     renderCard(aMachine(), checks);
     await screen.findByText(/to fix/);
-    const said = screen.getAllByText(/wheel group/);
+    expect(screen.queryByText(/wheel group/)).toBeNull();
+    const said = screen.getAllByText("Agents here can use sudo");
     expect(said).toHaveLength(1);
     expect(said[0].getAttribute("role")).toBe("note");
     expect(screen.queryByText("The joined account can use sudo")).toBeNull();
-    expect(screen.getByText("no hooks file")).toBeTruthy();
+    expect(screen.getByText("hook command not on PATH")).toBeTruthy();
     const filled = Array.from(document.body.querySelectorAll("button, a")).filter((one) =>
       /filled/.test(one.className),
     );
@@ -195,7 +196,10 @@ describe("a ready machine with gaps (Y-714)", () => {
 
   it("prints no backticks", async () => {
     renderCard(aMachine(), [...all.filter((one) => one.check !== "terminfo"), { check: "terminfo", state: "absent", detail: "that machine lacks `xterm-256color`" }]);
-    await screen.findByText("that machine lacks xterm-256color");
+    await screen.findByText("lacks xterm-256color");
     expect(document.body.textContent).not.toContain("`");
+    // Y-733: a failing row is its short cause, with no daemon paragraph and no Fix on the card.
+    expect(document.body.textContent).not.toContain("that machine lacks");
+    expect(screen.queryByRole("button", { name: /^Fix/ })).toBeNull();
   });
 });

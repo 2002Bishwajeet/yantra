@@ -5,7 +5,7 @@ import { fromReading, type Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useAbout } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { fixOf, nameOf, olderAgent, tookOf, withoutSignIn } from '@/lib/checks'
+import { causeOf, fixOf, isNightly, nameOf, olderAgent, tookOf, withoutMarkdown, withoutSignIn } from '@/lib/checks'
 import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -28,48 +28,65 @@ import type { Verdicted } from './useVerdict'
 import { sorted, startable, titleOf, type Verdict } from './verdict'
 import './Readiness.css'
 
-function CheckLine(props: { check: Check; machine: string; fix?: boolean }) {
+function CheckLine(props: { check: Check; machine: string; fix?: boolean; nightlyMac?: boolean }) {
   const { check, machine } = props
   const showFix = props.fix ?? true
   const fix = showFix && check.state === 'absent' ? fixOf(check, machine) : null
-  return (
-    <li className="machine__check">
+  const line = (
+    <div className="machine__line">
       <State size="small" state={rowMark(check)}>
         {nameOf(check.check)}
       </State>
       <Text className="machine__word" scale="label-small">
         {rowWord(check)}
       </Text>
-      {check.took_ms === undefined ? null : (
-        <Text className="machine__detail" scale="body-small" tone="variant">
-          {tookOf(check.took_ms)}
-        </Text>
-      )}
-      {fix?.by === 'command' ? (
+      <Text className="machine__cause" scale="body-small" tone="variant">
+        {causeOf(check)}
+      </Text>
+    </div>
+  )
+  if (!fix) return <li className="machine__check">{line}</li>
+  const where =
+    fix.by !== 'command'
+      ? null
+      : olderAgent(check) && props.nightlyMac
+        ? 'Nightly has no Mac build; this installs the latest stable.'
+        : fix.where === 'appliance'
+          ? 'Run this on the appliance:'
+          : fix.where === 'terminal'
+            ? `Open Terminal on ${machine} and run:`
+            : `Run this on ${machine}:`
+  // An older agent's words only repeat the command in the fix.
+  const said = check.detail && !olderAgent(check) && !optionalAbsent(check) ? withoutMarkdown(withoutSignIn(check.detail)) : null
+  return (
+    <li className="machine__check">
+      <Disclosure action="Fix" className="machine__fixrow" summary={line}>
         <div className="machine__fix">
           <Text scale="body-small" tone="variant">
-            {fix.where === 'appliance'
-              ? 'Run this on the appliance:'
-              : fix.where === 'terminal'
-                ? `Open Terminal on ${machine} and run:`
-                : `Run this on ${machine}:`}
+            {fix.by === 'hand' ? fix.words : where}
           </Text>
-          <Copyable text={fix.command} what={`the command that fixes ${nameOf(check.check)}`} />
+          {fix.by === 'command' ? <Copyable line text={fix.command} what={`the command that fixes ${nameOf(check.check)}`} /> : null}
+          {said ? (
+            <Text className="m3-wrap" render={<div />} scale="body-small">
+              {said}
+            </Text>
+          ) : null}
+          {check.took_ms === undefined ? null : (
+            <Text className="machine__detail" scale="body-small" tone="variant">
+              {tookOf(check.took_ms)}
+            </Text>
+          )}
         </div>
-      ) : fix?.by === 'hand' ? (
-        <Text className="machine__fix" scale="body-small" tone="variant">
-          {fix.words}
-        </Text>
-      ) : null}
+      </Disclosure>
     </li>
   )
 }
 
-function Checks(props: { checks: Check[]; machine: string; fix?: boolean }) {
+function Checks(props: { checks: Check[]; machine: string; fix?: boolean; nightlyMac?: boolean }) {
   return (
     <ul className="machine__checks">
       {sorted(props.checks).map((check) => (
-        <CheckLine check={check} fix={props.fix} key={check.check} machine={props.machine} />
+        <CheckLine check={check} fix={props.fix} key={check.check} machine={props.machine} nightlyMac={props.nightlyMac} />
       ))}
     </ul>
   )
@@ -123,7 +140,7 @@ function Commands(props: {
       <ul className="readiness__commands">
         {result.commands.map((command, index) => (
           <li className="readiness__command" key={command}>
-            <Copyable text={command} what={`the command for ${machine}`} />
+            <Copyable line text={command} what={`the command for ${machine}`} />
             {needsSudo(command) ? (
               <Button data-sudo-opener="" onClick={() => onTerminal({ index, command, at: result.at })} variant={index === firstSudo ? emphasis : 'tonal'}>
                 Open a terminal
@@ -200,6 +217,7 @@ export function ReadinessCard(props: {
   const already = install.error?.status === 409
   const refused = install.error && !already ? install.error : null
   const join = joinUrl(location, about.data)
+  const nightlyMac = state.os === 'macOS' && isNightly(about.data?.version)
   // One filled action: New session when a session can start, else Check again on a manual machine.
   const sessionFirst = verdict.kind === 'ready' || (verdict.kind === 'manual' && verdict.ready)
   const checkFirst = verdict.kind === 'manual' && !verdict.ready
@@ -278,9 +296,7 @@ export function ReadinessCard(props: {
       {verdict.kind === 'sudo' ? (
         <>
           <Text render={<p />} className="readiness__said" scale="body-small" tone="variant">
-            sudo on {name} asks for a password, so Yantra stopped before{' '}
-            {verdict.missing.includes(nameOf('mic')) ? 'a step that needs root' : 'the package step'}. Run this on{' '}
-            {name}, then Install again for anything still missing.
+            sudo on {name} wants a password; run this there.
           </Text>
           <Commands emphasis="filled" machine={name} onTerminal={setStep} result={verdict.result} />
         </>
@@ -315,6 +331,7 @@ export function ReadinessCard(props: {
         join={join}
         lastSeen={lastSeen}
         micFix={state.os !== 'macOS'}
+        nightlyMac={nightlyMac}
         micAction={inside ? <>{micBox}{installButton}</> : null}
         name={name}
         readiness={readiness}
@@ -383,10 +400,11 @@ function Body(props: {
   lastSeen: string | null
   join: string | null
   micFix: boolean
+  nightlyMac: boolean
   micAction: ReactNode
   retry: () => void
 }) {
-  const { verdict, name, checks, readiness, lastSeen, join, micFix, micAction, retry } = props
+  const { verdict, name, checks, readiness, lastSeen, join, micFix, nightlyMac, micAction, retry } = props
   const failing = checks.filter((one) => one.state !== 'present')
   switch (verdict.kind) {
     case 'pending':
@@ -423,7 +441,7 @@ function Body(props: {
     case 'unreachable':
       return (
         <ReachFailure detail={verdict.detail} join={join} kind={verdict.kind} name={name}>
-          {failing.length > 0 ? <Checks checks={failing} machine={name} /> : null}
+          {failing.length > 0 ? <Checks checks={failing} machine={name} nightlyMac={nightlyMac} /> : null}
         </ReachFailure>
       )
     case 'ready':
@@ -438,7 +456,7 @@ function Body(props: {
       const rest = checks.filter((one) => one !== first && one.state !== 'present' && !optionalAbsent(one))
       return (
         <>
-          {first ? <Checks checks={[first]} machine={name} /> : null}
+          {first ? <Checks checks={[first]} machine={name} nightlyMac={nightlyMac} /> : null}
           {rest.length > 0 ? <Checks checks={rest} fix={false} machine={name} /> : null}
           <Optional action={micAction} checks={checks} fix={micFix} machine={name} />
           <ProbeSaid checks={checks} />

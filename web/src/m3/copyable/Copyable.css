@@ -17,6 +17,16 @@
   user-select: all;
 }
 
+/* A long command is scrolled, never cut or wrapped (Y-733). */
+.m3-copyable__text--line {
+  white-space: pre;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
 .m3-copyable__hint {
   display: block;
   margin-top: 4px;

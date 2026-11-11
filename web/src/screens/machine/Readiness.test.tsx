@@ -71,7 +71,7 @@ const ABOUT = {
 
 /** Every call answered by path, as `yantrad` would. `after` is what a
  *  re-check finds. */
-function daemon(install: [number, string?] = [202], after: Check[] = checks()) {
+function daemon(install: [number, string?] = [202], after: Check[] = checks(), about: typeof ABOUT = ABOUT) {
   const asked: string[] = []
   vi.stubGlobal(
     'fetch',
@@ -79,7 +79,7 @@ function daemon(install: [number, string?] = [202], after: Check[] = checks()) {
       asked.push(`${init?.method ?? 'GET'} ${path}`)
       if (path.split('?')[0]!.endsWith('/install')) return Promise.resolve(answer(install[0], install[1]))
       if (path.endsWith('/readiness')) return Promise.resolve(answer(200, report(after)))
-      if (path === '/api/about') return Promise.resolve(answer(200, ABOUT))
+      if (path === '/api/about') return Promise.resolve(answer(200, about))
       return Promise.resolve(answer(200, ring([earlier])))
     }),
   )
@@ -110,6 +110,8 @@ const showOptional = () => fireEvent.click(card().getByRole('button', { name: /^
 
 /** The folded checks; the button named "What ssh said" is the other disclosure. */
 const openChecks = () => fireEvent.click(card().getByRole('button', { name: /^Show (?!What ssh said)/ }))
+/** The first closed Fix row; its command and words are mounted only once it opens. */
+const pressFix = () => fireEvent.click(card().getAllByRole('button', { name: /^Fix/ })[0]!)
 const openSaid = () => fireEvent.click(card().getByRole('button', { name: /^Show What ssh said/ }))
 
 describe('the counts on a machine with optional checks absent', () => {
@@ -227,8 +229,9 @@ describe('the Readiness card', () => {
     act(() => client.setQueryData(keys.notifications(), ring([linger, earlier])))
 
     await card().findByRole('heading', { name: 'microphone needs your password' })
-    expect(card().getByText(/stopped before a step that needs root/)).toBeTruthy()
-    expect(card().getByText('sudo loginctl enable-linger biswa')).toBeTruthy()
+    // Y-733: one sentence, and the command is one line that scrolls.
+    expect(card().getByText(/^sudo on pi wants a password/).textContent).toBe('sudo on pi wants a password; run this there.')
+    expect(card().getByText('sudo loginctl enable-linger biswa').classList.contains('m3-copyable__text--line')).toBe(true)
     expect(card().getByRole('button', { name: 'Open a terminal' })).toBeTruthy()
   })
 
@@ -508,6 +511,7 @@ describe('the Readiness card', () => {
     daemon()
     const timed = checks(['tmux']).map((one) => (one.check === 'tmux' ? { ...one, took_ms: 84 } : one))
     await draw(report(timed))
+    pressFix()
     expect(card().getByText('84 ms')).toBeTruthy()
     expect(document.querySelectorAll('.machine__detail')).toHaveLength(1)
   })
@@ -516,6 +520,8 @@ describe('the Readiness card', () => {
     daemon()
     await draw(report(checks(['provider-auth'])))
     expect(card().getByRole('heading', { name: 'gh is not signed in' })).toBeTruthy()
+    expect(card().queryByText('gh auth login')).toBeNull()
+    pressFix()
     expect(card().getByText('gh auth login')).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
@@ -530,6 +536,7 @@ describe('the Readiness card', () => {
     await draw(report(checks(['login-session', 'provider-auth'], both)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'No tmux server from a login on pi' })).toBeTruthy()
     // The first check carries the fix; the second is listed without one (Y-714).
+    pressFix()
     expect(card().getAllByText('Open Terminal on pi and run:')).toHaveLength(1)
     expect(card().getAllByText('tmux -L yantra new-session -d')).toHaveLength(1)
     expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/log in|sign in/i)
@@ -548,6 +555,8 @@ describe('the Readiness card', () => {
     expect(card().getByText('older · v0.3.2')).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing/)
     expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
+    expect(card().queryByText(command)).toBeNull()
+    pressFix()
     expect(card().getByText('Run this on pi:')).toBeTruthy()
     expect(card().getByText(command)).toBeTruthy()
     expect(card().getByRole('button', { name: 'Copy the command that fixes usage reports' })).toBeTruthy()
@@ -568,6 +577,7 @@ describe('the Readiness card', () => {
     daemon()
     await draw(report(checks(['folder-access'])), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'macOS blocks Desktop, Documents and Downloads' })).toBeTruthy()
+    pressFix()
     expect(card().getByText(/Allow full disk access for remote users\. Every ssh login to pi, agents included/)).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
@@ -581,8 +591,8 @@ describe('the Readiness card', () => {
     await draw(report(checks(['hooks'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'a hook cannot run' })).toBeTruthy()
     expect(card().queryByText(/lacks `node`/)).toBeNull()
-    openSaid()
-    expect(card().getByText(/lacks `node` \(SessionStart in claude-mem@thedotmack\)/)).toBeTruthy()
+    pressFix()
+    expect(card().getAllByText(/lacks node \(SessionStart in claude-mem@thedotmack\)/)).toHaveLength(1)
     expect(card().getByText(/put its directory on PATH in your login shell/)).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
@@ -647,6 +657,7 @@ describe('the checks on a phone-sized card', () => {
   it('shows the first absent check with its fix, then the others without one', async () => {
     daemon()
     await draw(report(checks(['provider-auth', 'hooks'])))
+    pressFix()
     expect(document.querySelectorAll('.machine__check')).toHaveLength(2)
     expect(card().queryByText('git')).toBeNull()
     expect(card().getAllByText('gh auth login')).toHaveLength(1)
@@ -712,6 +723,7 @@ describe('a ready machine', () => {
     const open = card().getByRole('button', { name: /^Show Optional: microphone/ })
     expect(open.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(open)
+    pressFix()
     expect(card().getByText(/Run Install with Microphone ticked/)).toBeTruthy()
     expect(card().getByRole('checkbox', { name: 'Microphone' })).toBeTruthy()
     expect(card().getByRole('button', { name: 'Install' })).toBeTruthy()
@@ -766,6 +778,7 @@ describe('the one filled action', () => {
     daemon()
     await draw(report(checks(['provider-auth'])))
     expect(filled().map((one) => one.textContent)).toEqual(['New session'])
+    pressFix()
     expect(fixes()).toHaveLength(1)
   })
 
@@ -776,6 +789,7 @@ describe('the one filled action', () => {
     await draw(report(unknown))
     expect(filled().map((one) => one.textContent)).toEqual(['Check again'])
     expect(card().getByRole('link', { name: 'New session' }).getAttribute('data-variant')).toBe('tonal')
+    pressFix()
     expect(fixes()).toHaveLength(1)
   })
 
@@ -784,5 +798,52 @@ describe('the one filled action', () => {
     await draw(report(checks(['reachable'], { reachable: 'No route to host' })))
     openSaid()
     expect(document.querySelectorAll('.machine__check')).toHaveLength(1)
+  })
+})
+
+describe('one short line per problem (Y-733)', () => {
+  const rows = () => [...document.querySelectorAll('.machine__check')] as HTMLElement[]
+
+  it('draws a failing row as its cause, with no backtick and no daemon paragraph, and the fix closed', async () => {
+    daemon()
+    const said = { tmux: 'tmux is not on PATH or in any of: $HOME/.local/bin. Install `tmux` there' }
+    await draw(report(checks(['tmux'], said)))
+    const row = rows()[0]!
+    expect(row.querySelector('.machine__cause')!.textContent).toBe('not found')
+    expect(row.textContent).not.toMatch(/`|PATH or in any/)
+    const fix = within(row).getByRole('button', { name: /^Fix/ })
+    expect(fix.getAttribute('aria-expanded')).toBe('false')
+    expect(card().queryByRole('button', { name: /^Copy/ })).toBeNull()
+    fireEvent.click(fix)
+    expect(fix.getAttribute('aria-expanded')).toBe('true')
+    const opened = within(row).getByText(/tmux is not on PATH or in any of/)
+    expect(opened.textContent).toBe('tmux is not on PATH or in any of: $HOME/.local/bin. Install tmux there')
+  })
+
+  it('shows Copy on a command only after Fix, and keeps the command on one line', async () => {
+    daemon()
+    await draw(report(checks(['provider-auth'])))
+    expect(card().queryByRole('button', { name: /^Copy/ })).toBeNull()
+    pressFix()
+    expect(card().getByRole('button', { name: 'Copy the command that fixes gh signed in' })).toBeTruthy()
+    expect(card().getByText('gh auth login').classList.contains('m3-copyable__text--line')).toBe(true)
+  })
+
+  it('gives a row that carries no fix no Fix button', async () => {
+    daemon()
+    await draw(report(checks(['provider-auth', 'hooks'])))
+    expect(rows().filter((row) => within(row).queryByRole('button', { name: /^Fix/ }))).toHaveLength(1)
+  })
+
+  it('tells a Mac under a nightly daemon that nightly has no Mac build', async () => {
+    const nightly = { ...ABOUT, version: '0.11.1-nightly.20261111000000.abc1234' }
+    daemon([202], checks(), nightly)
+    const command = 'curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash'
+    const said = { heartbeat: `yantra-agent here is v0.3.2 and yantrad is v${nightly.version}. Update it on pi: \`${command}\`` }
+    await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
+    await waitFor(() => expect(card().getByRole('button', { name: /^Fix/ })).toBeTruthy())
+    pressFix()
+    await waitFor(() => expect(card().getByText('Nightly has no Mac build; this installs the latest stable.')).toBeTruthy())
+    expect(card().getByText(command)).toBeTruthy()
   })
 })
