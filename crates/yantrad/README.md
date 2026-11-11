@@ -196,8 +196,12 @@ Every answer names which of three states it is in, so an empty list is never mis
 ```
 
 Run it with `yantrad`. It listens on **port 7717**, on the addresses Tailscale says this machine
-holds, and refuses to start if it cannot learn them. There is no flag to change either — with no
-authentication (Q6, personal-first), where it listens is the whole security model.
+holds, and refuses to start if it cannot learn them. There is no flag to change either: where it
+listens is the first boundary. The second is the owner's passkey
+([ADR-0044](../../docs/adr/0044-a-write-needs-the-owners-passkey.md)). A browser signs in once per
+device and every `/api` request then carries a session cookie; with none it gets a **401**. On the
+hub, `yantra passkey code` makes the code that enrols a device, and `yantra passkey list`,
+`yantra passkey remove` and `yantra session revoke` manage them over the socket.
 
 `YANTRA_WEB` points it at a directory of built assets. Unset it and the API serves alone and `/`
 says how; point it at a directory with no `index.html` and it refuses to start rather than answering

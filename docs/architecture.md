@@ -152,7 +152,7 @@ flowchart TB
     subgraph tailnet["the tailnet — WireGuard, the only perimeter"]
         subgraph host["your machine"]
             cli["yantra"]
-            daemon["yantrad<br/>binds tailnet addresses only<br/>reads open · writes and terminal owner-gated"]
+            daemon["yantrad<br/>binds tailnet addresses only<br/>every request needs the owner's passkey"]
         end
         subgraph managed["a managed machine"]
             sshd["sshd or Tailscale SSH"]
@@ -175,8 +175,8 @@ flowchart TB
 | Boundary | Mechanism | Verified |
 | --- | --- | --- |
 | Nothing is publicly reachable | `yantrad` binds only the addresses Tailscale reports for **this** machine, and **refuses to start** if it cannot learn them | ✅ `ss -ltnp` shows the tailnet addresses and no `0.0.0.0`; `curl 127.0.0.1:7717` is refused |
-| No auth on the **read** API | Deliberate. Q6 settled that Yantra is personal-first, so for reads the bind address **is** the security model (R-22) | ⚠️ a design decision, not a control — see below |
-| Anything that **acts** | `up`, `down`, `resume` and the terminal socket resolve the caller with `tailscale whois` and refuse unless it is the tailnet's owner ([ADR-0016](adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)). The kernel proves the `serve` hop on a Unix socket, and this machine's own address is refused over TCP ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)) | ✅ tested, including a forged `X-Forwarded-For` from another account |
+| Every `/api` request, read or write | A browser holds a session cookie from a passkey sign-in with user verification, and no cookie is a **401** ([ADR-0044](adr/0044-a-write-needs-the-owners-passkey.md)). A write whose `Origin` is not the dashboard's is a **403**. On the socket the kernel names the account instead, and `yantra` and its group need no cookie. A Chat turn's agent carries a token that reaches only its own workspace's room and task routes | ✅ tested against a real `yantrad` in podman with a soft authenticator, and in the browser with a virtual one |
+| Who the owner is | `tailscale whois` names the caller's node and refuses one that is not the tailnet's owner ([ADR-0016](adr/0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)). The kernel proves the `serve` hop on a Unix socket, and this machine's own address is refused over TCP ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)) | ✅ tested, including a forged `X-Forwarded-For` from another account |
 | Remote command injection | Every command crosses as **base64 decoded by `/bin/sh` on the far side**, so a hostile `repo` path stays an argument. POSIX quoting was tested and breaks on an embedded newline (I-26) | ✅ tested against a real `/bin/sh`, with a hostile path |
 | Host identity | `UserKnownHostsFile` in Yantra's own state dir, `StrictHostKeyChecking=accept-new` | ✅ |
 | Credentials on disk | Yantra stores **none for the machines it reaches**, and two of its own — the last row names both. It never asks for a password: `BatchMode=yes` means a machine that wants one fails instead of prompting | ✅ |
@@ -186,12 +186,12 @@ flowchart TB
 
 ### The two things to understand before trusting this
 
-**`yantrad` has no authentication, on purpose.** Anyone who can reach your tailnet on port 7717 can
-read everything it exposes — machine names, workspace names, repo paths. That is an accepted
-consequence of Q6 (personal-first), and it is why the bind address is treated as a security control
-rather than a convenience: there is **no `--bind` flag and no `--port` flag**, because a flag that can
-expose the API is a flag someone eventually passes. If you share a tailnet with people you would not
-give a shell to, do not run the daemon yet.
+**`yantrad` opens only for the owner's passkey.** Until ADR-0044 anyone on your tailnet could read
+machine names, workspace names and repo paths, and an agent account on any of your machines shared
+your address. Now a device signs in once, with a passkey and user verification, and holds a cookie
+for 30 days; the hub keeps public keys and token hashes in `~/.config/yantra/passkeys.toml`, `0600`,
+and never a token. The bind address is still the first boundary: there is **no `--bind` flag and no
+`--port` flag**, because a flag that can expose the API is a flag someone eventually passes.
 
 **A workspace file is a code-execution path.** `machine` and `repo` come from a file on disk and end
 up in a remote shell. They are quoted as such, with tests that assert the exact string *and* prove the

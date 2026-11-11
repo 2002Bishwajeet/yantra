@@ -18,12 +18,22 @@ paragraph: it describes M6 onward. **Today the CLI does not go through the daemo
 records what would justify changing that — a client not on the operator's machine, state that must
 not be derived twice, or a placement decision the CLI must also see.
 
-## The bind address is the security boundary
+## The bind address is the first boundary, and a passkey is the second
 
-Q6 settled that Yantra is personal-first, so there is **no authentication**. That makes where the
-daemon listens the entire security model (R-22), and it is why `listen_on` fails closed: every branch
-that cannot prove an address belongs to this machine returns an error, because the only default
+Q6 settled that Yantra is personal-first, so the bind address was once the whole security model
+(R-22). It is still the first boundary, and it is why `listen_on` fails closed: every branch that
+cannot prove an address belongs to this machine returns an error, because the only default
 available is one that listens to the whole world.
+
+**Since [ADR-0044](../../docs/adr/0044-a-write-needs-the-owners-passkey.md) every request also needs
+the owner.** A tailnet address no longer proves it, because an agent account on any machine shares
+that address. `write::gate` sits over the whole `/api` nest and asks `presented` who called: the
+socket's peer uid (ADR-0042), a `__Host-yantra_session` cookie from a passkey sign-in, or a
+`Bearer` agent token minted for one Chat turn. No cookie is a 401; a write whose `Origin` is not the
+dashboard's is a 403; an agent token reaches only `write::agent_may`. `write::unchecked` is the
+short list that answers with neither, and a new route belongs on it only if a signed-out browser
+must reach it. `passkey.rs` keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and
+never a token.
 
 **Do not add a `--bind` flag, a `--port` flag, or a config file for either.** A flag that can expose
 the API is a flag someone eventually passes. The port is a constant with a test asserting it is one.
