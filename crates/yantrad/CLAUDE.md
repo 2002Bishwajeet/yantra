@@ -723,6 +723,17 @@ stays in RAM until `end`, capped at 60 seconds. It goes with the function on eve
 frame, a count, the text or a hotword: the TRACE test fails on any of them (§7). Errors name a status
 and never the URL, because the query holds the hotwords.
 
+**`main.rs`'s `unlogged` filter drops every record from `ureq`, `tungstenite` and `tokio_tungstenite`,
+whatever `RUST_LOG` says.** At TRACE they write each byte they send and receive, so `RUST_LOG=trace`
+would put the audio, the hotwords and the text in the journal, and a terminal's keystrokes too. The
+TRACE test installs a global subscriber with `log` bridged, because ureq logs from the blocking
+thread, and it fails without the filter. A new crate that logs a request's bytes goes in `UNLOGGED`.
+
+`a_real_clip_comes_back_as_text_through_the_route` is ignored: it sends a real clip through the route
+to a running `yantra-stt`, with the hotwords of a real workspace. Set `YANTRA_STT_URL`,
+`YANTRA_STT_CLIP` (raw 16 kHz mono s16le) and `YANTRA_STT_WORKSPACE`, then run it with
+`cargo nextest run -p yantrad --bins --run-ignored only -E 'test(a_real_clip)'`.
+
 ## The route that holds a chat
 
 `GET /api/workspaces/{name}/chat?thread=<id>&after=<cursor>` ([`chat.rs`](src/chat.rs), Y-356,

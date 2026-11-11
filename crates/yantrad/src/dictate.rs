@@ -12,7 +12,8 @@
 //! and a close. The buffer goes with the function on every path.
 //!
 //! **No audio, transcript or hotword is ever logged** (§7): the lifecycle is
-//! logged, and the reason a request failed.
+//! logged, and the reason a request failed. `main.rs`'s `unlogged` keeps ureq
+//! and tungstenite silent, because at TRACE they write every byte they carry.
 //!
 //! `GET /api/dictate/health` is §6's read, made by the daemon: the HTTPS page
 //! cannot reach the service's plain-HTTP tailnet address itself.
@@ -382,6 +383,8 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::time::timeout;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
 
     use crate::terminal::tests::{
         BINARY, Capture, LOCAL, ME, PING, TEXT, caller, connect_to, direct, frame, pong, send,
@@ -613,17 +616,50 @@ mod tests {
         );
     }
 
+    /// The row's outcome on the real fleet: a clip goes through `/api/dictate`
+    /// to the running `yantra-stt`, with the hotwords [`hotwords`] builds over
+    /// ssh from a real workspace. `YANTRA_STT_CLIP` is raw 16 kHz mono s16le.
+    #[tokio::test]
+    #[ignore = "needs yantra-stt; set YANTRA_STT_URL, YANTRA_STT_CLIP and YANTRA_STT_WORKSPACE"]
+    async fn a_real_clip_comes_back_as_text_through_the_route() {
+        let url = std::env::var("YANTRA_STT_URL").expect("YANTRA_STT_URL");
+        let clip = std::fs::read(std::env::var("YANTRA_STT_CLIP").expect("YANTRA_STT_CLIP"))
+            .expect("the clip");
+        let workspace = std::env::var("YANTRA_STT_WORKSPACE").expect("YANTRA_STT_WORKSPACE");
+
+        let words = hotwords(Some(workspace.clone()), None).await;
+        println!("{} hotwords: {words:?}", words.len());
+        assert!(!words.is_empty(), "{workspace} gave no hotwords");
+
+        let api = api(
+            Some(url),
+            Arc::new(|workspace, thread| Box::pin(hotwords(workspace, thread))),
+        );
+        let mut socket = upgraded(api, &format!("/api/dictate?workspace={workspace}")).await;
+        for chunk in clip.chunks(124) {
+            send(&mut socket, BINARY, chunk).await;
+        }
+        send(&mut socket, TEXT, b"end").await;
+        let seen = said(&mut socket).await;
+        println!("{seen:?}");
+        let text = seen[0]["text"].as_str().expect("a text, not an error");
+        assert!(!text.trim().is_empty());
+    }
+
     /// **§7.** The lifecycle is logged; the audio, the text and the hotwords never are.
     #[tokio::test]
     async fn dictation_logs_its_lifecycle_and_never_its_audio_text_or_hotwords() {
         let capture = Capture::default();
         let writer = capture.clone();
-        let subscriber = tracing_subscriber::fmt()
+        // Global, with `log` bridged, because ureq logs from the blocking thread.
+        tracing_subscriber::fmt()
             .with_ansi(false)
             .with_max_level(tracing::Level::TRACE)
             .with_writer(move || writer.clone())
-            .finish();
-        let _logging = tracing::subscriber::set_default(subscriber);
+            .finish()
+            .with(crate::unlogged())
+            .try_init()
+            .expect("no other subscriber in this process");
 
         let (url, sent) = service(StatusCode::OK, r#"{"text":"marker-of-the-text"}"#).await;
         let seen = speak(
@@ -636,6 +672,10 @@ mod tests {
             sent.lock().expect("the record")[0].0,
             b"marker-of-the-audio"
         );
+        // The control: the capture sees a thread that is not this test's.
+        tokio::task::spawn_blocking(|| tracing::trace!("a blocking thread logged"))
+            .await
+            .expect("the thread ran");
         for _ in 0..50 {
             if String::from_utf8_lossy(&capture.0.lock().expect("the log")).contains("ended") {
                 break;
@@ -652,11 +692,13 @@ mod tests {
             logged.contains("dictate for nSOME000000011CNTRL ended"),
             "{logged}"
         );
+        assert!(logged.contains("a blocking thread logged"), "{logged}");
         for marker in [
             "marker-of-the-audio",
             "marker-of-the-text",
             "markerHotword",
             "19 bytes",
+            "content-length",
         ] {
             assert!(!logged.contains(marker), "{marker} was logged: {logged}");
         }

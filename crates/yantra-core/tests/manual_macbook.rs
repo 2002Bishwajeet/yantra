@@ -188,6 +188,49 @@ async fn the_terminal_probe_tells_real_macos_apart() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Y-682 under the Mac's own sh and BSD tools: the dictation's listing script
+/// reads a real repository's index, manifests and scripts there.
+#[tokio::test]
+#[ignore = "needs the real MacBook; set YANTRA_MAC=user@host"]
+async fn the_hotword_listing_runs_on_real_macos() -> anyhow::Result<()> {
+    let dest = std::env::var("YANTRA_MAC")?;
+    let ssh = Ssh::new(Machine {
+        host: dest,
+        user: None,
+        port: None,
+        identity: Some(PathBuf::from(std::env::var("HOME")?).join(".ssh/id_yantra")),
+        state_dir: PathBuf::from("/tmp/y682"),
+    })?;
+    let repo = "/private/tmp/yantra-y682";
+    let made = ssh
+        .exec(&format!(
+            "rm -rf {repo} && mkdir -p {repo}/scripts && cd {repo} && git init -q \
+             && printf '[package]\\nname = \"hotalpha\"\\n' > Cargo.toml \
+             && printf 'lint:\\n    cargo clippy\\n' > justfile \
+             && printf 'rsync -a a b\\n' > scripts/ship.sh \
+             && git add ."
+        ))
+        .await?;
+    assert!(made.success(), "{}", String::from_utf8_lossy(&made.stderr));
+
+    let listing = yantra_core::stt::listing(&ssh, repo).await;
+    let _ = ssh.exec(&format!("rm -rf {repo}")).await;
+    let listing = listing?;
+    let mut files = listing.files.clone();
+    files.sort();
+    assert_eq!(files, ["Cargo.toml", "justfile", "scripts/ship.sh"]);
+    let read: Vec<&str> = listing.read.iter().map(|(path, _)| path.as_str()).collect();
+    assert_eq!(read, ["justfile", "Cargo.toml", "scripts/ship.sh"]);
+    let words = yantra_core::stt::hotwords(&listing, &[]);
+    for word in ["hotalpha", "scripts", "clippy", "rsync"] {
+        assert!(
+            words.iter().any(|w| w == word),
+            "{word} is not in {words:?}"
+        );
+    }
+    Ok(())
+}
+
 /// Y-619 on the real Mac: once a login session started the tmux server, both
 /// keychain checks pass. Start it first at the Mac, in Terminal:
 /// `tmux -L yantra new-session -d`.

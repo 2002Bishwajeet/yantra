@@ -19,6 +19,9 @@ use std::process::ExitCode;
 
 use axum::Router;
 use axum::routing::get;
+use tracing_subscriber::filter::{FilterFn, filter_fn};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use yantra_core::github::TOKEN as GITHUB_TOKEN;
 use yantra_core::inventory::{Inventory, Tailscale};
 use yantra_core::notify::RELAY_URL;
@@ -93,6 +96,18 @@ enum Error {
     },
 }
 
+/// These crates write every byte they send and receive at TRACE, and ureq a
+/// request's URL and length at DEBUG: a terminal's keystrokes, and a dictation's
+/// audio, hotwords and text (ADR-0043 §7). So no `RUST_LOG` turns them on.
+const UNLOGGED: &[&str] = &["ureq", "tungstenite", "tokio_tungstenite"];
+
+fn unlogged() -> FilterFn<fn(&tracing::Metadata<'_>) -> bool> {
+    fn kept(event: &tracing::Metadata<'_>) -> bool {
+        !UNLOGGED.iter().any(|name| event.target().starts_with(name))
+    }
+    filter_fn(kept)
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -100,6 +115,8 @@ async fn main() -> ExitCode {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "yantrad=info".into()),
         )
+        .finish()
+        .with(unlogged())
         .init();
 
     match serve(&Tailscale).await {
