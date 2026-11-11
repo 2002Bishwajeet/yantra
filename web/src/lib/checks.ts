@@ -126,12 +126,12 @@ const SHORT_REACH: Record<ReachableFailure, string> = {
 
 const SHORT_ABSENT: Record<string, string> = {
   sshd: 'not answering',
-  tmux: 'not installed',
-  git: 'not installed',
-  'agent-cli': 'not installed',
-  mic: 'not installed',
+  tmux: 'not found',
+  git: 'not found',
+  'agent-cli': 'not found',
+  mic: 'not found',
   terminfo: 'lacks xterm-256color',
-  'provider-cli': 'gh not installed',
+  'provider-cli': 'gh not found',
   'provider-auth': 'gh not signed in',
   'login-session': 'claude has no credential here',
   'folder-access': 'macOS blocks Desktop, Documents and Downloads',

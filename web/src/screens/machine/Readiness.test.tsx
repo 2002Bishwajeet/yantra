@@ -809,7 +809,7 @@ describe('one short line per problem (Y-733)', () => {
     const said = { tmux: 'tmux is not on PATH or in any of: $HOME/.local/bin. Install `tmux` there' }
     await draw(report(checks(['tmux'], said)))
     const row = rows()[0]!
-    expect(row.querySelector('.machine__cause')!.textContent).toBe('not installed')
+    expect(row.querySelector('.machine__cause')!.textContent).toBe('not found')
     expect(row.textContent).not.toMatch(/`|PATH or in any/)
     const fix = within(row).getByRole('button', { name: /^Fix/ })
     expect(fix.getAttribute('aria-expanded')).toBe('false')

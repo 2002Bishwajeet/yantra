@@ -48,7 +48,13 @@ export function Copyable(props: { text: string; what: string; line?: boolean; co
   return (
     <div className="m3-copyable">
       <div className="m3-copyable__row">
-        <Mono className={clsx('m3-copyable__text', props.line && 'm3-copyable__text--line')} ref={ref} translate="no">
+        <Mono
+          className={clsx('m3-copyable__text', props.line && 'm3-copyable__text--line')}
+          ref={ref}
+          // A scrolling region needs keyboard access (axe scrollable-region-focusable).
+          {...(props.line ? { tabIndex: 0, role: 'group', 'aria-label': what } : {})}
+          translate="no"
+        >
           {text}
         </Mono>
         <Button

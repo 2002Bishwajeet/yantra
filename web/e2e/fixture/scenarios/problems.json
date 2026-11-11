@@ -78,6 +78,11 @@
             "detail": "tmux 3.5a at /opt/homebrew/bin/tmux"
           },
           {
+            "check": "git",
+            "state": "present",
+            "detail": "found at /opt/homebrew/bin/git"
+          },
+          {
             "check": "agent-cli",
             "state": "present",
             "detail": "claude 2.1.0 at /Users/biswa/.local/bin/claude"

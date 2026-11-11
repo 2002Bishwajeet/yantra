@@ -295,9 +295,9 @@ describe('the short cause of a check (Y-733)', () => {
 
   it('gives the cause the plan names', () => {
     const absent = (check: string, detail = '') => causeOf({ check, state: 'absent', detail })
-    expect(absent('tmux')).toBe('not installed')
+    expect(absent('tmux')).toBe('not found')
     expect(absent('terminfo')).toBe('lacks xterm-256color')
-    expect(absent('provider-cli')).toBe('gh not installed')
+    expect(absent('provider-cli')).toBe('gh not found')
     expect(absent('provider-auth')).toBe('gh not signed in')
     expect(absent('login-session')).toBe('claude has no credential here')
     expect(absent('login-session', NO_SERVER)).toBe('no tmux server from a login')
