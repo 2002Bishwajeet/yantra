@@ -54,10 +54,11 @@ describe('/machines on the busy fleet', () => {
     const gone = card('thinkpad')
     // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
     expect(gone.getByText('asleep · 7 Jul')).toBeTruthy()
-    expect(gone.getAllByText('unknown').length).toBeGreaterThan(0)
-    expect(gone.getByText('0 of 9 · 2 failing · 7 unknown')).toBeTruthy()
+    // ssh failed too, so the card gives one sentence in place of a tally nobody could ask (Y-714).
+    expect(gone.getByText(/can’t reach thinkpad over ssh/)).toBeTruthy()
+    expect(gone.queryByText(/unknown/)).toBeNull()
     // Asleep offers nothing to press: ssh cannot answer either way.
-    expect(gone.queryAllByRole('button')).toHaveLength(0)
+    expect(gone.queryAllByRole('button', { name: /install|copy|again/i })).toHaveLength(0)
   })
 
   /** Y-404, owner 2026-09-13: listed with the reason, never a card or a count. */
@@ -285,7 +286,7 @@ describe('/machines with devices that open the dashboard', () => {
 
     const asleep = card('asleep-laptop')
     expect(asleep.getByText(/^asleep · /)).toBeTruthy()
-    expect(asleep.queryAllByRole('button')).toHaveLength(0)
+    expect(asleep.queryAllByRole('button', { name: /install|copy|again/i })).toHaveLength(0)
   })
 
   it('copies the join command where a clipboard exists', async () => {
