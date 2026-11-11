@@ -144,10 +144,10 @@ jobs:
       # instead of relying on cargo to ignore a flag it might not ignore.
       - name: Install mold
         if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mold
+        # Y-724: from GitHub releases; the runners' Ubuntu mirror failed DNS for hours on 2026-11-11.
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: mold
 
       - name: Install zig
         if: matrix.zigbuild
@@ -341,10 +341,10 @@ jobs:
         uses: ./.github/actions/setup-rust
 
       - name: Install mold
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mold
+        # Y-724: from GitHub releases; the runners' Ubuntu mirror failed DNS for hours on 2026-11-11.
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: mold
 
       - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
