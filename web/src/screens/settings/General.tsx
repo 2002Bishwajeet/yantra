@@ -1,7 +1,7 @@
 import { useMachines } from '@/api/hooks'
 import { useEnterSends } from '@/composer/enterSends'
 import { Button } from '@/m3/button/Button'
-import { ListItem, ListValue } from '@/m3/list/List'
+import { ListItem } from '@/m3/list/List'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Switch } from '@/m3/switch/Switch'
 import { readPrefs, usePrefs, writePrefs } from '@/shell/prefs'
@@ -32,7 +32,7 @@ export function General() {
       <Group label="New session">
         <ListItem
           headline="Home directory for clones"
-          supporting="a clone lands under one of these on the machine you pick"
+          supporting="Where a clone lands on the machine"
           trailing={
             <Segmented label="Home directory for clones" onValueChange={(value) => write({ cloneHome: value as Held['cloneHome'] })} value={held.cloneHome}>
               {CLONE_HOMES.map((one) => (
@@ -45,7 +45,7 @@ export function General() {
         />
         <ListItem
           headline="Default machine for new sessions"
-          supporting="preselected in the Machine step when it is reachable; with none, the step preselects nothing"
+          supporting="Preselected in New session when reachable"
           trailing={
             <select
               aria-label="Default machine for new sessions"
@@ -73,7 +73,7 @@ export function General() {
       <Group label="Dashboard">
         <ListItem
           headline="Time format"
-          supporting="Age shows 4s, 12m, 6h and a date past a day · Clock shows the wall time"
+          supporting="Age: 12m, 6h. Clock: wall time"
           trailing={
             <Segmented label="Time format" onValueChange={(value) => write({ time: value as Held['time'] })} value={held.time}>
               <Segment value="age">Age</Segment>
@@ -84,7 +84,7 @@ export function General() {
         {setupCardHidden(prefs) ? (
           <ListItem
             headline="Finish setup card"
-            supporting="hidden from the dashboard · it shows again until GitHub and push are set up"
+            supporting="Hidden from the dashboard"
             trailing={
               <Button onClick={showSetupCard} variant="text">
                 Show the setup card
@@ -92,12 +92,6 @@ export function General() {
             }
           />
         ) : null}
-        <ListItem
-          headline="Confirmations"
-          supporting="Kill and Delete ask first because they cannot be undone. Stop and Resume do not."
-          trailing={<ListValue>fixed</ListValue>}
-        />
-        <ListItem headline="Language" supporting="the dashboard and the notifications it sends" trailing={<ListValue>English</ListValue>} />
       </Group>
       <Note>Saved on this device. How the dashboard looks is under Appearance.</Note>
     </>

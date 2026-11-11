@@ -14,11 +14,12 @@ describe('About', () => {
     expect((await screen.findByText(/^yantrad/)).textContent).toBe('yantrad 0.1.0 · built 6 Sep · running')
     expect(screen.getByText('aarch64-unknown-linux-musl')).toBeTruthy()
     expect(screen.getByText('1d 0h')).toBeTruthy()
-    expect(screen.getByText('100.64.0.1:7717 · [fd7a:115c:a1e0::1]:7717')).toBeTruthy()
+    expect(screen.getByText('100.64.0.1:7717')).toBeTruthy()
+    expect(screen.getByText('[fd7a:115c:a1e0::1]:7717')).toBeTruthy()
     expect(screen.getByText(location.host)).toBeTruthy()
-    expect(screen.getByText('/etc/yantra/daemon.env')).toBeTruthy()
+    expect(screen.queryByText('/etc/yantra/daemon.env')).toBeNull()
     expect(screen.getByRole('link', { name: /Source/ }).getAttribute('href')).toBe('https://github.com/2002Bishwajeet/yantra')
-    expect(screen.getByText(/persists nothing about the fleet/)).toBeTruthy()
+    expect(screen.getByText(/keeps no fleet state/)).toBeTruthy()
   })
 
   it('credits NVIDIA for the dictation model, as its CC-BY-4.0 licence asks', async () => {
@@ -30,8 +31,21 @@ describe('About', () => {
 
   it('says who can open the dashboard, and names the tailnet', async () => {
     mountSettings('desktop', '/settings/about', { 'GET /api/about': [200, { ...contract.about, tailnet: 'home.ts.net' }] })
-    expect(await screen.findByText('Only devices on your tailnet can open this dashboard. There is no separate login.')).toBeTruthy()
-    expect(await screen.findByText('Tailnet · home.ts.net')).toBeTruthy()
+    expect(await screen.findByText('Only devices on your tailnet')).toBeTruthy()
+    expect(await screen.findByText('home.ts.net')).toBeTruthy()
+    expect(screen.getByText('No separate login')).toBeTruthy()
+  })
+
+  it('never breaks a value inside a word, and draws each address on its own line', async () => {
+    mountSettings('desktop', '/settings/about')
+    await screen.findByText(/^yantrad/)
+    for (const dd of document.querySelectorAll('.settings__fact > dd')) {
+      expect(dd.className).not.toMatch(/break-all|m3-wrap/)
+      expect((dd as HTMLElement).style.wordBreak).not.toBe('break-all')
+    }
+    const listens = screen.getByText('Listens on').closest('.settings__fact')!
+    expect(within(listens as HTMLElement).getByText('100.64.0.1:7717').getAttribute('title')).toBe('100.64.0.1:7717')
+    expect(within(listens as HTMLElement).getByText('[fd7a:115c:a1e0::1]:7717')).toBeTruthy()
   })
 
   it('draws the boundary when the daemon answers something else', async () => {

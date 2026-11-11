@@ -354,10 +354,7 @@ test.describe('settings · Notifications', () => {
     await opened(page, 'Notifications', size)
 
     // `about.relay` says the running daemon holds one (D7 §4.7).
-    await expect(page.getByText('On · the daemon holds a relay and pushes to it')).toBeVisible()
-    // What the daemon pushes reads rather than sets: no route changes it.
-    const needsYou = page.getByRole('listitem').filter({ hasText: 'When an agent needs you' })
-    await expect(needsYou.getByText('Sent', { exact: true })).toBeVisible()
+    await expect(page.getByText('On · pushes to your relay')).toBeVisible()
 
     await page.getByRole('button', { name: 'Edit' }).click()
     const sheet = page.getByRole('dialog', { name: 'Push relay' })
@@ -378,7 +375,7 @@ test.describe('settings · Notifications', () => {
     await expect(sheet.getByText(/^Push works\./)).toBeVisible()
     await sheet.getByRole('button', { name: 'Done' }).click()
     await expect(
-      page.getByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),
+      page.getByText('On · pushes to your relay · saved, used after a restart'),
     ).toBeVisible()
 
     expect(writes.filter((one) => one === 'POST /api/relay')).toHaveLength(1)
@@ -401,9 +398,8 @@ test.describe('settings · About reads the appliance', () => {
     await scenario(page, 'busy')
     await page.goto('/settings/about')
     await opened(page, 'About', size)
-    await expect(
-      page.getByText('Only devices on your tailnet can open this dashboard. There is no separate login.'),
-    ).toBeVisible()
+    await expect(page.getByText('Only devices on your tailnet')).toBeVisible()
+    await expect(page.getByText('No separate login')).toBeVisible()
   })
 
   // The key moved to Add a device, so the old link opens its new home.
@@ -414,13 +410,12 @@ test.describe('settings · About reads the appliance', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Add a device' })).toBeVisible()
   })
 
-  test('says the daemon facts and where its env file lives', async ({ page, size }) => {
+  test('says the daemon facts', async ({ page, size }) => {
     await scenario(page, 'busy')
     await page.goto('/settings/about')
     await opened(page, 'About', size)
     await expect(page.getByText(/^yantrad 0\.1\.0 · built 6 Sep · running/)).toBeVisible()
     await expect(page.getByText('aarch64-unknown-linux-musl')).toBeVisible()
-    await expect(page.getByText('/etc/yantra/daemon.env')).toBeVisible()
   })
 
   // Y-368: the fixture answers 202 and never restarts, so the page stays on

@@ -80,6 +80,21 @@ describe('/usage on the busy fleet', () => {
     expect(models.getByText('unpriced')).toBeTruthy()
   })
 
+  it('wraps names at spaces and hyphens only, and carries the full name in a title', async () => {
+    mount('desktop', '/usage', scenario('busy'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
+    await screen.findByRole('region', { name: 'By workspace' })
+    for (const region of ['By workspace', 'By model']) {
+      const names = Array.from(screen.getByRole('region', { name: region }).querySelectorAll('.usage__name'))
+      expect(names.length).toBeGreaterThan(0)
+      for (const name of names) {
+        expect(name.classList.contains('m3-wrap')).toBe(false)
+        expect(name.getAttribute('title')).toBe(name.textContent)
+      }
+    }
+    expect(document.querySelector('.usage__where.m3-wrap')).toBeNull()
+  })
+
   it('draws a proportion bar against the dearest row, not against a sum', async () => {
     mount('desktop', '/usage', scenario('busy'))
     fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
@@ -118,7 +133,7 @@ describe('/usage on the busy fleet', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(11)
     expect(within(table).queryByRole('columnheader', { name: /total/i })).toBeNull()
     expect(screen.queryByText(/^Total/i)).toBeNull()
-    expect(screen.getByText(/there is no fleet total/)).toBeTruthy()
+    expect(screen.getByText(/no fleet total/)).toBeTruthy()
   })
 })
 

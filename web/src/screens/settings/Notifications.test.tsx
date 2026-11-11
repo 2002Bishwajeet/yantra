@@ -26,7 +26,7 @@ function fill(sheet: ReturnType<typeof within>, url: string, token?: string) {
 describe('the relay row', () => {
   it('reads whether the daemon holds a relay from about.relay', async () => {
     mountSettings('desktop', '/settings/notifications')
-    expect(await screen.findByText('On · the daemon holds a relay and pushes to it')).toBeTruthy()
+    expect(await screen.findByText('On · pushes to your relay')).toBeTruthy()
   })
 
   it('says off when about.relay is false', async () => {
@@ -210,7 +210,7 @@ describe('the relay sheet', () => {
     // ADR-0021: the write took, and the row says it waits on a restart.
     fireEvent.click(sheet.getByRole('button', { name: 'Done' }))
     expect(
-      await screen.findByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),
+      await screen.findByText('On · pushes to your relay · saved, used after a restart'),
     ).toBeTruthy()
   })
 
@@ -242,7 +242,7 @@ describe('the relay sheet', () => {
     expect(sheet.getByText(/answered 401/)).toBeTruthy()
     fireEvent.click(sheet.getByRole('button', { name: 'Cancel' }))
     expect(
-      await screen.findByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),
+      await screen.findByText('On · pushes to your relay · saved, used after a restart'),
     ).toBeTruthy()
   })
 
@@ -260,7 +260,7 @@ describe('the relay sheet', () => {
     await sheet.findByText('The test message arrived at the relay.')
     fireEvent.click(sheet.getByRole('button', { name: 'Done' }))
     expect(
-      await screen.findByText('On · the daemon holds a relay and pushes to it · saved, used after yantrad restarts'),
+      await screen.findByText('On · pushes to your relay · saved, used after a restart'),
     ).toBeTruthy()
 
     const before = asked.filter((one) => one === 'GET /api/about').length
@@ -279,7 +279,7 @@ describe('the relay sheet', () => {
     vi.useRealTimers()
 
     await waitFor(() => expect(asked.filter((one) => one === 'GET /api/about').length).toBeGreaterThan(before))
-    expect(await screen.findByText('On · the daemon holds a relay and pushes to it')).toBeTruthy()
+    expect(await screen.findByText('On · pushes to your relay')).toBeTruthy()
   })
 
   it("draws a refusal with the daemon's own words, and the row says nothing was saved", async () => {
@@ -290,22 +290,16 @@ describe('the relay sheet', () => {
     expect(sheet.getByText('node biswas-iphone is on this tailnet but is not yours')).toBeTruthy()
     // Not written: the row still reads the daemon it started with.
     fireEvent.click(sheet.getByRole('button', { name: 'Cancel' }))
-    expect(screen.getByText('On · the daemon holds a relay and pushes to it')).toBeTruthy()
+    expect(screen.getByText('On · pushes to your relay')).toBeTruthy()
   })
 
-  /** The daemon decides what is worth a push and no route changes it, so the
-   *  rows read the daemon rather than set it (D7 §4.7: a value, not a switch
-   *  that looks broken while disabled). */
-  it('draws what the daemon pushes as values nothing here can move', async () => {
+  it('draws no read-only push rules, only one note', async () => {
     mountSettings('desktop', '/settings/notifications')
     await screen.findByRole('button', { name: 'Edit' })
-    const row = (headline: string) => screen.getByText(headline).closest('li')!
-    expect(within(row('When an agent needs you')).getByText('Sent')).toBeTruthy()
-    expect(within(row('When a session ends')).getByText('Sent')).toBeTruthy()
-    // I-47: a look the daemon could not make is not a change it can report.
-    expect(within(row('When a machine goes unreachable')).getByText('Not sent')).toBeTruthy()
-    expect(within(row('Quiet while a dashboard is open')).getByText('Always')).toBeTruthy()
-    expect(screen.getByText(/there is no route that changes this/)).toBeTruthy()
+    for (const gone of ['When an agent needs you', 'When a session ends', 'Quiet while a dashboard is open', 'Sent', 'Not sent', 'Always']) {
+      expect(screen.queryByText(gone)).toBeNull()
+    }
+    expect(screen.getByText(/stays quiet while a dashboard is open/)).toBeTruthy()
   })
 
   it('masks the token until Show is pressed', async () => {

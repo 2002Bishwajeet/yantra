@@ -14,13 +14,13 @@ test.describe('install and join rows on notifications', () => {
     await expect(page.getByRole('main').getByText('needs your password')).toBeVisible()
   })
 
-  test('shows every command via Copyable, the full warning, and Open', async ({ page, size }) => {
+  test('shows every command via Copyable, the full warning, and a link to the machine', async ({ page, size }) => {
     const main = page.getByRole('main')
 
     const install = main.locator('li').filter({ hasText: 'pi-5 needs your password' })
     await expect(install.getByText('sudo apt-get update; sudo apt-get install -y tmux')).toBeVisible()
     await expect(install.getByRole('button', { name: 'Copy the command' })).toBeVisible()
-    await expect(install.getByRole('link', { name: 'Open' })).toHaveAttribute('href', '/m/pi-5')
+    await expect(install.locator('a.m3-row')).toHaveAttribute('href', '/m/pi-5')
 
     const warning =
       'thinkpad joined as biswa, but the ssh config logs in there as someone-else, so Yantra cannot reach it until the owner edits that config'

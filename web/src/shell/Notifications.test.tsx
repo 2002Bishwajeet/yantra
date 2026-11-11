@@ -45,6 +45,9 @@ describe('notifications on the desktop', () => {
     expect(rows.at(-1)!.textContent).toContain('api is waiting for trust')
     const answer = popover.getByRole('link', { name: 'Answer' })
     expect(answer.getAttribute('href')).toBe('/w/api?view=chat')
+    // One filled button at most: Answer is tonal and Mark all read is text.
+    expect(popover.getAllByRole('button').filter((b) => b.dataset.variant === 'filled').length).toBeLessThanOrEqual(1)
+    expect(answer.dataset.variant).toBe('tonal')
     expect(popover.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('/settings/notifications')
   })
 
@@ -65,7 +68,7 @@ describe('notifications on the desktop', () => {
 })
 
 describe('install and join rows (Y-399)', () => {
-  it('shows the full warning, the commands via Copyable, a machine tile and Open', async () => {
+  it('shows the full warning, the commands via Copyable, a machine tile and a row that links to the machine', async () => {
     mount('desktop', '/', {
       overrides: { '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [joined, installStopped] } } },
     })
@@ -77,13 +80,17 @@ describe('install and join rows (Y-399)', () => {
     expect(joinedItem!.textContent).toContain(joined.said)
     expect(joinedItem!.querySelector('.m3-row__supporting')!.classList.contains('m3-wrap')).toBe(true)
     expect(joinedItem!.querySelector('.m3-tile--icon')).toBeTruthy()
-    expect(within(joinedItem!).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/pi-5')
+    expect(within(joinedItem!).queryByRole('button', { name: 'Open' })).toBeNull()
+    expect(joinedItem!.querySelector('a.m3-row')!.getAttribute('href')).toBe('/m/pi-5')
 
     const installItem = items.find((item) => item.textContent?.includes('needs your password'))
     expect(installItem).toBeTruthy()
     expect(installItem!.textContent).toContain('sudo apt-get install -y tmux')
     expect(within(installItem!).getByRole('button', { name: 'Copy the command' })).toBeTruthy()
-    expect(within(installItem!).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/pi-5')
+    expect(within(installItem!).queryByText('Open')).toBeNull()
+    expect(installItem!.querySelector('a.m3-row')!.getAttribute('href')).toBe('/m/pi-5')
+    // The commands stay outside the link: a link cannot hold a button.
+    expect(installItem!.querySelector('a.m3-row button')).toBeNull()
   })
 
   it('a plain join is done and never draws a letter avatar', async () => {
@@ -104,6 +111,49 @@ describe('install and join rows (Y-399)', () => {
     const tile = item!.querySelector('.m3-tile')
     expect(tile?.classList.contains('m3-tile--icon')).toBe(true)
     expect(tile?.querySelector('svg')).toBeTruthy()
+  })
+})
+
+describe('row taps (Y-722)', () => {
+  const at = (n: number, kind: Event['kind'], workspace: string | null, machine: string | null): Event =>
+    ({ at: 1785522000 + n, kind, workspace, machine, said: `${kind} said`, commands: [] }) as Event
+
+  it.each(['finished', 'crashed', 'killed', 'check_failed', 'checks_passed', 'reviewed'] as const)(
+    'a %s row is a link to the workspace',
+    async (kind) => {
+      mount('desktop', '/', {
+        overrides: {
+          '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [at(1, kind, 'api', 'pi-5')] } },
+        },
+      })
+      const popover = await open()
+      const item = (await popover.findAllByRole('listitem')).find((one) => one.textContent?.includes('said'))!
+      expect(item.querySelector('a.m3-row')!.getAttribute('href')).toBe('/w/api')
+    },
+  )
+
+  it('an unreachable row is a link to the machine', async () => {
+    mount('desktop', '/', {
+      overrides: {
+        '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [at(1, 'unreachable', null, 'pi-5')] } },
+      },
+    })
+    const popover = await open()
+    const item = (await popover.findAllByRole('listitem')).find((one) => one.textContent?.includes('said'))!
+    expect(item.querySelector('a.m3-row')!.getAttribute('href')).toBe('/m/pi-5')
+  })
+
+  it('a trust row links to the workspace and keeps Answer outside the link', async () => {
+    mount('desktop', '/', {
+      overrides: {
+        '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [at(1, 'awaiting_trust', 'api', null)] } },
+      },
+    })
+    const popover = await open()
+    const item = (await popover.findAllByRole('listitem')).find((one) => one.textContent?.includes('said'))!
+    expect(item.querySelector('a.m3-row')!.getAttribute('href')).toBe('/w/api')
+    expect(item.querySelector('a.m3-row a, a.m3-row button')).toBeNull()
+    expect(within(item).getByRole('link', { name: 'Answer' }).getAttribute('href')).toBe('/w/api?view=chat')
   })
 })
 

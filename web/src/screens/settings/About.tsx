@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ExternalLink, FileKey, Mic, Scale, Shield } from 'lucide-react'
+import { clsx } from 'clsx'
+import { ExternalLink, Mic, Scale, Shield } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import type { Channel, Looked, Published, UpdateProgress } from '@/api'
 import { fromReading } from '@/api/client'
@@ -8,7 +9,7 @@ import { aboutQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
 import { type Described, ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
-import { ListChevron, ListItem } from '@/m3/list/List'
+import { ListChevron, ListItem, ListValue } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Mono, Text } from '@/m3/text/Text'
@@ -59,9 +60,21 @@ export function About() {
           <Skeleton shape="text" />
         )}
         <dl className="settings__facts">
-          <Fact label="Target" value={facts ? <Mono>{facts.target}</Mono> : null} />
+          <Fact label="Target" value={facts ? <Mono clip title={facts.target}>{facts.target}</Mono> : null} wide />
           <Fact label="Uptime" value={facts ? <Mono>{uptime(facts.uptime_seconds)}</Mono> : null} />
-          <Fact label="Listens on" value={facts ? <Mono>{facts.listening_on.join(' · ')}</Mono> : null} />
+          <Fact
+            label="Listens on"
+            value={
+              facts
+                ? facts.listening_on.map((address) => (
+                    <Mono className="settings__line" clip key={address} title={address}>
+                      {address}
+                    </Mono>
+                  ))
+                : null
+            }
+            wide
+          />
           <Fact label="Reached at" value={<Mono>{location.host}</Mono>} />
           {facts?.published.looked === 'failed' ? null : (
             <Fact
@@ -90,24 +103,14 @@ export function About() {
       </section>
       <Group label="Who can open the dashboard">
         <ListItem
-          headline="Only devices on your tailnet can open this dashboard. There is no separate login."
-          supporting={facts?.tailnet ? `Tailnet · ${facts.tailnet}` : undefined}
+          headline="Only devices on your tailnet"
+          supporting="No separate login"
+          trailing={facts?.tailnet ? <ListValue>{facts.tailnet}</ListValue> : undefined}
           leading={
             <Lead>
               <Shield />
             </Lead>
           }
-        />
-      </Group>
-      <Group label="Daemon">
-        <ListItem
-          headline={<Mono>/etc/yantra/daemon.env</Mono>}
-          leading={
-            <Lead>
-              <FileKey />
-            </Lead>
-          }
-          supporting="0600 · the relay and the GitHub grant"
         />
       </Group>
       <Group label="Project">
@@ -148,7 +151,7 @@ export function About() {
           trailing={<ListChevron />}
         />
       </Group>
-      <Note>Yantra persists nothing about the fleet. What you see on the dashboard is read from the machines each time.</Note>
+      <Note>Yantra keeps no fleet state. The dashboard reads the machines each time.</Note>
     </>
   )
 }
@@ -200,7 +203,7 @@ function ChannelSwitch(props: { channel: Channel | null }) {
             <Mono>/etc/yantra/channel</Mono> names no channel. Pick one to rewrite it.
           </>
         ) : (
-          'Stable is each tagged release. Nightly is the latest merge to main. An update never goes back a version.'
+          'Stable is each release. Nightly is the latest merge.'
         )}
       </Text>
       {set.error ? <ErrorSurface.Inline error={set.error} title="The channel did not change" /> : null}
@@ -332,10 +335,10 @@ function Failed(props: { said: string }) {
   )
 }
 
-function Fact(props: { label: string; value: React.ReactNode }) {
-  const { label, value } = props
+function Fact(props: { label: string; value: React.ReactNode; wide?: boolean }) {
+  const { label, value, wide } = props
   return (
-    <div className="settings__fact">
+    <div className={clsx('settings__fact', wide && 'settings__fact--wide')}>
       <dt>
         <Text scale="label-medium" tone="variant">
           {label}

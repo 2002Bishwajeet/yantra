@@ -78,8 +78,8 @@ function ByWorkspace(props: { rows: Row[] }) {
               <div className="usage__line">
                 <Tile name={one.name} size="small" />
                 <span className="usage__text">
-                  <span className="usage__name m3-wrap">{one.name}</span>
-                  <span className="usage__where m3-wrap">
+                  <span className="usage__name" title={one.name}>{one.name}</span>
+                  <span className="usage__where">
                     {one.machine} · {count(one.responses)} responses
                   </span>
                 </span>
@@ -118,12 +118,12 @@ function ByModel(props: { rows: Row[] }) {
             <li className="usage__row" key={one.model}>
               <div className="usage__line">
                 <span className="usage__text">
-                  <span className="usage__name m3-wrap">{one.model}</span>
+                  <span className="usage__name" title={one.model}>{one.model}</span>
                   <span className="usage__where">
                     {count(one.responses)} responses · {one.workspaces} workspace
                     {one.workspaces === 1 ? '' : 's'}
                   </span>
-                  <span className="usage__where m3-wrap">
+                  <span className="usage__where">
                     {count(one.input)} in · {count(one.output)} out · {count(one.cacheRead)} cache
                     read
                   </span>
@@ -294,8 +294,7 @@ export function Usage() {
       )}
 
       <Text render={<p />} className="usage__note" scale="body-small" tone="variant">
-        Each figure is read from the transcript on the machine that wrote it, over ssh, when you
-        ask. Nothing here polls, and there is no fleet total.
+        Read over ssh from each machine's transcript, only when you ask. There is no fleet total.
       </Text>
     </Page>
   )
