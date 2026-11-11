@@ -12,6 +12,8 @@ export type Prefs = {
   density: 'clean' | 'compact'
   /** A seed hex other than brass; null is brass, and loads no colour engine. */
   seed: string | null
+  /** The release version whose update notice the owner dismissed. */
+  updateDismissed: string | null
   /** General's rows, which Y-350 narrows. */
   general: Record<string, unknown>
 }
@@ -24,6 +26,7 @@ const DEFAULTS: Prefs = {
   theme: 'system',
   density: 'clean',
   seed: null,
+  updateDismissed: null,
   general: {},
 }
 

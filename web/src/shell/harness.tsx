@@ -79,6 +79,6 @@ export function mount(
 export function unmount() {
   vi.unstubAllGlobals()
   history.pushState(null, '', '/')
-  writePrefs({ seenAt: null, theme: 'system', density: 'clean', seed: null, general: {} })
+  writePrefs({ seenAt: null, theme: 'system', density: 'clean', seed: null, updateDismissed: null, general: {} })
   localStorage.clear()
 }

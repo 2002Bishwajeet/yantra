@@ -30,6 +30,7 @@ import { Palette } from './Palette'
 import { usePrefs } from './prefs'
 import { keyOf, usePrimary, usePublishDrawn, usePublishRoute, useRouteAction, type Primary } from './primary'
 import { NotReached } from './NotReached'
+import { UpdateNotice } from './UpdateNotice'
 import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
 import { useScreenTitle, useScreenTitleOverride } from './title'
@@ -78,6 +79,11 @@ function Main({ down }: { down: ReactNode }) {
   return (
     // Focusable, not tabbable: where focus lands when a focused FAB goes away.
     <main className="shell__main" data-scroll-restoration-id="main" tabIndex={-1}>
+      {down === null ? (
+        <Guarded title="The update notice could not be drawn">
+          <UpdateNotice />
+        </Guarded>
+      ) : null}
       <ErrorBoundary layout="page" {...useResetOnRouteChange()}>
         {down ?? (
           <>

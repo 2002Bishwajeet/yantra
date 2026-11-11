@@ -55,7 +55,7 @@ export const NOW = '2026-09-06T12:00:00Z'
 export async function scenario(
   page: Page,
   name: Scenario,
-  options: { slow?: number } = {},
+  options: { slow?: number; update?: boolean } = {},
 ) {
   const key = Math.random().toString(36).slice(2, 8)
   const cookie = (n: string, value: string) => ({
@@ -68,6 +68,21 @@ export async function scenario(
     cookie('fixture-scenario', `${name}#${key}`),
     ...(options.slow ? [cookie('fixture-slow', String(options.slow))] : []),
   ])
+  if (!options.update) {
+    // Y-712: busy and notifications hold a newer release; keep its notice out of every other screenshot.
+    await page.addInitScript(() => {
+      const get = Storage.prototype.getItem
+      Storage.prototype.getItem = function (k: string) {
+        const v = get.call(this, k)
+        if (k !== 'yantra.prefs') return v
+        try {
+          return JSON.stringify({ v: 1, ...JSON.parse(v ?? '{}'), updateDismissed: '0.4.0' })
+        } catch {
+          return v
+        }
+      }
+    })
+  }
   await page.clock.setFixedTime(NOW)
   return `${name}#${key}`
 }
