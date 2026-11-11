@@ -17,10 +17,13 @@ embed-dashboard = ["dep:include_dir"]
 
 [dependencies]
 axum.workspace = true
+# `state_dir()` for the thread store's path (ADR-0045 decision 1).
+etcetera.workspace = true
 include_dir = { workspace = true, optional = true }
 # The socket's peer account and the `yantra` group (ADR-0042), since
 # `unsafe_code = forbid` rules out libc. 0.28 is already in the lock.
 nix = { version = "0.28", default-features = false, features = ["user"] }
+rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

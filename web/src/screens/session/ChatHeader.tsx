@@ -23,7 +23,7 @@ import { Text } from '@/m3/text/Text'
 import { useRegisterLoopCommands } from '@/shell/loopCommands'
 import { Checks } from './Checks'
 import { GitActions } from './GitActions'
-import { elapsed, groupThreads, prMark, threadTitle } from './threads'
+import { elapsed, groupThreads, presenceWord, prMark, readOnlyWhy, threadTitle } from './threads'
 
 export type ChatHeaderProps = {
   workspace: string
@@ -45,12 +45,15 @@ export type ChatHeaderProps = {
   into?: HTMLElement | null
   /** Fix with agent: put this block in the composer, and send nothing. */
   onFix: (block: string) => void
+  /** Why the open thread is read-only as the list read it (ADR-0045), or null. */
+  onReadOnly?: (why: string | null) => void
 }
 
 /** Y-633: the Chat tab's top line. The threads read on mount and on Refresh, and never poll:
  *  each read is an ssh to the machine and a call to GitHub (Y-489). */
 export function ChatHeader(props: ChatHeaderProps) {
-  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, terminal, terminalRef, added, into, onFix } = props
+  const { workspace, thread, urlThread, busy, diffs, diff, diffRef, terminal, terminalRef, added, into, onFix, onReadOnly } =
+    props
   const active = thread ?? urlThread ?? null
   const threads = useThreads(workspace)
   const { mutate } = threads
@@ -82,6 +85,8 @@ export function ChatHeader(props: ChatHeaderProps) {
   const current = listed?.find((one) => one.id === active)
   const pr = thread ? shown?.find((one) => one.id === thread)?.pr : undefined
   const title = current ? threadTitle(current) : active ? 'Thread' : 'New thread'
+  const readOnly = readOnlyWhy(current)
+  useEffect(() => onReadOnly?.(readOnly), [onReadOnly, readOnly])
   const groupId = useId()
   const noTerminal = useId()
 
@@ -154,10 +159,11 @@ export function ChatHeader(props: ChatHeaderProps) {
                       const name = threadTitle(one)
                       const isWorking = one.state === 'working'
                       const doing = isWorking ? (one.since === null ? 'Working' : `Working · ${elapsed(one.since, now)}`) : 'Idle'
+                      const presence = presenceWord(one, now)
                       return (
                         <MenuLinkItem
                           aria-current={one.id === active ? 'true' : undefined}
-                          aria-label={`${name}${one.from ? `, from ${one.from}` : ''}, ${doing}, ${mark.word}`}
+                          aria-label={`${name}${one.from ? `, from ${one.from}` : ''}${presence ? `, ${presence}` : ''}, ${doing}, ${mark.word}`}
                           className="threads__row"
                           key={one.id}
                           render={
@@ -170,13 +176,18 @@ export function ChatHeader(props: ChatHeaderProps) {
                               from {one.from}
                             </Text>
                           ) : null}
+                          {presence ? (
+                            <State className="threads__presence" state={one.presence === 'gone' ? 'failed' : 'unknown'}>
+                              {presence}
+                            </State>
+                          ) : null}
                           <State className="threads__doing" state={isWorking ? 'running' : 'idle'}>
                             {doing}
                           </State>
                           <State className="threads__pr" state={mark.state}>
                             {mark.word}
                           </State>
-                          {one.pr.state === 'unknown' ? (
+                          {one.pr.state === 'unknown' && !presence ? (
                             <Text className="threads__said" scale="body-small" tone="variant">
                               {one.pr.said}
                             </Text>
@@ -196,9 +207,9 @@ export function ChatHeader(props: ChatHeaderProps) {
       </nav>
       {/* An icon, as T3 Code draws it: a labelled button wraps the desktop header onto two lines. */}
       <IconButton
-        aria-describedby={thread ? undefined : noTerminal}
+        aria-describedby={thread && !readOnly ? undefined : noTerminal}
         aria-pressed={terminal.open}
-        disabled={!thread}
+        disabled={!thread || readOnly !== null}
         focusableWhenDisabled
         label="Terminal"
         onClick={terminal.onToggle}
@@ -231,13 +242,14 @@ export function ChatHeader(props: ChatHeaderProps) {
           mutate()
           void navigate({ to: '/w/$name', params: { name: workspace }, search: { view: 'chat' }, replace: true })
         }}
+        readOnly={readOnly}
         refresh={() => mutate()}
         thread={thread}
         workspace={workspace}
       />
-      {thread ? null : (
+      {thread && !readOnly ? null : (
         <span className="m3-sr-only" id={noTerminal}>
-          The terminal opens in the thread's worktree, which the first turn makes.
+          {readOnly ?? "The terminal opens in the thread's worktree, which the first turn makes."}
         </span>
       )}
       <span aria-live="polite" className="chat__added">

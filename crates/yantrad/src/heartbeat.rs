@@ -84,6 +84,8 @@ pub struct Fleet {
     /// True once the daemon has begun to shut down, so a long wait ends
     /// rather than holding the graceful shutdown open.
     pub closing: tokio::sync::watch::Sender<bool>,
+    /// The thread store (ADR-0045). `None` only in a test that needs none.
+    pub store: Option<crate::store::Store>,
     /// The live Chat keepers (ADR-0035 decision 4), which the refresh pass
     /// adopts after a restart.
     pub chats: crate::chat::Registry,
@@ -147,6 +149,7 @@ impl Default for Fleet {
                 channel: PathBuf::new(),
             }),
             github: crate::github::Grant::default(),
+            store: None,
             joins: Arc::default(),
             env: Arc::default(),
             left: Arc::default(),

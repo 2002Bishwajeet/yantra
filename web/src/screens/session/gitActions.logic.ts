@@ -20,6 +20,8 @@ export type GitState = {
   /** This page pushed and has not opened a PR since. */
   pushed: boolean
   pr: { number: number; state: 'open' | 'merged' } | null
+  /** Why the thread is read-only (ADR-0045), which turns every verb off. */
+  readOnly?: string | null
 }
 
 export type QuickAction = {
@@ -42,7 +44,7 @@ const act = (label: string, kind: GitVerb): QuickAction => ({ label, kind, disab
 
 export function resolveQuickAction(state: GitState): QuickAction {
   const { thread, busy, changed, committed, pushed, pr } = state
-  const off = whyOff(thread ? 'thread' : null, busy)
+  const off = state.readOnly ?? whyOff(thread ? 'thread' : null, busy)
   if (off !== null) return { label: 'Commit', kind: 'hint', disabled: true, hint: off }
   if (changed) return act('Commit', 'commit')
   if (committed) return act('Push', 'push')
@@ -52,7 +54,7 @@ export function resolveQuickAction(state: GitState): QuickAction {
 }
 
 export function buildMenuItems(state: GitState): MenuItem[] {
-  const reason = whyOff(state.thread ? 'thread' : null, state.busy)
+  const reason = state.readOnly ?? whyOff(state.thread ? 'thread' : null, state.busy)
   const off = reason !== null
   const { pr } = state
   const items: MenuItem[] = [

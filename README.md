@@ -246,8 +246,9 @@ Q6 in [`tracker.md`](tracker.md).
 
 **Rust** for the daemon, CLI and per-machine agent · **TypeScript** for the web UI ·
 `tokio` + `axum` · the system `ssh` binary as transport (with `ControlMaster` multiplexing) ·
-tmux for persistence · Tailscale as the network · nothing persisted — state is declared, derived, or
-held in memory · appliance target `aarch64-unknown-linux-musl`.
+tmux for persistence · Tailscale as the network · one SQLite file of Chat threads,
+`~/.local/state/yantra/threads.sqlite` ([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md)); the
+rest of the state is declared, derived, or held in memory · appliance target `aarch64-unknown-linux-musl`.
 
 The dashboard is React 19 with the compiler, TanStack Router, Query, Form, Table and Virtual. It uses
 Material 3 Expressive, which we built by hand on Base UI. See [`web/README.md`](web/README.md).

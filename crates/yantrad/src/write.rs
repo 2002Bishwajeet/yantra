@@ -48,6 +48,7 @@ use crate::chat::Doing;
 use crate::events::{self, Event};
 use crate::heartbeat::Fleet;
 use crate::refresh::Model;
+use crate::store::{self, Row, Status, Store};
 
 /// `tailscaled` writes this with `Set` from the connection it terminated, so it
 /// carries one address and never a list ([ADR-0017]).
@@ -1847,23 +1848,130 @@ async fn threads<I: Inventory + Clone + Send + Sync + 'static>(
     tracing::info!("threads {name} for {}", caller.node);
     let token = state.fleet.github.token().await;
     let github = github::Github::default();
-    let found = thread::threads(&name, token.as_ref().map(|token| (&github, token)))
-        .await
-        .map_err(|error| Refused::Verb {
-            status: from_thread(&error),
-            said: chain(&error),
-        })?;
-    let doing: std::collections::HashMap<_, _> =
-        state.fleet.chats.doing(&name).into_iter().collect();
-    Ok(Json(
-        found
-            .into_iter()
-            .map(|thread| {
-                let doing = doing.get(&thread.id).copied();
-                Thread::of(thread, doing)
-            })
-            .collect(),
-    ))
+    let found = thread::threads(&name, token.as_ref().map(|token| (&github, token))).await;
+    let doing: Doings = state.fleet.chats.doing(&name).into_iter().collect();
+    let store = state.fleet.store.as_ref();
+    let refused = |error: &thread::Failed| Refused::Verb {
+        status: from_thread(error),
+        said: chain(error),
+    };
+    match found {
+        Ok(found) => {
+            let machine = workspace::load(&name)
+                .map_err(|error| refused(&thread::Failed::Workspace(error)))?
+                .machine;
+            Ok(Json(
+                live_threads(store, &name, &machine, found, &doing).await,
+            ))
+        }
+        Err(error) => {
+            let Some(store) = store.filter(|_| error.is_unreachable()) else {
+                return Err(refused(&error));
+            };
+            tracing::warn!("threads {name}: the machine is offline: {}", chain(&error));
+            offline_threads(store, &name, &doing)
+                .await
+                .map(Json)
+                .map_err(|failed| {
+                    tracing::warn!("threads {name}: the store was not read: {}", chain(&failed));
+                    refused(&error)
+                })
+        }
+    }
+}
+
+type Doings = std::collections::HashMap<String, Doing>;
+
+/// The machine's answer, kept in the store first: each thread the store lacks
+/// is adopted from git config, each row takes the machine's status, branch and
+/// worktree, and the rows it no longer has follow as gone (ADR-0045 decisions
+/// 4, 6 and 7). A store that fails leaves the machine's answer alone.
+async fn live_threads(
+    store: Option<&Store>,
+    name: &str,
+    machine: &str,
+    found: Vec<thread::Thread>,
+    doing: &Doings,
+) -> Vec<Thread> {
+    let now = store::now();
+    let rows: Vec<Row> = found
+        .iter()
+        .map(|thread| row_of(name, machine, thread, doing.get(&thread.id).copied(), now))
+        .collect();
+    let mut threads: Vec<Thread> = found
+        .into_iter()
+        .map(|thread| {
+            let doing = doing.get(&thread.id).copied();
+            Thread::of(thread, doing, Some(now))
+        })
+        .collect();
+    let Some(store) = store else {
+        return threads;
+    };
+    let kept = async {
+        store.adopt(rows.clone()).await?;
+        store.observe(name, machine, rows).await?;
+        store.list(name).await
+    };
+    match kept.await {
+        Ok(rows) => threads.extend(
+            rows.into_iter()
+                .filter(|row| row.status == Status::Gone)
+                .map(|row| Thread::stored(row, None)),
+        ),
+        Err(error) => tracing::warn!("threads {name}: the store was not kept: {}", chain(&error)),
+    }
+    threads
+}
+
+/// Every row the store keeps for workspace `name`, for a machine that did not
+/// answer (decision 7).
+async fn offline_threads(
+    store: &Store,
+    name: &str,
+    doing: &Doings,
+) -> Result<Vec<Thread>, store::Error> {
+    Ok(store
+        .list(name)
+        .await?
+        .into_iter()
+        .map(|row| {
+            let doing = doing.get(&row.id).copied();
+            Thread::stored(row, doing)
+        })
+        .collect())
+}
+
+/// A listed thread's row. A thread with no harness in git config is Claude's.
+fn row_of(
+    name: &str,
+    machine: &str,
+    thread: &thread::Thread,
+    doing: Option<Doing>,
+    now: i64,
+) -> Row {
+    let kept = thread.kept.clone();
+    let (harness, session) = match kept.harness {
+        Some(harness) => (harness, kept.session),
+        None => ("claude".to_owned(), kept.claude_session),
+    };
+    Row {
+        workspace: name.to_owned(),
+        id: thread.id.clone(),
+        machine: machine.to_owned(),
+        branch: thread.branch.clone(),
+        worktree: thread.worktree.clone(),
+        harness: Some(harness),
+        session,
+        title: thread.title.clone(),
+        status: match doing {
+            Some(Doing::Working(_)) => Status::Running,
+            Some(Doing::Idle) | None => Status::Idle,
+        },
+        created: now,
+        active: now,
+        seen: Some(now),
+    }
 }
 
 /// What each thread the daemon holds is doing, read from memory (Y-649).
@@ -2158,10 +2266,25 @@ async fn removing<I: Inventory + Clone + Send + Sync + 'static>(
     let caller = allowed(&state.authoriser, &from, &headers).await?;
     idle(&state.fleet.chats, &name, &id)?;
     tracing::info!("thread remove {name} {id} for {}", caller.node);
-    commit::remove_for(&name, &id)
-        .await
-        .map_err(refuse_commit)?;
-    Ok(StatusCode::NO_CONTENT)
+    let removed = commit::remove_for(&name, &id).await;
+    // A gone thread has no worktree left, so only its row goes (ADR-0045 decision 4).
+    let forgot = match &state.fleet.store {
+        Some(store) if matches!(removed, Ok(()) | Err(commit::Failed::NoThread { .. })) => {
+            store.remove(&name, &id).await.unwrap_or_else(|error| {
+                tracing::warn!(
+                    "thread remove {name} {id}: the store keeps it: {}",
+                    chain(&error)
+                );
+                false
+            })
+        }
+        _ => false,
+    };
+    match removed {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(commit::Failed::NoThread { .. }) if forgot => Ok(StatusCode::NO_CONTENT),
+        Err(error) => Err(refuse_commit(error)),
+    }
 }
 
 /// A turn or a revert would race the commit for the worktree and its index.
@@ -2565,10 +2688,16 @@ struct Thread {
     /// Unix milliseconds the working turn started, or null when idle or unknown.
     since: Option<u64>,
     pr: ThreadPr,
+    /// `"here"` from the machine, `"offline"` from the store for a machine that
+    /// did not answer, `"gone"` for a worktree the machine no longer has
+    /// (ADR-0045 decision 7).
+    presence: &'static str,
+    /// Unix milliseconds the machine last answered.
+    seen: Option<u64>,
 }
 
 impl Thread {
-    fn of(thread: thread::Thread, doing: Option<Doing>) -> Self {
+    fn of(thread: thread::Thread, doing: Option<Doing>, seen: Option<i64>) -> Self {
         let (state, since) = wire(doing);
         Self {
             id: thread.id,
@@ -2580,6 +2709,32 @@ impl Thread {
             state,
             since,
             pr: ThreadPr::of(thread.pr),
+            presence: "here",
+            seen: seen.and_then(|at| u64::try_from(at).ok()),
+        }
+    }
+
+    /// A row the machine did not answer for. Its PR is not read.
+    fn stored(row: Row, doing: Option<Doing>) -> Self {
+        let (state, since) = wire(doing);
+        let (presence, said) = match row.status {
+            Status::Gone => ("gone", "the thread's worktree is gone"),
+            _ => ("offline", "the machine is offline"),
+        };
+        Self {
+            id: row.id,
+            branch: row.branch,
+            worktree: row.worktree,
+            issue: None,
+            title: row.title,
+            from: None,
+            state,
+            since,
+            pr: ThreadPr::Unknown {
+                said: said.to_owned(),
+            },
+            presence,
+            seen: row.seen.and_then(|at| u64::try_from(at).ok()),
         }
     }
 }
@@ -3084,6 +3239,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
     let working = Doing::Working(Some(
         std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_790_000_000_000),
     ));
+    const SEEN: i64 = 1_790_000_100_000;
     vec![
         (
             "here",
@@ -3226,11 +3382,41 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         }),
                         from: Some("main".to_owned()),
                         pr,
+                        kept: thread::Kept::default(),
                     },
                     (n == 1).then_some(working),
+                    Some(SEEN),
                 )
             })
             .collect::<Vec<_>>()),
+        ),
+        (
+            "threadsOffline",
+            "Thread[]",
+            of(&[Status::Idle, Status::Gone]
+                .into_iter()
+                .enumerate()
+                .map(|(n, status)| {
+                    let id = format!("{}a1b2c3d4e5f6a7b", n + 5);
+                    Thread::stored(
+                        Row {
+                            workspace: "site".to_owned(),
+                            branch: format!("yantra/chat/site/{id}"),
+                            worktree: format!("/home/<user>/.yantra/worktrees/chat/site/{id}"),
+                            id,
+                            machine: "mac".to_owned(),
+                            harness: Some("claude".to_owned()),
+                            session: None,
+                            title: Some("Keep a thread store".to_owned()),
+                            status,
+                            created: SEEN,
+                            active: SEEN,
+                            seen: Some(SEEN),
+                        },
+                        None,
+                    )
+                })
+                .collect::<Vec<_>>()),
         ),
         (
             "threadStates",
@@ -4757,6 +4943,110 @@ mod tests {
                 .expect("the router is infallible");
             assert_eq!(answered.status(), StatusCode::FORBIDDEN);
         }
+    }
+
+    fn listed_thread(id: &str, title: &str, session: &str) -> thread::Thread {
+        thread::Thread {
+            id: id.to_owned(),
+            branch: format!("yantra/chat/web/{id}"),
+            worktree: format!("/w/{id}"),
+            issue: None,
+            title: Some(title.to_owned()),
+            from: None,
+            pr: thread::Pr::None,
+            kept: thread::Kept {
+                claude_session: Some(session.to_owned()),
+                ..thread::Kept::default()
+            },
+        }
+    }
+
+    /// ADR-0045 decision 6: git config fills the store once, and a later
+    /// change there does not overwrite the row. A row the machine no longer
+    /// has follows the live list as gone.
+    #[tokio::test]
+    async fn the_thread_list_fills_the_store_once_and_shows_a_gone_thread() {
+        let (store, _) = crate::store::tests::scratch();
+        store
+            .adopt(vec![crate::store::tests::live(
+                "old",
+                Some("removed elsewhere"),
+                None,
+            )])
+            .await
+            .expect("a row");
+        let doing = Doings::new();
+
+        let first = live_threads(
+            Some(&store),
+            "web",
+            "m",
+            vec![listed_thread("a", "Fix it", "B")],
+            &doing,
+        )
+        .await;
+        let again = live_threads(
+            Some(&store),
+            "web",
+            "m",
+            vec![listed_thread("a", "Renamed in git", "other")],
+            &doing,
+        )
+        .await;
+
+        assert_eq!(
+            store.session("web", "a").await.expect("a read"),
+            Some(("claude".to_owned(), "B".to_owned()))
+        );
+        let rows = store.list("web").await.expect("rows");
+        let a = rows.iter().find(|row| row.id == "a").expect("a row for a");
+        assert_eq!(a.title.as_deref(), Some("Fix it"));
+        for served in [&first, &again] {
+            let json = serde_json::to_value(served).expect("json");
+            assert_eq!(json[0]["id"], "a");
+            assert_eq!(json[0]["presence"], "here");
+            assert_eq!(json[1]["id"], "old");
+            assert_eq!(json[1]["presence"], "gone");
+            assert_eq!(json[1]["title"], "removed elsewhere");
+        }
+    }
+
+    /// Decision 7: a machine that does not answer still lists its threads,
+    /// with their titles, as offline.
+    #[tokio::test]
+    async fn an_offline_machines_threads_come_from_the_store() {
+        let (store, _) = crate::store::tests::scratch();
+        let mut gone = crate::store::tests::live("b", Some("old"), None);
+        gone.status = Status::Gone;
+        store
+            .adopt(vec![
+                crate::store::tests::live("a", Some("Fix the login"), Some("S")),
+                gone,
+            ])
+            .await
+            .expect("rows");
+
+        let served = offline_threads(&store, "web", &Doings::new())
+            .await
+            .expect("served");
+
+        let json = serde_json::to_value(&served).expect("json");
+        let a = json
+            .as_array()
+            .and_then(|threads| threads.iter().find(|thread| thread["id"] == "a"))
+            .expect("thread a");
+        assert_eq!(a["presence"], "offline");
+        assert_eq!(a["title"], "Fix the login");
+        assert_eq!(a["seen"], 1);
+        assert_eq!(
+            a["pr"],
+            serde_json::json!({"state": "unknown", "said": "the machine is offline"})
+        );
+        let b = json
+            .as_array()
+            .and_then(|threads| threads.iter().find(|thread| thread["id"] == "b"))
+            .expect("thread b");
+        assert_eq!(b["presence"], "gone");
     }
 
     /// Y-649: the live states come from memory, for the owner only.

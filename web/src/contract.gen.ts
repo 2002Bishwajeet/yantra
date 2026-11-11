@@ -862,6 +862,8 @@ export const threads = [
     "pr": {
       "state": "none"
     },
+    "presence": "here",
+    "seen": 1790000100000,
     "since": null,
     "state": "idle",
     "title": "Fix the login redirect",
@@ -877,6 +879,8 @@ export const threads = [
       "state": "open",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/512"
     },
+    "presence": "here",
+    "seen": 1790000100000,
     "since": 1790000000000,
     "state": "working",
     "title": "#488 A workspace lists its threads",
@@ -892,6 +896,8 @@ export const threads = [
       "state": "closed",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/511"
     },
+    "presence": "here",
+    "seen": 1790000100000,
     "since": null,
     "state": "idle",
     "title": "Fix the login redirect",
@@ -907,6 +913,8 @@ export const threads = [
       "state": "merged",
       "url": "https://github.com/2002Bishwajeet/yantra/pull/510"
     },
+    "presence": "here",
+    "seen": 1790000100000,
     "since": null,
     "state": "idle",
     "title": "Fix the login redirect",
@@ -921,10 +929,47 @@ export const threads = [
       "said": "no GitHub grant — run `yantra github login`",
       "state": "unknown"
     },
+    "presence": "here",
+    "seen": 1790000100000,
     "since": null,
     "state": "idle",
     "title": "Fix the login redirect",
     "worktree": "/home/<user>/.yantra/worktrees/chat/site/4a1b2c3d4e5f6a7b"
+  }
+] satisfies Thread[]
+
+export const threadsOffline = [
+  {
+    "branch": "yantra/chat/site/5a1b2c3d4e5f6a7b",
+    "from": null,
+    "id": "5a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "said": "the machine is offline",
+      "state": "unknown"
+    },
+    "presence": "offline",
+    "seen": 1790000100000,
+    "since": null,
+    "state": "idle",
+    "title": "Keep a thread store",
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/5a1b2c3d4e5f6a7b"
+  },
+  {
+    "branch": "yantra/chat/site/6a1b2c3d4e5f6a7b",
+    "from": null,
+    "id": "6a1b2c3d4e5f6a7b",
+    "issue": null,
+    "pr": {
+      "said": "the thread's worktree is gone",
+      "state": "unknown"
+    },
+    "presence": "gone",
+    "seen": 1790000100000,
+    "since": null,
+    "state": "idle",
+    "title": "Keep a thread store",
+    "worktree": "/home/<user>/.yantra/worktrees/chat/site/6a1b2c3d4e5f6a7b"
   }
 ] satisfies Thread[]
 

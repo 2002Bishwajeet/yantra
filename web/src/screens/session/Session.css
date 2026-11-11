@@ -760,7 +760,8 @@
 /* Y-561: what the person queued behind the running turn, above the composer card. */
 
 .chat__queued,
-.chat__background {
+.chat__background,
+.chat__readonly {
   display: flex;
   flex-direction: column;
   gap: 4px;

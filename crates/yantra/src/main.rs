@@ -5609,6 +5609,7 @@ mod tests {
             title: None,
             from: None,
             pr,
+            kept: thread::Kept::default(),
         };
         let url = || "https://github.com/o/r/pull/1".to_owned();
         let rendered = render_threads(&[

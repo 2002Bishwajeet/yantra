@@ -36,6 +36,20 @@ describe('resolveQuickAction', () => {
   })
 })
 
+describe('a read-only thread (ADR-0045)', () => {
+  const why = 'The machine is offline, so this thread is read-only until it answers.'
+
+  it('turns the quick action into a hint that says why', () => {
+    expect(quick({ changed: true, readOnly: why })).toEqual({ label: 'Commit', kind: 'hint', disabled: true, hint: why })
+  })
+
+  it('turns every verb off with the reason, and keeps a PR link', () => {
+    const items = buildMenuItems({ ...idle, pr: { number: 7, state: 'open' }, readOnly: why })
+    expect(items.filter((item) => item.kind !== 'open_pr_link').every((item) => item.disabled && item.reason === why)).toBe(true)
+    expect(items.find((item) => item.kind === 'open_pr_link')?.disabled).toBe(false)
+  })
+})
+
 describe('buildMenuItems', () => {
   it('lists the three verbs, on once the thread is idle', () => {
     const items = buildMenuItems(idle)

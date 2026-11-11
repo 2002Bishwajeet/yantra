@@ -61,7 +61,7 @@ OAuth App token of its own ([ADR-0023](adr/0023-the-github-grant-lives-beside-th
 | --- | --- | --- |
 | [`yantra-core`](../crates/yantra-core/README.md) | All orchestration: ssh, tmux, agents, inventory, workspaces. Never prints, never exits ([ADR-0005](adr/0005-core-logic-in-a-library-crate.md)). | **Nearly all the code** |
 | [`yantra`](../crates/yantra/README.md) | The CLI. Layout, wording, exit codes. | Working; every verb the dashboard has, and `ls attention` |
-| [`yantrad`](../crates/yantrad/README.md) | The daemon. An HTTP surface over the same library, plus the dashboard and a pty per attached terminal. | Serves the read model, control, and a live terminal |
+| [`yantrad`](../crates/yantrad/README.md) | The daemon. An HTTP surface over the same library, plus the dashboard and a pty per attached terminal. It keeps one SQLite file, `~/.local/state/yantra/threads.sqlite`: a row per Chat thread, with no message and no secret ([ADR-0045](adr/0045-the-hub-keeps-a-thread-store.md)). | Serves the read model, control, and a live terminal |
 | [`yantra-agent`](../crates/yantra-agent/README.md) | Per-machine heartbeat, so a person choosing a machine can see a sleeping laptop. | Probes and reports, on a 10 s tick |
 
 The CLI and the daemon are **two callers of one library**, not a stack —

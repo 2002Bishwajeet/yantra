@@ -45,10 +45,12 @@ const RECORDING: &str =
 const WAKE: &str =
     include_str!("../../yantra-core/tests/recordings/claude-2.1.319-background-wake.jsonl");
 
-/// Plays the recording a line every 0.5 s, and holds at the `control_request`
-/// until a `control_response` arrives on stdin, as `claude -p` does. Then it
-/// reads stdin until it closes, as a `claude` that waits for its next turn.
+/// Appends its argv to `ARGV`, plays the recording a line every 0.5 s, and
+/// holds at the `control_request` until a `control_response` arrives on stdin,
+/// as `claude -p` does. Then it reads stdin until it closes, as a `claude` that
+/// waits for its next turn.
 const CLAUDE_STAND_IN: &str = r#"#!/bin/sh
+printf '%s\n' "$*" >> /home/yantra/claude.argv
 IFS= read -r prompt || exit 1
 while IFS= read -r line <&3; do
   sleep 0.5
@@ -1113,6 +1115,106 @@ async fn a_real_claude_background_task_wakes_the_thread() -> Result<()> {
         .collect();
     assert!(said.contains("WAKE_DONE"), "{said}");
     assert!(machine.session_exists(&thread), "the keeper stays");
+    Ok(())
+}
+
+/// The session id the recording's `init` line names.
+fn recorded_session() -> Result<String> {
+    RECORDING
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|line| line["type"] == "system" && line["subtype"] == "init")
+        .and_then(|init| init["session_id"].as_str().map(str::to_owned))
+        .context("the recording has an init line with a session id")
+}
+
+/// The session the daemon's thread store holds for `thread`.
+fn stored_session(store: &Path, thread: &str) -> Result<Option<String>> {
+    if !store.exists() {
+        return Ok(None);
+    }
+    let db = rusqlite::Connection::open(store)?;
+    let mut rows = db.prepare("SELECT session FROM threads WHERE workspace = ?1 AND id = ?2")?;
+    let session = rows
+        .query_map([WORKSPACE, thread], |at| at.get::<_, Option<String>>(0))?
+        .next()
+        .transpose()?
+        .flatten();
+    Ok(session)
+}
+
+/// ADR-0045 decision 4: an agent in the worktree that runs `claude` and
+/// rewrites git config does not change which conversation the next keeper
+/// resumes, and the daemon writes the store's session back.
+#[tokio::test]
+async fn a_second_claude_run_does_not_change_which_conversation_resumes() -> Result<()> {
+    let Some(machine) = Machine::start(Agent::StandIn)? else {
+        return Ok(());
+    };
+    let host = Host::new(&machine.fixture)?;
+    let _daemon = host.daemon_with("a", &[("YANTRA_CHAT_IDLE", "15")]).await?;
+    let mut socket = Socket::open(&chat(None, None)).await?;
+    socket
+        .send(json!({"type": "turn", "text": Agent::StandIn.prompt(), "harness": "claude"}))
+        .await?;
+    let drawn = socket
+        .through(PATIENCE, |frame| frame["type"] == "request.opened")
+        .await?;
+    let thread = thread_of(&drawn)?;
+    let request = drawn[drawn.len() - 1]["payload"]["requestId"].clone();
+    socket
+        .send(json!({"type": "answer", "requestId": request, "decision": "accept"}))
+        .await?;
+    socket.through(PATIENCE, diff_of(1)).await?;
+    let session = recorded_session()?;
+    let store = host.root.join("home/.local/state/yantra/threads.sqlite");
+    let deadline = Instant::now() + PATIENCE;
+    while stored_session(&store, &thread)?.as_deref() != Some(session.as_str()) {
+        if Instant::now() > deadline {
+            bail!("the store never held session {session}");
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    // An agent in the worktree runs `claude` itself and rewrites git config.
+    let key = format!("branch.yantra/chat/{WORKSPACE}/{thread}.yantraClaudeSession");
+    machine.sh(&format!(
+        "cd ~/.yantra/worktrees/chat/{WORKSPACE}/{thread} && {{ claude -p --resume other </dev/null || true; }} \
+         && git config {key} other"
+    ))?;
+    machine
+        .until(
+            Duration::from_secs(60),
+            "the idle keeper's session going",
+            |machine| Ok(!machine.session_exists(&thread)),
+        )
+        .await?;
+
+    let mut again = Socket::open(&chat(Some(&thread), None)).await?;
+    again
+        .send(json!({"type": "turn", "text": "and again", "harness": "claude"}))
+        .await?;
+    machine
+        .until(PATIENCE, "a second keeper's claude", |machine| {
+            Ok(machine
+                .sh("wc -l < ~/claude.argv")?
+                .parse::<u32>()
+                .unwrap_or(0)
+                >= 3)
+        })
+        .await?;
+    let argv = machine.sh("tail -n 1 ~/claude.argv")?;
+    assert!(
+        argv.ends_with(&format!("--resume {session}")),
+        "the store's session resumes: {argv}"
+    );
+    assert_eq!(
+        machine.sh(&format!("git -C {REPO} config --get {key}"))?,
+        session,
+        "git config names the store's session again"
+    );
+    let mode = fs::metadata(&store)?.permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "{}", store.display());
     Ok(())
 }
 

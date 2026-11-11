@@ -30,6 +30,30 @@ const finished = (one: Thread) => one.pr.state === 'closed' || one.pr.state === 
 /** What a person reads for a thread: never its id, which is random hex. */
 export const threadTitle = (one: Thread) => one.title ?? one.issue ?? 'Untitled thread'
 
+/** The word a thread's presence adds to its row, or null for a machine that answered. */
+export function presenceWord(one: Thread, now: number): string | null {
+  switch (one.presence) {
+    case 'here':
+      return null
+    case 'gone':
+      return 'gone'
+    case 'offline':
+      return one.seen === null ? 'offline' : `offline · seen ${elapsed(one.seen, now)} ago`
+  }
+}
+
+/** Why a thread takes no message and no git verb, or null when it does. */
+export function readOnlyWhy(one: Thread | undefined): string | null {
+  switch (one?.presence) {
+    case 'offline':
+      return 'The machine is offline, so this thread is read-only until it answers.'
+    case 'gone':
+      return 'The machine no longer has this thread’s worktree, so it is read-only.'
+    default:
+      return null
+  }
+}
+
 /** "8s", "3m 04s" or "1h 02m". */
 export function elapsed(since: number, now: number) {
   const seconds = Math.max(0, Math.floor((now - since) / 1000))

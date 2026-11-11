@@ -585,6 +585,11 @@ export type Thread = {
   state: ThreadState['state']
   since: number | null
   pr: ThreadPr
+  /** ADR-0045: `here` is the machine's answer; `offline` is the daemon's store, for a machine
+   *  that did not answer; `gone` is a worktree the machine no longer has. */
+  presence: 'here' | 'offline' | 'gone'
+  /** Unix milliseconds the machine last answered; null when it never has. */
+  seen: number | null
 }
 
 /** `POST /api/workspaces/{name}/threads/new` with `{ issue }`. `draft` is the

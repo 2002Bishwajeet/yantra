@@ -24,6 +24,7 @@ import {
   chatStopTaskFailed,
   pulls,
   threads,
+  threadsOffline,
 } from '@/contract.gen'
 import { aMentions, commands as claudeCommands } from '@/api/fixtures'
 import { writePrefs } from '@/shell/prefs'
@@ -2096,5 +2097,21 @@ describe('markdown in a reply (Y-653)', () => {
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noreferrer')
     expect(screen.getByText('use **bold** `a/b.rs`').tagName).toBe('P')
+  })
+})
+
+describe('an offline thread (ADR-0045)', () => {
+  it('disables the composer and says why', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).endsWith('/threads')
+          ? Response.json([{ ...threadsOffline[0], id: '1a2b3c4d' }])
+          : new Response('no', { status: 404 }),
+      ),
+    )
+    await open('1a2b3c4d')
+    await settled(() => expect(document.querySelector('.chat__readonly')?.textContent).toMatch(/machine is offline/))
+    expect(screen.getByRole('combobox', { name: /^Message / }).hasAttribute('disabled')).toBe(true)
   })
 })
