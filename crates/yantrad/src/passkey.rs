@@ -461,39 +461,18 @@ impl Passkeys {
         if state.saved.passkeys.len() == before {
             return Ok(false);
         }
-        let ended: Vec<String> = state
-            .saved
-            .sessions
-            .iter()
-            .filter(|s| s.passkey == name)
-            .map(|s| s.id.clone())
-            .collect();
-        state.saved.sessions.retain(|s| s.passkey != name);
-        for id in &ended {
-            end(&mut state, id);
-        }
+        end_where(&mut state, |s| s.passkey == name);
         self.save(&state)?;
         Ok(true)
     }
 
     fn revoke_where(&self, revoked: impl Fn(&Session) -> bool) -> Result<usize, Error> {
         let mut state = self.lock();
-        let ended: Vec<String> = state
-            .saved
-            .sessions
-            .iter()
-            .filter(|s| revoked(s))
-            .map(|s| s.id.clone())
-            .collect();
-        if ended.is_empty() {
-            return Ok(0);
+        let ended = end_where(&mut state, revoked);
+        if ended > 0 {
+            self.save(&state)?;
         }
-        state.saved.sessions.retain(|s| !revoked(s));
-        for id in &ended {
-            end(&mut state, id);
-        }
-        self.save(&state)?;
-        Ok(ended.len())
+        Ok(ended)
     }
 
     /// The first half of an enrolment: the code must be open, and is used at
@@ -649,6 +628,22 @@ impl Passkeys {
         };
         write(file, &state.saved)
     }
+}
+
+/// Drops every session `ended` picks and closes its sockets; how many.
+fn end_where(state: &mut Held, ended: impl Fn(&Session) -> bool) -> usize {
+    let ids: Vec<String> = state
+        .saved
+        .sessions
+        .iter()
+        .filter(|s| ended(s))
+        .map(|s| s.id.clone())
+        .collect();
+    state.saved.sessions.retain(|s| !ended(s));
+    for id in &ids {
+        end(state, id);
+    }
+    ids.len()
 }
 
 /// Written whole to a temporary file at `0600` and renamed over the old one.

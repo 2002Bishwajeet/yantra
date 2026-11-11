@@ -64,7 +64,7 @@ function spell(seconds: number, at: Date): string {
 
 // Composed rather than taken from `toLocaleDateString`, whose order follows the
 // reader's locale: D3 names the format `7 Jul`, and only the month is localised.
-function day(at: Date): string {
+export function day(at: Date): string {
   const month = at.toLocaleDateString(undefined, { month: 'short' })
   return `${at.getDate()} ${month}`
 }

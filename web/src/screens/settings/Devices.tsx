@@ -12,10 +12,14 @@ import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
+import type { ApiError } from '@/api/errors'
+import { day } from '@/lib/time'
 import { Group, Note } from './Group'
 
-const day = (seconds: number) =>
-  new Date(seconds * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+const when = (seconds: number) => day(new Date(seconds * 1000))
+
+/** A write's failure in one supporting line: the sentence, then the daemon's words. */
+const words = (error: ApiError) => `${error.describe()} ${error.said}`
 
 function Session(props: { session: DeviceSession }) {
   const { session } = props
@@ -30,8 +34,8 @@ function Session(props: { session: DeviceSession }) {
       }
       supporting={
         out.error
-          ? `${out.error.describe()} ${out.error.said}`
-          : `${session.this_device ? 'this device · ' : ''}with ${session.passkey} · ends ${day(session.ends)}`
+          ? words(out.error)
+          : `${session.this_device ? 'this device · ' : ''}with ${session.passkey} · ends ${when(session.ends)}`
       }
       trailing={
         <Button variant="text" tone="error" onClick={() => out.mutate(session.id)} disabled={out.isPending}>
@@ -54,7 +58,7 @@ function Passkey(props: { name: string; made: number }) {
         </Lead>
       }
       supporting={
-        remove.error ? `${remove.error.describe()} ${remove.error.said}` : `enrolled ${day(made)}`
+        remove.error ? words(remove.error) : `enrolled ${when(made)}`
       }
       trailing={
         <Button variant="text" tone="error" onClick={() => remove.mutate(name)} disabled={remove.isPending}>
@@ -79,7 +83,7 @@ function NewDevice() {
             <Plus />
           </Lead>
         }
-        supporting={code.error ? `${code.error.describe()} ${code.error.said}` : 'or run yantra passkey code on the hub'}
+        supporting={code.error ? words(code.error) : 'or run yantra passkey code on the hub'}
         trailing={
           <Button variant="tonal" onClick={() => code.mutate()} disabled={code.isPending}>
             {code.data ? 'New code' : 'Make a code'}
@@ -126,7 +130,7 @@ export function Devices() {
           Sign out every other device
         </Button>
       ) : null}
-      {others.error ? <Note>{`${others.error.describe()} ${others.error.said}`}</Note> : null}
+      {others.error ? <Note>{words(others.error)}</Note> : null}
       <Group label="Passkeys" note="Removing a passkey signs out every device it signed in.">
         {passkeys.map((one) => (
           <Passkey key={one.name} name={one.name} made={one.made} />
