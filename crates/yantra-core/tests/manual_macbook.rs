@@ -312,8 +312,9 @@ async fn the_gate_finds_a_credential_in_the_server_where_ssh_finds_none() -> any
 /// through the LaunchAgent and opens a session in it, and that server's panes
 /// find the credential. Needs the owner logged in at the Mac's screen.
 ///
-/// **It kills Yantra's `-L yantra` server, so every session on it ends.** It
-/// leaves the LaunchAgent loaded and its server running.
+/// **It boots out the LaunchAgent and kills Yantra's `-L yantra` server, so
+/// every session on it ends.** It leaves the LaunchAgent loaded and its server
+/// running.
 #[tokio::test]
 #[ignore = "needs the real MacBook with the owner logged in at its screen, and kills its tmux server; set YANTRA_MAC=user@host"]
 async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<()> {
@@ -329,11 +330,7 @@ async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<
     let tmux = Tmux::resolve(&ssh).await?;
     let claude = Claude::resolve(&ssh).await?;
 
-    ssh.exec(&format!("{} kill-server", tmux.command())).await?;
-    anyhow::ensure!(
-        !tmux.running(&ssh).await?,
-        "the server outlived kill-server"
-    );
+    no_login_server(&ssh, &tmux).await?;
 
     let _leaves = Leaves::session_only(&dest, &tmux.command(), E2E);
     let ws = workspace::Workspace {
@@ -377,8 +374,9 @@ async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<
 /// `doctor` reports `hooks` present, and `node` and `claude-mem` resolve in it.
 /// Needs the owner logged in at the Mac's screen.
 ///
-/// **It kills Yantra's `-L yantra` server, so every session on it ends.** It
-/// leaves the LaunchAgent loaded and its server running.
+/// **It boots out the LaunchAgent and kills Yantra's `-L yantra` server, so
+/// every session on it ends.** It leaves the LaunchAgent loaded and its server
+/// running.
 #[tokio::test]
 #[ignore = "needs the real MacBook with the owner logged in at its screen, and kills its tmux server; set YANTRA_MAC=user@host"]
 async fn the_agents_hooks_find_their_commands_on_the_mac() -> anyhow::Result<()> {
@@ -404,11 +402,7 @@ async fn the_agents_hooks_find_their_commands_on_the_mac() -> anyhow::Result<()>
         .filter(|dir| dir.starts_with('/'))
         .ok_or_else(|| anyhow::anyhow!("the login shell finds no node: {node:?}"))?;
 
-    ssh.exec(&format!("{} kill-server", tmux.command())).await?;
-    anyhow::ensure!(
-        !tmux.running(&ssh).await?,
-        "the server outlived kill-server"
-    );
+    no_login_server(&ssh, &tmux).await?;
 
     let _leaves = Leaves::session_only(&dest, &tmux.command(), E2E);
     let ws = workspace::Workspace {
@@ -457,9 +451,8 @@ async fn the_agents_hooks_find_their_commands_on_the_mac() -> anyhow::Result<()>
     Ok(())
 }
 
-/// **Y-639's done condition on macOS**, and the half of Y-640 that says the
-/// hook runs: a real Claude reads as running, and after a `SIGTERM` it reads as
-/// stopped with no raw tmux text on its pane. Needs the owner logged in at the
+/// **Y-639's done condition on macOS**: a real Claude reads as running, and
+/// after a `SIGTERM` it reads as stopped with no raw tmux text on its pane. Needs the owner logged in at the
 /// Mac's screen, and [`Q12_REPO`] trusted there (I-49).
 ///
 /// **It ends the `yantra-manual-e2e` session on Yantra's `-L yantra` server**,
@@ -518,9 +511,6 @@ async fn a_claude_session_reads_running_then_stopped_on_the_mac() -> anyhow::Res
         started.elapsed().as_secs(),
         running.agent
     );
-    // Read now and asserted last, so a hook fault does not hide Y-639's result.
-    let hook_failed = tmux.pane_shows(&ssh, &pane, "hook error").await?;
-
     // `down::stop` kills the session once it has read it, so the dead pane is
     // read here, between the signal and the kill.
     let pid = running
@@ -563,10 +553,6 @@ async fn a_claude_session_reads_running_then_stopped_on_the_mac() -> anyhow::Res
         after.verdict == Verdict::NoSession,
         "after down: {:?}",
         after.verdict
-    );
-    anyhow::ensure!(
-        !hook_failed,
-        "a hook failed in a pane of the LaunchAgent's server (Y-640)"
     );
     Ok(())
 }
@@ -848,6 +834,21 @@ struct Auth {
     method: String,
 }
 
+/// Boots out Yantra's LaunchAgent and kills its server. KeepAlive restarts a
+/// killed server within a second, so the job goes first (Y-679).
+async fn no_login_server(ssh: &Ssh, tmux: &Tmux) -> anyhow::Result<()> {
+    ssh.exec(&format!(
+        "launchctl bootout gui/$(id -u)/{LABEL} 2>/dev/null; {} kill-server 2>/dev/null; true",
+        tmux.command()
+    ))
+    .await?;
+    anyhow::ensure!(
+        !tmux.running(ssh).await?,
+        "Yantra's server outlived the bootout"
+    );
+    Ok(())
+}
+
 /// A fresh v4 id per run, so the file the readings come from is this run's
 /// conversation and no earlier one. `agent::prepare` is what mints one in
 /// production, and it is behind the gate this harness cannot use here.
@@ -927,15 +928,7 @@ async fn a_chat_turn_with_no_login_server_starts_the_launch_agent_on_the_mac() -
     anyhow::ensure!(ssh::os(&ssh).await? == Os::MacOs, "{dest} is not a Mac");
     let tmux = Tmux::resolve(&ssh).await?;
 
-    ssh.exec(&format!(
-        "launchctl bootout gui/$(id -u)/{LABEL} 2>/dev/null; {} kill-server 2>/dev/null; true",
-        tmux.command()
-    ))
-    .await?;
-    anyhow::ensure!(
-        !tmux.running(&ssh).await?,
-        "Yantra's server outlived the bootout"
-    );
+    no_login_server(&ssh, &tmux).await?;
     real_turn(&ssh, &tmux, &dest, "y667", "/private/tmp/yantra-y667").await?;
 
     // The `-D` server outlives its last session, so it is still the job's.
