@@ -26,6 +26,7 @@ nix = { version = "0.28", default-features = false, features = ["user"] }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.11"
 thiserror.workspace = true
 # A spend window's start arrives as an RFC 3339 instant (Y-354).
 time.workspace = true
@@ -35,6 +36,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 # The one HTTP client in the tree, for `yantra-stt` (ADR-0043).
 ureq.workspace = true
+webauthn-rs = "0.6.2"
 yantra-core.workspace = true
 
 # `tower` is axum's own; it is here only so a test can drive the router
