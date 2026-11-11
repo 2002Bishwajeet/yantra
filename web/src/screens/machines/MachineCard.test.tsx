@@ -179,6 +179,20 @@ describe("a ready machine with gaps (Y-714)", () => {
     expect(screen.getByText("no hooks file")).toBeTruthy();
   });
 
+  it("shows the sudo gap once, in its note, and keeps the other gaps as lines", async () => {
+    renderCard(aMachine(), checks);
+    await screen.findByText(/to fix/);
+    const said = screen.getAllByText(/wheel group/);
+    expect(said).toHaveLength(1);
+    expect(said[0].getAttribute("role")).toBe("note");
+    expect(screen.queryByText("The joined account can use sudo")).toBeNull();
+    expect(screen.getByText("no hooks file")).toBeTruthy();
+    const filled = Array.from(document.body.querySelectorAll("button, a")).filter((one) =>
+      /filled/.test(one.className),
+    );
+    expect(filled.length).toBeLessThanOrEqual(1);
+  });
+
   it("prints no backticks", async () => {
     renderCard(aMachine(), [...all.filter((one) => one.check !== "terminfo"), { check: "terminfo", state: "absent", detail: "that machine lacks `xterm-256color`" }]);
     await screen.findByText("that machine lacks xterm-256color");

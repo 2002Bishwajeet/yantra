@@ -144,7 +144,7 @@ export function MachineCard(props: MachineCardProps) {
   })
   // Y-714: a card names what needs the owner and counts the rest. A ready machine
   // with gaps lists those gaps, which are not always among the four.
-  const shown = verdict.kind === 'manual' ? verdict.absent : four.filter((one) => one.state !== 'present')
+  const shown = verdict.kind === 'manual' ? verdict.absent.filter((one) => one.check !== 'no-sudo') : four.filter((one) => one.state !== 'present')
   const chip = chipOf(verdict, seen?.text ?? null)
   // The machine cannot be reached, so a tally of checks nobody could ask says nothing.
   const reachable = checkNamed(checks, 'reachable')
