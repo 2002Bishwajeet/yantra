@@ -216,3 +216,14 @@ Accessed 2026-11-08.
 > [ADR-0044](0044-a-write-needs-the-owners-passkey.md) closes the open hole in the Consequences and
 > the first *Not decided here* item. It changes one case in decision 3: a `serve` hop whose forwarded
 > address is this node's own passes when it carries a live session cookie.
+
+> **2026-11-11 ([Y-727](../../tracker.md)): one named proxy account is treated as the `serve` hop.**
+> The owner's box serves the dashboard at a custom name through Caddy, which runs as the `caddy`
+> account and forwards over TCP to `:7717`. Decision 5 refuses that hop, so Home chats, Usage and
+> every write stopped on the nightly that carried Y-680. The owner chose, on 2026-11-11, to keep the
+> custom name. Decision 3 gains one case: **an account that the daemon's configuration names as its
+> proxy is treated as uid 0 on the socket.** Its `X-Forwarded-For` names the caller, an absent
+> header or an address of this node is refused, and every other address goes through ADR-0016's
+> predicate. No account is named by default. The cost is the one decision 3 already accepts for
+> root: any process that runs as that account can name a caller. Caddy then proxies to
+> `unix//run/yantra/yantrad.sock`.
