@@ -120,6 +120,7 @@ use yantra_core::thread::{self, Place};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::{self, Workspace};
 
+use crate::store::Store;
 use crate::terminal::{MISSES, PING_EVERY};
 use crate::write::{Authoriser, Refused, allowed, chain};
 
@@ -624,12 +625,12 @@ trait Machine: Send + Sync + 'static {
         &self,
         place: &Place,
     ) -> impl Future<Output = Result<Vec<logs::Entry>, String>> + Send;
-    /// Starts Claude in a keeper, resuming the session the thread keeps, and
-    /// sends it `first`.
+    /// Starts Claude in a keeper, resuming `resumed`, and sends it `first`.
     fn start(
         &self,
         place: &Place,
         first: &claude::Prompt<'_>,
+        resumed: Option<&str>,
     ) -> impl Future<Output = Result<Started<KeptClaude>, String>> + Send;
     /// Writes one image on the machine and returns its path.
     fn put(
@@ -649,6 +650,11 @@ trait Machine: Send + Sync + 'static {
         harness: Harness,
         session: &str,
     ) -> impl Future<Output = Result<(), String>> + Send;
+    /// The Claude session id git config keeps.
+    fn claude_session(
+        &self,
+        place: &Place,
+    ) -> impl Future<Output = Result<Option<String>, String>> + Send;
     /// Keeps a Claude thread's session id (ADR-0041 decision 8).
     fn remember_claude(
         &self,
@@ -820,6 +826,7 @@ impl Machine for Fleet {
         &self,
         place: &Place,
         first: &claude::Prompt<'_>,
+        resumed: Option<&str>,
     ) -> Result<Started<KeptClaude>, String> {
         let keeper = keeper_of(place)?;
         let tmux = self.tmux().await?;
@@ -828,9 +835,6 @@ impl Machine for Fleet {
             url: format!("http://{daemon}/api/mcp"),
             thread: format!("{}/{}", self.workspace.name, thread::name(place)),
         });
-        let resumed = thread::claude_session(&self.ssh, place)
-            .await
-            .map_err(|error| chain(&error))?;
         let agent = claude::command(
             &place.worktree,
             &keeper,
@@ -840,7 +844,7 @@ impl Machine for Fleet {
             first.effort,
             first.context,
             mcp.as_ref(),
-            resumed.as_deref(),
+            resumed,
         );
         let started = keep::start(&self.ssh, tmux, &keeper, &agent, &run, Limits::default())
             .await
@@ -863,7 +867,7 @@ impl Machine for Fleet {
             session,
             events,
             run,
-            resumed,
+            resumed: resumed.map(str::to_owned),
         }))
     }
 
@@ -886,6 +890,12 @@ impl Machine for Fleet {
 
     async fn remember(&self, place: &Place, harness: Harness, session: &str) -> Result<(), String> {
         thread::remember(&self.ssh, place, harness, session)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    async fn claude_session(&self, place: &Place) -> Result<Option<String>, String> {
+        thread::claude_session(&self.ssh, place)
             .await
             .map_err(|error| chain(&error))
     }
@@ -1199,6 +1209,8 @@ pub struct Registry {
     daemon: Option<SocketAddr>,
     /// Bumped when a held thread's turn or tool changes, for room presence.
     changed: watch::Sender<u64>,
+    /// The thread store (ADR-0045), which wins over git config for a session.
+    store: Option<Store>,
 }
 
 #[derive(Default)]
@@ -1267,7 +1279,15 @@ impl Registry {
             waits: Some(waits),
             daemon: None,
             changed: watch::Sender::default(),
+            store: None,
         }
+    }
+
+    /// This registry, whose threads keep their sessions in `store` first.
+    #[must_use]
+    pub fn storing(mut self, store: Store) -> Self {
+        self.store = Some(store);
+        self
     }
 
     /// This registry, whose Claude turns reach the room tools at `daemon`.
@@ -2592,7 +2612,7 @@ async fn attach<M: Machine, P: Peer>(
             return None;
         }
     };
-    let kept = match machine.recall(&place).await {
+    let kept = match recalled(machine.as_ref(), &place).await {
         Ok(kept) => kept,
         Err(said) => {
             let _ = peer.say(&unreachable(said)).await;
@@ -2857,10 +2877,21 @@ async fn begin<M: Machine, P: Peer>(
                     return false;
                 }
                 // The thread lists by this title; a failed write leaves it untitled.
-                if let Err(said) = machine
-                    .remember_title(&opened.place, &thread::title(&next.text))
-                    .await
+                let title = thread::title(&next.text);
+                if let Some((store, keeper)) = stored_as(machine.as_ref(), &opened.place)
+                    && let Err(error) = store
+                        .put_title(
+                            keeper.workspace(),
+                            keeper.thread(),
+                            machine.machine(),
+                            &opened.place,
+                            &title,
+                        )
+                        .await
                 {
+                    tracing::warn!("chat {name}: the store has no title: {}", chain(&error));
+                }
+                if let Err(said) = machine.remember_title(&opened.place, &title).await {
                     tracing::warn!(
                         "chat {name}: thread {} has no title: {said}",
                         opened.place.id
@@ -2968,6 +2999,14 @@ async fn open<M: Machine>(
             if let Err(said) = machine.remove(&place).await {
                 tracing::warn!("chat {name}: thread {id} stays: {said}");
             }
+            if let Some((store, keeper)) = stored_as(machine.as_ref(), &place)
+                && let Err(error) = store.remove(keeper.workspace(), keeper.thread()).await
+            {
+                tracing::warn!(
+                    "chat {name}: the store keeps thread {id}: {}",
+                    chain(&error)
+                );
+            }
             Err(refusal)
         }
     }
@@ -3058,7 +3097,14 @@ async fn claude_turn<M: Machine>(
     let Some(mut claim) = Claim::take(machine, place) else {
         return Ok(Turned::Lost);
     };
-    let started = machine.start(place, &turn.prompt()).await;
+    let started = match resumable(machine.as_ref(), name, place).await {
+        Ok(resumed) => {
+            machine
+                .start(place, &turn.prompt(), resumed.as_deref())
+                .await
+        }
+        Err(said) => Err(said),
+    };
     let KeptClaude {
         session,
         events,
@@ -3336,10 +3382,16 @@ async fn open_session<M: Machine>(
                 .new_session(&place.worktree)
                 .await
                 .map_err(|error| refused(machine.machine(), harness, login.clone(), &error))?;
-            machine
-                .remember(place, harness, &session)
-                .await
-                .map_err(|said| failure(Kind::Unreachable, said))?;
+            let stored = store_session(machine, place, harness.name(), &session).await;
+            if let Err(said) = machine.remember(place, harness, &session).await {
+                if !stored {
+                    return Err(failure(Kind::Unreachable, said));
+                }
+                tracing::warn!(
+                    "chat {}: the session is not in git config: {said}",
+                    place.id
+                );
+            }
             session
         }
     };
@@ -3587,10 +3639,131 @@ async fn remember<M: Machine>(machine: &M, name: &str, place: &Place, claude: &m
     if claude.remembered.as_ref() == Some(&session) {
         return;
     }
+    let stored = store_session(machine, place, name_of(None), &session).await;
     match machine.remember_claude(place, &session).await {
         Ok(()) => claude.remembered = Some(session),
-        Err(said) => tracing::warn!("chat {name}: the session id was not kept: {said}"),
+        Err(said) => {
+            tracing::warn!("chat {name}: the session id is not in git config: {said}");
+            if stored {
+                claude.remembered = Some(session);
+            }
+        }
     }
+}
+
+/// The store and the thread's key in it, for a registry that has one.
+fn stored_as<'a, M: Machine>(machine: &'a M, place: &Place) -> Option<(&'a Store, Keeper)> {
+    Some((machine.registry().store.as_ref()?, Keeper::of(place)?))
+}
+
+/// Writes a session to the store before git config (ADR-0045 decision 3).
+/// `false` is a session the store does not hold.
+async fn store_session<M: Machine>(
+    machine: &M,
+    place: &Place,
+    harness: &str,
+    session: &str,
+) -> bool {
+    let Some((store, keeper)) = stored_as(machine, place) else {
+        return false;
+    };
+    let put = store
+        .put_session(
+            keeper.workspace(),
+            keeper.thread(),
+            machine.machine(),
+            place,
+            harness,
+            session,
+        )
+        .await;
+    put.inspect_err(|error| {
+        tracing::warn!(
+            "chat {}: the store has no session: {}",
+            place.id,
+            chain(error)
+        )
+    })
+    .is_ok()
+}
+
+/// The harness and session the store keeps for the thread. A store that
+/// cannot be read is logged, and git config answers.
+async fn stored<M: Machine>(machine: &M, place: &Place) -> Option<(String, String)> {
+    let (store, keeper) = stored_as(machine, place)?;
+    store
+        .session(keeper.workspace(), keeper.thread())
+        .await
+        .inspect_err(|error| {
+            tracing::warn!(
+                "chat {}: the store was not read: {}",
+                place.id,
+                chain(error)
+            )
+        })
+        .ok()
+        .flatten()
+}
+
+/// The session a new Claude keeper resumes. The store's wins and is written
+/// back to git config, where an agent may have changed it; a thread the store
+/// lacks is read from git config and kept (ADR-0045 decisions 4 and 5).
+async fn resumable<M: Machine>(
+    machine: &M,
+    name: &str,
+    place: &Place,
+) -> Result<Option<String>, String> {
+    let kept = machine.claude_session(place).await?;
+    let Some((_, session)) = stored(machine, place)
+        .await
+        .filter(|(harness, _)| harness == name_of(None))
+    else {
+        if let Some(session) = &kept {
+            store_session(machine, place, name_of(None), session).await;
+        }
+        return Ok(kept);
+    };
+    if kept.as_ref() != Some(&session) {
+        tracing::warn!("chat {name}: git config names another session, so the store's resumes");
+        if let Err(said) = machine.remember_claude(place, &session).await {
+            tracing::warn!("chat {name}: the session id is not in git config: {said}");
+        }
+    }
+    Ok(Some(session))
+}
+
+/// [`Machine::recall`], with the store's answer winning as [`resumable`]'s does.
+/// `None` is a Claude thread.
+async fn recalled<M: Machine>(
+    machine: &M,
+    place: &Place,
+) -> Result<Option<(Harness, String)>, String> {
+    let kept = machine.recall(place).await?;
+    let Some((named, session)) = stored(machine, place).await else {
+        if let Some((harness, session)) = &kept {
+            store_session(machine, place, harness.name(), session).await;
+        }
+        return Ok(kept);
+    };
+    let harness = match harness_named(&named) {
+        Ok(Some(harness)) => harness,
+        Ok(None) => return Ok(None),
+        Err(_) => return Ok(kept),
+    };
+    let wins = (harness, session);
+    if kept.as_ref() != Some(&wins) {
+        tracing::warn!(
+            "chat {}: git config names another session, so the store's resumes",
+            place.id
+        );
+        if let Err(said) = machine.remember(place, wins.0, &wins.1).await {
+            tracing::warn!(
+                "chat {}: the session is not in git config: {said}",
+                place.id
+            );
+        }
+    }
+    Ok(Some(wins))
 }
 
 /// A Claude turn ended, a wake turn too: the thread is free, the tree is kept,
@@ -4060,7 +4233,7 @@ fn wake_on<M: Machine>(
 ) -> Pin<Box<dyn Future<Output = Woke> + Send>> {
     Box::pin(async move {
         let thread = thread::name(&place).to_owned();
-        match machine.recall(&place).await {
+        match recalled(machine.as_ref(), &place).await {
             Ok(None) => {}
             Ok(Some((harness, _))) => {
                 tracing::info!(
@@ -4211,7 +4384,9 @@ async fn adopt_claimed<M: Machine>(
     _claim: &Claim<M>,
 ) -> Result<(), Failure> {
     let unreachable = |said: String| failure(Kind::Unreachable, said);
-    let kept = machine.recall(&place).await.map_err(unreachable)?;
+    let kept = recalled(machine.as_ref(), &place)
+        .await
+        .map_err(unreachable)?;
     let harness = kept.as_ref().map(|(harness, _)| *harness);
     let Some(adopted) = machine.adopt(&place, harness).await.map_err(unreachable)? else {
         return Ok(());
@@ -4881,6 +5056,8 @@ mod tests {
         cleared: Mutex<usize>,
         /// Each Claude session id the thread was told to keep.
         claude_sessions: Mutex<Vec<String>>,
+        /// The Claude session id the thread's git config keeps.
+        claude_kept: Option<String>,
         /// The permission mode each Claude keeper was started with.
         modes: Mutex<Vec<PermissionMode>>,
         /// The command each Claude turn would run.
@@ -5025,6 +5202,7 @@ mod tests {
             &self,
             place: &Place,
             first: &claude::Prompt<'_>,
+            resumed: Option<&str>,
         ) -> Result<Started<KeptClaude>, String> {
             let Some((run, reader, writer, end)) = self.begin(Some(first.mode)) else {
                 return Ok(Started::Busy);
@@ -5039,7 +5217,7 @@ mod tests {
                 first.effort,
                 first.context,
                 None,
-                None,
+                resumed,
             ));
             lock(&self.turns).push(Claude(end));
             if let Some(gate) = &self.start_gate {
@@ -5051,8 +5229,12 @@ mod tests {
                 session,
                 events,
                 run,
-                resumed: None,
+                resumed: resumed.map(str::to_owned),
             }))
+        }
+
+        async fn claude_session(&self, _: &Place) -> Result<Option<String>, String> {
+            Ok(self.claude_kept.clone())
         }
 
         async fn remember_claude(&self, _: &Place, session: &str) -> Result<(), String> {
@@ -5778,6 +5960,122 @@ mod tests {
         let (_tab, _agent, prompt) = an_opencode_thread(&script).await;
         assert_eq!(prompt["method"], "session/prompt", "the turn still runs");
         assert!(script.titled.lock().expect("a lock").is_empty());
+    }
+
+    fn storing(claude_kept: Option<&str>) -> (Arc<Script>, Store) {
+        let (store, _) = crate::store::tests::scratch();
+        let script = Arc::new(Script {
+            claude_kept: claude_kept.map(str::to_owned),
+            registry: Registry::default().storing(store.clone()),
+            ..Script::default()
+        });
+        (script, store)
+    }
+
+    /// ADR-0045 decision 4: an agent in the worktree that rewrites git config
+    /// does not change which conversation resumes.
+    #[tokio::test]
+    async fn a_start_resumes_the_stores_session_and_writes_it_back_to_git_config() {
+        let (script, store) = storing(Some("B"));
+        store
+            .put_session("web", THREAD, "m", &place(), "claude", "A")
+            .await
+            .expect("a row");
+
+        a_claude_turn_in(&script, None).await;
+
+        let commands = lock(&script.commands);
+        assert!(commands[0].contains("--resume 'A'"), "{}", commands[0]);
+        assert_eq!(*lock(&script.claude_sessions), ["A"]);
+    }
+
+    /// Decision 5: a thread made before the store resumes git config's session,
+    /// and the store keeps it from then on.
+    #[tokio::test]
+    async fn a_thread_the_store_lacks_resumes_git_configs_session_and_keeps_it() {
+        let (script, store) = storing(Some("B"));
+
+        a_claude_turn_in(&script, None).await;
+
+        assert!(lock(&script.commands)[0].contains("--resume 'B'"));
+        assert!(
+            lock(&script.claude_sessions).is_empty(),
+            "git config says B"
+        );
+        assert_eq!(
+            store.session("web", THREAD).await.expect("a read"),
+            Some(("claude".to_owned(), "B".to_owned()))
+        );
+    }
+
+    /// Decision 3: the session Claude's `init` names reaches the store and git config.
+    #[tokio::test]
+    async fn a_claude_session_reaches_the_store_and_git_config() {
+        let (script, store) = storing(None);
+        let (_tab, mut claude) = a_claude_turn_in(&script, None).await;
+
+        claude
+            .say(json!({"type": "system", "subtype": "init", "session_id": "S"}))
+            .await;
+
+        for _ in 0..500 {
+            if !lock(&script.claude_sessions).is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(*lock(&script.claude_sessions), ["S"]);
+        assert_eq!(
+            store.session("web", THREAD).await.expect("a read"),
+            Some(("claude".to_owned(), "S".to_owned()))
+        );
+        let rows = store.list("web").await.expect("rows");
+        assert_eq!(rows[0].title.as_deref(), Some("fix it"));
+    }
+
+    /// Decision 3: an ACP thread whose git config write fails still starts,
+    /// because the store holds its session and title.
+    #[tokio::test]
+    async fn an_acp_session_the_store_holds_survives_a_failed_git_write() {
+        let (store, _) = crate::store::tests::scratch();
+        let script = Arc::new(Script {
+            remember_fails: true,
+            registry: Registry::default().storing(store.clone()),
+            ..Script::default()
+        });
+
+        let (_tab, _agent, prompt) = an_opencode_thread(&script).await;
+
+        assert_eq!(prompt["method"], "session/prompt", "the turn runs");
+        assert_eq!(
+            store.session("web", THREAD).await.expect("a read"),
+            Some(("opencode".to_owned(), SESSION.to_owned()))
+        );
+        let rows = store.list("web").await.expect("rows");
+        assert_eq!(rows[0].title.as_deref(), Some("list the files"));
+    }
+
+    /// Decision 4 for ACP: the store's session is the one an attach loads.
+    #[tokio::test]
+    async fn recall_answers_the_stores_session_and_writes_it_back() {
+        let (store, _) = crate::store::tests::scratch();
+        store
+            .put_session("web", THREAD, "m", &place(), "opencode", "A")
+            .await
+            .expect("a row");
+        let script = Script {
+            kept: Some((Harness::Opencode, "B".to_owned())),
+            registry: Registry::default().storing(store),
+            ..Script::default()
+        };
+
+        let recalled = recalled(&script, &place()).await.expect("recalled");
+
+        assert_eq!(recalled, Some((Harness::Opencode, "A".to_owned())));
+        assert_eq!(
+            *lock(&script.remembered),
+            [(Harness::Opencode, "A".to_owned())]
+        );
     }
 
     #[test]

@@ -191,6 +191,36 @@ describe('the thread menu', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('marks an offline thread with a word and when it was seen, and a gone one as gone', async () => {
+    daemon([200, contract.threadsOffline])
+    await show()
+    await openMenu()
+    const [offline, gone] = await rows()
+    expect(within(offline!).getByText(/^offline · seen .+ ago$/)).toBeTruthy()
+    expect(offline!.getAttribute('aria-label')).toMatch(/, offline · seen .+ ago, /)
+    expect(within(gone!).getByText('gone')).toBeTruthy()
+    expect(screen.queryByText('the machine is offline')).toBeNull()
+  })
+
+  it('opens an offline thread read-only: no terminal, no git verb, and the reason told', async () => {
+    daemon([200, contract.threadsOffline])
+    const onReadOnly = vi.fn()
+    const [offline] = contract.threadsOffline
+    await show({ thread: offline!.id, onReadOnly })
+    await waitFor(() => expect(onReadOnly).toHaveBeenLastCalledWith(expect.stringMatching(/machine is offline/)))
+    const terminal = screen.getByRole('button', { name: 'Terminal' })
+    expect(terminal.getAttribute('aria-disabled')).toBe('true')
+    expect(document.getElementById(terminal.getAttribute('aria-describedby')!)?.textContent).toMatch(/machine is offline/)
+  })
+
+  it('tells a thread the machine answered for that it is not read-only', async () => {
+    daemon([200, contract.threads])
+    const onReadOnly = vi.fn()
+    await show({ thread: '1a1b2c3d4e5f6a7b', onReadOnly })
+    await screen.findByRole('button', { name: 'Threads, #488 A workspace lists its threads' })
+    expect(onReadOnly).toHaveBeenLastCalledWith(null)
+  })
+
   it('says "No threads yet" inside the menu, and nowhere else', async () => {
     const asked = daemon([200, []])
     await show()

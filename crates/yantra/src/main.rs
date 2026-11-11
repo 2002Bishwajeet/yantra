@@ -397,6 +397,11 @@ enum ChatAction {
         /// Remove without asking; needed when stdin is not a terminal
         #[arg(long)]
         yes: bool,
+        /// yantrad's address, such as http://appliance:7717. The daemon then
+        /// removes the thread and forgets its row in the thread store, which
+        /// is the only way to clear a thread whose worktree is gone
+        #[arg(long)]
+        daemon: Option<String>,
     },
     /// Attach to a shell in the thread's worktree, opening it the first time.
     /// The agent works in the same tree
@@ -682,8 +687,9 @@ async fn main() -> ExitCode {
                     workspace,
                     thread,
                     yes,
+                    daemon,
                 },
-        }) => chat_rm(&workspace, &thread, yes).await,
+        }) => chat_rm(&workspace, &thread, yes, daemon).await,
         Some(Command::Chat {
             action: ChatAction::Terminal { workspace, thread },
         }) => chat_terminal(&workspace, &thread).await,
@@ -2654,7 +2660,7 @@ async fn chat_ls(workspace: &str) -> ExitCode {
     }
 }
 
-async fn chat_rm(workspace: &str, thread: &str, yes: bool) -> ExitCode {
+async fn chat_rm(workspace: &str, thread: &str, yes: bool, daemon: Option<String>) -> ExitCode {
     let answer = || {
         print!("{}", remove_question(workspace, thread));
         let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -2674,6 +2680,25 @@ async fn chat_rm(workspace: &str, thread: &str, yes: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+    if let Some(daemon) = daemon {
+        let (name, id) = (workspace.to_owned(), thread.to_owned());
+        let removed =
+            tokio::task::spawn_blocking(move || mcp::remove_thread(&daemon, &name, &id)).await;
+        return match removed {
+            Ok(Ok(_)) => {
+                println!("removed thread {thread}");
+                ExitCode::SUCCESS
+            }
+            Ok(Err(said)) => {
+                eprintln!("yantra: {said}");
+                ExitCode::FAILURE
+            }
+            Err(error) => {
+                eprintln!("yantra: chat rm did not finish: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     match commit::remove_for(workspace, thread).await {
         Ok(()) => {
             println!("removed thread {thread}");
@@ -2681,6 +2706,11 @@ async fn chat_rm(workspace: &str, thread: &str, yes: bool) -> ExitCode {
         }
         Err(err) => {
             report_error(&err);
+            if matches!(err, commit::Failed::NoThread { .. }) {
+                eprintln!(
+                    "yantra: yantrad may still list it as gone; pass --daemon to forget it there"
+                );
+            }
             ExitCode::FAILURE
         }
     }
@@ -5557,8 +5587,23 @@ mod tests {
             Cli::try_parse_from(["yantra", "chat", "rm", "site", "0a1b", "--yes"]).expect("parses");
         assert!(matches!(
             parsed.command,
-            Some(Command::Chat { action: ChatAction::Rm { workspace, thread, yes: true } })
+            Some(Command::Chat { action: ChatAction::Rm { workspace, thread, yes: true, daemon: None } })
                 if workspace == "site" && thread == "0a1b"
+        ));
+        let through = Cli::try_parse_from([
+            "yantra",
+            "chat",
+            "rm",
+            "site",
+            "0a1b",
+            "--daemon",
+            "http://hub:7717",
+        ])
+        .expect("parses");
+        assert!(matches!(
+            through.command,
+            Some(Command::Chat { action: ChatAction::Rm { daemon: Some(daemon), yes: false, .. } })
+                if daemon == "http://hub:7717"
         ));
         assert!(Cli::try_parse_from(["yantra", "chat", "rm", "site"]).is_err());
         assert_eq!(
@@ -5609,6 +5654,7 @@ mod tests {
             title: None,
             from: None,
             pr,
+            kept: thread::Kept::default(),
         };
         let url = || "https://github.com/o/r/pull/1".to_owned();
         let rendered = render_threads(&[

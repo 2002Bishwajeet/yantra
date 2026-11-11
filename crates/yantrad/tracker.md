@@ -6,8 +6,9 @@ decisions, open questions and risks, and it still wins when anything disagrees w
 
 **The daemon exists now but is small**: it binds, serves `/healthz`, and refreshes a snapshot in the
 background (Y-069, Y-070). Most of the invariants below were earned during research, before there was
-anywhere to put them, and **none of those has been exercised by shipped code yet** — the daemon holds
-no state on disk and makes no placement decisions. **I-58, I-59, I-60, I-63 and I-64 are the exception**: each was
+anywhere to put them. The daemon makes no placement decisions. Its one store on disk is the thread
+store ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md), Y-688), which I-12, I-13 and I-14
+bind. **I-58, I-59, I-60, I-63 and I-64 are the exception**: each was
 read off shipped code rather than off research. I-58 and I-59 have never been seen; **I-60 and I-64
 have**. Shipped code enforces those two here, and I-63 in
 [`yantra-core/src/ssh.rs`](../yantra-core/src/ssh.rs), where every `ssh` argv is built (Y-329).

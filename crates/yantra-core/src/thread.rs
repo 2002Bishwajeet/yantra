@@ -200,9 +200,20 @@ pub struct Listed {
     /// The remote's URL and the branch on it, from `branch.<b>.remote` and
     /// `branch.<b>.merge`.
     pub upstream: Option<(String, String)>,
+    pub kept: Kept,
 }
 
-/// [`list`], and each thread's title, issue and upstream. One more round trip,
+/// The sessions git config keeps for a thread: [`remember`]'s and
+/// [`remember_claude`]'s, which the daemon's store reads once (ADR-0045
+/// decision 6).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Kept {
+    pub harness: Option<String>,
+    pub session: Option<String>,
+    pub claude_session: Option<String>,
+}
+
+/// [`list`], and each thread's title, issue, upstream and sessions. One more round trip,
 /// and none when the workspace has no thread.
 pub async fn listed<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<Listed>, Error> {
     let places = list(exec, workspace).await?;
@@ -214,7 +225,7 @@ pub async fn listed<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<List
             "git -C {} config -z --get-regexp {}",
             sq(&first.repo),
             sq(&format!(
-                "^branch\\.yantra/chat/{}/.*\\.(yantratitle|yantrafrom|yantraissue|remote|merge)$|^remote\\..*\\.url$",
+                "^branch\\.yantra/chat/{}/.*\\.(yantratitle|yantrafrom|yantraissue|yantraclaudesession|yantrasession|yantraharness|remote|merge)$|^remote\\..*\\.url$",
                 workspace.name
             ))
         ))
@@ -233,6 +244,17 @@ pub async fn listed<E: Exec>(exec: &E, workspace: &Workspace) -> Result<Vec<List
             from: config.get(&place.branch, "yantrafrom").map(str::to_owned),
             issue: config.get(&place.branch, "yantraissue").map(str::to_owned),
             upstream: config.upstream(&place.branch),
+            kept: Kept {
+                harness: config
+                    .get(&place.branch, "yantraharness")
+                    .map(str::to_owned),
+                session: config
+                    .get(&place.branch, "yantrasession")
+                    .map(str::to_owned),
+                claude_session: config
+                    .get(&place.branch, "yantraclaudesession")
+                    .map(str::to_owned),
+            },
             place,
         })
         .collect())
@@ -300,6 +322,7 @@ pub struct Thread {
     /// The repository branch the thread left.
     pub from: Option<String>,
     pub pr: Pr,
+    pub kept: Kept,
 }
 
 /// A thread's PR, read from its upstream each time it is asked for.
@@ -360,6 +383,14 @@ pub enum Failed {
     NoStateDir,
 }
 
+impl Failed {
+    /// ssh could not reach the machine, so nothing about its threads is known
+    /// (ADR-0045 decision 7).
+    pub fn is_unreachable(&self) -> bool {
+        matches!(self, Self::Thread(Error::Ssh(ssh::Error::Transport { .. })))
+    }
+}
+
 fn reach(workspace: &Workspace) -> Result<Ssh, Failed> {
     let machine = ssh::machine_at(&workspace.machine).ok_or(Failed::NoStateDir)?;
     Ok(Ssh::new(machine).map_err(Error::Ssh)?)
@@ -384,6 +415,7 @@ pub async fn threads(name: &str, github: Option<(&Github, &Token)>) -> Result<Ve
             title: found.title,
             from: found.from,
             pr,
+            kept: found.kept,
         });
     }
     Ok(threads)
@@ -1320,6 +1352,9 @@ mod tests {
         branch.yantra/chat/a/11111111.yantraissue\no/r#7\0\
         branch.yantra/chat/a/11111111.remote\norigin\0\
         branch.yantra/chat/a/11111111.merge\nrefs/heads/fix-7\0\
+        branch.yantra/chat/a/11111111.yantraclaudesession\nS1\0\
+        branch.yantra/chat/a/55555555.yantrasession\nS5\0\
+        branch.yantra/chat/a/55555555.yantraharness\ncodex\0\
         branch.yantra/chat/a/55555555.remote\nmy.fork\0\
         remote.origin.url\nhttps://github.com/o/r.git\0\
         remote.my.fork.url\ngit@github.com:me/r.git\0";
@@ -1336,7 +1371,7 @@ mod tests {
             machine.asked()[2],
             format!(
                 "git -C '{REPO}' config -z --get-regexp \
-                 '^branch\\.yantra/chat/a/.*\\.(yantratitle|yantrafrom|yantraissue|remote|merge)$|^remote\\..*\\.url$'"
+                 '^branch\\.yantra/chat/a/.*\\.(yantratitle|yantrafrom|yantraissue|yantraclaudesession|yantrasession|yantraharness|remote|merge)$|^remote\\..*\\.url$'"
             )
         );
         let read: Vec<_> = found
@@ -1359,6 +1394,15 @@ mod tests {
             ]
         );
         assert_eq!(found[0].place.id, "chat/a/11111111");
+        assert_eq!(found[0].kept.claude_session.as_deref(), Some("S1"));
+        assert_eq!(
+            found[1].kept,
+            Kept {
+                harness: Some("codex".to_owned()),
+                session: Some("S5".to_owned()),
+                claude_session: None,
+            }
+        );
     }
 
     #[tokio::test]
@@ -1388,6 +1432,20 @@ mod tests {
             listed(&broken, &workspace("a")).await,
             Err(Error::Worktree { stderr }) if stderr == "error: invalid config file"
         ));
+    }
+
+    #[test]
+    fn only_an_ssh_transport_failure_is_unreachable() {
+        let transport = Failed::Thread(Error::Ssh(ssh::Error::Transport {
+            host: "m".to_owned(),
+            diagnosis: "Connection refused".to_owned(),
+        }));
+        assert!(transport.is_unreachable());
+        let git = Failed::Thread(Error::Worktree {
+            stderr: "fatal".to_owned(),
+        });
+        assert!(!git.is_unreachable());
+        assert!(!Failed::NoStateDir.is_unreachable());
     }
 
     #[test]

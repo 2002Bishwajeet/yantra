@@ -40,6 +40,7 @@ mod notify;
 mod placement;
 mod refresh;
 mod room;
+mod store;
 mod tasks;
 mod terminal;
 mod watch;
@@ -79,6 +80,16 @@ enum Error {
 
     #[error("could not serve the dashboard")]
     Dashboard(#[source] web::NoIndex),
+
+    #[error("this account has no state directory for the thread store")]
+    NoStateDir,
+
+    #[error("could not open the thread store {}", path.display())]
+    Store {
+        path: PathBuf,
+        #[source]
+        source: store::Error,
+    },
 }
 
 #[tokio::main]
@@ -197,8 +208,14 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         PathBuf::new()
     });
     let relay = yantra_core::notify::from_env();
+    let threads = store::path().ok_or(Error::NoStateDir)?;
+    let store = store::open(&threads).map_err(|source| Error::Store {
+        path: threads.clone(),
+        source,
+    })?;
+    tracing::info!("keeping threads in {}", threads.display());
     let ips: Vec<IpAddr> = addresses.iter().map(SocketAddr::ip).collect();
-    let chats = chats(yantra_core::join::daemon_address(&ips).ok());
+    let chats = chats(yantra_core::join::daemon_address(&ips).ok()).storing(store.clone());
     let fleet = heartbeat::Fleet {
         facts: std::sync::Arc::new(heartbeat::Facts {
             started: std::time::Instant::now(),
@@ -212,6 +229,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             channel: PathBuf::from(yantra_core::update::CHANNEL),
         }),
         github: github::Grant::from_env(),
+        store: Some(store),
         rooms: rooms(chats.clone()),
         chats,
         ..heartbeat::Fleet::default()

@@ -22,6 +22,7 @@ yantra mic mac                   # stream this laptop's microphone into mac's vi
 yantra chat new site --issue o/r#7   # open a thread from a GitHub issue; print its draft prompt
 yantra chat ls site              # the workspace's threads, each with its issue and PR
 yantra chat rm site 0a1b         # remove a thread's worktree and branch after you confirm
+yantra chat rm site 0a1b --daemon http://hub:7717   # the same through yantrad, which also forgets its row; clears a gone thread
 yantra chat terminal site 0a1b   # a shell in the thread's worktree, kept by tmux
 yantra commit site 0a1b [-m MSG] [--draft]   # commit a thread's work; claude writes the message
 yantra push site 0a1b            # push a thread's branch and set its upstream

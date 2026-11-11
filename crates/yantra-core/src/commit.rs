@@ -1449,6 +1449,7 @@ mod tests {
             from: None,
             issue: issue.map(str::to_owned),
             upstream: remote.map(|url| (url.to_owned(), UPSTREAM.to_owned())),
+            kept: thread::Kept::default(),
         }
     }
 

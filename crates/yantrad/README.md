@@ -231,6 +231,10 @@ moves there once the origin answers (Y-652). The daemon does not redirect: agent
 ADR-0016's identity check sees the machine running the proxy rather than the caller. See its
 amendment and [`docs/development.md`](../../docs/development.md).
 
+It keeps one file of state, `~/.local/state/yantra/threads.sqlite`: a row per Chat thread, so the
+thread list and the titles work while a machine is offline ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md)).
+It holds no message and no secret, and the daemon refuses to start when it does not open.
+
 [tracker.md](tracker.md) collects what research already settled about it — SQLite handling, scheduling
-determinism, PTYs — none of it exercised by code yet. See [../../tracker.md](../../tracker.md) for
+determinism, PTYs. The SQLite rules bind [`src/store.rs`](src/store.rs). See [../../tracker.md](../../tracker.md) for
 where this sits in the roadmap.

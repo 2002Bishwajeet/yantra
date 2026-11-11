@@ -29,7 +29,7 @@ function daemon(routes: Routes) {
   return log
 }
 
-type Props = Partial<{ thread: string | null; busy: boolean; diffs: number; listed: ThreadPr }>
+type Props = Partial<{ thread: string | null; busy: boolean; diffs: number; listed: ThreadPr; readOnly: string; gone: boolean }>
 
 const open = (props: Props = {}) => {
   const refresh = vi.fn()
@@ -39,8 +39,10 @@ const open = (props: Props = {}) => {
       <GitActions
         busy={props.busy ?? false}
         diffs={props.diffs ?? 1}
+        gone={props.gone}
         listed={props.listed}
         onRemoved={onRemoved}
+        readOnly={props.readOnly}
         refresh={refresh}
         thread={props.thread === undefined ? mine : props.thread}
         workspace="site"
@@ -444,6 +446,47 @@ describe('merge', () => {
     const offer = await screen.findByRole('dialog', { name: 'PR #7 merged' })
     fireEvent.click(within(offer).getByRole('button', { name: 'Remove worktree' }))
     const alert = await within(offer).findByRole('alert')
+    expect(within(alert).getByRole('heading', { name: title })).toBeTruthy()
+    expect(within(alert).getByText(said)).toBeTruthy()
+    expect(onRemoved).not.toHaveBeenCalled()
+  })
+})
+
+describe('a gone thread (ADR-0045)', () => {
+  const gone = {
+    diffs: 0,
+    gone: true,
+    readOnly: 'The machine no longer has this thread’s worktree, so it is read-only.',
+    listed: { state: 'unknown', said: 'the thread’s worktree is gone' },
+  } as const
+
+  it('offers Forget thread while every git verb is off, and forgets it after a confirmation', async () => {
+    const log = daemon({ remove: [204, undefined] })
+    const { onRemoved } = open(gone)
+    fireEvent.click(menuTrigger())
+    for (const name of ['Commit', 'Push', 'Open PR']) {
+      expect((await screen.findByRole('menuitem', { name })).getAttribute('aria-disabled')).toBe('true')
+    }
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Forget thread' }))
+    const asked = await screen.findByRole('dialog', { name: 'Forget this thread' })
+    expect(asked.textContent).toMatch('The machine no longer has this thread’s worktree.')
+    expect(log).toHaveLength(0)
+
+    fireEvent.click(within(asked).getByRole('button', { name: 'Forget' }))
+    await waitFor(() => expect(onRemoved).toHaveBeenCalledOnce())
+    expect(log[0]).toMatchObject({ path: base, method: 'DELETE' })
+  })
+
+  it.each([
+    [404, 'no thread 0a1b2c3d4e5f6a7b', 'No such thread'],
+    [503, 'ssh: no route to host', 'The machine did not answer'],
+  ] as const)('draws a %s answer saying "%s" in the dialog, and keeps the thread', async (status, said, title) => {
+    daemon({ remove: [status, said] })
+    const { onRemoved } = open(gone)
+    await pick('Forget thread')
+    const asked = await screen.findByRole('dialog', { name: 'Forget this thread' })
+    fireEvent.click(within(asked).getByRole('button', { name: 'Forget' }))
+    const alert = await within(asked).findByRole('alert')
     expect(within(alert).getByRole('heading', { name: title })).toBeTruthy()
     expect(within(alert).getByText(said)).toBeTruthy()
     expect(onRemoved).not.toHaveBeenCalled()

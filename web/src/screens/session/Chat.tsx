@@ -184,6 +184,8 @@ export function Chat(props: ChatProps) {
   const { workspace, thread, onThread, initialDraft, slot } = props
   const chat = useChat(workspace.name, thread, onThread)
   const { timeline, error, link } = chat
+  // ADR-0045: an offline or gone thread opens read-only; ChatHeader reads the list that says so.
+  const [readOnly, setReadOnly] = useState<string | null>(null)
   const [draft, setDraft, recallInto] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
   const [showDiff, setShowDiff] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
@@ -400,13 +402,14 @@ export function Chat(props: ChatProps) {
 
   const answering = `${agent} is answering. A message you queue is sent when it ends.`
   const cannotSend =
-    link !== 'open'
+    readOnly ??
+    (link !== 'open'
       ? 'The chat is not connected, so nothing can be sent.'
       : uploading
         ? 'An image is still uploading. Send once it is attached.'
         : text === ''
           ? 'Type a message to send it.'
-          : null
+          : null)
 
   // Stop drops the queue too, so its text comes back to an empty field.
   const stop = () => {
@@ -454,6 +457,7 @@ export function Chat(props: ChatProps) {
         diffs={diffs}
         into={slot}
         onFix={fixWithAgent}
+        onReadOnly={setReadOnly}
         terminal={{ open: showTerminal, onToggle: () => (showTerminal ? closeTerminal() : setShowTerminal(true)) }}
         terminalRef={terminalButton}
         thread={timeline.thread}
@@ -560,6 +564,11 @@ export function Chat(props: ChatProps) {
             onRetry={() => void asked?.refetch()}
           />
         ) : null}
+        {readOnly ? (
+          <p className="chat__readonly" role="status">
+            {readOnly}
+          </p>
+        ) : null}
         <Composer.Root
           above={<PlanBadge plan={timeline.plan} />}
           dropping={dropping}
@@ -611,7 +620,7 @@ export function Chat(props: ChatProps) {
             aria-controls={trigger ? menu : undefined}
             aria-expanded={trigger !== null}
             aria-label={`Message ${agent} in ${workspace.name}`}
-            disabled={link === 'closed'}
+            disabled={link === 'closed' || readOnly !== null}
             enterSends={enterSends}
             onChange={(event) => {
               setDraft(event.target.value)

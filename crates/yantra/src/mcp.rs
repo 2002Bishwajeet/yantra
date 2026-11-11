@@ -275,6 +275,15 @@ pub fn remove(daemon: &str, name: &str) -> Result<String, String> {
     Daemon::new(daemon).send(Method::Delete, &format!("/api/rooms/{name}"))
 }
 
+/// `yantra chat rm --daemon`: the daemon removes the thread and forgets its
+/// row, so a thread whose worktree is gone leaves the list (ADR-0045 decision 4).
+pub fn remove_thread(daemon: &str, workspace: &str, id: &str) -> Result<String, String> {
+    Daemon::new(daemon).send(
+        Method::Delete,
+        &format!("/api/workspaces/{workspace}/threads/{id}"),
+    )
+}
+
 enum Method {
     Get,
     /// A `GET` that may last as long as the daemon's longest wait.
@@ -502,6 +511,18 @@ mod tests {
                             (StatusCode::OK, json!({"seq": 1, "heard": body}).to_string())
                         } else {
                             (StatusCode::NOT_FOUND, format!("no room {room}"))
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/api/workspaces/{name}/threads/{thread}",
+                axum::routing::delete(
+                    |Path((name, thread)): Path<(String, String)>| async move {
+                        if name == "site" && thread == "0a1b" {
+                            (StatusCode::NO_CONTENT, String::new())
+                        } else {
+                            (StatusCode::NOT_FOUND, format!("no thread {thread}"))
                         }
                     },
                 ),
@@ -995,5 +1016,25 @@ mod tests {
         );
         assert_eq!(json(&said[7]), json!({"removed": true}));
         assert_eq!(json(&said[8]), json!({"removed": false}));
+    }
+
+    /// ADR-0045 decision 4: `chat rm --daemon` reaches the route that forgets
+    /// a thread's row, and a refusal names the daemon's words.
+    #[tokio::test]
+    async fn chat_rm_through_the_daemon_reaches_the_thread_route() {
+        let daemon = fake_daemon().await;
+        let said = tokio::task::spawn_blocking(move || {
+            [
+                remove_thread(&daemon, "site", "0a1b"),
+                remove_thread(&daemon, "site", "9z"),
+            ]
+        })
+        .await
+        .expect("the thread");
+        assert_eq!(said[0], Ok(String::new()));
+        assert_eq!(
+            said[1],
+            Err("yantrad answered 404: no thread 9z".to_owned())
+        );
     }
 }

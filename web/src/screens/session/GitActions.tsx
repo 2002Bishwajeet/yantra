@@ -43,8 +43,12 @@ export function GitActions(props: {
   refresh: () => void
   /** The thread's worktree is gone: leave it for the workspace's chat. */
   onRemoved: () => void
+  /** Why the thread is read-only, which turns every verb off. */
+  readOnly?: string | null
+  /** The machine no longer has the worktree: Forget drops the daemon's row (ADR-0045). */
+  gone?: boolean
 }) {
-  const { workspace, thread, busy, diffs, listed, refresh, onRemoved } = props
+  const { workspace, thread, busy, diffs, listed, refresh, onRemoved, readOnly, gone } = props
   const whyId = useId()
   const menuWhyId = useId()
   const [note, setNote] = useState('')
@@ -56,7 +60,7 @@ export function GitActions(props: {
   const [committed, setCommitted] = useState(false)
   const [pushed, setPushed] = useState(false)
 
-  const state = { thread: thread !== null, busy, changed: diffs > committedAt, committed, pushed, pr }
+  const state = { thread: thread !== null, busy, changed: diffs > committedAt, committed, pushed, pr, readOnly: readOnly ?? null, gone: gone ?? false }
   const quick = resolveQuickAction(state)
   const items = buildMenuItems(state)
   const off = items[0]!.reason
@@ -276,14 +280,18 @@ export function GitActions(props: {
             <>
               <DialogClose render={<Button variant="text" />}>Keep</DialogClose>
               <Button disabled={remove.isPending} icon={ICON.remove} onClick={removeIt}>
-                {remove.isPending ? 'Removing…' : 'Remove worktree'}
+                {gone ? (remove.isPending ? 'Forgetting…' : 'Forget') : remove.isPending ? 'Removing…' : 'Remove worktree'}
               </Button>
             </>
           }
           className="git__confirm"
-          description={`Remove this thread's worktree and branch?${branchKept ? ' Its remote branch stayed on GitHub.' : ''}`}
+          description={
+            gone
+              ? 'The machine no longer has this thread’s worktree. Forget it, so the thread list stops showing it?'
+              : `Remove this thread's worktree and branch?${branchKept ? ' Its remote branch stayed on GitHub.' : ''}`
+          }
           finalFocus={returnTo}
-          title={`PR #${pr?.number} merged`}
+          title={gone ? 'Forget this thread' : `PR #${pr?.number} merged`}
         >
           {removeFailure ? <Failure failure={removeFailure} retry={removeIt} /> : null}
         </DialogPopup>

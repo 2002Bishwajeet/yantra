@@ -178,6 +178,7 @@ yantra mic mac                   # stream this laptop's microphone into a sessio
 yantra chat new site --issue o/r#7   # open a thread from a GitHub issue, and print its draft prompt
 yantra chat ls site              # the workspace's threads, each with its issue and PR
 yantra chat rm site 0a1b         # remove a thread's worktree and branch after you confirm
+yantra chat rm site 0a1b --daemon http://hub:7717   # the same through yantrad, which also forgets its row; clears a gone thread
 yantra chat terminal site 0a1b   # a shell in the thread's worktree, kept by tmux
 yantra commit site 0a1b [-m MSG] [--draft]   # commit a thread's work; claude writes the message
 yantra push site 0a1b            # push a thread's branch and set its upstream
@@ -246,8 +247,9 @@ Q6 in [`tracker.md`](tracker.md).
 
 **Rust** for the daemon, CLI and per-machine agent · **TypeScript** for the web UI ·
 `tokio` + `axum` · the system `ssh` binary as transport (with `ControlMaster` multiplexing) ·
-tmux for persistence · Tailscale as the network · nothing persisted — state is declared, derived, or
-held in memory · appliance target `aarch64-unknown-linux-musl`.
+tmux for persistence · Tailscale as the network · one SQLite file of Chat threads,
+`~/.local/state/yantra/threads.sqlite` ([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md)); the
+rest of the state is declared, derived, or held in memory · appliance target `aarch64-unknown-linux-musl`.
 
 The dashboard is React 19 with the compiler, TanStack Router, Query, Form, Table and Virtual. It uses
 Material 3 Expressive, which we built by hand on Base UI. See [`web/README.md`](web/README.md).

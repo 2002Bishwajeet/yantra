@@ -20,6 +20,10 @@ export type GitState = {
   /** This page pushed and has not opened a PR since. */
   pushed: boolean
   pr: { number: number; state: 'open' | 'merged' } | null
+  /** Why the thread is read-only (ADR-0045), which turns every verb off. */
+  readOnly?: string | null
+  /** The machine no longer has the worktree, so Remove only forgets the daemon's row (ADR-0045). */
+  gone?: boolean
 }
 
 export type QuickAction = {
@@ -42,7 +46,7 @@ const act = (label: string, kind: GitVerb): QuickAction => ({ label, kind, disab
 
 export function resolveQuickAction(state: GitState): QuickAction {
   const { thread, busy, changed, committed, pushed, pr } = state
-  const off = whyOff(thread ? 'thread' : null, busy)
+  const off = state.readOnly ?? whyOff(thread ? 'thread' : null, busy)
   if (off !== null) return { label: 'Commit', kind: 'hint', disabled: true, hint: off }
   if (changed) return act('Commit', 'commit')
   if (committed) return act('Push', 'push')
@@ -52,7 +56,7 @@ export function resolveQuickAction(state: GitState): QuickAction {
 }
 
 export function buildMenuItems(state: GitState): MenuItem[] {
-  const reason = whyOff(state.thread ? 'thread' : null, state.busy)
+  const reason = state.readOnly ?? whyOff(state.thread ? 'thread' : null, state.busy)
   const off = reason !== null
   const { pr } = state
   const items: MenuItem[] = [
@@ -64,6 +68,7 @@ export function buildMenuItems(state: GitState): MenuItem[] {
   ]
   // Y-496: an open PR is merged from here, and a merged one leaves a worktree to remove.
   if (pr?.state === 'open') items.push({ id: 'merge', label: `Merge PR #${pr.number}`, kind: 'merge', disabled: off, reason })
-  if (pr?.state === 'merged') items.push({ id: 'remove', label: 'Remove worktree', kind: 'remove', disabled: off, reason })
+  if (state.gone) items.push({ id: 'remove', label: 'Forget thread', kind: 'remove', disabled: false, reason: null })
+  else if (pr?.state === 'merged') items.push({ id: 'remove', label: 'Remove worktree', kind: 'remove', disabled: off, reason })
   return items
 }

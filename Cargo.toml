@@ -46,6 +46,9 @@ portable-pty = "0.9"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 # `yantra dash` (Y-592). Its crossterm is the one the CLI uses, via `ratatui::crossterm`.
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+# yantrad's thread store (ADR-0045). `bundled` compiles SQLite's C source, so the
+# musl appliance build needs no system library; the default `cache` is unused.
+rusqlite = { version = "0.41", default-features = false, features = ["bundled"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
