@@ -381,6 +381,9 @@ fn a_write_needs_the_owners_passkey() -> Result<()> {
         read.body
     );
     assert_eq!(hub.write(None, None)?.status, 401);
+    // Another account on the socket, with no cookie, is no owner either.
+    let other = hub.curl(UNPRIVILEGED, "GET", "/api/sessions", &[], None)?;
+    assert_eq!(other.status, 403, "{}", other.body);
     for open in ["/healthz", "/api/about", "/join"] {
         let answer = hub.phone("GET", open, None, None)?;
         assert_ne!(answer.status, 401, "{open}: {}", answer.body);

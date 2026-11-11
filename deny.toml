@@ -36,3 +36,9 @@ exceptions = [
 
 [bans]
 multiple-versions = "warn"
+# The appliance is a static musl binary, and `webauthn-rs` asks for openssl by
+# default (ADR-0044, Y-687). Any crate that brings it back fails here.
+deny = [
+  { name = "openssl", reason = "the musl appliance build links no C library" },
+  { name = "openssl-sys", reason = "the musl appliance build links no C library" },
+]
