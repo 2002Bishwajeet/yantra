@@ -346,3 +346,16 @@ Recorded so the trade does not quietly expire, per §B0.2. Any of:
 > bare machine to a working one. The QA walk-through did on 2026-09-11, and the owner judged a
 > command per missing piece per machine too costly. R-12's worry stands, which is why ADR-0028
 > installs three things and updates none.
+
+> **Amended 2026-11-11 (Y-713, owner): the heartbeat carries the agent's version.** §1's "there is
+> no version field" no longer holds for one field. The heartbeat gains an optional `version`, the
+> agent's own semver string. The daemon only shows it: readiness marks an agent older than the
+> daemon and names the command that updates that machine. There is still no negotiation. The daemon
+> refuses no beat for its version, the reply is still `204` with no instruction, and placement does
+> not read the field. An older agent sends no `version` and is still accepted. **Upgrade the daemon
+> before the agents** still holds, because a newer agent's field is unknown to an older daemon.
+>
+> **What changed upstream of the reasoning:** the owner runs three machines by hand on different
+> versions and could not tell which one was behind. On 2026-11-11 the laptop's CLI was v0.3.2
+> against a v0.11.0 box. R-12's worry was a protocol to keep in step. One display-only string adds
+> no protocol.
