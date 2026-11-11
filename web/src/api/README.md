@@ -16,7 +16,7 @@ beneath it in mono. `error.status` is there where a code arrived.
 | kind | from | draw |
 | --- | --- | --- |
 | `network` | `fetch` rejected; nothing answered | "The daemon did not answer." Asked again twice, with backoff. |
-| `refused` | a non-2xx with the daemon's bare-string body (403, 503, 409, 400…) | the status sentence; the body under it, verbatim |
+| `refused` | a non-2xx with the daemon's bare-string body (403, 503, 409, 400…) | the status sentence; the body under it, verbatim. A 403 whose body starts with the own-address text (`isOwnAddress`) names the proxy instead, with a `headline` |
 | `missing` | 404 | "The daemon knows nothing by that name." |
 | `contract` | a body that is not JSON, or not the envelope | "The daemon answered something this dashboard cannot read." |
 | `socket` | a terminal socket's text frame | "The terminal could not be opened."; the frame under it |

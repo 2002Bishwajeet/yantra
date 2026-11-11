@@ -9,7 +9,7 @@ import './ErrorSurface.css'
 
 /** What a surface needs of an error: `api/errors.ts` gives exactly this, and
  *  `api/chat.ts` names kinds of its own. */
-export type Described = Pick<ApiError, 'said' | 'retryable'> & { kind: string; describe: () => string }
+export type Described = Pick<ApiError, 'said' | 'retryable'> & { kind: string; describe: () => string; headline?: string }
 
 export type ErrorSurfaceProps = ComponentPropsWithRef<'section'> & {
   /** The eyebrow names the failing read ("Fleet read", "Session / Chat"), never the title the PageHeader already draws. */
@@ -50,7 +50,8 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
   const [open, setOpen] = useState(false)
   const detailsId = useId()
   const hasDetails = Boolean(error.said || unknowns?.length || meta)
-  const words = `${title}. ${error.describe()}`
+  const heading = error.headline ?? title
+  const words = `${heading}. ${error.describe()}`
   useEffect(() => announce(words), [words])
   return (
     <section
@@ -66,7 +67,7 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
       {layout === 'page' ? <span className="m3-error__mark" aria-hidden="true" /> : null}
       <div className="m3-error__text">
         {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
-        <h2 className="m3-error__title">{title}</h2>
+        <h2 className="m3-error__title">{heading}</h2>
         <p className="m3-error__sentence">{error.describe()}</p>
         {!page && error.said ? (
           <Mono className="m3-error__said m3-wrap">

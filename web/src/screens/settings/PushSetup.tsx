@@ -1,5 +1,6 @@
 import { type FormEvent, lazy, type ReactNode, Suspense, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
+import { isOwnAddress, PROXY_SENTENCE } from '@/api/errors'
 import { useSetRelay } from '@/api/mutations'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -27,7 +28,8 @@ const refusals: Record<number, string> = {
   503: 'The daemon could not ask Tailscale who is calling, so nothing about you was decided.',
 }
 
-function refusal(status: number | undefined): string {
+function refusal(status: number | undefined, said = ''): string {
+  if (isOwnAddress(status, said)) return PROXY_SENTENCE
   if (status === undefined) return 'The daemon did not answer.'
   return refusals[status] ?? 'The daemon did not take it.'
 }
@@ -176,7 +178,7 @@ export function PushSetup(props: { open: boolean; onOpenChange: (open: boolean) 
               {relay.error ? (
                 <>
                   <Text render={<p />} scale="body-medium" tone="error" emphasized>
-                    {relay.error.kind === 'network' ? refusal(undefined) : refusal(relay.error.status)}
+                    {relay.error.kind === 'network' ? refusal(undefined) : refusal(relay.error.status, relay.error.said)}
                   </Text>
                   {/* The daemon's own words: they name the file or what the relay
                       said, and never the topic or the token. */}

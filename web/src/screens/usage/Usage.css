@@ -96,9 +96,16 @@
 
 .usage__said > li {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
+}
+
+.usage__who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .usage__reason {

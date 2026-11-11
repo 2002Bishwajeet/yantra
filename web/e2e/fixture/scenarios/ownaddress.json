@@ -1,0 +1,7 @@
+{
+  "extends": "busy",
+  "refuse": {
+    "status": 403,
+    "text": "a request from this machine's own address may not act, because any account here could have sent it. From this machine, send it on the socket: curl --unix-socket /run/yantra.sock http://yantra/…. Through HTTPS, point the proxy at the socket: tailscale serve --bg --https=8443 unix:/run/yantra.sock"
+  }
+}

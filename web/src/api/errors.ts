@@ -49,6 +49,16 @@ const refusals: Record<number, string> = {
   503: 'Nothing could be asked, so nothing was decided and nothing ran.',
 }
 
+/** The start of `Refused::OwnAddress`'s body (write.rs): the daemon saw its own
+ *  address, which is what a proxy on the same machine sends from. */
+export const OWN_ADDRESS = "a request from this machine's own address"
+export const PROXY_HEADLINE = 'The proxy hides who is calling'
+export const PROXY_SENTENCE =
+  "The proxy in front of Yantra sends from this machine's own address, so the daemon cannot tell who is calling."
+
+export const isOwnAddress = (status: number | null | undefined, said: string) =>
+  status === 403 && said.startsWith(OWN_ADDRESS)
+
 const sentences: Record<Kind, string> = {
   network: 'The daemon did not answer.',
   refused: 'The daemon refused.',
@@ -107,9 +117,15 @@ export class ApiError extends Error {
     this.sentence = sentence
   }
 
+  /** A title that names the cause, for the one refusal whose cause is not the caller's. */
+  get headline(): string | undefined {
+    return isOwnAddress(this.status, this.said) ? PROXY_HEADLINE : undefined
+  }
+
   /** The sentence a surface draws: plain, and it names the daemon. */
   describe(): string {
     if (this.sentence) return this.sentence
+    if (isOwnAddress(this.status, this.said)) return PROXY_SENTENCE
     if (this.kind === 'refused' && this.status !== undefined) {
       return refusals[this.status] ?? sentences.refused
     }

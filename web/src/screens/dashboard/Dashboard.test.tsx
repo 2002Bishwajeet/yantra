@@ -77,6 +77,20 @@ describe('the Dashboard on a busy fleet', () => {
 
   /** Ledger row 142: the row wrote `ago` behind a helper that names the day
    *  past 24 h, so an old ask read `asked 30 Aug ago`. */
+  it('names the proxy when the notifications read is refused for the own address', async () => {
+    const state = scenario('busy')
+    state.refuseReads = {
+      '/api/notifications': {
+        status: 403,
+        text: "a request from this machine's own address may not act, because any account here could have sent it.",
+      },
+    }
+    writePrefs({ density: 'compact' })
+    mount('desktop', '/', state)
+    expect(await screen.findByRole('heading', { name: 'The proxy hides who is calling' }, { timeout: 2000 })).toBeTruthy()
+    expect(screen.queryByText(/not on a node/)).toBeNull()
+  })
+
   it('drops `ago` from an ask that has become a date', async () => {
     const state = scenario('busy')
     const events = state.notifications!.data as { at: number; kind: string; workspace: string | null }[]

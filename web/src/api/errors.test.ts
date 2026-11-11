@@ -267,3 +267,24 @@ describe('no query rejects with a bare error', () => {
     expect(await call(spendQuery('yantra'))).toEqual(spend)
   })
 })
+
+describe('the own-address refusal', () => {
+  const said =
+    "a request from this machine's own address may not act, because any account here could have sent it. From this machine, send it on the socket."
+
+  it('names the proxy, not the browser', () => {
+    const error = new ApiError('refused', said, { status: 403 })
+    expect(error.headline).toBe('The proxy hides who is calling')
+    expect(error.describe()).toMatch(/^The proxy in front of Yantra/)
+  })
+
+  it('leaves every other 403 with the old sentence and no headline', () => {
+    const error = new ApiError('refused', 'node biswas-iphone is on this tailnet but is not yours', { status: 403 })
+    expect(error.headline).toBeUndefined()
+    expect(error.describe()).toBe("This browser is not on a node this tailnet's owner holds.")
+  })
+
+  it('needs the 403 as well as the words', () => {
+    expect(new ApiError('refused', said, { status: 400 }).headline).toBeUndefined()
+  })
+})
