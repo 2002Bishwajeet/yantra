@@ -101,9 +101,11 @@ describe('one workspace, three views the URL carries', () => {
     expect(heading.closest('.m3-page')?.querySelector('.session__meta')?.textContent).toContain(
       'macbook · ~/Github/yantra-landing',
     )
-    // A running agent can be stopped and has nothing to resume (ADR-0015).
+    // A running agent can be stopped and has nothing to resume (ADR-0015); Resume waits, off, in the menu.
     expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('disabled')).toBe(false)
-    expect(screen.getByRole('button', { name: 'Resume' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    expect((await screen.findByRole('menuitem', { name: /^Resume/ })).hasAttribute('data-disabled')).toBe(true)
   })
 
   /** **Finding 120.** A verb that is off reads as broken unless it says why,
@@ -112,10 +114,11 @@ describe('one workspace, three views the URL carries', () => {
     daemon()
     await open('landing')
 
-    const resume = await screen.findByRole('button', { name: 'Resume' })
-    const said = document.getElementById(resume.getAttribute('aria-describedby') ?? '')
-    expect(said?.textContent).toBe('Resume needs an agent that has ended, and landing is running.')
-    expect(screen.getByRole('button', { name: 'Stop' }).getAttribute('aria-describedby')).toBeNull()
+    const stop = await screen.findByRole('button', { name: 'Stop' })
+    expect(stop.getAttribute('aria-describedby')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    const resume = await screen.findByRole('menuitem', { name: /^Resume/ })
+    expect(resume.textContent).toContain('Resume needs an agent that has ended, and landing is running.')
   })
 
   /** Y-566: one Page width for every view, so the title and the tabs never move. */

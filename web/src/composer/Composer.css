@@ -156,10 +156,9 @@
 .composer__controls {
   display: flex;
   flex: 1;
-  flex-wrap: wrap;
+  /* One row at every width (Y-717): a row that overflows scrolls and does not wrap. */
   align-items: center;
-  /* A wrapped row sits 16 px below, so a 32 px control's 48 px hit area stays off the row under it. */
-  gap: 16px 2px;
+  gap: 2px;
   min-width: 0;
   /* The scroll box clips, so it holds the 8 px a 32 px control's hit area reaches past it. */
   margin: -8px;
@@ -261,7 +260,7 @@
     padding: 0;
   }
 
-  /* Each control's hit area reaches 8 px past it, so 16 px apart, across and between rows, keeps a tap off its neighbour. */
+  /* Each control's hit area reaches 8 px past it, so 16 px apart keeps a tap off its neighbour. */
   .composer__controls {
     gap: 16px;
   }
@@ -833,8 +832,8 @@
   z-index: 4;
   /* A short page leaves the dock at the foot of the column rather than under its last block. */
   margin-top: auto;
-  /* The scrim is drawn above the dock, so the page gap and this padding hold it clear of the last block. */
-  padding: calc(8px + max(0px, var(--composer-scrim) - var(--m3-page-gap))) 0 calc(8px + env(safe-area-inset-bottom, 0px));
+  /* The scrim is drawn above the dock, so the page gap holds it clear of the last block (Y-717: no further padding). */
+  padding: max(0px, calc(var(--composer-scrim) - var(--m3-page-gap))) 0 calc(8px + env(safe-area-inset-bottom, 0px));
   background: var(--md-sys-color-surface);
 }
 

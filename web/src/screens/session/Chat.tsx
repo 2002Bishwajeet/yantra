@@ -45,8 +45,6 @@ import { useEditors } from './diff/useEditors'
 import { ChatMarkdown } from './markdown/ChatMarkdown'
 import { ChatHeader } from './ChatHeader'
 import { HarnessPicker } from './HarnessPicker'
-import { ContextPicker } from './ContextPicker'
-import { EffortPicker } from './EffortPicker'
 import {
   keepContext,
   keepEffort,
@@ -59,14 +57,13 @@ import {
   recallMode,
   recallModel,
 } from './mode'
-import { ModePicker } from './ModePicker'
-import { ModelPicker } from './ModelPicker'
 import { PendingApproval } from './PendingApproval'
 import { PendingQuestion } from './PendingQuestion'
 import { PlanToggle } from './PlanToggle'
 import { TerminalDrawer } from './TerminalDrawer'
 import type { Message, Timeline } from './timeline'
 import { TurnDiff } from './TurnDiff'
+import { TurnSettings } from './TurnSettings'
 import { useChat } from './useChat'
 import { WorkLog } from './WorkLog'
 import { workRows } from './workLog.logic'
@@ -696,7 +693,6 @@ export function Chat(props: ChatProps) {
                     value={harness}
                   />
                 ) : null}
-                <ModePicker disabled={link !== 'open'} onChange={setMode} value={mode} />
                 <PlanToggle
                   disabled={
                     link !== 'open' ? 'The chat is not connected' : harness !== 'claude' ? 'Plan mode needs Claude' : undefined
@@ -704,27 +700,28 @@ export function Chat(props: ChatProps) {
                   onChange={setInteraction}
                   value={planning}
                 />
-                {harness === 'claude' ? (
-                  <>
-                    <ModelPicker disabled={link !== 'open'} onChange={pickModel} value={model} />
-                    <EffortPicker disabled={link !== 'open'} onChange={setEffort} value={effort} />
-                  </>
-                ) : null}
-                {lengths.length > 0 ? (
-                  <ContextPicker
-                    // Codex reads its length only when its keeper starts, on the thread's first turn.
-                    disabled={link !== 'open' || (harness === 'codex' && locked)}
-                    lengths={lengths}
-                    onChange={setContext}
-                    value={context}
-                  />
-                ) : null}
+                <TurnSettings
+                  claude={harness === 'claude'}
+                  context={context}
+                  // Codex reads its length only when its keeper starts, on the thread's first turn.
+                  contextLocked={harness === 'codex' && locked}
+                  disabled={link !== 'open'}
+                  effort={effort}
+                  lengths={lengths}
+                  mode={mode}
+                  model={model}
+                  onContext={setContext}
+                  onEffort={setEffort}
+                  onMode={setMode}
+                  onModel={pickModel}
+                />
               </>
             }
           />
         </Composer.Root>
-        {/* 4.1.3: the turn's state, said politely and shown, except while the empty field's placeholder says it. */}
-        <Composer.Status quiet={timeline.requests.length > 0 && draft === '' && link === 'open'}>
+        {/* 4.1.3: the turn's state is said politely and drawn nowhere: the pending card, Stop, the queue and the
+            placeholder already show it. */}
+        <Composer.Status quiet>
           {status(timeline, harness)}
         </Composer.Status>
         {workspace && showTerminal && timeline.thread ? (

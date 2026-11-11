@@ -9,7 +9,7 @@ import { useId, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { ItemType } from '@/api/thread'
 import { State, type MarkState } from '@/m3/mark/Mark'
-import { Eyebrow, Mono } from '@/m3/text/Text'
+import { Mono, Text } from '@/m3/text/Text'
 import type { Message, Tool } from './timeline'
 import type { Row } from './workLog.logic'
 
@@ -32,12 +32,14 @@ function Call(props: { tool: Tool }) {
   return (
     <article className="chat__call">
       <div className="chat__tool-head">
-        <Eyebrow>{KIND[tool.itemType]}</Eyebrow>
+        <Text scale="label-large" tone="variant">
+          {KIND[tool.itemType]}
+        </Text>
         <State size="small" state={status.state}>
           {status.word}
         </State>
       </div>
-      {tool.title ? <Mono className="chat__tool-title">{tool.title}</Mono> : null}
+      {tool.title ? <Mono className="chat__tool-title chat__code">{tool.title}</Mono> : null}
       {tool.output ? (
         <details className="chat__tool-output">
           <summary>Output</summary>

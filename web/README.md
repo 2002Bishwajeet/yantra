@@ -359,25 +359,22 @@ socket that [`api/chat.ts`](src/api/chat.ts) opens
 The first turn picks the harness — Claude, Codex, Gemini, Grok or opencode —
 in [`HarnessPicker.tsx`](src/screens/session/HarnessPicker.tsx), copied in shape
 from T3 Code's provider picker, and the thread keeps it (Y-434).
-[`ModePicker.tsx`](src/screens/session/ModePicker.tsx) picks T3 Code's
-permission mode, Supervised by default (Y-453). Each turn frame carries it, and
-this browser keeps it per thread. [`PlanToggle.tsx`](src/screens/session/PlanToggle.tsx),
+[`TurnSettings.tsx`](src/screens/session/TurnSettings.tsx) is one chip that opens
+four radio groups (Y-717): T3 Code's permission mode, Supervised by default
+(Y-453); Claude's model and effort (Y-564); and the tokens a Claude or Codex
+thread fills before it compacts (Y-663). The chip names only the values that are
+not the default. Each turn frame carries them, and this browser keeps each per
+thread. A change reaches the running Claude process before the next turn.
+[`PlanToggle.tsx`](src/screens/session/PlanToggle.tsx),
 copied from T3 Code's interaction-mode toggle, makes the next Claude turn a plan
 turn that writes nothing (Y-565); this browser keeps it per thread too, and it is
-off for any other harness. On a Claude thread,
-[`ModelPicker.tsx`](src/screens/session/ModelPicker.tsx) and
-[`EffortPicker.tsx`](src/screens/session/EffortPicker.tsx) pick Claude's model
-and effort, and each is kept per thread the same way (Y-564). A change
-reaches the running Claude process before the next turn.
-[`ContextPicker.tsx`](src/screens/session/ContextPicker.tsx) picks the tokens a
-Claude or Codex thread fills before it compacts, from the lengths the model
-allows, and is kept per thread too (Y-663). Codex reads it only on the turn
-that starts its agent, so the picker locks after the first turn. Each turn runs
+off for any other harness. Codex reads its context length only on the turn
+that starts its agent, so that group locks after the first turn. Each turn runs
 in the thread's own git worktree, so it never writes the tree the Terminal
 tab's agent is in. Every harness draws on the one timeline, with no branch per
 harness. The composer under it is [`src/composer/`](src/composer/Composer.tsx),
 one card for the Chat and the Room (Y-560): an input that grows to 40vh, the
-Attach, harness, permission, model, effort and context-length controls, a context ring that turns red above 90%,
+Attach, harness, plan and turn-settings controls, a context ring that turns red above 90%,
 the agent's plan on the card's top edge, a Send button or a Stop with Queue beside it, a draft kept
 per thread, ArrowUp for an earlier prompt, and an *Enter sends* switch in
 Settings → General. Ten things about the code:

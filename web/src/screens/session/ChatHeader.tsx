@@ -8,12 +8,11 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { ChevronDown, Diff, Plus, RefreshCw, SquareTerminal } from 'lucide-react'
+import { ChevronDown, Diff, Plus, SquareTerminal } from 'lucide-react'
 import type { ChatTarget } from '@/api/chat'
 import { useThreads } from '@/api/mutations'
 import { useThreadStates } from '@/api/queries'
 import { useTick } from '@/useTick'
-import { Button } from '@/m3/button/Button'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
@@ -229,20 +228,15 @@ function WorkspaceHeader(props: ChatHeaderProps & { workspace: string }) {
       >
         <SquareTerminal />
       </IconButton>
-      <Button
+      <IconButton
         aria-pressed={diff.open}
-        icon={<Diff />}
+        label="Diff"
         onClick={diff.onToggle}
         ref={diffRef}
-        variant={diff.open ? 'tonal' : 'text'}
+        variant={diff.open ? 'tonal' : 'standard'}
       >
-        Diff
-      </Button>
-      {diff.open ? (
-        <Button aria-label="Refresh the diff" icon={<RefreshCw />} onClick={diff.onRefresh} variant="text">
-          Refresh
-        </Button>
-      ) : null}
+        <Diff />
+      </IconButton>
       <Checks onFix={onFix} pr={pr?.state === 'open' ? pr : null} />
       <GitActions
         busy={busy}
@@ -256,6 +250,7 @@ function WorkspaceHeader(props: ChatHeaderProps & { workspace: string }) {
         }}
         readOnly={readOnly}
         refresh={() => mutate()}
+        refreshDiff={diff.open ? diff.onRefresh : undefined}
         thread={thread}
         workspace={workspace}
       />
