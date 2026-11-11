@@ -215,7 +215,14 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     })?;
     tracing::info!("keeping threads in {}", threads.display());
     let ips: Vec<IpAddr> = addresses.iter().map(SocketAddr::ip).collect();
-    let chats = chats(yantra_core::join::daemon_address(&ips).ok()).storing(store.clone());
+    let base = match inventory.machines().await {
+        Ok(machines) => api::https_of(&machines, &addresses),
+        Err(error) => {
+            tracing::warn!("a chat push carries no link: {error}");
+            None
+        }
+    };
+    let chats = chats(yantra_core::join::daemon_address(&ips).ok(), &store, base);
     let fleet = heartbeat::Fleet {
         facts: std::sync::Arc::new(heartbeat::Facts {
             started: std::time::Instant::now(),
@@ -356,18 +363,20 @@ async fn listen_on<I: Inventory>(inventory: &I) -> Result<Vec<SocketAddr>, Error
         .collect())
 }
 
-/// The chat registry, whose waits go to the relay when there is one, and
-/// whose Claude turns reach the room tools at `daemon`. The relay is read
-/// again because a `Relay` is not `Clone`, by design.
-fn chats(daemon: Option<SocketAddr>) -> chat::Registry {
+/// The chat registry, whose waits go to the relay when there is one, each
+/// linked to its thread under `base`, and whose Claude turns reach the room
+/// tools at `daemon`. The relay is read again because a `Relay` is not
+/// `Clone`, by design.
+fn chats(daemon: Option<SocketAddr>, store: &store::Store, base: Option<String>) -> chat::Registry {
     let registry = match yantra_core::notify::from_env() {
         Some(relay) => {
             let (waits, heard) = tokio::sync::mpsc::unbounded_channel();
-            tokio::spawn(chat::tell(relay, heard));
+            tokio::spawn(chat::tell(relay, store.clone(), base, heard));
             chat::Registry::telling(waits)
         }
         None => chat::Registry::default(),
-    };
+    }
+    .storing(store.clone());
     match daemon {
         Some(daemon) => registry.reaching(daemon),
         None => registry,

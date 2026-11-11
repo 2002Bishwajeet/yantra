@@ -672,6 +672,7 @@ async fn main() -> ExitCode {
                 body: message,
                 title,
                 priority,
+                click: None,
             })
             .await
         }

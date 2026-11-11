@@ -1432,33 +1432,101 @@ impl Machine for Home {
 }
 
 /// A wait or a turn's end that nobody is attached to see (ADR-0035 decision
-/// 10, ADR-0041 decision 3). It names the workspace and the thread, and no word
-/// of the request or the reply (Q5).
+/// 10, ADR-0041 decision 3). It names the workspace and the thread by its
+/// title, and links to the thread, with no word of the request or the reply.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Wait {
     pub workspace: String,
     pub thread: String,
     pub phase: Phase,
+    /// The store's title and machine for the thread, filled when it is told.
+    pub title: Option<String>,
+    pub machine: Option<String>,
 }
 
 impl Wait {
-    fn message(&self) -> notify::Message {
+    fn new(workspace: &str, thread: &str, phase: Phase) -> Self {
+        Self {
+            workspace: workspace.to_owned(),
+            thread: thread.to_owned(),
+            phase,
+            title: None,
+            machine: None,
+        }
+    }
+
+    /// `base` is the dashboard's HTTPS origin, when tailscale names this node.
+    fn message(&self, base: Option<&str>) -> notify::Message {
         let what = match self.phase {
             Phase::Completed => "finished a turn",
             _ => "waits for an answer",
         };
+        let title = self.title.as_deref().unwrap_or("a chat thread");
         notify::Message {
-            body: format!("{}: chat thread {} {what}", self.workspace, self.thread),
+            body: format!("{}: {title} {what}", self.workspace)
+                .chars()
+                .take(notify::BODY_MAX)
+                .collect(),
             title: Some(self.phase.headline().to_owned()),
             priority: None,
+            click: base.and_then(|base| self.link(base)),
+        }
+    }
+
+    /// The thread's page, which for a home thread needs the store's machine.
+    fn link(&self, base: &str) -> Option<String> {
+        let page = if self.workspace == keep::HOME {
+            format!("m/{}/home", encoded(self.machine.as_deref()?))
+        } else {
+            format!("w/{}", encoded(&self.workspace))
+        };
+        Some(format!("{base}/{page}?thread={}", encoded(&self.thread)))
+    }
+
+    /// A home thread's row has no workspace (ADR-0046 decision 1.4).
+    async fn named(&mut self, store: &Store) {
+        let workspace = if self.workspace == keep::HOME {
+            ""
+        } else {
+            &self.workspace
+        };
+        match store.get(workspace, &self.thread).await {
+            Ok(Some(row)) => {
+                self.title = row.title.filter(|title| !title.trim().is_empty());
+                self.machine = Some(row.machine);
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!(
+                "chat {}: the thread's title could not be read: {error}",
+                self.workspace
+            ),
         }
     }
 }
 
+/// RFC 3986's unreserved characters stay; every other byte is `%XX`.
+fn encoded(segment: &str) -> String {
+    segment
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                char::from(byte).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
 /// Sends each wait to the relay, one at a time, for the life of the daemon.
-pub async fn tell(relay: Relay, mut waits: mpsc::UnboundedReceiver<Wait>) {
-    while let Some(wait) = waits.recv().await {
-        if let Err(error) = notify::post(&relay, wait.message()).await {
+pub async fn tell(
+    relay: Relay,
+    store: Store,
+    base: Option<String>,
+    mut waits: mpsc::UnboundedReceiver<Wait>,
+) {
+    while let Some(mut wait) = waits.recv().await {
+        wait.named(&store).await;
+        if let Err(error) = notify::post(&relay, wait.message(base.as_deref())).await {
             tracing::warn!(
                 "chat {}: the wait was not notified: {error}",
                 wait.workspace
@@ -1851,11 +1919,7 @@ impl Registry {
 
     fn wait(&self, workspace: &str, thread: &str, phase: Phase) {
         if let Some(waits) = &self.waits {
-            let _ = waits.send(Wait {
-                workspace: workspace.to_owned(),
-                thread: thread.to_owned(),
-                phase,
-            });
+            let _ = waits.send(Wait::new(workspace, thread, phase));
         }
     }
 }
@@ -8703,15 +8767,14 @@ mod tests {
         adopt_place(&script, "web", place())
             .await
             .expect("the keeper is read back");
-        let wait = Wait {
-            workspace: "web".to_owned(),
-            thread: THREAD.to_owned(),
-            phase: Phase::WaitingForApproval,
-        };
+        let wait = Wait::new("web", THREAD, Phase::WaitingForApproval);
         assert_eq!(heard.recv().await, Some(wait.clone()));
+        let told = titled_wait(&wait, "web", "Fix the flaky test").await;
+        let message = told.message(Some(BASE));
+        assert_eq!(message.body, "web: Fix the flaky test waits for an answer");
         assert_eq!(
-            wait.message().body,
-            "web: chat thread 1a2b3c4d waits for an answer"
+            message.click.as_deref(),
+            Some("https://box.tail.ts.net:8443/w/web?thread=1a2b3c4d")
         );
 
         let mut claude = script.claude().await;
@@ -8850,21 +8913,77 @@ mod tests {
         tab.close();
         served.await.expect("the socket's task ends");
         claude.say(ended()).await;
-        let wait = Wait {
-            workspace: "web".to_owned(),
-            thread: THREAD.to_owned(),
-            phase: Phase::Completed,
-        };
+        let wait = Wait::new("web", THREAD, Phase::Completed);
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(5), heard.recv()).await,
             Ok(Some(wait.clone()))
         );
+        let told = titled_wait(&wait, "web", "Fix the flaky test").await;
+        let message = told.message(Some(BASE));
+        assert_eq!(message.body, "web: Fix the flaky test finished a turn");
         assert_eq!(
-            wait.message().body,
-            "web: chat thread 1a2b3c4d finished a turn"
+            message.click.as_deref(),
+            Some("https://box.tail.ts.net:8443/w/web?thread=1a2b3c4d")
         );
         until_turn_over(&script).await;
         assert!(heard.try_recv().is_err(), "one notification");
+    }
+
+    const BASE: &str = "https://box.tail.ts.net:8443";
+
+    /// `wait` as `tell` names it, from a store whose row for it under
+    /// `workspace` has `title`.
+    async fn titled_wait(wait: &Wait, workspace: &str, title: &str) -> Wait {
+        let (store, _) = crate::store::tests::scratch();
+        store
+            .put_title(workspace, &wait.thread, "laptop", &place(), title)
+            .await
+            .expect("the title is kept");
+        let mut told = wait.clone();
+        told.named(&store).await;
+        told
+    }
+
+    /// Y-669: a thread the store has no title for is never named by its id.
+    #[tokio::test]
+    async fn a_wait_with_no_title_says_a_chat_thread_and_not_its_id() {
+        let (store, _) = crate::store::tests::scratch();
+        let mut wait = Wait::new("web", THREAD, Phase::WaitingForApproval);
+        wait.named(&store).await;
+        let message = wait.message(Some(BASE));
+        assert_eq!(message.body, "web: a chat thread waits for an answer");
+        assert!(!message.body.contains(THREAD), "{}", message.body);
+        assert_eq!(
+            message.click.as_deref(),
+            Some("https://box.tail.ts.net:8443/w/web?thread=1a2b3c4d")
+        );
+        assert_eq!(wait.message(None).click, None, "no base, no link");
+    }
+
+    /// A home thread's page is its machine's, which only the store knows.
+    #[tokio::test]
+    async fn a_home_thread_wait_links_to_its_machine_home() {
+        let wait = Wait::new(keep::HOME, THREAD, Phase::Completed);
+        assert_eq!(wait.message(Some(BASE)).click, None, "no row, no machine");
+        let told = titled_wait(&wait, "", "Tidy dotfiles").await;
+        let message = told.message(Some(BASE));
+        assert_eq!(message.body, "yantra-home: Tidy dotfiles finished a turn");
+        assert_eq!(
+            message.click.as_deref(),
+            Some("https://box.tail.ts.net:8443/m/laptop/home?thread=1a2b3c4d")
+        );
+    }
+
+    #[test]
+    fn a_link_percent_encodes_its_segments() {
+        let mut wait = Wait::new("a b/c", "t#1", Phase::Completed);
+        wait.title = Some("x".repeat(400));
+        let message = wait.message(Some(BASE));
+        assert_eq!(
+            message.click.as_deref(),
+            Some("https://box.tail.ts.net:8443/w/a%20b%2Fc?thread=t%231")
+        );
+        assert_eq!(message.body.chars().count(), notify::BODY_MAX);
     }
 
     /// A keeper is closed, then its agent ends or is killed.

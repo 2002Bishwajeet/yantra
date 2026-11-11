@@ -107,6 +107,30 @@ describe('install and join rows (Y-399)', () => {
   })
 })
 
+describe('repeated unreachable rows (Y-669)', () => {
+  it('fold into one row whose supporting line carries the count', async () => {
+    const gone = (at: number): Event => ({
+      at,
+      kind: 'unreachable',
+      workspace: null,
+      machine: 'pi-5',
+      said: 'pi-5 is no longer online',
+      commands: [],
+    })
+    mount('desktop', '/', {
+      overrides: {
+        '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [gone(1785522900), gone(1785522800), gone(1785522700)] } },
+      },
+    })
+    const popover = await open()
+    const items = await popover.findAllByRole('listitem')
+    const rows = items.filter((item) => item.textContent?.includes('pi-5 became unreachable'))
+    expect(rows).toHaveLength(1)
+    const supporting = rows[0]!.querySelector('.m3-row__supporting')!
+    expect(supporting.textContent).toMatch(/^3 times since .+ · pi-5 is no longer online$/)
+  })
+})
+
 describe('the footer reads the relay (Y-399)', () => {
   it('says on when about.relay is true', async () => {
     mount('desktop')

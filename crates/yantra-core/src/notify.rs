@@ -122,6 +122,7 @@ impl Notification {
             body: body.trim().to_owned(),
             title: Some(phase.headline().to_owned()),
             priority: None,
+            click: None,
         }
     }
 }
@@ -221,9 +222,9 @@ fn notable(before: Option<&Verdict>, after: &Verdict) -> bool {
         )
 }
 
-/// What a caller wants published. `title` and `priority` are ntfy's `Title` and
-/// `Priority` headers ([the M7 plan] §3.4), and 1 to 5 is the scale that server
-/// documents.
+/// What a caller wants published. `title`, `priority` and `click` are ntfy's
+/// `Title`, `Priority` and `Click` headers ([the M7 plan] §3.4), and 1 to 5 is the
+/// scale that server documents. `Click` is the URL a tap on the push opens.
 ///
 /// **The body is the caller's and Yantra composes nothing into it.** §B4 lists
 /// where a workspace's secret *value* may never reach — SQLite, a log, the API,
@@ -237,6 +238,7 @@ pub struct Message {
     pub body: String,
     pub title: Option<String>,
     pub priority: Option<u8>,
+    pub click: Option<String>,
 }
 
 /// Where a message goes.
@@ -478,6 +480,7 @@ pub fn test_message() -> Message {
         body: "yantra can reach this topic".to_owned(),
         title: Some("yantra".to_owned()),
         priority: None,
+        click: None,
     }
 }
 
@@ -526,6 +529,9 @@ fn send(url: &str, token: Option<&str>, message: &Message) -> Result<(), Error> 
     }
     if let Some(priority) = message.priority {
         request = request.header("Priority", &priority.to_string());
+    }
+    if let Some(click) = &message.click {
+        request = request.header("Click", click);
     }
     match request.send(&message.body) {
         Ok(_) => Ok(()),
@@ -947,6 +953,7 @@ mod tests {
         );
         assert!(headers.contains("title: approval needed\r\n"), "{request}");
         assert!(!headers.contains("priority:"), "{request}");
+        assert!(!headers.contains("click:"), "{request}");
         assert!(
             request.ends_with("api: waiting at claude's trust prompt"),
             "{request}"
@@ -971,6 +978,7 @@ mod tests {
                 body: "context is at 90 %".to_owned(),
                 title: Some("y-147".to_owned()),
                 priority: Some(4),
+                click: Some("https://box.example.ts.net:8443/w/api?thread=ab12".to_owned()),
             },
         )
         .await
@@ -982,6 +990,10 @@ mod tests {
         let headers = request.to_lowercase();
         assert!(headers.contains("title: y-147\r\n"), "{request}");
         assert!(headers.contains("priority: 4\r\n"), "{request}");
+        assert!(
+            headers.contains("click: https://box.example.ts.net:8443/w/api?thread=ab12\r\n"),
+            "{request}"
+        );
         assert!(request.ends_with("context is at 90 %"), "{request}");
     }
 
@@ -1005,6 +1017,7 @@ mod tests {
                 body: "hello".to_owned(),
                 title: None,
                 priority: None,
+                click: None,
             },
         )
         .await
@@ -1033,6 +1046,7 @@ mod tests {
                 body: "hello".to_owned(),
                 title: None,
                 priority: None,
+                click: None,
             },
         )
         .await

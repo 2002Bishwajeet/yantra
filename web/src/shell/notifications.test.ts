@@ -203,6 +203,30 @@ describe('PR watch rows (Y-494)', () => {
   })
 })
 
+describe('unreachable rows fold per machine (Y-669)', () => {
+  const at = (when: number, machine = 'thinkpad'): Event => ({ ...gone, at: when, machine, said: `${machine} is no longer online` })
+  const first = Date.UTC(2026, 10, 11, 9, 30) / 1000
+  const events = [at(first), at(first + 600), at(first + 60, 'pi'), at(first + 300)]
+
+  it('gives one row per machine, the newest event, counted', () => {
+    const entries = merge(events, null)
+    expect(entries.map(({ headline, count, at }) => ({ headline, count, at }))).toEqual([
+      { headline: 'thinkpad became unreachable', count: 3, at: first + 600 },
+      { headline: 'pi became unreachable', count: 1, at: first + 60 },
+    ])
+    const clock = new Date(first * 1000)
+    const hhmm = `${String(clock.getHours()).padStart(2, '0')}:${String(clock.getMinutes()).padStart(2, '0')}`
+    expect(entries[0]!.supporting).toBe(`3 times since ${hhmm} · thinkpad is no longer online`)
+    expect(entries[1]!.supporting).toBe('pi is no longer online')
+  })
+
+  it('counts the folded rows as unseen, not the events', () => {
+    const entries = merge(events, null)
+    expect(unseen(entries, null)).toHaveLength(2)
+    expect(unseen(entries, first + 300)).toHaveLength(1)
+  })
+})
+
 describe('unseen and grouped', () => {
   const entries = merge([relay, trust, gone], null)
 

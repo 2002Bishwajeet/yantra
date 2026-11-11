@@ -110,13 +110,33 @@ const HTTPS_PORT: u16 = 8443;
 
 /// Where the microphone works: a browser needs a secure context (ADR-0031 §4).
 fn https(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
-    let name = this_node_name(snapshot, listening_on)?;
+    https_of(
+        snapshot.machines.as_deref()?.value().as_ref().ok()?,
+        listening_on,
+    )
+}
+
+/// The dashboard's HTTPS origin, which a chat push links to (Y-669).
+pub(crate) fn https_of(
+    machines: &[yantra_core::inventory::MachineInfo],
+    listening_on: &[SocketAddr],
+) -> Option<String> {
+    let name = node_name(machines, listening_on)?;
     Some(format!("https://{name}:{HTTPS_PORT}"))
 }
 
-/// This node's `DNSName` without the trailing dot.
 fn this_node_name<'a>(snapshot: &'a Snapshot, listening_on: &[SocketAddr]) -> Option<&'a str> {
-    let machines = snapshot.machines.as_deref()?.value().as_ref().ok()?;
+    node_name(
+        snapshot.machines.as_deref()?.value().as_ref().ok()?,
+        listening_on,
+    )
+}
+
+/// This node's `DNSName` without the trailing dot.
+fn node_name<'a>(
+    machines: &'a [yantra_core::inventory::MachineInfo],
+    listening_on: &[SocketAddr],
+) -> Option<&'a str> {
     let me = machines
         .iter()
         .find(|machine| is_this_node(machine, listening_on))?;
