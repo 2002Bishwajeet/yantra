@@ -115,3 +115,28 @@
   letter-spacing: var(--md-sys-typescale-body-small-tracking);
   color: var(--md-sys-color-on-surface-variant);
 }
+
+.terminal__status--short {
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A keyboard is the normal input off the phone; on it the hint stays for a screen reader only. */
+[data-shell="phone"] .terminal__escape {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* Y-720: the pane runs edge to edge on the phone, so xterm fits the whole screen. The drawer and the sheet keep their card. */
+[data-shell="phone"] :is(.session__terminal, .session-terminal) > .terminal > .terminal__pane {
+  width: auto;
+  margin-inline: calc(-1 * max(var(--m3-gutter), var(--m3-safe-left))) calc(-1 * max(var(--m3-gutter), var(--m3-safe-right)));
+  padding-inline: max(4px, var(--m3-safe-left)) max(4px, var(--m3-safe-right));
+  border-radius: 0;
+}

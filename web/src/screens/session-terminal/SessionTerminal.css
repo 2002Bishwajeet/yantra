@@ -31,3 +31,19 @@
   line-height: 18px;
   color: var(--md-sys-color-on-surface-variant);
 }
+
+.session-terminal__status {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* On a phone the status takes its own line under the meta and Kill. */
+.session-terminal__row[data-factor='phone'] {
+  flex-wrap: wrap;
+}
+
+.session-terminal__row[data-factor='phone'] .session-terminal__status {
+  flex: 1 0 100%;
+  order: 3;
+  white-space: normal;
+}
