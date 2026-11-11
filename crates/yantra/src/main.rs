@@ -44,6 +44,7 @@ mod behind;
 mod dash;
 mod jobs;
 mod mcp;
+mod passkey;
 mod why;
 
 #[derive(Debug, Parser)]
@@ -309,6 +310,17 @@ enum Command {
         #[arg(long)]
         daemon: String,
     },
+    /// The owner's passkeys, on the hub (ADR-0044). Run as the yantra
+    /// account: sudo -u yantra yantra passkey code
+    Passkey {
+        #[command(subcommand)]
+        action: PasskeyAction,
+    },
+    /// The devices signed in to the dashboard, on the hub (ADR-0044)
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
     /// The dashboard layout yantrad serves, in ~/.config/yantra/dashboard.json
     Layout {
         #[command(subcommand)]
@@ -478,6 +490,29 @@ enum PrAction {
         /// Merge without asking; needed when stdin is not a terminal
         #[arg(long)]
         yes: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PasskeyAction {
+    /// Make a code that enrols one device. It lives 10 minutes and works once
+    Code,
+    /// List the passkeys and the signed-in devices
+    List,
+    /// Remove a passkey and sign out every device it signed in
+    Remove {
+        /// The passkey's name, as `yantra passkey list` shows it
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SessionAction {
+    /// Sign out one device. Its next request is refused, and its open
+    /// terminals and chats close
+    Revoke {
+        /// The session's id, as `yantra passkey list` shows it
+        id: String,
     },
 }
 
@@ -820,6 +855,14 @@ async fn main() -> ExitCode {
             channel,
         }) => update_apply(channel).await,
         Some(Command::Mcp { daemon }) => serve_mcp(daemon).await,
+        Some(Command::Passkey { action }) => passkey_command(&action),
+        Some(Command::Session {
+            action: SessionAction::Revoke { id },
+        }) => hub_call(
+            "DELETE",
+            &format!("/api/sessions/{}", passkey::segment(&id)),
+            |_| Ok(format!("signed out session {id}")),
+        ),
         Some(Command::Room {
             action: RoomAction::Resume { room, daemon },
         }) => room_resume(room, daemon).await,
@@ -1012,6 +1055,47 @@ async fn serve_mcp(daemon: String) -> ExitCode {
             eprintln!("yantra mcp: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// One request on the hub's socket, and what `done` makes of its body.
+fn hub_call(
+    method: &str,
+    path: &str,
+    done: impl FnOnce(&str) -> Result<String, String>,
+) -> ExitCode {
+    match passkey::call(Path::new(passkey::SOCKET), method, path).and_then(|body| done(&body)) {
+        Ok(said) => {
+            println!("{}", said.trim_end());
+            ExitCode::SUCCESS
+        }
+        Err(said) => {
+            eprintln!("yantra: {said}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn passkey_command(action: &PasskeyAction) -> ExitCode {
+    match action {
+        PasskeyAction::Code => hub_call("POST", "/api/passkey/code", |body| {
+            let code: serde_json::Value = serde_json::from_str(body)
+                .map_err(|error| format!("yantrad sent no code: {error}"))?;
+            Ok(format!(
+                "{}\nOpen the dashboard on the device, choose Set up this device, and type this code within 10 minutes. It works once.",
+                code["code"].as_str().unwrap_or_default()
+            ))
+        }),
+        PasskeyAction::List => hub_call("GET", "/api/passkey", passkey::listed),
+        PasskeyAction::Remove { name } => hub_call(
+            "DELETE",
+            &format!("/api/passkey/{}", passkey::segment(name)),
+            |_| {
+                Ok(format!(
+                    "removed the passkey {name} and signed out its devices"
+                ))
+            },
+        ),
     }
 }
 
@@ -3695,6 +3779,28 @@ mod tests {
 
     #[test]
     fn mcp_needs_the_daemons_address() {
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "passkey", "code"]).map(|cli| cli.command),
+            Ok(Some(Command::Passkey {
+                action: PasskeyAction::Code
+            }))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "passkey", "list"]).map(|cli| cli.command),
+            Ok(Some(Command::Passkey {
+                action: PasskeyAction::List
+            }))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "passkey", "remove", "Biswa's iPhone"]).map(|cli| cli.command),
+            Ok(Some(Command::Passkey { action: PasskeyAction::Remove { name } })) if name == "Biswa's iPhone"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "passkey", "remove"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "session", "revoke", "ab12"]).map(|cli| cli.command),
+            Ok(Some(Command::Session { action: SessionAction::Revoke { id } })) if id == "ab12"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "session", "revoke"]).is_err());
         let parsed = Cli::try_parse_from(["yantra", "mcp", "--daemon", "http://x:7717"])
             .expect("`mcp --daemon <url>` parses");
         assert!(matches!(
