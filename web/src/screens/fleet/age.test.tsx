@@ -51,4 +51,10 @@ describe('Looked', () => {
     const day = screen.getByText(/^\d{1,2} \w{3}$/)
     expect(day.parentElement?.textContent).toBe(`looked ${day.textContent}`)
   })
+
+  it('keeps the plain age out of the mono face', () => {
+    const { container } = render(<Looked plain reads={read(4)} />)
+    expect(container.querySelector('.m3-mono')).toBeNull()
+    expect(container.textContent).toBe('looked 4s ago')
+  })
 })

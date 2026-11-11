@@ -105,6 +105,8 @@ async function draw(
 }
 
 const card = () => within(screen.getByRole('region', { name: 'Readiness' }))
+/** The microphone's box and Install wait inside the closed Optional row on a machine that can start sessions. */
+const showOptional = () => fireEvent.click(card().getByRole('button', { name: /^Show Optional: microphone/ }))
 
 /** The folded checks; the button named "What ssh said" is the other disclosure. */
 const openChecks = () => fireEvent.click(card().getByRole('button', { name: /^Show (?!What ssh said)/ }))
@@ -121,13 +123,13 @@ describe('the counts on a machine with optional checks absent', () => {
     const rows = [...document.querySelectorAll('.machine__check')]
     const needs = rows.filter((one) => one.querySelector('.m3-state')?.getAttribute('data-state') === 'needs')
     expect(needs).toHaveLength(3)
+    // Y-714: a passing check has no row; the three that need you and the optional one do.
+    expect(rows).toHaveLength(4)
 
     const verdict = verdictOf({ name: 'pi', machine: machine(), readiness: report(list), events: [], watch: null })
     expect(chipOf(verdict, null).word).toBe(`ready · ${needs.length} to fix`)
     expect(card().getByRole('heading', { name: `${needs.length} checks need you` })).toBeTruthy()
 
-    // The count line's total is the rows drawn, the microphone included.
-    expect(rows).toHaveLength(list.length)
     expect(card().getByText(new RegExp(`^10 of ${list.length} · asked`))).toBeTruthy()
   })
 
@@ -164,6 +166,7 @@ describe('the Readiness card', () => {
     await draw(report([...checks(), { check: 'mic', state: 'absent', detail: 'not installed — the microphone is optional' }]))
     expect(card().getByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
+    showOptional()
     const box = card().getByRole('checkbox', { name: 'Microphone' }) as HTMLInputElement
     expect(box.checked).toBe(false)
     box.focus()
@@ -185,6 +188,7 @@ describe('the Readiness card', () => {
     await draw(report([...checks(absent), { check: 'mic', state: 'absent', detail: 'not installed' }]))
     expect(card().getByRole('heading', { name: title })).toBeTruthy()
     expect(card().getByText(new RegExp(`^${count} · asked`))).toBeTruthy()
+    showOptional()
     const install = card().getByRole('button', { name: 'Install' })
     expect(install.hasAttribute('disabled')).toBe(true)
     fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
@@ -209,6 +213,7 @@ describe('the Readiness card', () => {
     const mic: Check = { check: 'mic', state: 'absent', detail: 'not installed' }
     daemon([202], [...checks(), mic])
     const client = await draw(report([...checks(), mic]))
+    showOptional()
     fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
     fireEvent.click(card().getByRole('button', { name: 'Install' }))
     await card().findByRole('heading', { name: 'Installing on pi' })
@@ -232,6 +237,7 @@ describe('the Readiness card', () => {
     const mic: Check = { check: 'mic', state: 'absent', detail: 'not installed' }
     daemon([202], [...checks(), mic])
     const client = await draw(report([...checks(), mic]))
+    showOptional()
     fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
     fireEvent.click(card().getByRole('button', { name: 'Install' }))
     await card().findByRole('heading', { name: 'Installing on pi' })
@@ -452,7 +458,8 @@ describe('the Readiness card', () => {
 
     fireEvent.click(press)
     expect(card().getAllByText(said).length).toBeGreaterThan(0)
-    expect(card().getByText('tmux')).toBeTruthy()
+    // Only checks that are not present are listed: tmux and the rest passed.
+    expect(card().queryByText('tmux')).toBeNull()
   })
 
   /** Y-621: the two lines a daemon before v0.10.1 sends. The sign-in link is
@@ -499,9 +506,8 @@ describe('the Readiness card', () => {
 
   it('says how long a step took, and nothing where no step ran', async () => {
     daemon()
-    const timed = checks().map((one) => (one.check === 'tmux' ? { ...one, took_ms: 84 } : one))
+    const timed = checks(['tmux']).map((one) => (one.check === 'tmux' ? { ...one, took_ms: 84 } : one))
     await draw(report(timed))
-    openChecks()
     expect(card().getByText('84 ms')).toBeTruthy()
     expect(document.querySelectorAll('.machine__detail')).toHaveLength(1)
   })
@@ -523,13 +529,12 @@ describe('the Readiness card', () => {
     const both = { 'login-session': NO_SERVER, 'provider-auth': NO_SERVER }
     await draw(report(checks(['login-session', 'provider-auth'], both)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'No tmux server from a login on pi' })).toBeTruthy()
+    // The first check carries the fix; the second is listed without one (Y-714).
     expect(card().getAllByText('Open Terminal on pi and run:')).toHaveLength(1)
-    openChecks()
-    expect(card().getAllByText('Open Terminal on pi and run:')).toHaveLength(2)
-    expect(card().getAllByText('tmux -L yantra new-session -d')).toHaveLength(2)
+    expect(card().getAllByText('tmux -L yantra new-session -d')).toHaveLength(1)
     expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/log in|sign in/i)
-    fireEvent.click(card().getByRole('button', { name: 'Copy the command that fixes claude signed in' }))
-    expect(await card().findByRole('button', { name: 'Copied the command that fixes claude signed in' })).toBeTruthy()
+    fireEvent.click(card().getByRole('button', { name: 'Copy the command that fixes gh signed in' }))
+    expect(await card().findByRole('button', { name: 'Copied the command that fixes gh signed in' })).toBeTruthy()
     expect(writeText).toHaveBeenCalledWith('tmux -L yantra new-session -d')
   })
 
@@ -612,35 +617,147 @@ describe('the Readiness card', () => {
   })
 })
 
-/** Y-676: a phone's page is the first fix, not a wall of probe text. */
+/** Y-676, Y-714: a phone's page is the first fix, not a wall of probe text. */
 describe('the checks on a phone-sized card', () => {
-  it('shows the first absent check with its fix open and folds the others', async () => {
+  it('shows the first absent check with its fix, then the others without one', async () => {
     daemon()
-    await draw(report(checks(['tmux', 'git'])))
-    expect(document.querySelectorAll('.machine__check')).toHaveLength(1)
-    expect(card().getByText('tmux')).toBeTruthy()
-    const fold = card().getByRole('button', { name: /^Show (?!What ssh said)/ })
-    expect(fold.getAttribute('aria-expanded')).toBe('false')
-    openChecks()
-    expect(document.querySelectorAll('.machine__check')).toHaveLength(IDS.length)
+    await draw(report(checks(['provider-auth', 'hooks'])))
+    expect(document.querySelectorAll('.machine__check')).toHaveLength(2)
+    expect(card().queryByText('git')).toBeNull()
+    expect(card().getAllByText('gh auth login')).toHaveLength(1)
+    expect(card().queryByText(/Install the command where the agent finds it/)).toBeNull()
   })
 
-  it('keeps every probe text out of the page until What ssh said opens', async () => {
+  it('keeps a passing check’s probe text off the page, and shows the failed one', async () => {
     daemon()
     await draw(report(checks(['tmux'], { tmux: 'tmux is not on PATH or in any of: $HOME/.local/bin', git: 'git 2.45' })))
-    openChecks()
     expect(card().queryByText(/not on PATH or in any of/)).toBeNull()
-    expect(card().queryByText(/git 2\.45/)).toBeNull()
     openSaid()
     expect(card().getByText(/tmux: tmux is not on PATH or in any of: \$HOME\/\.local\/bin/)).toBeTruthy()
-    expect(card().getByText(/git: git 2\.45/)).toBeTruthy()
+    expect(card().queryByText(/git 2\.45/)).toBeNull()
   })
 
-  it('folds a ready machine’s checks and still offers What ssh said', async () => {
+  it('draws a failed probe in the body font, not mono', async () => {
+    daemon()
+    await draw(report(checks(['tmux'], { tmux: 'gone', git: 'git 2.45' })))
+    openSaid()
+    const line = card().getByText(/tmux: gone/)
+    expect(line.classList.contains('m3-mono')).toBe(false)
+    expect(line.closest('.m3-disclosure')!.querySelector('.m3-mono')).toBeNull()
+  })
+
+  it('shows only the absent probe line when present checks carry details too', async () => {
+    daemon()
+    await draw(report(checks(['tmux'], { tmux: 'gone', git: 'git 2.45' })))
+    openSaid()
+    expect(card().getByText(/tmux: gone/)).toBeTruthy()
+    expect(card().queryByText(/git: git 2\.45/)).toBeNull()
+  })
+
+  it('shows no What ssh said when no check failed', async () => {
+    daemon()
+    await draw(report(checks()))
+    expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
+  })
+})
+
+/** Y-714: a ready machine shows only what needs the owner. */
+describe('a ready machine', () => {
+  const withMic = [...checks(), { check: 'mic', state: 'absent', detail: 'not installed' } as Check]
+  const filled = () =>
+    [...card().queryAllByRole('button'), ...card().queryAllByRole('link')].filter((one) => one.getAttribute('data-variant') === 'filled')
+
+  it('lists no passing check and no ok row', async () => {
     daemon()
     await draw(report(checks()))
     expect(document.querySelectorAll('.machine__check')).toHaveLength(0)
-    expect(card().getByRole('button', { name: /^Show What ssh said/ }).getAttribute('aria-expanded')).toBe('false')
-    expect(card().getByRole('button', { name: /^Show (?!What ssh said)/ })).toBeTruthy()
+    expect(card().queryByText('ok')).toBeNull()
+    expect(card().queryByRole('button', { name: /^Show/ })).toBeNull()
+    expect(filled()).toHaveLength(1)
+    expect(filled()[0]!.textContent).toBe('New session')
+  })
+
+  it('keeps the microphone fix behind Optional: microphone until it opens', async () => {
+    daemon()
+    await draw(report(withMic))
+    expect(card().queryByText(/Run Install with Microphone ticked/)).toBeNull()
+    expect(card().queryByText('ok')).toBeNull()
+    expect(card().queryByRole('checkbox', { name: 'Microphone' })).toBeNull()
+    expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
+    const open = card().getByRole('button', { name: /^Show Optional: microphone/ })
+    expect(open.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(open)
+    expect(card().getByText(/Run Install with Microphone ticked/)).toBeTruthy()
+    expect(card().getByRole('checkbox', { name: 'Microphone' })).toBeTruthy()
+    expect(card().getByRole('button', { name: 'Install' })).toBeTruthy()
+    expect(filled()).toHaveLength(1)
+  })
+
+  it('leaves the microphone fix out on a Mac, where Install never offers it', async () => {
+    daemon()
+    await draw(report(withMic), [earlier], { machine: machine({ os: 'macOS' }) })
+    expect(card().queryByRole('button', { name: /Optional: microphone/ })).toBeNull()
+    expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
+    expect(card().queryByText(/Run Install with Microphone ticked/)).toBeNull()
+    expect(filled()).toHaveLength(1)
+    expect(filled()[0]!.textContent).toBe('New session')
+  })
+
+  it('keeps an optional absent microphone out of What ssh said on Linux', async () => {
+    daemon()
+    await draw(report(withMic))
+    expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
+  })
+})
+
+/** Y-714: whatever the verdict, one button is filled. */
+describe('the one filled action', () => {
+  const filled = () =>
+    [...card().queryAllByRole('button'), ...card().queryAllByRole('link')].filter((one) => one.getAttribute('data-variant') === 'filled')
+  const fixes = () => card().queryAllByRole('button', { name: /^Copy the command/ })
+
+  it('is Install on a machine missing a basic, with the rest listed without a fix', async () => {
+    daemon()
+    await draw(report(checks(['tmux', 'git', 'provider-auth'])))
+    expect(filled().map((one) => one.textContent)).toEqual(['Install'])
+    expect(document.querySelectorAll('.machine__check')).toHaveLength(3)
+    expect(fixes()).toHaveLength(0)
+  })
+
+  it('is the first terminal button when sudo asks, and later commands and Install are tonal', async () => {
+    daemon([202], checks(['tmux', 'git']))
+    const client = await draw(report(checks(['tmux', 'git'])))
+    fireEvent.click(card().getByRole('button', { name: 'Install' }))
+    await card().findByRole('heading', { name: 'Installing tmux and git' })
+    const two: Event = { ...stopped, commands: ['sudo apk add tmux', 'sudo apk add git'] }
+    act(() => client.setQueryData(keys.notifications(), ring([two, earlier])))
+    await card().findByRole('heading', { name: 'tmux and git need your password' })
+    const openers = [...document.querySelectorAll<HTMLElement>('[data-sudo-opener]')]
+    expect(openers.map((one) => one.getAttribute('data-variant'))).toEqual(['filled', 'tonal'])
+    expect(filled()).toHaveLength(1)
+  })
+
+  it('is New session on a manual machine that is ready, with one fix', async () => {
+    daemon()
+    await draw(report(checks(['provider-auth'])))
+    expect(filled().map((one) => one.textContent)).toEqual(['New session'])
+    expect(fixes()).toHaveLength(1)
+  })
+
+  it('is Check again on a manual machine that is not ready, and New session is tonal', async () => {
+    daemon()
+    // A session check that could not be asked holds a machine back from ready.
+    const unknown = checks(['provider-auth']).map((one) => (one.check === 'login-session' ? { ...one, state: 'unknown' as const } : one))
+    await draw(report(unknown))
+    expect(filled().map((one) => one.textContent)).toEqual(['Check again'])
+    expect(card().getByRole('link', { name: 'New session' }).getAttribute('data-variant')).toBe('tonal')
+    expect(fixes()).toHaveLength(1)
+  })
+
+  it('lists only the checks that are not present in a reach failure', async () => {
+    daemon()
+    await draw(report(checks(['reachable'], { reachable: 'No route to host' })))
+    openSaid()
+    expect(document.querySelectorAll('.machine__check')).toHaveLength(1)
   })
 })

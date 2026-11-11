@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   RouterProvider,
   createMemoryHistory,
@@ -19,12 +19,11 @@ const present = (name: string): Check => ({
   detail: "ok",
 });
 
-function renderCard(machine: Machine, checks: Check[], condensed = false) {
+function renderCard(machine: Machine, checks: Check[]) {
   const root = createRootRoute({
     component: () => (
       <MachineCard
         checks={checks}
-        condensed={condensed}
         machine={machine}
         pending={false}
         sessions={0}
@@ -103,8 +102,8 @@ describe("the joined account and sudo (Y-628)", () => {
     { check: "no-sudo", state, detail },
   ];
 
-  it.each([false, true])("warns, in words and not on hover, when agents can use sudo (condensed: %s)", async (condensed) => {
-    renderCard(aMachine(), withSudo("absent", "the account is in the wheel group"), condensed);
+  it("warns, in words and not on hover, when agents can use sudo", async () => {
+    renderCard(aMachine(), withSudo("absent", "the account is in the wheel group"));
     const note = await screen.findByRole("note");
     expect(note.textContent).toBe(
       "Agents here can use sudo: the account is in the wheel group. Join a separate account without sudo, named karigar.",
@@ -113,13 +112,90 @@ describe("the joined account and sudo (Y-628)", () => {
 
   it("says nothing when the account cannot use sudo", async () => {
     renderCard(aMachine(), withSudo("present", "there is no sudo here"));
-    await screen.findByText("ssh");
+    await screen.findByText(/ of \d+/);
     expect(screen.queryByRole("note")).toBeNull();
   });
 
   it("says nothing when sudo could not be asked, because unknown is not absent", async () => {
     renderCard(aMachine(), withSudo("unknown", "could not be asked"));
-    await screen.findByText("ssh");
+    await screen.findByText(/ of \d+/);
     expect(screen.queryByRole("note")).toBeNull();
+  });
+});
+
+describe("a machine ssh cannot reach (Y-714)", () => {
+  const checks: Check[] = [
+    { check: "reachable", state: "absent", detail: "ssh: connect to host cachyos-g14 port 22: No route to host" },
+    { check: "tmux", state: "unknown", detail: "could not be asked" },
+    { check: "agent-cli", state: "unknown", detail: "could not be asked" },
+    { check: "terminfo", state: "unknown", detail: "could not be asked" },
+  ];
+
+  it("says one sentence of cause, with no per-check list and no tally", async () => {
+    renderCard(aMachine(), checks);
+    await screen.findByText(/can’t reach cachyos-g14 over ssh/);
+    expect(screen.getAllByText(/can’t reach cachyos-g14 over ssh/)).toHaveLength(1);
+    expect(screen.queryByText("tmux")).toBeNull();
+    expect(screen.queryByText(/could not be asked/)).toBeNull();
+    expect(screen.queryByText(/of 4/)).toBeNull();
+  });
+
+  it("keeps ssh’s own words behind What ssh said, in the body font", async () => {
+    renderCard(aMachine(), checks);
+    const press = await screen.findByRole("button", { name: /What ssh said/ });
+    expect(screen.queryByText(/No route to host/)).toBeNull();
+    fireEvent.click(press);
+    const said = screen.getByText(/No route to host/);
+    expect(said.classList.contains("m3-mono")).toBe(false);
+  });
+
+  it("gives an offline machine the same one sentence, not a wall of unknown checks", async () => {
+    renderCard(aMachine({ online: false }), checks);
+    await screen.findByText(/can’t reach cachyos-g14 over ssh/);
+    expect(screen.queryByText("tmux")).toBeNull();
+    expect(screen.queryByText(/could not be asked/)).toBeNull();
+    expect(screen.queryByText(/of 4/)).toBeNull();
+  });
+});
+
+describe("a ready machine with gaps (Y-714)", () => {
+  const all = [
+    "reachable", "sshd", "tmux", "git", "agent-cli", "terminfo",
+    "provider-cli", "provider-auth", "login-session", "folder-access", "hooks", "heartbeat",
+  ].map((name): Check => ({ check: name, state: "present", detail: "that machine knows `xterm-256color`" }));
+  const gaps: Check[] = [
+    { check: "no-sudo", state: "absent", detail: "the account is in the wheel group" },
+    { check: "hooks", state: "absent", detail: "no `hooks` file" },
+  ];
+  const checks = [...all.filter((one) => one.check !== "hooks"), ...gaps];
+
+  it("lists the failing checks and none that pass", async () => {
+    renderCard(aMachine(), checks);
+    await screen.findByText(/to fix/);
+    expect(screen.queryByText("ssh")).toBeNull();
+    expect(screen.queryByText("tmux")).toBeNull();
+    expect(screen.queryByText("terminfo")).toBeNull();
+    expect(screen.queryByText("ok")).toBeNull();
+    expect(screen.getByText("no hooks file")).toBeTruthy();
+  });
+
+  it("shows the sudo gap once, in its note, and keeps the other gaps as lines", async () => {
+    renderCard(aMachine(), checks);
+    await screen.findByText(/to fix/);
+    const said = screen.getAllByText(/wheel group/);
+    expect(said).toHaveLength(1);
+    expect(said[0].getAttribute("role")).toBe("note");
+    expect(screen.queryByText("The joined account can use sudo")).toBeNull();
+    expect(screen.getByText("no hooks file")).toBeTruthy();
+    const filled = Array.from(document.body.querySelectorAll("button, a")).filter((one) =>
+      /filled/.test(one.className),
+    );
+    expect(filled.length).toBeLessThanOrEqual(1);
+  });
+
+  it("prints no backticks", async () => {
+    renderCard(aMachine(), [...all.filter((one) => one.check !== "terminfo"), { check: "terminfo", state: "absent", detail: "that machine lacks `xterm-256color`" }]);
+    await screen.findByText("that machine lacks xterm-256color");
+    expect(document.body.textContent).not.toContain("`");
   });
 });

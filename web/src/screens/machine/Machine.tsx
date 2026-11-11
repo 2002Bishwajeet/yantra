@@ -23,7 +23,7 @@ import { Mark, State } from '@/m3/mark/Mark'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { Looked } from '@/screens/fleet/age'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
@@ -62,7 +62,7 @@ function Fact(props: { label: string; children: ReactNode }) {
 function Tailnet(props: { name: string }) {
   const labels = props.name.replace(/\.$/, '').split('.')
   return (
-    <Mono>
+    <Text className="machine__num" scale="body-medium">
       {labels.map((label, index) => (
         <Fragment key={index}>
           {index > 0 ? (
@@ -74,7 +74,7 @@ function Tailnet(props: { name: string }) {
           {label}
         </Fragment>
       ))}
-    </Mono>
+    </Text>
   )
 }
 
@@ -85,7 +85,15 @@ function About(props: { machine: OneMachine; lastSeen: string | null }) {
   return (
     <dl className="machine__about">
       <Fact label="OS">{machine.os}</Fact>
-      <Fact label="Address">{machine.address ? <Mono>{machine.address}</Mono> : 'none reported'}</Fact>
+      <Fact label="Address">
+        {machine.address ? (
+          <Text className="machine__num" scale="body-medium">
+            {machine.address}
+          </Text>
+        ) : (
+          'none reported'
+        )}
+      </Fact>
       <Fact label="Tailnet name">
         <Tailnet name={machine.dns_name} />
       </Fact>
@@ -116,7 +124,11 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
         <Text render={<h2 />} emphasized id="machine-workspaces" scale="title-large">
           Workspaces on this machine
         </Text>
-        {rows.length > 0 ? <Mono>{rows.length}</Mono> : null}
+        {rows.length > 0 ? (
+          <Text className="machine__num" scale="body-small" tone="variant">
+            {rows.length}
+          </Text>
+        ) : null}
       </div>
       {pending ? (
         <div aria-busy="true" className="machine__pending">
@@ -139,7 +151,9 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
                     <Link className="machine__name m3-hit" params={{ name: workspace.name }} to="/w/$name">
                       {workspace.name}
                     </Link>
-                    <Mono className="machine__where m3-clip">{workspace.repo}</Mono>
+                    <Text className="machine__where m3-clip" scale="body-small" tone="variant">
+                      {workspace.repo}
+                    </Text>
                   </span>
                   <State className="machine__state" state={state}>
                     {word}
@@ -223,7 +237,7 @@ export function Machine() {
   return (
     <Page>
       <PageHeader
-        stamp={<Looked reads={[machines, readiness, sessions]} />}
+        stamp={<Looked plain reads={[machines, readiness, sessions]} />}
         subtitle={
           chip ? (
             <Chip tone={chip.error ? 'error' : 'lowest'}>

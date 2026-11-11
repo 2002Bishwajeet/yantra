@@ -5,7 +5,7 @@ import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { Since } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -101,9 +101,9 @@ export function Sessions(props: {
                       : `${session.attached} client${session.attached === 1 ? '' : 's'}`}
                   </span>
                 </span>
-                <Mono className="machine__age">
-                  <Since at={session.created_at} />
-                </Mono>
+                <Text className="machine__age" scale="body-small" tone="variant">
+                  <Since at={session.created_at} plain />
+                </Text>
                 <span className="machine__verbs">
                   <Button
                     render={

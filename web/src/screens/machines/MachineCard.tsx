@@ -34,7 +34,7 @@ function CheckLine(props: { check: Check; machine: string; pressable: boolean })
         {rowWord(check)}
       </Text>
       <Text className="machines__detail m3-wrap" scale="body-small" tone="variant">
-        {failed ? reachWords(reachableFailure(check.detail), machine).cause : check.detail}
+        {failed ? reachWords(reachableFailure(check.detail), machine).cause : check.detail.replaceAll('`', '')}
       </Text>
       {failed && pressable ? <SshSaid detail={check.detail} /> : null}
     </li>
@@ -120,21 +120,17 @@ function CopyJoin() {
 export type MachineCardProps = {
   machine: Machine
   checks: Check[]
-  /** The phone board condenses a card that passes: the failing checks are
-   *  named and the rest are one line. */
-  condensed: boolean
   pending: boolean
   /** Tmux sessions the machine reported; null when it did not answer. */
   sessions: number | null
 }
 
 export function MachineCard(props: MachineCardProps) {
-  const { machine, checks, condensed, pending, sessions } = props
+  const { machine, checks, pending, sessions } = props
   const four = CARD_CHECKS.flatMap((name) => {
     const check = checkNamed(checks, name)
     return check ? [check] : []
   })
-  const shown = condensed ? four.filter((one) => one.state !== 'present') : four
   // ADR-0046: not one of the four, so its warning is a line of its own. Unknown is not absent (R-23).
   const sudo = checkNamed(checks, 'no-sudo')
   // D3 §5.7's one clock, as the board prints it: `2h` under a day, `7 Jul` past one.
@@ -146,7 +142,23 @@ export function MachineCard(props: MachineCardProps) {
     events: [],
     watch: null,
   })
+  // Y-714: a card names what needs the owner and counts the rest. A ready machine
+  // with gaps lists those gaps, which are not always among the four.
+  const shown = verdict.kind === 'manual' ? verdict.absent.filter((one) => one.check !== 'no-sudo') : four.filter((one) => one.state !== 'present')
   const chip = chipOf(verdict, seen?.text ?? null)
+  // The machine cannot be reached, so a tally of checks nobody could ask says nothing.
+  const reachable = checkNamed(checks, 'reachable')
+  const reach =
+    verdict.kind === 'refused' ||
+    verdict.kind === 'unjoined' ||
+    verdict.kind === 'browser' ||
+    verdict.kind === 'changed' ||
+    verdict.kind === 'unreachable'
+      ? verdict
+      : // An offline machine that ssh also failed to reach has the same one sentence (Y-714).
+        verdict.kind === 'asleep' && reachable?.state === 'absent'
+        ? { kind: reachableFailure(reachable.detail), detail: reachable.detail }
+        : null
 
   return (
     <Card aria-labelledby={`machine-${machine.name}`} className="machines__card">
@@ -176,22 +188,31 @@ export function MachineCard(props: MachineCardProps) {
         </div>
       ) : (
         <>
-          <ul className="machines__checks">
-            {shown.map((check) => (
-              <CheckLine
-                check={check}
-                key={check.check}
-                machine={machine.name}
-                pressable={verdict.kind !== 'asleep' && verdict.kind !== 'expired'}
-              />
-            ))}
-          </ul>
+          {reach ? (
+            <>
+              <Text render={<p />} className="machines__about" scale="body-medium">
+                {reachWords(reach.kind, machine.name).cause}
+              </Text>
+              <SshSaid detail={reach.detail} />
+            </>
+          ) : (
+            <ul className="machines__checks">
+              {shown.map((check) => (
+                <CheckLine
+                  check={check}
+                  key={check.check}
+                  machine={machine.name}
+                  pressable={verdict.kind !== 'asleep' && verdict.kind !== 'expired'}
+                />
+              ))}
+            </ul>
+          )}
           {sudo?.state === 'absent' ? (
             <Text render={<p role="note" />} className="machines__about" scale="body-small" tone="error">
               Agents here can use sudo: {sudo.detail}. Join a separate account without sudo, named karigar.
             </Text>
           ) : null}
-          {verdict.kind === 'unasked' ? null : (
+          {verdict.kind === 'unasked' || reach ? null : (
             <Text className="machines__summary" scale="body-small" tone="variant">
               {summary(tally(checks))}
             </Text>

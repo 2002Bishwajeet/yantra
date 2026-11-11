@@ -26,7 +26,7 @@ test.describe('the machines on a busy fleet', () => {
     const short = card(page, 'pi-5')
     // The check name table, never a raw id (D7 §3.5).
     await expect(short.getByText('claude', { exact: true })).toBeVisible()
-    await expect(short.getByText('no `claude` on PATH there')).toBeVisible()
+    await expect(short.getByText('no claude on PATH there')).toBeVisible()
     await expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeVisible()
     // `git` is not in pi-5's report at all, so it counts as missing too.
     await expect(short.getByText('2 missing')).toBeVisible()
@@ -36,8 +36,9 @@ test.describe('the machines on a busy fleet', () => {
     // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
     // Finding 128: the board dates the chip `7 Jul`, not `2026-07-07`.
     await expect(gone.getByText('asleep · 7 Jul', { exact: true })).toBeVisible()
-    await expect(gone.getByText('0 of 9 · 2 failing · 7 unknown')).toBeVisible()
-    await expect(gone.getByRole('button')).toHaveCount(0)
+    // ssh failed too, so one sentence stands in for a tally nobody could ask (Y-714).
+    await expect(gone.getByText(/can’t reach thinkpad over ssh/)).toBeVisible()
+    await expect(gone.getByRole('button', { name: /install|copy|again/i })).toHaveCount(0)
   })
 
   test('starts an install when Install is pressed', async ({ page }) => {
@@ -160,7 +161,7 @@ test.describe('the machines list with devices that open the dashboard', () => {
   test('is asleep, not failed, and offers nothing to press', async ({ page }) => {
     const asleep = card(page, 'asleep-laptop')
     await expect(asleep.getByText(/^asleep · /)).toBeVisible()
-    await expect(asleep.getByRole('button')).toHaveCount(0)
+    await expect(asleep.getByRole('button', { name: /install|copy|again/i })).toHaveCount(0)
   })
 
   test('looks like the board', async ({ page, size }) => {

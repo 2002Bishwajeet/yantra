@@ -60,7 +60,7 @@ describe('one fleet, every count', () => {
     for (const { machine, report: one } of fleet) {
       if (!one) continue
       const view = await renderInApp(
-        createElement(MachineCard, { machine, checks: one.checks, condensed: false, pending: false, sessions: null }),
+        createElement(MachineCard, { machine, checks: one.checks, pending: false, sessions: null }),
       )
       const chip = chipFor(machine, one).word
       const count = counted(tally(one.checks))

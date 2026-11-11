@@ -34,18 +34,20 @@ describe('/machines on the busy fleet', () => {
     const good = card('cachyos-g14')
     // Every basic is present, so the chip reads the verdict, not `online` (D7 §3.3).
     expect(good.getByText('ready')).toBeTruthy()
-    // The check name table (`lib/checks.ts`), never a raw id (D7 §3.5).
+    // Y-714: what passes is counted, never listed, on the desktop as on the phone.
     for (const check of ['ssh', 'tmux', 'claude', 'terminfo']) {
-      expect(good.getByText(check)).toBeTruthy()
+      expect(good.queryByText(check)).toBeNull()
     }
-    expect(good.getAllByText('ok')).toHaveLength(4)
+    expect(good.queryByText('ok')).toBeNull()
     expect(good.getByText('10 of 10')).toBeTruthy()
     // Everything passes, so nothing asks the machine again.
     expect(good.queryByRole('button')).toBeNull()
 
     const short = card('pi-5')
     expect(short.getByText('missing')).toBeTruthy()
-    expect(short.getByText('no `claude` on PATH there')).toBeTruthy()
+    // The check name table (`lib/checks.ts`), never a raw id (D7 §3.5).
+    expect(short.getByText('claude')).toBeTruthy()
+    expect(short.getByText('no claude on PATH there')).toBeTruthy()
     expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeTruthy()
     // `git` is not in pi-5's report at all, so it counts as missing too (D7 §3.3).
     expect(short.getByText('2 missing')).toBeTruthy()
@@ -54,10 +56,11 @@ describe('/machines on the busy fleet', () => {
     const gone = card('thinkpad')
     // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
     expect(gone.getByText('asleep · 7 Jul')).toBeTruthy()
-    expect(gone.getAllByText('unknown').length).toBeGreaterThan(0)
-    expect(gone.getByText('0 of 9 · 2 failing · 7 unknown')).toBeTruthy()
+    // ssh failed too, so the card gives one sentence in place of a tally nobody could ask (Y-714).
+    expect(gone.getByText(/can’t reach thinkpad over ssh/)).toBeTruthy()
+    expect(gone.queryByText(/unknown/)).toBeNull()
     // Asleep offers nothing to press: ssh cannot answer either way.
-    expect(gone.queryAllByRole('button')).toHaveLength(0)
+    expect(gone.queryAllByRole('button', { name: /install|copy|again/i })).toHaveLength(0)
   })
 
   /** Y-404, owner 2026-09-13: listed with the reason, never a card or a count. */
@@ -231,6 +234,15 @@ describe('/machines on the busy fleet', () => {
   })
 })
 
+describe('/machines keeps monospace for commands (Y-714)', () => {
+  it.each(['desktop', 'phone'] as const)('has no .m3-mono outside a command on the %s, age line included', async (size) => {
+    mount(size, '/machines')
+    await screen.findByText(/^looked /)
+    const stray = [...document.querySelectorAll('.m3-mono')].filter((one) => !one.closest('.m3-copyable, .m3-kbd') && !one.matches('.m3-kbd'))
+    expect(stray).toHaveLength(0)
+  })
+})
+
 describe('/machines on the phone', () => {
   it('condenses a card that passes and still names what fails', async () => {
     mount('phone', '/machines')
@@ -285,7 +297,7 @@ describe('/machines with devices that open the dashboard', () => {
 
     const asleep = card('asleep-laptop')
     expect(asleep.getByText(/^asleep · /)).toBeTruthy()
-    expect(asleep.queryAllByRole('button')).toHaveLength(0)
+    expect(asleep.queryAllByRole('button', { name: /install|copy|again/i })).toHaveLength(0)
   })
 
   it('copies the join command where a clipboard exists', async () => {
