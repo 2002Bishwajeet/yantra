@@ -24,14 +24,15 @@ type FileDiffProps = {
   options: {
     enableGutterUtility: boolean
     enableLineSelection: boolean
-    onGutterUtilityClick: (range: { start: number; end: number }) => void
     onLineSelectionEnd: (range: { start: number; end: number; side?: string; endSide?: string } | null) => void
   }
   lineAnnotations: { side: string; lineNumber: number }[]
+  renderGutterUtility: (getHoveredLine: () => { lineNumber: number; side: string } | undefined) => React.ReactNode
   renderAnnotation: (annotation: unknown) => React.ReactNode
   selectedLines: unknown
 }
 
+const hovered = vi.hoisted(() => ({ line: undefined as { lineNumber: number; side: string } | undefined }))
 const tree = vi.hoisted(() => ({ options: undefined as unknown, selected: [] as string[], scrolled: [] as string[] }))
 
 vi.mock('@pierre/trees/react', () => ({
@@ -83,9 +84,7 @@ vi.mock('@pierre/diffs/react', () => ({
       >
         select across in {props.fileDiff.name}
       </button>
-      <button onClick={() => props.options.onGutterUtilityClick({ start: 1, end: 1 })} type="button">
-        plus on {props.fileDiff.name}
-      </button>
+      <div data-testid={`utility-${props.fileDiff.name}`}>{props.renderGutterUtility(() => hovered.line)}</div>
       <button onClick={() => props.options.onLineSelectionEnd(null)} type="button">
         clear selection in {props.fileDiff.name}
       </button>
@@ -162,6 +161,7 @@ function open(data: DiffData = branch, thread: string | null = THREAD) {
 }
 
 beforeEach(() => {
+  hovered.line = { lineNumber: 1, side: 'additions' }
   tree.selected = []
   tree.scrolled = []
   asked.mockReset()
@@ -295,10 +295,18 @@ describe('a line comment', () => {
     expect((compose() as HTMLTextAreaElement).value).toBe('half typed')
   })
 
+  it('does nothing when the gutter button is pressed with no hovered line', () => {
+    listing(200, threads)
+    open()
+    hovered.line = undefined
+    expect(() => fireEvent.click(screen.getByRole('button', { name: 'Comment on this line' }))).not.toThrow()
+    expect(screen.queryByRole('textbox', { name: /^Comment on/ })).toBeNull()
+  })
+
   it('opens from the gutter button, and submits with its button and Ctrl+Enter', async () => {
     listing(200, threads)
     const onComment = open()
-    fireEvent.click(screen.getByRole('button', { name: 'plus on src/new.rs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on this line' }))
     const box = await waitFor(compose)
     const add = screen.getByRole('button', { name: 'Add to message' })
     expect(add.hasAttribute('disabled')).toBe(true)
@@ -312,10 +320,10 @@ describe('a line comment', () => {
   it('cancels with Escape and with Cancel, sending nothing', async () => {
     listing(200, threads)
     const onComment = open()
-    fireEvent.click(screen.getByRole('button', { name: 'plus on src/new.rs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on this line' }))
     fireEvent.keyDown(await waitFor(compose), { key: 'Escape' })
     expect(screen.queryByRole('textbox', { name: /^Comment on/ })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'plus on src/new.rs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on this line' }))
     await waitFor(compose)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('textbox', { name: /^Comment on/ })).toBeNull()
@@ -348,7 +356,7 @@ describe('a line comment', () => {
     expect(box.getAttribute('aria-label')).toBe('Comment on src/new.rs whole file')
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('textbox', { name: /^Comment on/ })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'plus on src/new.rs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Comment on this line' }))
     await waitFor(compose)
     expect(onComment).not.toHaveBeenCalled()
   })

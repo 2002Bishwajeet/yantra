@@ -75,6 +75,7 @@
 
 .add-device__link {
   color: var(--md-sys-color-primary);
+  text-decoration: underline;
   text-underline-offset: 2px;
 }
 

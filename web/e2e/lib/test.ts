@@ -12,9 +12,6 @@ export const test = base.extend<{ size: Size }>({
 
 export { expect } from '@playwright/test'
 
-/** The first run in WebKit found it: an iPhone gets a tailscale.com/download link that axe and the press table refuse. */
-export const IPHONE_ADD_DEVICE = 'Y-684: Add a device on an iPhone draws a link that fails axe link-in-text-block'
-export const WEBKIT_DIFF_BUTTON = "Y-684: in WebKit the diff viewer's utility button has no name, and axe fails button-name"
 export { axe } from './axe'
 export { keyboardWalk } from './keyboard'
 export { firstReading, scenario } from './scenario'
