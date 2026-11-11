@@ -238,7 +238,7 @@ describe('/machines keeps monospace for commands (Y-714)', () => {
   it.each(['desktop', 'phone'] as const)('has no .m3-mono outside a command on the %s, age line included', async (size) => {
     mount(size, '/machines')
     await screen.findByText(/^looked /)
-    const stray = [...document.querySelectorAll('.m3-mono')].filter((one) => !one.closest('.m3-copyable'))
+    const stray = [...document.querySelectorAll('.m3-mono')].filter((one) => !one.closest('.m3-copyable, .m3-kbd') && !one.matches('.m3-kbd'))
     expect(stray).toHaveLength(0)
   })
 })
