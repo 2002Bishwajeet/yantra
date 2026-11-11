@@ -8,7 +8,11 @@
 //! decision 2). The thread's git config keeps either one's session id. Without `?thread=` the first turn opens a
 //! thread and the socket says so with `thread.started`; with it, the socket
 //! says `thread.started` too, replays the conversation and continues there.
-//! **There is no session-addressed form**: a bare session names no worktree.
+//!
+//! **`GET /api/machines/{machine}/chat` is a home thread** ([ADR-0046]
+//! decision 1): Claude in the joined account's `$HOME`, with no workspace,
+//! worktree or checkpoint. The thread store holds it, and its keeper takes
+//! [`keep::HOME`] in the workspace slot. `revert` and `diff` get `badFrame`.
 //!
 //! **A turn outlives its socket** ([ADR-0035]). Each agent runs in a keeper on
 //! its machine ([`yantra_core::keep`]), a tmux session that is also the
@@ -84,6 +88,7 @@
 //! [ADR-0033]: ../../../docs/adr/0033-other-harnesses-speak-acp-and-claude-delegates.md
 //! [ADR-0035]: ../../../docs/adr/0035-a-chat-turn-outlives-its-ssh-pipe.md
 //! [ADR-0041]: ../../../docs/adr/0041-a-claude-keeper-holds-the-thread.md
+//! [ADR-0046]: ../../../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -115,14 +120,14 @@ use yantra_core::keep::{self, Cursor, File, Keeper, Limits};
 use yantra_core::logs::{self, Who};
 use yantra_core::notify::{self, Phase, Relay};
 use yantra_core::room;
-use yantra_core::ssh::{self, Ssh};
+use yantra_core::ssh::{self, Exec as _, Ssh};
 use yantra_core::thread::{self, Place};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::{self, Workspace};
 
 use crate::store::Store;
 use crate::terminal::{MISSES, PING_EVERY};
-use crate::write::{Authoriser, Refused, allowed, chain};
+use crate::write::{Authoriser, Refused, allowed, chain, checked};
 
 /// How many transcript records an attach replays.
 const HISTORY: usize = 200;
@@ -171,6 +176,7 @@ where
 {
     Router::new()
         .route("/workspaces/{name}/chat", get(chat::<I>))
+        .route("/machines/{machine}/chat", get(home_chat::<I>))
         .with_state(Chats {
             authoriser,
             registry,
@@ -191,10 +197,43 @@ async fn chat<I: Inventory + Clone + Send + Sync + 'static>(
     let caller = allowed(&authoriser, &from, &headers).await?;
     let query = read_query(&uri);
     tracing::info!("chat {name} for {}", caller.node);
+    Ok(served(upgrade, name.clone(), query, move || {
+        Fleet::of(&name, registry)
+    }))
+}
 
-    Ok(sized(upgrade).on_upgrade(move |mut socket| async move {
-        match Fleet::of(&name, registry) {
-            Ok(fleet) => converse(Arc::new(fleet), &name, query, &mut socket).await,
+/// `GET /api/machines/{machine}/chat`: a home thread, which has no workspace
+/// (ADR-0046 decision 1.6, ADR-0026 decision 3's session-addressed form).
+async fn home_chat<I: Inventory + Clone + Send + Sync + 'static>(
+    State(Chats {
+        authoriser,
+        registry,
+    }): State<Chats<I>>,
+    ConnectInfo(from): ConnectInfo<crate::write::Peer>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+    uri: Uri,
+    upgrade: WebSocketUpgrade,
+) -> Result<Response, Refused> {
+    let caller = allowed(&authoriser, &from, &headers).await?;
+    checked(&machine)?;
+    let query = read_query(&uri);
+    tracing::info!("chat home on {machine} for {}", caller.node);
+    Ok(served(upgrade, keep::HOME.to_owned(), query, move || {
+        Home::on(&machine, registry)
+    }))
+}
+
+/// Upgrades to a conversation on the machine `machine` makes.
+fn served<M: Machine>(
+    upgrade: WebSocketUpgrade,
+    name: String,
+    query: ChatQuery,
+    machine: impl FnOnce() -> Result<M, String> + Send + 'static,
+) -> Response {
+    sized(upgrade).on_upgrade(move |mut socket| async move {
+        match machine() {
+            Ok(machine) => converse(Arc::new(machine), &name, query, &mut socket).await,
             Err(said) => {
                 tracing::warn!("chat {name}: {said}");
                 let _ = socket.say(&failure(Kind::Unreachable, said)).await;
@@ -208,7 +247,7 @@ async fn chat<I: Inventory + Clone + Send + Sync + 'static>(
         })
         .await;
         tracing::info!("chat {name} ended");
-    }))
+    })
 }
 
 /// tungstenite's own limits are 64 MiB a message and 16 MiB a frame.
@@ -615,6 +654,11 @@ trait Machine: Send + Sync + 'static {
     /// The machine's name, as a login failure names it.
     fn machine(&self) -> &str;
     fn registry(&self) -> &Registry;
+    /// Whether the thread is a git worktree that each turn checkpoints. A home
+    /// thread is not, so it skips every checkpoint (ADR-0046 decision 1.3).
+    fn tracked(&self) -> bool {
+        true
+    }
     /// Makes the thread `id` names, an id [`thread::new_id`] gave.
     fn open(&self, id: &str) -> impl Future<Output = Result<Place, String>> + Send;
     fn find(&self, thread: &str) -> impl Future<Output = Result<Option<Place>, String>> + Send;
@@ -751,6 +795,53 @@ impl Fleet {
             .map_err(|error| chain(&error))
     }
 
+    /// Starts Claude in the thread's keeper. `mcp` adds the room tools.
+    async fn start_claude(
+        &self,
+        place: &Place,
+        first: &claude::Prompt<'_>,
+        resumed: Option<&str>,
+        mcp: Option<&claude::Mcp>,
+    ) -> Result<Started<KeptClaude>, String> {
+        let keeper = keeper_of(place)?;
+        let tmux = self.tmux().await?;
+        let run = keep::run_id().map_err(|error| chain(&error))?;
+        let agent = claude::command(
+            &place.worktree,
+            &keeper,
+            first.mode,
+            first.interaction,
+            first.model,
+            first.effort,
+            first.context,
+            mcp,
+            resumed,
+        );
+        let started = keep::start(&self.ssh, tmux, &keeper, &agent, &run, Limits::default())
+            .await
+            .map_err(|error| chain(&error))?;
+        let keep::Started::Running { pane } = started else {
+            return Ok(Started::Busy);
+        };
+        if let Err(error) = keep::write_mode(&self.ssh, &keeper, &mode_name(first.mode)).await {
+            // The lock goes with the start that failed; `keep::stale` catches a
+            // kill that fails too.
+            let _ = keep::kill(&self.ssh, tmux, &keeper).await;
+            return Err(chain(&error));
+        }
+        let reader = keep::follow(self.ssh.clone(), tmux.clone(), keeper.clone(), pane, 0);
+        let writer = keep::feed(self.ssh.clone(), tmux.clone(), keeper.clone(), &run, 0);
+        let said = self.said(&keeper);
+        let (session, events) =
+            Session::kept(reader, writer, thread::name(place), &run, first, said);
+        Ok(Started::Running(KeptClaude {
+            session,
+            events,
+            run,
+            resumed: resumed.map(str::to_owned),
+        }))
+    }
+
     /// What the keeper's `err` says, read once its `out` has ended.
     fn said(&self, keeper: &Keeper) -> Said {
         let (ssh, keeper) = (self.ssh.clone(), keeper.clone());
@@ -828,47 +919,11 @@ impl Machine for Fleet {
         first: &claude::Prompt<'_>,
         resumed: Option<&str>,
     ) -> Result<Started<KeptClaude>, String> {
-        let keeper = keeper_of(place)?;
-        let tmux = self.tmux().await?;
-        let run = keep::run_id().map_err(|error| chain(&error))?;
         let mcp = self.registry.daemon.map(|daemon| claude::Mcp {
             url: format!("http://{daemon}/api/mcp"),
             thread: format!("{}/{}", self.workspace.name, thread::name(place)),
         });
-        let agent = claude::command(
-            &place.worktree,
-            &keeper,
-            first.mode,
-            first.interaction,
-            first.model,
-            first.effort,
-            first.context,
-            mcp.as_ref(),
-            resumed,
-        );
-        let started = keep::start(&self.ssh, tmux, &keeper, &agent, &run, Limits::default())
-            .await
-            .map_err(|error| chain(&error))?;
-        let keep::Started::Running { pane } = started else {
-            return Ok(Started::Busy);
-        };
-        if let Err(error) = keep::write_mode(&self.ssh, &keeper, &mode_name(first.mode)).await {
-            // The lock goes with the start that failed; `keep::stale` catches a
-            // kill that fails too.
-            let _ = keep::kill(&self.ssh, tmux, &keeper).await;
-            return Err(chain(&error));
-        }
-        let reader = keep::follow(self.ssh.clone(), tmux.clone(), keeper.clone(), pane, 0);
-        let writer = keep::feed(self.ssh.clone(), tmux.clone(), keeper.clone(), &run, 0);
-        let said = self.said(&keeper);
-        let (session, events) =
-            Session::kept(reader, writer, thread::name(place), &run, first, said);
-        Ok(Started::Running(KeptClaude {
-            session,
-            events,
-            run,
-            resumed: resumed.map(str::to_owned),
-        }))
+        self.start_claude(place, first, resumed, mcp.as_ref()).await
     }
 
     async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error> {
@@ -1154,6 +1209,228 @@ impl Machine for Fleet {
     }
 }
 
+/// A home thread's machine (ADR-0046 decision 1): Claude in the joined
+/// account's `$HOME`, with no workspace, worktree or checkpoint. The store
+/// holds the thread, and the keeper is a fleet's under [`keep::HOME`].
+struct Home {
+    fleet: Fleet,
+    home: OnceCell<String>,
+}
+
+const CLAUDE_ONLY: &str = "a home chat runs Claude only";
+const NO_STORE: &str = "a home chat needs the thread store";
+const NO_TREE: &str = "a home chat has no worktree to checkpoint";
+
+impl Home {
+    fn on(machine: &str, registry: Registry) -> Result<Self, String> {
+        let workspace = Workspace {
+            name: keep::HOME.to_owned(),
+            machine: machine.to_owned(),
+            repo: std::path::PathBuf::new(),
+            startup: None,
+        };
+        Ok(Self {
+            fleet: Fleet::on(workspace, registry)?,
+            home: OnceCell::new(),
+        })
+    }
+
+    fn store(&self) -> Result<&Store, String> {
+        self.fleet
+            .registry
+            .store
+            .as_ref()
+            .ok_or_else(|| NO_STORE.to_owned())
+    }
+
+    /// The far shell expands `$HOME`; the daemon never guesses it.
+    async fn home(&self) -> Result<&str, String> {
+        let home = self
+            .home
+            .get_or_try_init(|| async {
+                let out = self
+                    .fleet
+                    .ssh
+                    .exec("printf '%s' \"$HOME\"")
+                    .await
+                    .map_err(|error| chain(&error))?;
+                let home = String::from_utf8_lossy(&out.stdout).into_owned();
+                if !out.success() || !home.starts_with('/') {
+                    return Err(format!("{} named no home directory", self.machine()));
+                }
+                Ok(home)
+            })
+            .await?;
+        Ok(home)
+    }
+
+    async fn place(&self, id: &str) -> Result<Place, String> {
+        Ok(Place {
+            id: format!("chat/{}/{id}", keep::HOME),
+            repo: String::new(),
+            worktree: self.home().await?.to_owned(),
+            branch: String::new(),
+            base: String::new(),
+        })
+    }
+}
+
+impl Machine for Home {
+    fn machine(&self) -> &str {
+        self.fleet.machine()
+    }
+
+    fn registry(&self) -> &Registry {
+        &self.fleet.registry
+    }
+
+    fn tracked(&self) -> bool {
+        false
+    }
+
+    async fn open(&self, id: &str) -> Result<Place, String> {
+        self.store()?;
+        self.place(id).await
+    }
+
+    async fn find(&self, id: &str) -> Result<Option<Place>, String> {
+        let row = self
+            .store()?
+            .get("", id)
+            .await
+            .map_err(|error| chain(&error))?;
+        match row.filter(|row| row.machine == self.machine()) {
+            Some(_) => self.place(id).await.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// The keeper and its journals go, and no file in `$HOME` does.
+    async fn remove(&self, place: &Place) -> Result<(), String> {
+        let tmux = self.fleet.tmux().await?;
+        keep::forget(&self.fleet.ssh, tmux, &keeper_of(place)?)
+            .await
+            .map_err(|error| chain(&error))
+    }
+
+    /// Only the stored session's transcript: every home thread shares the
+    /// directory (ADR-0046 decision 1.8).
+    async fn history(&self, place: &Place) -> Result<Vec<logs::Entry>, String> {
+        let Some((_, session)) = stored(self, place).await else {
+            return Ok(Vec::new());
+        };
+        match logs::read(&self.fleet.ssh, &place.worktree, Some(&session), HISTORY, 0).await {
+            Ok(transcript) => Ok(transcript.entries),
+            Err(logs::Error::NoTurnYet { .. }) => Ok(Vec::new()),
+            Err(error) => Err(chain(&error)),
+        }
+    }
+
+    /// No room tools: a room addresses a workspace's threads.
+    async fn start(
+        &self,
+        place: &Place,
+        first: &claude::Prompt<'_>,
+        resumed: Option<&str>,
+    ) -> Result<Started<KeptClaude>, String> {
+        self.fleet.start_claude(place, first, resumed, None).await
+    }
+
+    async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error> {
+        self.fleet.put(images, bytes).await
+    }
+
+    async fn clear(&self, images: &Images) -> Result<(), String> {
+        self.fleet.clear(images).await
+    }
+
+    async fn recall(&self, _: &Place) -> Result<Option<(Harness, String)>, String> {
+        Ok(None)
+    }
+
+    async fn remember(&self, _: &Place, _: Harness, _: &str) -> Result<(), String> {
+        Err(CLAUDE_ONLY.to_owned())
+    }
+
+    async fn claude_session(&self, place: &Place) -> Result<Option<String>, String> {
+        Ok(stored(self, place).await.map(|(_, session)| session))
+    }
+
+    /// The store keeps it, and there is no git config.
+    async fn remember_claude(&self, _: &Place, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn remember_title(&self, _: &Place, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn start_acp(
+        &self,
+        _: &Place,
+        _: Harness,
+        _: Option<ContextLength>,
+    ) -> Result<Started<KeptAgent>, String> {
+        Err(CLAUDE_ONLY.to_owned())
+    }
+
+    async fn adopt(
+        &self,
+        place: &Place,
+        harness: Option<Harness>,
+    ) -> Result<Option<Adopted>, String> {
+        self.fleet.adopt(place, harness).await
+    }
+
+    async fn journals(&self, place: &Place, upto: Option<u64>) -> Result<Journals, String> {
+        self.fleet.journals(place, upto).await
+    }
+
+    async fn write_mode(&self, place: &Place, mode: PermissionMode) -> Result<(), String> {
+        self.fleet.write_mode(place, mode).await
+    }
+
+    async fn close_stdin(&self, place: &Place, run: &str) -> Result<(), String> {
+        self.fleet.close_stdin(place, run).await
+    }
+
+    async fn out_size(&self, place: &Place) -> Result<u64, String> {
+        self.fleet.out_size(place).await
+    }
+
+    async fn finish(&self, place: &Place, within: Duration) -> Result<Option<String>, String> {
+        self.fleet.finish(place, within).await
+    }
+
+    async fn base(&self, _: &Place) -> Result<Option<u32>, String> {
+        Err(NO_TREE.to_owned())
+    }
+
+    async fn capture(&self, _: &Place) -> Result<u32, String> {
+        Err(NO_TREE.to_owned())
+    }
+
+    async fn diff(&self, _: &Place, _: u32) -> Result<Diff, String> {
+        Err(NO_TREE.to_owned())
+    }
+
+    async fn latest(&self, _: &Place) -> Result<Option<u32>, String> {
+        Err(NO_TREE.to_owned())
+    }
+
+    async fn revert(&self, _: &Place, _: u32) -> Result<(), String> {
+        Err(NO_TREE.to_owned())
+    }
+
+    async fn branch_diff(&self, _: &Place) -> Result<BranchDiff, String> {
+        Err(NO_TREE.to_owned())
+    }
+
+    async fn kill_orphan(&self, thread: &str) -> Result<bool, String> {
+        self.fleet.kill_orphan(thread).await
+    }
+}
+
 /// A wait or a turn's end that nobody is attached to see (ADR-0035 decision
 /// 10, ADR-0041 decision 3). It names the workspace and the thread, and no word
 /// of the request or the reply (Q5).
@@ -1323,15 +1600,14 @@ impl Registry {
             .values()
             .filter_map(|live| {
                 let short = live.id.strip_prefix(&prefix)?;
-                let state = live.lock();
-                let doing = if state.busy {
-                    Doing::Working(state.since)
-                } else {
-                    Doing::Idle
-                };
-                Some((short.to_owned(), doing))
+                Some((short.to_owned(), live.doing()))
             })
             .collect()
+    }
+
+    /// What thread `thread` of `workspace` is doing, when this daemon holds it.
+    pub fn doing_in(&self, workspace: &str, thread: &str) -> Option<Doing> {
+        Some(self.live(&format!("chat/{workspace}/{thread}"))?.doing())
     }
 
     /// Whether thread `thread` of `workspace` runs a turn, and its tool. `None`
@@ -1785,6 +2061,15 @@ impl Live {
 
     fn busy(&self) -> bool {
         self.lock().busy
+    }
+
+    fn doing(&self) -> Doing {
+        let state = self.lock();
+        if state.busy {
+            Doing::Working(state.since)
+        } else {
+            Doing::Idle
+        }
     }
 
     fn set_busy(&self, busy: bool) {
@@ -2288,6 +2573,10 @@ async fn heard_frame<M: Machine, P: Peer>(
                 let said = "no thread is open, so there is nothing to revert";
                 peer.say(&failure(Kind::BadFrame, said)).await
             }
+            Some(_) if !machine.tracked() => {
+                let said = "a home chat has no worktree, so there is nothing to revert";
+                peer.say(&failure(Kind::BadFrame, said)).await
+            }
             Some(here) => {
                 let place = here.place.clone();
                 if let Err(refusal) = machine.registry().begin_revert(&place.id) {
@@ -2303,6 +2592,10 @@ async fn heard_frame<M: Machine, P: Peer>(
         Ok(Frame::Diff) => match here.as_ref() {
             None => {
                 let said = "no thread is open, so there is nothing to diff";
+                peer.say(&failure(Kind::BadFrame, said)).await
+            }
+            Some(_) if !machine.tracked() => {
+                let said = "a home chat has no worktree, so there is nothing to diff";
                 peer.say(&failure(Kind::BadFrame, said)).await
             }
             // A revert half done is no tree to diff.
@@ -2390,7 +2683,10 @@ async fn checkpointed<M: Machine>(
     {
         let mut state = live.lock();
         state.set_busy(false);
-        state.checkpointing = true;
+        state.checkpointing = machine.tracked();
+    }
+    if !machine.tracked() {
+        return;
     }
     let kept = match within(machine.capture(place)).await {
         Ok(turn) => within(machine.diff(place, turn))
@@ -2428,6 +2724,9 @@ fn diffed(place: &Place, turn: u32, unified_diff: String, truncated: bool) -> Th
 
 /// The last turn's diff, for a tab back after its keeper has gone.
 async fn last_diff<M: Machine>(machine: &M, place: &Place) -> Option<ThreadEvent> {
+    if !machine.tracked() {
+        return None;
+    }
     let turn = within(machine.latest(place)).await.ok()??;
     let Diff { unified, truncated } = within(machine.diff(place, turn)).await.ok()?;
     Some(diffed(place, turn, unified, truncated))
@@ -2876,27 +3175,7 @@ async fn begin<M: Machine, P: Peer>(
                 if !peer.say(&opened.started(None)).await {
                     return false;
                 }
-                // The thread lists by this title; a failed write leaves it untitled.
-                let title = thread::title(&next.text);
-                if let Some((store, keeper)) = stored_as(machine.as_ref(), &opened.place)
-                    && let Err(error) = store
-                        .put_title(
-                            keeper.workspace(),
-                            keeper.thread(),
-                            machine.machine(),
-                            &opened.place,
-                            &title,
-                        )
-                        .await
-                {
-                    tracing::warn!("chat {name}: the store has no title: {}", chain(&error));
-                }
-                if let Err(said) = machine.remember_title(&opened.place, &title).await {
-                    tracing::warn!(
-                        "chat {name}: thread {} has no title: {said}",
-                        opened.place.id
-                    );
-                }
+                titled(machine.as_ref(), name, &opened.place, &next.text).await;
                 if subscribed.is_some() {
                     *sub = subscribed;
                 }
@@ -2909,12 +3188,14 @@ async fn begin<M: Machine, P: Peer>(
         return peer.say(&elsewhere()).await;
     }
     // A turn with no checkpoint before it could not be reverted.
-    match within(machine.base(&here.place)).await {
-        Ok(Some(turn)) => tracing::info!("chat {name}: checkpoint {turn} kept"),
-        Ok(None) => {}
-        Err(said) => {
-            tracing::warn!("chat {name}: no checkpoint: {said}");
-            return peer.say(&failure(Kind::Checkpoint, said)).await;
+    if machine.tracked() {
+        match within(machine.base(&here.place)).await {
+            Ok(Some(turn)) => tracing::info!("chat {name}: checkpoint {turn} kept"),
+            Ok(None) => {}
+            Err(said) => {
+                tracing::warn!("chat {name}: no checkpoint: {said}");
+                return peer.say(&failure(Kind::Checkpoint, said)).await;
+            }
         }
     }
     if here.harness.is_none() {
@@ -2945,6 +3226,28 @@ async fn begin<M: Machine, P: Peer>(
         }
         Ok(None) => true,
         Err(refusal) => peer.say(&refusal).await,
+    }
+}
+
+/// Keeps the title the thread lists by, from its first prompt. A failed write
+/// leaves it untitled.
+async fn titled<M: Machine>(machine: &M, name: &str, place: &Place, prompt: &str) {
+    let title = thread::title(prompt);
+    if let Some((store, key)) = stored_as(machine, place)
+        && let Err(error) = store
+            .put_title(
+                &key.workspace,
+                &key.thread,
+                machine.machine(),
+                &key.place,
+                &title,
+            )
+            .await
+    {
+        tracing::warn!("chat {name}: the store has no title: {}", chain(&error));
+    }
+    if let Err(said) = machine.remember_title(place, &title).await {
+        tracing::warn!("chat {name}: thread {} has no title: {said}", place.id);
     }
 }
 
@@ -2999,8 +3302,8 @@ async fn open<M: Machine>(
             if let Err(said) = machine.remove(&place).await {
                 tracing::warn!("chat {name}: thread {id} stays: {said}");
             }
-            if let Some((store, keeper)) = stored_as(machine.as_ref(), &place)
-                && let Err(error) = store.remove(keeper.workspace(), keeper.thread()).await
+            if let Some((store, key)) = stored_as(machine.as_ref(), &place)
+                && let Err(error) = store.remove(&key.workspace, &key.thread).await
             {
                 tracing::warn!(
                     "chat {name}: the store keeps thread {id}: {}",
@@ -3651,9 +3954,36 @@ async fn remember<M: Machine>(machine: &M, name: &str, place: &Place, claude: &m
     }
 }
 
-/// The store and the thread's key in it, for a registry that has one.
-fn stored_as<'a, M: Machine>(machine: &'a M, place: &Place) -> Option<(&'a Store, Keeper)> {
-    Some((machine.registry().store.as_ref()?, Keeper::of(place)?))
+/// A thread as its store row keys it.
+struct Key {
+    workspace: String,
+    thread: String,
+    /// The branch and worktree the row keeps.
+    place: Place,
+}
+
+/// The store and the thread's key in it, for a registry that has one. A home
+/// thread's row has no workspace, branch or worktree (ADR-0046 decision 1.4).
+fn stored_as<'a, M: Machine>(machine: &'a M, place: &Place) -> Option<(&'a Store, Key)> {
+    let store = machine.registry().store.as_ref()?;
+    let keeper = Keeper::of(place)?;
+    let mut place = place.clone();
+    let workspace = if keeper.workspace() == keep::HOME {
+        place.branch.clear();
+        place.worktree.clear();
+        String::new()
+    } else {
+        keeper.workspace().to_owned()
+    };
+    let thread = keeper.thread().to_owned();
+    Some((
+        store,
+        Key {
+            workspace,
+            thread,
+            place,
+        },
+    ))
 }
 
 /// Writes a session to the store before git config (ADR-0045 decision 3).
@@ -3664,15 +3994,15 @@ async fn store_session<M: Machine>(
     harness: &str,
     session: &str,
 ) -> bool {
-    let Some((store, keeper)) = stored_as(machine, place) else {
+    let Some((store, key)) = stored_as(machine, place) else {
         return false;
     };
     let put = store
         .put_session(
-            keeper.workspace(),
-            keeper.thread(),
+            &key.workspace,
+            &key.thread,
             machine.machine(),
-            place,
+            &key.place,
             harness,
             session,
         )
@@ -3690,9 +4020,9 @@ async fn store_session<M: Machine>(
 /// The harness and session the store keeps for the thread. A store that
 /// cannot be read is logged, and git config answers.
 async fn stored<M: Machine>(machine: &M, place: &Place) -> Option<(String, String)> {
-    let (store, keeper) = stored_as(machine, place)?;
+    let (store, key) = stored_as(machine, place)?;
     store
-        .session(keeper.workspace(), keeper.thread())
+        .session(&key.workspace, &key.thread)
         .await
         .inspect_err(|error| {
             tracing::warn!(
@@ -4248,7 +4578,7 @@ fn wake_on<M: Machine>(
             }
         }
         let reverting = || machine.registry().lock().reverting.contains(&place.id);
-        let mut checkpointed = false;
+        let mut checkpointed = !machine.tracked();
         let deadline = tokio::time::Instant::now() + CONNECT_WITHIN;
         loop {
             if let Some(heard) = machine.registry().queue(&place.id, &prompt) {
@@ -4306,21 +4636,62 @@ fn wake_on<M: Machine>(
     })
 }
 
-/// Reads back the keeper of the thread `thread` in workspace `workspace`,
-/// which no task of this daemon holds (ADR-0035 decision 9). The refresh pass
-/// calls it for each keeper session it finds.
-pub async fn adopt(registry: &Registry, workspace: &str, thread: &str) {
+/// Starts a home thread on `machine` with `prompt`, for `yantra chat new
+/// --home` (ADR-0046 decision 1.1), and answers its id. The turn runs with no
+/// socket, as a room's wake does.
+pub async fn start_home(
+    registry: Registry,
+    machine: &str,
+    prompt: String,
+) -> Result<String, String> {
+    let home = Arc::new(Home::on(machine, registry)?);
+    let id = thread::new_id().map_err(|error| chain(&error))?;
+    let place = home.open(&id).await?;
+    tracing::info!("chat home on {machine} opened thread {id}");
+    titled(home.as_ref(), keep::HOME, &place, &prompt).await;
+    let turn = Next {
+        text: prompt,
+        mode: PermissionMode::Supervised,
+        interaction: Interaction::Build,
+        model: None,
+        effort: None,
+        context: None,
+        room: false,
+    };
+    match claude_turn(&home, keep::HOME, &place, turn, false).await {
+        Ok(Turned::Started(_)) => Ok(id),
+        Ok(Turned::Lost) => Err(busy().said),
+        Err(refusal) => Err(refusal.said),
+    }
+}
+
+/// Removes home thread `id` on `machine`: its keeper, its journals and its
+/// row, and no file in `$HOME` (ADR-0046 decision 1.7). `false` is a thread
+/// the machine does not have.
+pub async fn remove_home(registry: Registry, machine: &str, id: &str) -> Result<bool, String> {
+    forget(&Home::on(machine, registry)?, id).await
+}
+
+async fn forget<M: Machine>(machine: &M, id: &str) -> Result<bool, String> {
+    let Some(place) = machine.find(id).await? else {
+        return Ok(false);
+    };
+    machine.remove(&place).await?;
+    let (store, key) = stored_as(machine, &place).ok_or(NO_STORE)?;
+    store
+        .remove(&key.workspace, &key.thread)
+        .await
+        .map_err(|error| chain(&error))
+}
+
+/// Reads back the keeper of the thread `thread` in workspace `workspace` on
+/// `machine`, which no task of this daemon holds (ADR-0035 decision 9). The
+/// refresh pass calls it for each keeper session it finds.
+pub async fn adopt(registry: &Registry, machine: &str, workspace: &str, thread: &str) {
     if registry.holds(&Keeper::new(workspace, thread).session()) {
         return;
     }
-    let adopted = match workspace::load(workspace) {
-        Ok(loaded) => match Fleet::on(loaded, registry.clone()) {
-            Ok(fleet) => adopt_in(&Arc::new(fleet), workspace, thread).await,
-            Err(said) => Err(said),
-        },
-        Err(error @ workspace::Error::NotFound { .. }) => Ok(Some(chain(&error))),
-        Err(error) => Err(chain(&error)),
-    };
+    let adopted = adopted(registry, machine, workspace, thread).await;
     let session = Keeper::new(workspace, thread).session();
     match adopted {
         Ok(None) => {
@@ -4333,6 +4704,31 @@ pub async fn adopt(registry: &Registry, workspace: &str, thread: &str) {
             }
         }
         Err(said) => tracing::warn!("chat {workspace}: keeper {thread} was not adopted: {said}"),
+    }
+}
+
+/// [`adopt`] on a home thread's machine or on its workspace's.
+async fn adopted(
+    registry: &Registry,
+    machine: &str,
+    workspace: &str,
+    thread: &str,
+) -> Result<Option<String>, String> {
+    if workspace == keep::HOME {
+        let home = Home::on(machine, registry.clone())?;
+        return adopt_in(&Arc::new(home), workspace, thread).await;
+    }
+    match workspace::load(workspace) {
+        Ok(loaded) => {
+            adopt_in(
+                &Arc::new(Fleet::on(loaded, registry.clone())?),
+                workspace,
+                thread,
+            )
+            .await
+        }
+        Err(error @ workspace::Error::NotFound { .. }) => Ok(Some(chain(&error))),
+        Err(error) => Err(chain(&error)),
     }
 }
 
@@ -4832,6 +5228,16 @@ mod tests {
         }
     }
 
+    fn home_place() -> Place {
+        Place {
+            id: format!("chat/{}/{THREAD}", keep::HOME),
+            repo: String::new(),
+            worktree: "/home/u".to_owned(),
+            branch: String::new(),
+            base: String::new(),
+        }
+    }
+
     fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         mutex.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -5028,6 +5434,8 @@ mod tests {
     /// A machine with one thread, whose keepers are pipes the test holds.
     #[derive(Default)]
     struct Script {
+        /// Its thread is a home thread, which keeps no checkpoint.
+        home: bool,
         threads: Vec<Place>,
         history: Vec<logs::Entry>,
         unreachable: bool,
@@ -5173,12 +5581,16 @@ mod tests {
             &self.registry
         }
 
+        fn tracked(&self) -> bool {
+            !self.home
+        }
+
         async fn open(&self, _: &str) -> Result<Place, String> {
             if self.unreachable {
                 return Err("ssh: connect to host m port 22: Connection refused".to_owned());
             }
             *lock(&self.opened) += 1;
-            Ok(place())
+            Ok(if self.home { home_place() } else { place() })
         }
 
         async fn find(&self, id: &str) -> Result<Option<Place>, String> {
@@ -5628,7 +6040,8 @@ mod tests {
                 pings: counted,
                 pong,
             };
-            converse(script, "web", query, &mut browser).await;
+            let name = if script.home { keep::HOME } else { "web" };
+            converse(script, name, query, &mut browser).await;
         });
         (
             Tab {
@@ -6728,6 +7141,10 @@ mod tests {
     /// The upgrade's status line, from a real listener: the refusal turns on
     /// the peer address the kernel reports.
     async fn handshake(caller: Option<Caller>) -> String {
+        handshake_to(caller, "/api/workspaces/web/chat").await
+    }
+
+    async fn handshake_to(caller: Option<Caller>, path: &str) -> String {
         let fake = Fake {
             machines: Vec::new(),
             addresses: Vec::new(),
@@ -6756,12 +7173,15 @@ mod tests {
         let mut stream = TcpStream::connect(address).await.expect("the daemon is up");
         stream
             .write_all(
-                b"GET /api/workspaces/web/chat HTTP/1.1\r\n\
-                  Host: yantra\r\n\
-                  Connection: Upgrade\r\n\
-                  Upgrade: websocket\r\n\
-                  Sec-WebSocket-Version: 13\r\n\
-                  Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+                format!(
+                    "GET {path} HTTP/1.1\r\n\
+                     Host: yantra\r\n\
+                     Connection: Upgrade\r\n\
+                     Upgrade: websocket\r\n\
+                     Sec-WebSocket-Version: 13\r\n\
+                     Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+                )
+                .as_bytes(),
             )
             .await
             .expect("the request is written");
@@ -6784,6 +7204,22 @@ mod tests {
             assert!(status.starts_with("HTTP/1.1 403"), "{status}");
         }
         let owner = handshake(Some(caller(ME, &[]))).await;
+        assert!(owner.starts_with("HTTP/1.1 101"), "{owner}");
+    }
+
+    /// ADR-0046 decision 1.6: the home socket authorises first, and a machine
+    /// name that is no ssh destination is a 400 before the upgrade (I-63).
+    #[tokio::test]
+    async fn the_home_route_refuses_a_stranger_and_a_bad_machine_name_before_the_upgrade() {
+        let stranger = handshake_to(
+            Some(caller(ME + 1, &[])),
+            "/api/machines/-oProxyCommand=x/chat",
+        )
+        .await;
+        assert!(stranger.starts_with("HTTP/1.1 403"), "{stranger}");
+        let bad = handshake_to(Some(caller(ME, &[])), "/api/machines/-oProxyCommand=x/chat").await;
+        assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+        let owner = handshake_to(Some(caller(ME, &[])), "/api/machines/box/chat").await;
         assert!(owner.starts_with("HTTP/1.1 101"), "{owner}");
     }
 
@@ -7052,6 +7488,131 @@ mod tests {
                 {"turn": 1, "unifiedDiff": "diff for turn 1\n", "truncated": false}})
         );
         assert_eq!(*script.checkpoints.lock().expect("a lock"), 2, "0 and 1");
+    }
+
+    /// A home thread on a script whose every checkpoint call would fail.
+    fn home(store: Option<Store>) -> Arc<Script> {
+        let registry = Registry::default();
+        Arc::new(Script {
+            home: true,
+            threads: vec![home_place()],
+            base_fails: true,
+            capture_fails: true,
+            revert_fails: true,
+            branch_fails: true,
+            registry: match store {
+                Some(store) => registry.storing(store),
+                None => registry,
+            },
+            ..Script::default()
+        })
+    }
+
+    /// ADR-0046 decision 1.3: a home turn keeps no checkpoint, sends no diff
+    /// and no checkpoint failure, and refuses a revert and a diff.
+    #[tokio::test]
+    async fn a_home_turn_skips_the_checkpoint_and_refuses_revert_and_diff() {
+        let script = home(None);
+        let (mut tab, _claude) = a_claude_turn_that_ends(&script).await;
+        assert!(tab.quiet().await, "no diff and no checkpoint failure");
+        assert_eq!(*lock(&script.checkpoints), 0, "no base and no capture");
+
+        for frame in [
+            json!({"type": "revert", "turn": 1}),
+            json!({"type": "diff"}),
+        ] {
+            let said = tab.next_after(frame).await;
+            assert_eq!(said["kind"], "badFrame", "{said}");
+            assert!(
+                said["said"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("home chat")
+            );
+        }
+        assert!(lock(&script.reverted).is_empty());
+    }
+
+    /// ADR-0046 decision 1.4: a home thread resumes the session its row keeps.
+    #[tokio::test]
+    async fn a_home_thread_resumes_the_stored_session() {
+        let (store, _) = crate::store::tests::scratch();
+        store
+            .put_session(
+                "",
+                THREAD,
+                "m",
+                &Place {
+                    worktree: String::new(),
+                    ..home_place()
+                },
+                "claude",
+                "A",
+            )
+            .await
+            .expect("a row");
+        let script = home(Some(store.clone()));
+
+        let (_tab, _claude) = a_claude_turn_in(&script, None).await;
+
+        let command = lock(&script.commands)[0].clone();
+        assert!(command.starts_with("cd '/home/u' "), "{command}");
+        assert!(command.contains("--resume 'A'"), "{command}");
+    }
+
+    /// Decisions 1.4 and 1.8: every home thread shares one transcript
+    /// directory, so a new one never resumes the newest transcript there, and
+    /// its row has no workspace, branch or worktree.
+    #[tokio::test]
+    async fn a_new_home_thread_with_no_session_starts_fresh() {
+        let (store, _) = crate::store::tests::scratch();
+        let script = home(Some(store.clone()));
+
+        let (_tab, _claude) = a_claude_turn_in(&script, None).await;
+
+        let command = lock(&script.commands)[0].clone();
+        assert!(!command.contains("--resume"), "{command}");
+        assert!(!command.contains("ls -t"), "{command}");
+        let row = store
+            .get("", THREAD)
+            .await
+            .expect("a read")
+            .expect("the row");
+        assert_eq!(
+            (
+                row.branch.as_str(),
+                row.worktree.as_str(),
+                row.title.as_deref()
+            ),
+            ("", "", Some("fix it")),
+            "a home row has no branch or worktree"
+        );
+    }
+
+    /// Decision 1.7: removing a home thread forgets its row.
+    #[tokio::test]
+    async fn removing_a_home_thread_forgets_its_row() {
+        let (store, _) = crate::store::tests::scratch();
+        store
+            .put_title(
+                "",
+                THREAD,
+                "m",
+                &Place {
+                    worktree: String::new(),
+                    ..home_place()
+                },
+                "hi",
+            )
+            .await
+            .expect("a row");
+        let script = home(Some(store.clone()));
+
+        assert_eq!(forget(script.as_ref(), THREAD).await, Ok(true));
+
+        assert_eq!(*lock(&script.removed), 1, "the keeper and its journals");
+        assert_eq!(store.get("", THREAD).await.expect("a read"), None);
+        assert_eq!(forget(script.as_ref(), "0000").await, Ok(false));
     }
 
     #[tokio::test]
@@ -9452,9 +10013,17 @@ mod tests {
         let registry = Registry::default();
         let gone = "y542-no-such-workspace";
         let session = Keeper::new(gone, THREAD).session();
-        adopt(&registry, gone, THREAD).await;
+        adopt(&registry, "m", gone, THREAD).await;
         assert!(registry.lock().gone.contains(&session), "warned once");
         assert!(!registry.holds(&session), "the next pass looks again");
+    }
+
+    /// ADR-0046 decision 1.5: a `yantra-home` keeper is a home thread's, so no
+    /// workspace is loaded for it.
+    #[tokio::test]
+    async fn adopt_takes_a_home_keeper_for_a_home_thread() {
+        let said = adopted(&Registry::default(), "m", keep::HOME, THREAD).await;
+        assert_eq!(said, Err("a home chat needs the thread store".to_owned()));
     }
 
     /// Y-542: a keeper whose thread is gone is killed once its agent ended,

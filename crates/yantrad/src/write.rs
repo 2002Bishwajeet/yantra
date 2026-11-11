@@ -299,6 +299,13 @@ where
             post(threads::<I>).get(thread_states::<I>),
         )
         .route("/workspaces/{name}/threads/new", post(thread_new::<I>))
+        // A machine's threads, home threads among them (ADR-0046 decision 1.7).
+        .route("/machines/{machine}/threads", get(machine_threads::<I>))
+        .route("/machines/{machine}/threads/new", post(home_new::<I>))
+        .route(
+            "/machines/{machine}/threads/{thread}",
+            axum::routing::delete(home_removing::<I>),
+        )
         // Opening a PR reads refs and writes GitHub, so a running turn does not refuse it.
         .route(
             "/workspaces/{name}/threads/{thread}/pr",
@@ -2128,6 +2135,109 @@ async fn thread_new<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(Json(ThreadOpened::of(opened)))
 }
 
+/// The machine name reaches `ssh`'s argv, so it is checked first (I-63).
+pub(crate) fn checked(machine: &str) -> Result<(), Refused> {
+    install::check_machine(machine).map_err(|error| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said: error.to_string(),
+    })
+}
+
+fn no_store() -> Refused {
+    Refused::Verb {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        said: "this daemon has no thread store".to_owned(),
+    }
+}
+
+/// Every thread the store keeps for `machine`, the newest first (ADR-0046
+/// decision 1.7). A workspace thread shows as the store last saw it; a home
+/// thread is here while its row is.
+///
+/// **A `GET`**: it reads the store and memory and asks no machine ([ADR-0019]).
+///
+/// [ADR-0019]: ../../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md
+async fn machine_threads<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+) -> Result<Json<Vec<MachineThread>>, Refused> {
+    allowed(&state.authoriser, &from, &headers).await?;
+    checked(&machine)?;
+    let store = state.fleet.store.as_ref().ok_or_else(no_store)?;
+    let rows = store
+        .list_machine(&machine)
+        .await
+        .map_err(|error| Refused::Verb {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            said: chain(&error),
+        })?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|row| MachineThread::of(row, &state.fleet.chats))
+            .collect(),
+    ))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HomeAsked {
+    prompt: String,
+}
+
+/// `yantra chat new --home <machine>` on the wire (ADR-0046 decision 1.1):
+/// a home thread whose first turn runs with `prompt`. The prompt is never
+/// logged (Q5).
+async fn home_new<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+    Json(HomeAsked { prompt }): Json<HomeAsked>,
+) -> Result<Json<HomeOpened>, Refused> {
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    checked(&machine)?;
+    if prompt.trim().is_empty() {
+        return Err(Refused::Verb {
+            status: StatusCode::BAD_REQUEST,
+            said: "a home chat needs a prompt".to_owned(),
+        });
+    }
+    tracing::info!("thread new home on {machine} for {}", caller.node);
+    let thread = crate::chat::start_home(state.fleet.chats.clone(), &machine, prompt)
+        .await
+        .map_err(|said| Refused::Verb {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            said,
+        })?;
+    Ok(Json(HomeOpened { thread, machine }))
+}
+
+/// Removes a home thread's keeper, journals and row (ADR-0046 decision 1.7).
+async fn home_removing<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Path((machine, id)): Path<(String, String)>,
+) -> Result<StatusCode, Refused> {
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    checked(&machine)?;
+    idle(&state.fleet.chats, yantra_core::keep::HOME, &id)?;
+    tracing::info!("thread remove home {id} on {machine} for {}", caller.node);
+    match crate::chat::remove_home(state.fleet.chats.clone(), &machine, &id).await {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(Refused::Verb {
+            status: StatusCode::NOT_FOUND,
+            said: format!("{machine} has no home thread {id}"),
+        }),
+        Err(said) => Err(Refused::Verb {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            said,
+        }),
+    }
+}
+
 /// `yantra chat terminal <workspace> <thread>` on the wire (Y-498): opens or
 /// attaches the thread's tmux session in its worktree, and answers the
 /// session socket's address. A running turn does not refuse it: the owner's
@@ -2828,6 +2938,37 @@ impl Thread {
             seen: row.seen.and_then(|at| u64::try_from(at).ok()),
         }
     }
+}
+
+/// A stored thread with its workspace, which is null for a home thread.
+#[derive(Debug, serde::Serialize)]
+struct MachineThread {
+    workspace: Option<String>,
+    #[serde(flatten)]
+    thread: Thread,
+}
+
+impl MachineThread {
+    fn of(row: Row, chats: &crate::chat::Registry) -> Self {
+        let workspace = (!row.workspace.is_empty()).then(|| row.workspace.clone());
+        let doing = chats.doing_in(
+            workspace.as_deref().unwrap_or(yantra_core::keep::HOME),
+            &row.id,
+        );
+        let mut thread = Thread::stored(row, doing);
+        if workspace.is_none() {
+            // A home thread has no worktree to lose and no PR to read.
+            thread.presence = "here";
+            thread.pr = ThreadPr::None;
+        }
+        Self { workspace, thread }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct HomeOpened {
+    thread: String,
+    machine: String,
 }
 
 fn wire(doing: Option<Doing>) -> (&'static str, Option<u64>) {
@@ -5204,6 +5345,124 @@ mod tests {
         assert_eq!(states[1]["id"], "1c2d");
         assert_eq!(states[1]["state"], "idle");
         assert!(states[1]["since"].is_null());
+    }
+
+    /// ADR-0046 decision 1.7: a machine's threads, home threads among them,
+    /// for the owner only and for a machine name that is an ssh destination.
+    #[tokio::test]
+    async fn a_machines_threads_come_from_the_store_for_the_owner_only() {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+        use tower::ServiceExt as _;
+
+        let (store, _) = crate::store::tests::scratch();
+        let mut home = crate::store::tests::live("h", Some("Say hello"), Some("S"));
+        home.workspace.clear();
+        home.branch.clear();
+        home.worktree.clear();
+        home.created = 2;
+        let mut elsewhere = crate::store::tests::live("x", None, None);
+        elsewhere.machine = "mac".to_owned();
+        store
+            .adopt(vec![
+                crate::store::tests::live("a", Some("Fix it"), None),
+                home,
+                elsewhere,
+            ])
+            .await
+            .expect("rows");
+        let fleet = Fleet {
+            store: Some(store),
+            ..Fleet::default()
+        };
+        fleet.chats.hold_for_test("chat/yantra-home/h", true);
+        let app = router::<Fake, ()>(direct(mine(3)), fleet);
+        let send = |last: u8, request: Request<Body>| {
+            let mut request = request;
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(tcp(address(last))));
+            app.clone().oneshot(request)
+        };
+
+        for request in [
+            Request::get("/machines/m/threads").body(Body::empty()),
+            Request::post("/machines/m/threads/new")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"prompt":"hi"}"#)),
+            Request::delete("/machines/m/threads/h").body(Body::empty()),
+        ] {
+            let answered = send(9, request.expect("a request"))
+                .await
+                .expect("infallible");
+            assert_eq!(answered.status(), StatusCode::FORBIDDEN);
+        }
+        for request in [
+            Request::get("/machines/-oProxyCommand=x/threads").body(Body::empty()),
+            Request::post("/machines/-oProxyCommand=x/threads/new")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"prompt":"hi"}"#)),
+            Request::delete("/machines/-oProxyCommand=x/threads/h").body(Body::empty()),
+            Request::post("/machines/m/threads/new")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"prompt":"  "}"#)),
+        ] {
+            let answered = send(3, request.expect("a request"))
+                .await
+                .expect("infallible");
+            assert_eq!(answered.status(), StatusCode::BAD_REQUEST);
+        }
+        let busy = send(
+            3,
+            Request::delete("/machines/m/threads/h")
+                .body(Body::empty())
+                .expect("a request"),
+        )
+        .await
+        .expect("infallible");
+        assert_eq!(busy.status(), StatusCode::CONFLICT, "a turn runs there");
+
+        let owner = send(
+            3,
+            Request::get("/machines/m/threads")
+                .body(Body::empty())
+                .expect("a request"),
+        )
+        .await
+        .expect("infallible");
+        assert_eq!(owner.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(owner.into_body(), 8192)
+            .await
+            .expect("a body");
+        let threads: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        let threads = threads.as_array().expect("a list");
+        assert_eq!(threads.len(), 2, "only machine m's: {threads:?}");
+        assert_eq!(threads[0]["id"], "h");
+        assert!(threads[0]["workspace"].is_null());
+        assert_eq!(threads[0]["title"], "Say hello");
+        assert_eq!(threads[0]["presence"], "here");
+        assert_eq!(threads[0]["state"], "working");
+        assert_eq!(threads[0]["pr"], serde_json::json!({"state": "none"}));
+        assert_eq!(threads[1]["id"], "a");
+        assert_eq!(threads[1]["workspace"], "web");
+    }
+
+    /// A daemon with no store has nowhere to keep a home thread.
+    #[tokio::test]
+    async fn a_daemon_with_no_store_lists_no_machine_threads() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt as _;
+
+        let app = router::<Fake, ()>(direct(mine(3)), Fleet::default());
+        let mut request = Request::get("/machines/m/threads")
+            .body(Body::empty())
+            .expect("a request");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(tcp(address(3))));
+        let answered = app.oneshot(request).await.expect("infallible");
+        assert_eq!(answered.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     /// Y-689: the search reads the store alone, for the owner only.

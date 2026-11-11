@@ -45,12 +45,13 @@ const RECORDING: &str =
 const WAKE: &str =
     include_str!("../../yantra-core/tests/recordings/claude-2.1.319-background-wake.jsonl");
 
-/// Appends its argv to `ARGV`, plays the recording a line every 0.5 s, and
+/// Appends its argv and its working directory, plays the recording a line every 0.5 s, and
 /// holds at the `control_request` until a `control_response` arrives on stdin,
 /// as `claude -p` does. Then it reads stdin until it closes, as a `claude` that
 /// waits for its next turn.
 const CLAUDE_STAND_IN: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> /home/yantra/claude.argv
+pwd >> /home/yantra/claude.pwd
 IFS= read -r prompt || exit 1
 while IFS= read -r line <&3; do
   sleep 0.5
@@ -918,11 +919,16 @@ async fn outlives(agent: Agent) -> Result<()> {
 
 /// A `POST` with no body, answered as JSON.
 async fn post(path: &str) -> Result<Value> {
+    call("POST", path).await
+}
+
+/// A request with no body, answered as JSON.
+async fn call(method: &str, path: &str) -> Result<Value> {
     let mut stream = UnixStream::connect(daemon_socket()).await?;
     stream
         .write_all(
             format!(
-                "POST {path} HTTP/1.1\r\nHost: yantra\r\nContent-Length: 0\r\n\
+                "{method} {path} HTTP/1.1\r\nHost: yantra\r\nContent-Length: 0\r\n\
                  Connection: close\r\n\r\n"
             )
             .as_bytes(),
@@ -1128,15 +1134,15 @@ fn recorded_session() -> Result<String> {
         .context("the recording has an init line with a session id")
 }
 
-/// The session the daemon's thread store holds for `thread`.
-fn stored_session(store: &Path, thread: &str) -> Result<Option<String>> {
+/// The session the daemon's thread store holds for `thread` of `workspace`.
+fn stored_session(store: &Path, workspace: &str, thread: &str) -> Result<Option<String>> {
     if !store.exists() {
         return Ok(None);
     }
     let db = rusqlite::Connection::open(store)?;
     let mut rows = db.prepare("SELECT session FROM threads WHERE workspace = ?1 AND id = ?2")?;
     let session = rows
-        .query_map([WORKSPACE, thread], |at| at.get::<_, Option<String>>(0))?
+        .query_map([workspace, thread], |at| at.get::<_, Option<String>>(0))?
         .next()
         .transpose()?
         .flatten();
@@ -1169,7 +1175,7 @@ async fn a_second_claude_run_does_not_change_which_conversation_resumes() -> Res
     let session = recorded_session()?;
     let store = host.root.join("home/.local/state/yantra/threads.sqlite");
     let deadline = Instant::now() + PATIENCE;
-    while stored_session(&store, &thread)?.as_deref() != Some(session.as_str()) {
+    while stored_session(&store, WORKSPACE, &thread)?.as_deref() != Some(session.as_str()) {
         if Instant::now() > deadline {
             bail!("the store never held session {session}");
         }
@@ -1194,16 +1200,15 @@ async fn a_second_claude_run_does_not_change_which_conversation_resumes() -> Res
     again
         .send(json!({"type": "turn", "text": "and again", "harness": "claude"}))
         .await?;
+    // The daemon's agent sweep also runs `agents --json` and `auth status` with
+    // this binary, at any time, so count only the keepers' lines.
+    let keepers = "grep -e '--input-format stream-json' ~/claude.argv";
     machine
         .until(PATIENCE, "a second keeper's claude", |machine| {
-            Ok(machine
-                .sh("wc -l < ~/claude.argv")?
-                .parse::<u32>()
-                .unwrap_or(0)
-                >= 3)
+            Ok(machine.sh(keepers)?.lines().count() >= 2)
         })
         .await?;
-    let argv = machine.sh("tail -n 1 ~/claude.argv")?;
+    let argv = machine.sh(&format!("{keepers} | tail -n 1"))?;
     assert!(
         argv.ends_with(&format!("--resume {session}")),
         "the store's session resumes: {argv}"
@@ -1255,5 +1260,103 @@ async fn an_idle_claude_keeper_closes() -> Result<()> {
             |machine| Ok(machine.leftovers(Agent::StandIn)?.is_empty()),
         )
         .await?;
+    Ok(())
+}
+
+/// ADR-0046 decision 1, with the idle close cut to 15 s: a home thread runs
+/// Claude in `$HOME` with no worktree and no checkpoint, and a new keeper
+/// resumes the session the store keeps.
+#[tokio::test]
+async fn a_home_thread_resumes_after_its_keeper_ends() -> Result<()> {
+    let Some(machine) = Machine::start(Agent::StandIn)? else {
+        return Ok(());
+    };
+    let host = Host::new(&machine.fixture)?;
+    let _daemon = host.daemon_with("a", &[("YANTRA_CHAT_IDLE", "15")]).await?;
+    let mut socket = Socket::open("/api/machines/fixture/chat").await?;
+    socket
+        .send(json!({"type": "turn", "text": Agent::StandIn.prompt(), "harness": "claude"}))
+        .await?;
+    let mut drawn = socket
+        .through(PATIENCE, |frame| frame["type"] == "request.opened")
+        .await?;
+    let thread = thread_of(&drawn)?;
+    let request = drawn[drawn.len() - 1]["payload"]["requestId"].clone();
+    socket
+        .send(json!({"type": "answer", "requestId": request, "decision": "accept"}))
+        .await?;
+    drawn.extend(
+        socket
+            .through(PATIENCE, |frame| frame["type"] == "turn.completed")
+            .await?,
+    );
+    // A diff or a checkpoint failure would follow the turn's end at once.
+    while let Ok(Some(frame)) = socket.next(Duration::from_secs(3)).await {
+        drawn.push(frame);
+    }
+    assert!(
+        drawn
+            .iter()
+            .all(|frame| frame["type"] != "turn.diff.updated" && frame["type"] != "error"),
+        "no checkpoint: {drawn:#?}"
+    );
+
+    let session = recorded_session()?;
+    let store = host.root.join("home/.local/state/yantra/threads.sqlite");
+    let deadline = Instant::now() + PATIENCE;
+    while stored_session(&store, "", &thread)?.as_deref() != Some(session.as_str()) {
+        if Instant::now() > deadline {
+            bail!("the store never held session {session}");
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let keeper = format!("tmux has-session -t '=yantra-keep-yantra-home-{thread}'");
+    machine
+        .until(
+            Duration::from_secs(60),
+            "the idle home keeper's session going",
+            |machine| Ok(machine.sh(&keeper).is_err()),
+        )
+        .await?;
+
+    let mut again = Socket::open(&format!("/api/machines/fixture/chat?thread={thread}")).await?;
+    again
+        .send(json!({"type": "turn", "text": "and again", "harness": "claude"}))
+        .await?;
+    again
+        .through(PATIENCE, |frame| frame["type"] == "request.opened")
+        .await?;
+    let argv = machine.sh("cat ~/claude.argv")?;
+    // Each start also probes `agents --json` and `auth status` with the same binary.
+    let argv: Vec<&str> = argv
+        .lines()
+        .filter(|line| line.contains("--input-format stream-json"))
+        .collect();
+    assert_eq!(argv.len(), 2, "two keepers: {argv:?}");
+    assert!(
+        !argv[0].contains("--resume"),
+        "a new home thread starts fresh: {argv:?}"
+    );
+    assert!(
+        argv[1].ends_with(&format!("--resume {session}")),
+        "the store's session resumes: {argv:?}"
+    );
+    assert_eq!(
+        machine.sh("sort -u ~/claude.pwd")?,
+        format!("/home/{USER}"),
+        "Claude ran in $HOME"
+    );
+    assert_eq!(
+        machine.sh("[ -e ~/.yantra/worktrees/chat/yantra-home ] && echo made || echo absent")?,
+        "absent"
+    );
+
+    let listed = call("GET", "/api/machines/fixture/threads").await?;
+    let row = listed
+        .as_array()
+        .and_then(|threads| threads.iter().find(|row| row["id"] == thread.as_str()))
+        .with_context(|| format!("thread {thread} is listed: {listed}"))?;
+    assert_eq!(row["title"], Agent::StandIn.prompt());
+    assert!(row["workspace"].is_null(), "{row}");
     Ok(())
 }

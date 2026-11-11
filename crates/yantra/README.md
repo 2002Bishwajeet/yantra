@@ -20,6 +20,7 @@ yantra probe mac /code/site      # is it there, and what origin does it hold?
 yantra clone <url> --machine mac --into ~/code/site   # git clone there, inside a tmux session
 yantra mic mac                   # stream this laptop's microphone into mac's virtual mic until Ctrl-C
 yantra chat new site --issue o/r#7   # open a thread from a GitHub issue; print its draft prompt
+yantra chat new --home box --daemon http://hub:7717 --prompt "hi"   # Claude in box's home folder, no worktree
 yantra chat ls site              # the workspace's threads, each with its issue and PR
 yantra chat rm site 0a1b         # remove a thread's worktree and branch after you confirm
 yantra chat rm site 0a1b --daemon http://hub:7717   # the same through yantrad, which also forgets its row; clears a gone thread

@@ -284,6 +284,29 @@ pub fn remove_thread(daemon: &str, workspace: &str, id: &str) -> Result<String, 
     )
 }
 
+/// What the daemon answers a new home thread with.
+#[derive(Debug, PartialEq, Eq, serde::Deserialize)]
+pub struct HomeOpened {
+    pub thread: String,
+    pub machine: String,
+}
+
+/// `yantra chat new --home`: the daemon starts Claude in `machine`'s home
+/// folder with `prompt` (ADR-0046 decision 1.1).
+pub fn new_home(daemon: &str, machine: &str, prompt: &str) -> Result<HomeOpened, String> {
+    let daemon = Daemon::new(daemon);
+    let said = daemon.send(
+        Method::Post(Some(json!({"prompt": prompt}))),
+        &format!("/api/machines/{machine}/threads/new"),
+    )?;
+    serde_json::from_str(&said).map_err(|error| {
+        format!(
+            "yantrad at {} sent an unreadable answer: {error}",
+            daemon.base
+        )
+    })
+}
+
 enum Method {
     Get,
     /// A `GET` that may last as long as the daemon's longest wait.
@@ -523,6 +546,18 @@ mod tests {
                             (StatusCode::NO_CONTENT, String::new())
                         } else {
                             (StatusCode::NOT_FOUND, format!("no thread {thread}"))
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/api/machines/{machine}/threads/new",
+                post(
+                    |Path(machine): Path<String>, axum::Json(body): axum::Json<Value>| async move {
+                        if machine == "box" && body == json!({"prompt": "hi"}) {
+                            (StatusCode::OK, json!({"thread": "0a1b", "machine": machine}).to_string())
+                        } else {
+                            (StatusCode::BAD_REQUEST, format!("not an ssh destination: {machine}"))
                         }
                     },
                 ),
@@ -1016,6 +1051,32 @@ mod tests {
         );
         assert_eq!(json(&said[7]), json!({"removed": true}));
         assert_eq!(json(&said[8]), json!({"removed": false}));
+    }
+
+    /// ADR-0046 decision 1.1: `chat new --home` reaches the daemon's route,
+    /// and a refusal names the daemon's words.
+    #[tokio::test]
+    async fn chat_new_home_through_the_daemon_answers_the_thread() {
+        let daemon = fake_daemon().await;
+        let said = tokio::task::spawn_blocking(move || {
+            [
+                new_home(&daemon, "box", "hi"),
+                new_home(&daemon, "-o", "hi"),
+            ]
+        })
+        .await
+        .expect("the thread");
+        assert_eq!(
+            said[0],
+            Ok(HomeOpened {
+                thread: "0a1b".to_owned(),
+                machine: "box".to_owned()
+            })
+        );
+        assert_eq!(
+            said[1],
+            Err("yantrad answered 400: not an ssh destination: -o".to_owned())
+        );
     }
 
     /// ADR-0045 decision 4: `chat rm --daemon` reaches the route that forgets

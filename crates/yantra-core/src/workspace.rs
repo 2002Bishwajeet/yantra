@@ -85,10 +85,12 @@ pub enum Error {
     )]
     InvalidName { name: String, path: PathBuf },
 
-    /// The prefix names a Chat keeper's tmux session (ADR-0035 decision 1).
+    /// The prefix names a Chat keeper's tmux session (ADR-0035 decision 1), and
+    /// `yantra-home` a home thread's keeper (ADR-0046 decision 1.5).
     #[error(
-        "`{name}` is not a usable workspace name: names that start with `{}` or `{}` are \
-         Yantra's own (looked at {})",
+        "`{name}` is not a usable workspace name: `{}` and names that start with `{}` or `{}` \
+         are Yantra's own (looked at {})",
+        crate::keep::HOME,
         crate::keep::PREFIX,
         crate::thread::TERMINAL,
         path.display()
@@ -579,7 +581,10 @@ fn validate_name(dir: &Path, name: &str) -> Result<(), Error> {
             path: path(),
         });
     }
-    if crate::keep::is_keeper(name) || name.starts_with(crate::thread::TERMINAL) {
+    if name == crate::keep::HOME
+        || crate::keep::is_keeper(name)
+        || name.starts_with(crate::thread::TERMINAL)
+    {
         return Err(Error::Reserved {
             name: name.to_owned(),
             path: path(),
@@ -1295,6 +1300,13 @@ mod tests {
         assert!(
             matches!(&terminal, Err(Error::Reserved { .. })),
             "{terminal:?}"
+        );
+        // ADR-0046 decision 1.5: a home thread's keeper takes this word.
+        let home = create_in(&dir, "yantra-home", "m", Path::new("/r"), None);
+        assert!(matches!(&home, Err(Error::Reserved { .. })), "{home:?}");
+        assert!(
+            validate_name(&dir, "yantra-homes").is_ok(),
+            "only the whole word is Yantra's"
         );
         let said = terminal.expect_err("refused").to_string();
         assert!(said.contains("`yantra-keep-` or `yantra-term-`"), "{said}");
