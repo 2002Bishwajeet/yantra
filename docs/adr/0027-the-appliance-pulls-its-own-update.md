@@ -324,3 +324,14 @@ once the moved-tag problem bites.
 >
 > **What changed upstream of the reasoning:** the owner stopped gating a release on hardware walks.
 > A box that wants each merge now opts in to the nightly; a box that does not want it sees nothing new.
+
+> **Amended 2026-11-11 (Y-713, owner): the daemon knows each agent's version.** §7's "the daemon
+> holds no inventory of what version a machine runs" no longer holds. The daemon keeps the version
+> from each machine's latest heartbeat in memory beside the beat (ADR-0013's 2026-11-11 amendment),
+> and readiness shows an agent older than the daemon with the `install.sh` command for that machine.
+> The rest of §7 stands: no binary, unit, script or update instruction crosses ssh, nothing updates
+> a machine for the owner, and the agent's reply carries no instruction. The owner still runs the
+> command.
+>
+> **What changed upstream of the reasoning:** the owner could not tell which machine was behind, and
+> asked "how would i know?" Knowing a version is not shipping software; the person still does that.
