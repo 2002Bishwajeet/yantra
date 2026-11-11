@@ -133,6 +133,7 @@ describe('the rooms list', () => {
     open('/rooms')
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByText('The rooms could not be read')).toBeTruthy()
+    fireEvent.click(within(alert).getByRole('button', { name: 'Details' }))
     expect(alert.textContent).toContain('not yours')
   })
 

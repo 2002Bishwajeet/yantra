@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { NOT_REACHED } from '@/api/client'
 import { looked } from '@/api/fixtures'
 import * as contract from '@/contract.gen'
 import { mount, unmount } from './harness'
+import { NotReached, causeOf } from './NotReached'
 import { notReached } from './reached'
 
 afterEach(() => {
@@ -44,16 +46,17 @@ describe('the screen a dead daemon draws', () => {
 
     const board = within(alert)
     expect(board.getByText('Yantra')).toBeTruthy()
-    expect(board.getByRole('heading', { name: 'Yantra cannot be reached' })).toBeTruthy()
+    expect(board.getByRole('heading', { name: 'yantrad is not answering' })).toBeTruthy()
+    expect(board.getByText(/its daemon did not/)).toBeTruthy()
+    // One button, and the rest is behind Details.
+    expect(board.getAllByRole('button').map((one) => one.textContent)).toEqual(['Try again', 'Details'])
+    expect(board.queryByRole('link', { name: 'Open Tailscale' })).toBeNull()
+    for (const hidden of [`${NOT_REACHED}: HTTP 502`, /retrying every 5 s/, /off the tailnet/]) {
+      expect(board.queryByText(hidden)).toBeNull()
+    }
+    fireEvent.click(board.getByRole('button', { name: 'Details' }))
     expect(board.getByText(`${NOT_REACHED}: HTTP 502`)).toBeTruthy()
-    expect(board.getByText(/off the tailnet/)).toBeTruthy()
-    expect(board.getByText(/yantrad down/)).toBeTruthy()
     expect(board.getByText(/retrying every 5 s/)).toBeTruthy()
-    expect(board.getByRole('button', { name: 'Try again' })).toBeTruthy()
-    // Finding 131: the board draws the way out beside the retry.
-    expect(board.getByRole('link', { name: 'Open Tailscale' }).getAttribute('href')).toBe(
-      'https://login.tailscale.com/admin/machines',
-    )
 
     // Nothing of the fleet: no Dashboard, and no rail listing sessions.
     expect(screen.queryByRole('heading', { level: 1, name: 'Dashboard' })).toBeNull()
@@ -74,7 +77,7 @@ describe('the screen a dead daemon draws', () => {
   it('stands in front of a settings route too', async () => {
     mount('desktop', '/settings/providers', { down: true })
     const alert = await screen.findByRole('alert')
-    expect(within(alert).getByRole('heading', { name: 'Yantra cannot be reached' })).toBeTruthy()
+    expect(within(alert).getByRole('heading', { name: 'yantrad is not answering' })).toBeTruthy()
     expect(screen.getAllByRole('alert')).toHaveLength(1)
     expect(screen.queryByText(/Providers could not be drawn/)).toBeNull()
   })
@@ -97,7 +100,37 @@ describe('the screen a dead daemon draws', () => {
   it('draws nothing of itself while the daemon answers', async () => {
     mount('desktop', '/')
     await screen.findByRole('heading', { level: 1, name: 'Dashboard' })
-    expect(screen.queryByText('Yantra cannot be reached')).toBeNull()
+    expect(screen.queryByText('yantrad is not answering')).toBeNull()
     expect(screen.getByRole('complementary', { name: 'Sessions' })).toBeTruthy()
+  })
+})
+
+describe('the cause the screen names', () => {
+  it('blames the daemon when the proxy answered for it', () => {
+    for (const code of [502, 503, 504]) {
+      expect(causeOf(`${NOT_REACHED}: HTTP ${code}`)).toMatchObject({ daemon: true, title: 'yantrad is not answering' })
+    }
+  })
+
+  it('blames this device when the fetch failed', () => {
+    expect(causeOf('TypeError: Failed to fetch')).toMatchObject({ daemon: false, title: 'This device cannot reach Yantra' })
+    expect(causeOf(`${NOT_REACHED}: HTTP 500`).daemon).toBe(false)
+  })
+
+  it('draws one Open Tailscale button, not Try again, when this device cannot reach Yantra', () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <NotReached since={null} why="TypeError: Failed to fetch" />
+      </QueryClientProvider>,
+    )
+    const board = within(screen.getByRole('alert'))
+    expect(board.getByRole('heading', { name: 'This device cannot reach Yantra' })).toBeTruthy()
+    expect(board.getByRole('link', { name: 'Open Tailscale' }).getAttribute('href')).toBe(
+      'https://login.tailscale.com/admin/machines',
+    )
+    expect(board.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(board.queryByText('TypeError: Failed to fetch')).toBeNull()
+    fireEvent.click(board.getByRole('button', { name: 'Details' }))
+    expect(board.getByText('TypeError: Failed to fetch')).toBeTruthy()
   })
 })

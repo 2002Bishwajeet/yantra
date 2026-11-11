@@ -1,4 +1,4 @@
-import { useEffect, type ComponentPropsWithRef, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ComponentPropsWithRef, type ReactNode } from 'react'
 import { clsx } from 'clsx'
 import type { ApiError } from '@/api/errors'
 import { Button } from '../button/Button'
@@ -26,12 +26,30 @@ export type ErrorSurfaceProps = ComponentPropsWithRef<'section'> & {
   action?: ReactNode
 }
 
+function Unknowns(props: { items: readonly string[] }) {
+  return (
+    <ul className="m3-error__unknowns">
+      {props.items.map((one, i) => (
+        <li key={i}>
+          <State state="unknown">
+            {one} · <span className="m3-error__word">unknown</span>
+          </State>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** Every layout announces one way, and it is the live region: it reads the
  *  whole failure, where a focus move reads the title alone and takes the caret
  *  from wherever the reader left it. Do not add a focus move back (row 79). */
 function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' }) {
   const { layout, eyebrow, title, error, reset, unknowns, meta, action, className, ...rest } = props
   const retry = reset && error.retryable
+  const page = layout === 'page'
+  const [open, setOpen] = useState(false)
+  const detailsId = useId()
+  const hasDetails = Boolean(error.said || unknowns?.length || meta)
   const words = `${title}. ${error.describe()}`
   useEffect(() => announce(words), [words])
   return (
@@ -50,30 +68,48 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
         {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
         <h2 className="m3-error__title">{title}</h2>
         <p className="m3-error__sentence">{error.describe()}</p>
-        {error.said ? (
+        {!page && error.said ? (
           <Mono className="m3-error__said m3-wrap">
             {error.said}
           </Mono>
         ) : null}
       </div>
-      {unknowns?.length ? (
-        <ul className="m3-error__unknowns">
-          {unknowns.map((one, i) => (
-            <li key={i}>
-              <State state="unknown">
-                {one} · <span className="m3-error__word">unknown</span>
-              </State>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {meta ? <Mono className="m3-error__meta">{meta}</Mono> : null}
-      {retry || action ? (
-        <div className="m3-error__actions">
-          {retry ? <Button onClick={reset}>Try again</Button> : null}
-          {action}
-        </div>
-      ) : null}
+      {page ? (
+        <>
+          {action ?? (retry ? <Button onClick={reset}>Try again</Button> : null)}
+          {hasDetails ? (
+            <>
+              <Button
+                aria-controls={detailsId}
+                aria-expanded={open}
+                className="m3-error__toggle"
+                onClick={() => setOpen(!open)}
+                variant="text"
+              >
+                Details
+              </Button>
+              {open ? (
+                <div className="m3-error__details" id={detailsId}>
+                  {error.said ? <Mono className="m3-error__said m3-wrap">{error.said}</Mono> : null}
+                  {unknowns?.length ? <Unknowns items={unknowns} /> : null}
+                  {meta ? <Mono className="m3-error__meta">{meta}</Mono> : null}
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {unknowns?.length ? <Unknowns items={unknowns} /> : null}
+          {meta ? <Mono className="m3-error__meta">{meta}</Mono> : null}
+          {retry || action ? (
+            <div className="m3-error__actions">
+              {retry ? <Button onClick={reset}>Try again</Button> : null}
+              {action}
+            </div>
+          ) : null}
+        </>
+      )}
     </section>
   )
 }

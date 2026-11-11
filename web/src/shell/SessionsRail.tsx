@@ -5,7 +5,7 @@ import type { AgentRow, MachineSessions } from '@/api'
 import { useHomeThreads, type HomeThreads } from '@/api/queries'
 import { threadTitle } from '@/screens/session/threads'
 import { fromReading } from '@/api/client'
-import { loaded, useAgents, useSessions, useWorkspaces, type Reading } from '@/api/hooks'
+import { loaded, useAgents, useMachines, useSessions, useWorkspaces, type Reading } from '@/api/hooks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -15,6 +15,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Mono } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { useTick } from '@/useTick'
+import { unreachable } from '@/work'
 import { phrase } from './phrase'
 
 /** The tmux session behind a workspace, for its age. */
@@ -117,8 +118,11 @@ function Home(props: { threads: HomeThreads; open: { machine: string; thread: st
  *  workspace, live ones first, and a way to the fleet for the rest. */
 export function SessionsRail() {
   const client = useQueryClient()
-  const agents = useAgents(loaded(useWorkspaces()))
+  const machines = useMachines()
+  const workspaces = useWorkspaces()
+  const agents = useAgents(loaded(workspaces))
   const sessions = useSessions()
+  const nothing = unreachable([machines, workspaces, sessions])
   const now = useTick(true)
   const homes = useHomeThreads()
   const home = useRouterState({
@@ -141,9 +145,11 @@ export function SessionsRail() {
     <aside className="rail" aria-label="Sessions">
       <div className="rail__head">
         <h2 className="rail__title">Sessions</h2>
-        <Button icon={<Plus />} role="link" render={<Link to="/new" />}>
-          New
-        </Button>
+        {nothing ? null : (
+          <Button icon={<Plus />} role="link" render={<Link to="/new" />}>
+            New
+          </Button>
+        )}
       </div>
       {agents.looked === 'pending' ? (
         <div className="rail__list" aria-busy="true">

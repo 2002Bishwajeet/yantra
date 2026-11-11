@@ -385,8 +385,14 @@ describe('the Dashboard with nothing reachable', () => {
     const pages = screen.getAllByRole('alert').filter((one) => (one as HTMLElement).dataset.layout === 'page')
     expect(pages).toHaveLength(1)
     const alert = pages[0]!
-    expect(within(alert).getByText('Nothing here can be reached')).toBeTruthy()
+    expect(within(alert).getByText('The daemon could not read the fleet')).toBeTruthy()
     expect(within(alert).getByRole('button', { name: 'Try again' })).toBeTruthy()
+    // The shell's board owns "off the tailnet"; this daemon answered.
+    expect(within(alert).queryByRole('link', { name: 'Open Tailscale' })).toBeNull()
+    fireEvent.click(within(alert).getByRole('button', { name: 'Details' }))
+    expect(within(alert).queryByText(/off the tailnet/)).toBeNull()
+    expect(screen.queryByRole('link', { name: /new session/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'New' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Running' })).toBeNull()
   })
 })
