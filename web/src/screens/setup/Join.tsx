@@ -1,5 +1,6 @@
 import { useJoinCommand } from '@/api/passkey'
 import { Copyable } from '@/m3/copyable/Copyable'
+import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Text } from '@/m3/text/Text'
 
 /** The join command with a fresh code (ADR-0044 decision 13), or why there is
@@ -17,11 +18,12 @@ export function Join(props: { machine: string; what: string }) {
       </>
     )
   }
+  if (command.error) {
+    return <ErrorSurface.Inline error={command.error} folded title="The join command could not be made" />
+  }
   return (
     <Text scale="body-small" tone="variant">
-      {command.error
-        ? `the join command could not be made · ${command.error.describe()} ${command.error.said}`
-        : 'making a join command…'}
+      making a join command…
     </Text>
   )
 }

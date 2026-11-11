@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { answer } from '@/test/daemon'
 import { Join } from './Join'
@@ -35,10 +35,20 @@ describe('the join command', () => {
     expect(screen.getAllByText(/works once, within 10 minutes/)).toHaveLength(2)
   })
 
-  it('says why there is none, in the daemon’s words', async () => {
+  it('says there is none in a short row, and keeps the daemon’s words behind Details', async () => {
     draw(503, 'the hub does not know its MagicDNS name yet')
-    expect((await screen.findAllByText(/the join command could not be made/))[0].textContent).toContain(
-      'the hub does not know its MagicDNS name yet',
-    )
+    const [row] = await screen.findAllByRole('alert')
+    expect(within(row).getByRole('heading', { name: 'The join command could not be made' })).toBeTruthy()
+    expect(row.textContent).not.toContain('MagicDNS')
+    fireEvent.click(within(row).getByRole('button', { name: 'Details' }))
+    expect(within(row).getByText('the hub does not know its MagicDNS name yet')).toBeTruthy()
+  })
+
+  /** The own-address refusal is about 250 characters with two shell commands. */
+  it('names the proxy, not the commands, when the hub refused its own address', async () => {
+    draw(403, "a request from this machine's own address may not act, because any account here could have sent it.")
+    const [row] = await screen.findAllByRole('alert')
+    expect(within(row).getByRole('heading', { name: 'The proxy hides who is calling' })).toBeTruthy()
+    expect(row.textContent).not.toContain('any account here')
   })
 })

@@ -74,7 +74,23 @@ describe('Devices', () => {
     })
     await screen.findByText(/^enrolled /)
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
-    expect(await screen.findByText(/an agent token cannot act as the owner/)).toBeTruthy()
+    const row = await screen.findByRole('alert')
+    expect(within(row).getByRole('heading', { name: 'iPhone was not removed' })).toBeTruthy()
+    expect(row.textContent).not.toContain('agent token')
+    expect(screen.getByText(/^enrolled /)).toBeTruthy()
+    fireEvent.click(within(row).getByRole('button', { name: 'Details' }))
+    expect(within(row).getByText('an agent token cannot act as the owner')).toBeTruthy()
+  })
+
+  it('says a code was not made in a short row, with the words behind Details', async () => {
+    mountSettings('desktop', '/settings/devices', {
+      'GET /api/passkey': [200, DEVICES],
+      'POST /api/passkey/code': [403, "a request from this machine's own address may not act"],
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Make a code' }))
+    const row = await screen.findByRole('alert')
+    expect(within(row).getByRole('heading', { name: 'The proxy hides who is calling' })).toBeTruthy()
+    expect(screen.getByText('or run yantra passkey code on the hub')).toBeTruthy()
   })
 
   it('draws the read’s failure with the daemon’s words', async () => {

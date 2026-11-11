@@ -528,3 +528,8 @@
   gap: 4px;
   padding-inline-start: 20px;
 }
+
+/* A failed write's row sits inset under the row it failed on. */
+.devices__failed {
+  padding: 0 8px 8px;
+}

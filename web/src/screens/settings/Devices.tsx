@@ -14,35 +14,41 @@ import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
 import type { ApiError } from '@/api/errors'
 import { day } from '@/lib/time'
-import { Group, Note } from './Group'
+import { Group } from './Group'
 
 const when = (seconds: number) => day(new Date(seconds * 1000))
 
-/** A write's failure in one supporting line: the sentence, then the daemon's words. */
-const words = (error: ApiError) => `${error.describe()} ${error.said}`
+/** A write's failure as its own row under the one it failed on, with the
+ *  daemon's words behind Details. */
+function Failed(props: { title: string; error: ApiError }) {
+  return (
+    <li className="devices__failed">
+      <ErrorSurface.Inline error={props.error} folded title={props.title} />
+    </li>
+  )
+}
 
 function Session(props: { session: DeviceSession }) {
   const { session } = props
   const out = useSignOut()
   return (
-    <ListItem
-      headline={session.device}
-      leading={
-        <Lead tone={session.this_device ? 'primary' : undefined}>
-          <Laptop />
-        </Lead>
-      }
-      supporting={
-        out.error
-          ? words(out.error)
-          : `${session.this_device ? 'this device · ' : ''}with ${session.passkey} · ends ${when(session.ends)}`
-      }
-      trailing={
-        <Button variant="text" tone="error" onClick={() => out.mutate(session.id)} disabled={out.isPending}>
-          Sign out
-        </Button>
-      }
-    />
+    <>
+      <ListItem
+        headline={session.device}
+        leading={
+          <Lead tone={session.this_device ? 'primary' : undefined}>
+            <Laptop />
+          </Lead>
+        }
+        supporting={`${session.this_device ? 'this device · ' : ''}with ${session.passkey} · ends ${when(session.ends)}`}
+        trailing={
+          <Button variant="text" tone="error" onClick={() => out.mutate(session.id)} disabled={out.isPending}>
+            Sign out
+          </Button>
+        }
+      />
+      {out.error ? <Failed error={out.error} title={`${session.device} was not signed out`} /> : null}
+    </>
   )
 }
 
@@ -50,22 +56,23 @@ function Passkey(props: { name: string; made: number }) {
   const { name, made } = props
   const remove = useRemovePasskey()
   return (
-    <ListItem
-      headline={name}
-      leading={
-        <Lead>
-          <KeyRound />
-        </Lead>
-      }
-      supporting={
-        remove.error ? words(remove.error) : `enrolled ${when(made)}`
-      }
-      trailing={
-        <Button variant="text" tone="error" onClick={() => remove.mutate(name)} disabled={remove.isPending}>
-          Remove
-        </Button>
-      }
-    />
+    <>
+      <ListItem
+        headline={name}
+        leading={
+          <Lead>
+            <KeyRound />
+          </Lead>
+        }
+        supporting={`enrolled ${when(made)}`}
+        trailing={
+          <Button variant="text" tone="error" onClick={() => remove.mutate(name)} disabled={remove.isPending}>
+            Remove
+          </Button>
+        }
+      />
+      {remove.error ? <Failed error={remove.error} title={`${name} was not removed`} /> : null}
+    </>
   )
 }
 
@@ -83,13 +90,14 @@ function NewDevice() {
             <Plus />
           </Lead>
         }
-        supporting={code.error ? words(code.error) : 'or run yantra passkey code on the hub'}
+        supporting="or run yantra passkey code on the hub"
         trailing={
           <Button variant="tonal" onClick={() => code.mutate()} disabled={code.isPending}>
             {code.data ? 'New code' : 'Make a code'}
           </Button>
         }
       />
+      {code.error ? <Failed error={code.error} title="No code was made" /> : null}
       {code.data ? <Copyable text={code.data.code} what="the code" /> : null}
     </Group>
   )
@@ -130,7 +138,9 @@ export function Devices() {
           Sign out every other device
         </Button>
       ) : null}
-      {others.error ? <Note>{words(others.error)}</Note> : null}
+      {others.error ? (
+        <ErrorSurface.Inline error={others.error} folded title="The other devices were not signed out" />
+      ) : null}
       <Group label="Passkeys" note="Removing a passkey signs out every device it signed in.">
         {passkeys.map((one) => (
           <Passkey key={one.name} name={one.name} made={one.made} />

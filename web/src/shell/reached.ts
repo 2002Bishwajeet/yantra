@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { NOT_REACHED, type Reading } from '@/api/client'
+import { NOT_REACHED, REFUSED, type Reading } from '@/api/client'
 import { useSessions, useWorkspaces } from '@/api/hooks'
 import { machinesQuery } from '@/api/queries'
 import { unreachable } from '@/work'
 
 /** D3 §7.2 raised to the shell. `unreachable` collapses N identical failures
- *  into one; this keeps only the ones that happened before the daemon
- *  answered, because a daemon that answered and said its own look failed is
- *  news about the fleet and belongs on the screen that owns it. */
+ *  into one; this keeps the ones that happened before the daemon answered, and
+ *  the daemon refusing this device, because a daemon that answered and said its
+ *  own look failed is news about the fleet and belongs on the screen that owns it. */
 export function notReached(reads: Reading<unknown>[]): string | null {
   const same = unreachable(reads)
-  return same !== null && same.startsWith(NOT_REACHED) ? same : null
+  return same !== null && (same.startsWith(NOT_REACHED) || same.startsWith(REFUSED)) ? same : null
 }
 
 /** The three classes every screen under the shell draws from, and the instant

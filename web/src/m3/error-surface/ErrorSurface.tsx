@@ -24,6 +24,9 @@ export type ErrorSurfaceProps = ComponentPropsWithRef<'section'> & {
   meta?: string
   /** The optional text button beside Try again. */
   action?: ReactNode
+  /** A card or a row keeps the daemon's words behind Details, as the page
+   *  does: for a refusal long enough to bury the sentence. */
+  folded?: boolean
 }
 
 function Unknowns(props: { items: readonly string[] }) {
@@ -44,9 +47,10 @@ function Unknowns(props: { items: readonly string[] }) {
  *  whole failure, where a focus move reads the title alone and takes the caret
  *  from wherever the reader left it. Do not add a focus move back (row 79). */
 function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' }) {
-  const { layout, eyebrow, title, error, reset, unknowns, meta, action, className, ...rest } = props
+  const { layout, eyebrow, title, error, reset, unknowns, meta, action, folded, className, ...rest } = props
   const retry = reset && error.retryable
   const page = layout === 'page'
+  const fold = !page && folded && Boolean(error.said)
   const [open, setOpen] = useState(false)
   const detailsId = useId()
   const hasDetails = Boolean(error.said || unknowns?.length || meta)
@@ -69,7 +73,7 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
         {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
         <h2 className="m3-error__title">{heading}</h2>
         <p className="m3-error__sentence">{error.describe()}</p>
-        {!page && error.said ? (
+        {!page && !fold && error.said ? (
           <Mono className="m3-error__said m3-wrap">
             {error.said}
           </Mono>
@@ -103,10 +107,26 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
         <>
           {unknowns?.length ? <Unknowns items={unknowns} /> : null}
           {meta ? <Mono className="m3-error__meta">{meta}</Mono> : null}
-          {retry || action ? (
+          {retry || action || fold ? (
             <div className="m3-error__actions">
               {retry ? <Button onClick={reset}>Try again</Button> : null}
               {action}
+              {fold ? (
+                <Button
+                  aria-controls={detailsId}
+                  aria-expanded={open}
+                  className="m3-error__toggle"
+                  onClick={() => setOpen(!open)}
+                  variant="text"
+                >
+                  Details
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {fold && open ? (
+            <div className="m3-error__details" id={detailsId}>
+              <Mono className="m3-error__said m3-wrap">{error.said}</Mono>
             </div>
           ) : null}
         </>

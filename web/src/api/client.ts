@@ -31,6 +31,10 @@ async function said(response: Response): Promise<string> {
  *  broken classes (D3 §7.2). */
 export const NOT_REACHED = 'yantrad was not reached'
 
+/** A read the daemon itself answered 403: it was reached, and it refused this
+ *  device for the reason that follows. */
+export const REFUSED = 'yantrad refused this device'
+
 /** 502, 503 and 504 have two possible senders. The daemon sends them itself —
  *  a relay that would not take the push, an ssh that could not be made — and
  *  always with a bare `text/plain` sentence saying why. Whatever sits between
@@ -120,6 +124,13 @@ export const failed = (error: string) =>
 
 const notReached = (why: string) => failed(`${NOT_REACHED}: ${why}`)
 
+/** A read's status other than 2xx and 401. Only the daemon answers 403, with
+ *  its reason; anything else came from between this browser and the daemon. */
+export async function unanswered(response: Response) {
+  if (response.status === 403) return failed(`${REFUSED}: ${await said(response)}`)
+  return notReached(`HTTP ${response.status}`)
+}
+
 /** D3 §7.1, the sharpest finding in that document: a question not yet asked was
  *  not answered *never*. `pending` is a fourth state and not a fourth word: it
  *  is this browser's, the other three are the daemon's, and only a surface
@@ -167,7 +178,7 @@ export async function look<T>(
       signedOut()
       return failed('this device is not signed in')
     }
-    if (!response.ok) return notReached(`HTTP ${response.status}`)
+    if (!response.ok) return await unanswered(response)
     return await envelope<T>(response, path)
   } catch (cause) {
     if (signal.aborted) throw cause

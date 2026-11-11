@@ -142,6 +142,23 @@ describe('ErrorSurface', () => {
     expect(hit).toMatch(/border-radius:/)
   })
 
+  it('folds a row’s raw words behind Details when asked', () => {
+    const long = new ApiError('refused', 'node pi is on this tailnet but is not yours', { status: 403 })
+    render(<ErrorSurface.Inline folded title="No code was made" error={long} />)
+    const row = screen.getByRole('alert')
+    expect(row.textContent).not.toContain('is not yours')
+    const toggle = screen.getByRole('button', { name: 'Details' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText('node pi is on this tailnet but is not yours')).toBeTruthy()
+  })
+
+  it('draws no Details on a folded row with no words to fold', () => {
+    render(<ErrorSurface.Inline folded title="Transcript" error={new ApiError('network', '')} />)
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull()
+  })
+
   it('has an inline row', () => {
     render(<ErrorSurface.Inline title="Transcript" error={network} />)
     expect(screen.getByRole('alert').dataset.layout).toBe('inline')

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { NOT_REACHED } from '@/api/client'
+import { NOT_REACHED, REFUSED } from '@/api/client'
 import { looked } from '@/api/fixtures'
 import * as contract from '@/contract.gen'
 import { mount, unmount } from './harness'
@@ -28,6 +28,11 @@ describe('what counts as the daemon not being reached', () => {
   it('is null when the daemon answered and said its own look failed', () => {
     const said = looked.failed<unknown>('`tailscale status --json` failed')
     expect(notReached([said, said, said])).toBeNull()
+  })
+
+  it('keeps reads the daemon refused, because the daemon answered for this device', () => {
+    const refused = looked.failed<unknown>(`${REFUSED}: the account x may only join itself`)
+    expect(notReached([refused, refused, refused])).toBe(`${REFUSED}: the account x may only join itself`)
   })
 
   it('is null unless every read agrees', () => {
@@ -115,6 +120,33 @@ describe('the cause the screen names', () => {
   it('blames this device when the fetch failed', () => {
     expect(causeOf('TypeError: Failed to fetch')).toMatchObject({ daemon: false, title: 'This device cannot reach Yantra' })
     expect(causeOf(`${NOT_REACHED}: HTTP 500`).daemon).toBe(false)
+  })
+
+  /** The walk on the real fleet: every read was 403 from the hub's own
+   *  address, and the screen said to turn Tailscale on. */
+  it('names the HTTPS address, not Tailscale, when the daemon refused its own address', () => {
+    const own = `${REFUSED}: a request from this machine's own address may not act, because any account here could have sent it.`
+    expect(causeOf(own)).toMatchObject({ daemon: true, title: 'Open Yantra at its HTTPS address' })
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <NotReached since={null} why={own} />
+      </QueryClientProvider>,
+    )
+    const board = within(screen.getByRole('alert'))
+    expect(board.getByRole('heading', { name: 'Open Yantra at its HTTPS address' })).toBeTruthy()
+    expect(board.getByText(/Open the dashboard's https:\/\/ address/)).toBeTruthy()
+    expect(board.queryByRole('link', { name: 'Open Tailscale' })).toBeNull()
+    expect(board.queryByText(/any account here/)).toBeNull()
+    fireEvent.click(board.getByRole('button', { name: 'Details' }))
+    expect(board.getByText(/any account here could have sent it/).textContent).not.toContain(REFUSED)
+  })
+
+  it('says the daemon refused this device for any other 403', () => {
+    expect(causeOf(`${REFUSED}: the account x may only join itself`)).toMatchObject({
+      daemon: true,
+      title: 'Yantra refused this device',
+      said: 'the account x may only join itself',
+    })
   })
 
   it('draws one Open Tailscale button, not Try again, when this device cannot reach Yantra', () => {
