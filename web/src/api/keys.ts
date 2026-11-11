@@ -43,6 +43,7 @@ export const keys = {
   /** The appliance's PR watch, one list for every thread's Checks. */
   pulls: () => ['pulls'] as const,
   about: () => ['about'] as const,
+  dictation: () => ['dictation'] as const,
   here: () => ['here'] as const,
   sshIdentity: () => ['ssh-identity'] as const,
   /** One workspace and everything under it, for a delete to drop. */

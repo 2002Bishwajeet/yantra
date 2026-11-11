@@ -130,6 +130,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
   'settings-about': {
     ...SETTINGS_NAV,
     Source: url('https://github.com/2002Bishwajeet/yantra'),
+    'Dictation model': url('https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2'),
   },
   notifications: { Settings: url('/settings/notifications'), 'Mark all read': disabled },
   rooms: {},

@@ -25,7 +25,7 @@ use crate::tmux::Tmux;
 use crate::workspace::Workspace;
 use crate::{
     agent, attach, chat, checkpoint, claude, clone, command, commit, delegate, dirs, doctor, down,
-    edit, install, join, logs, mention, mic, probe, pty, remove, resume, sessions, terminfo,
+    edit, install, join, logs, mention, mic, probe, pty, remove, resume, sessions, stt, terminfo,
     thread, tokens, up,
 };
 
@@ -359,6 +359,7 @@ async fn every_script() -> Vec<(String, String)> {
         "mention",
         mention::mentions(&r, WORKTREE, Some(Harness::Gemini))
     );
+    drive!(r, "stt", stt::listing(&r, WORKTREE));
     drive!(
         r,
         "dirs",
@@ -524,6 +525,7 @@ const MODULES: &[&str] = &[
     "remove",
     "resume",
     "sessions",
+    "stt",
     "terminfo",
     "thread",
     "tmux",

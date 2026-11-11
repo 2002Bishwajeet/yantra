@@ -47,7 +47,9 @@ verified all four end to end against a live Claude Code on a real machine, not a
 pull requests and issues that GitHub waits on, and it reads them with a grant that the daemon holds
 from the device flow ([ADR-0023](docs/adr/0023-the-github-grant-lives-beside-the-relay.md)). It also
 shows every tmux session on the fleet, whether a workspace names it or not. A workspace page carries
-the agent's chat, a live terminal, the transcript and what the session spent. The daemon listens on
+the agent's chat, a live terminal, the transcript and what the session spent. You can dictate into the
+chat: hold the microphone button, and a local speech model on the box writes your words at the caret
+([ADR-0043](docs/adr/0043-dictation-runs-a-local-speech-model.md), [`yantra-stt`](crates/yantra-stt/README.md)). The daemon listens on
 this machine's Tailscale addresses and refuses to start anywhere else. Still ahead are the always-on
 box, the hardware, and placement. Placement means that Yantra picks the machine for you, and you do
 not tap one from a list.
@@ -248,7 +250,8 @@ Q6 in [`tracker.md`](tracker.md).
 
 **Rust** for the daemon, CLI and per-machine agent · **TypeScript** for the web UI ·
 `tokio` + `axum` · the system `ssh` binary as transport (with `ControlMaster` multiplexing) ·
-tmux for persistence · Tailscale as the network · one SQLite file of Chat threads,
+tmux for persistence · Tailscale as the network · sherpa-onnx with NVIDIA's Parakeet-TDT-0.6B-v2
+(CC-BY-4.0) for dictation · one SQLite file of Chat threads,
 `~/.local/state/yantra/threads.sqlite` ([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md)); the
 rest of the state is declared, derived, or held in memory · appliance target `aarch64-unknown-linux-musl`.
 

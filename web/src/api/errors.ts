@@ -1,4 +1,4 @@
-/** The one error anything under `api/` rejects with. Twelve kinds, each from a
+/** The one error anything under `api/` rejects with. Seventeen kinds, each from a
  *  different place: what a surface draws is `describe()`, and `said` — the
  *  daemon's own words, verbatim — goes beneath it in mono, as every form
  *  already does (D3 §8.1). */
@@ -27,6 +27,13 @@ export type Kind =
   | 'busy'
   | 'capture'
   | 'allowed'
+  // Dictation's (ADR-0043 §4, §6): no service set, a service that does not
+  // answer, a clip over 60 seconds, no words heard, and a service that failed.
+  | 'dictation-off'
+  | 'stt-unreachable'
+  | 'too-long'
+  | 'silent'
+  | 'stt-failed'
 
 /** What the status alone says, before the daemon's sentence. Each code means a
  *  different thing, and collapsing them into "failed" sends the operator
@@ -55,6 +62,11 @@ const sentences: Record<Kind, string> = {
   busy: 'Another app is using the microphone.',
   capture: 'The browser could not open the microphone.',
   allowed: 'The browser now allows the microphone. Hold the button again to talk.',
+  'dictation-off': 'Dictation is off: the daemon has no speech service set.',
+  'stt-unreachable': 'Dictation is off: yantra-box does not answer.',
+  'too-long': 'That was over 60 seconds, so nothing was sent. Hold for less.',
+  silent: 'No words were heard. Hold the button and speak.',
+  'stt-failed': 'The speech service failed, so nothing was written.',
 }
 
 /** The kinds a press of the microphone ends with. */
@@ -119,3 +131,19 @@ export function asApiError(error: unknown): ApiError {
 }
 
 export const micError = (kind: MicKind, said: string) => new ApiError(kind, said, { sentence: onTheMic[kind] })
+
+/** What the daemon's dictation route names a failure, and the kind each becomes. */
+const dictated = {
+  off: 'dictation-off',
+  unreachable: 'stt-unreachable',
+  'too-long': 'too-long',
+  silent: 'silent',
+  failed: 'stt-failed',
+} as const satisfies Record<string, Kind>
+
+export type DictateKind = keyof typeof dictated
+
+export const isDictateKind = (kind: unknown): kind is DictateKind =>
+  typeof kind === 'string' && Object.hasOwn(dictated, kind)
+
+export const dictateError = (kind: DictateKind, said: string) => new ApiError(dictated[kind], said)

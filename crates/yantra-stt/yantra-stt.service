@@ -1,0 +1,20 @@
+# yantra-stt as a systemd user unit (ADR-0043 §2). Install it to
+# ~/.config/systemd/user/, set LISTEN to the box's `tailscale ip -4`, then
+# `systemctl --user enable --now yantra-stt`. It needs linger, not sudo.
+[Unit]
+Description=Yantra dictation: speech to text
+After=network-online.target
+# The tailnet address may come up after this unit; keep retrying until it does.
+StartLimitIntervalSec=0
+
+[Service]
+Environment=LISTEN=100.64.0.1:7718
+ExecStart=%h/.local/bin/yantra-stt serve --listen ${LISTEN} --model %h/.local/share/yantra-stt/parakeet-tdt-0.6b-v2-int8
+Restart=always
+RestartSec=5
+# No transcript or audio reaches a log (§7); errors go to stderr and the journal.
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target

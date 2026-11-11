@@ -55,7 +55,7 @@ is M11's work inbox. It read the `gh` already logged in on this machine until Y-
 appliance has no `gh` and nobody signed in on it — so the daemon now calls GitHub's REST API with an
 OAuth App token of its own ([ADR-0023](adr/0023-the-github-grant-lives-beside-the-relay.md)).
 
-**Four crates, and only one of them thinks.**
+**Six crates, and only one of them thinks.**
 
 | Crate | Job | State |
 | --- | --- | --- |
@@ -63,6 +63,8 @@ OAuth App token of its own ([ADR-0023](adr/0023-the-github-grant-lives-beside-th
 | [`yantra`](../crates/yantra/README.md) | The CLI. Layout, wording, exit codes. | Working; every verb the dashboard has, and `ls attention` |
 | [`yantrad`](../crates/yantrad/README.md) | The daemon. An HTTP surface over the same library, plus the dashboard and a pty per attached terminal. It keeps one SQLite file, `~/.local/state/yantra/threads.sqlite`: a row per Chat thread, with no message and no secret ([ADR-0045](adr/0045-the-hub-keeps-a-thread-store.md)). | Serves the read model, control, and a live terminal |
 | [`yantra-agent`](../crates/yantra-agent/README.md) | Per-machine heartbeat, so a person choosing a machine can see a sleeping laptop. | Probes and reports, on a 10 s tick |
+| [`yantra-stt`](../crates/yantra-stt/README.md) | Speech to text for the Chat's dictation, on the box ([ADR-0043](adr/0043-dictation-runs-a-local-speech-model.md)). `yantrad`'s `GET /api/dictate` holds an utterance in RAM, adds the workspace's hotwords and sends it to `POST /transcribe`. | Running on `yantra-box`; real-time factor 0.09 |
+| [`yantra-box`](../crates/yantra-box/README.md) | The wizard that writes the box installer to a USB stick. | Linux only |
 
 The CLI and the daemon are **two callers of one library**, not a stack —
 [ADR-0012](adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md). `yantra` keeps working

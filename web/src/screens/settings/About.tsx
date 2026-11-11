@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { clsx } from 'clsx'
-import { ExternalLink, Scale, Shield } from 'lucide-react'
+import { ExternalLink, Mic, Scale, Shield } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import type { Channel, Looked, Published, UpdateProgress } from '@/api'
 import { fromReading } from '@/api/client'
@@ -132,6 +132,22 @@ export function About() {
           }
           render={<a href="https://github.com/2002Bishwajeet/yantra" rel="noreferrer" target="_blank" />}
           supporting="github.com/2002Bishwajeet/yantra"
+          trailing={<ListChevron />}
+        />
+        {/* ADR-0043 §1: the model's CC-BY-4.0 licence asks for this credit. */}
+        <ListItem
+          headline="Dictation model"
+          leading={
+            <Lead>
+              <Mic />
+            </Lead>
+          }
+          render={<a href="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2" rel="noreferrer" target="_blank" />}
+          supporting={
+            <>
+              Parakeet-TDT-0.6B-v2 by NVIDIA · <span className="settings__licence">CC-BY-4.0</span>
+            </>
+          }
           trailing={<ListChevron />}
         />
       </Group>

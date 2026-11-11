@@ -16,7 +16,7 @@ use crate::acp::Harness;
 use crate::clone::destination;
 use crate::delegate::{self, NOT_A_REPO};
 use crate::ssh::{self, Exec, Ssh};
-use crate::thread;
+use crate::thread::{self, Place};
 use crate::tmux::sq;
 use crate::workspace;
 
@@ -113,22 +113,29 @@ pub async fn for_workspace(
     thread: Option<&str>,
     harness: Option<Harness>,
 ) -> Result<Mentions, Error> {
+    let (ssh, dir, _) = directory(name, thread).await?;
+    mentions(&ssh, &dir, harness).await
+}
+
+/// The machine, the directory and the thread [`for_workspace`] reads; the
+/// dictation's hotwords read the same one (ADR-0043 §5).
+pub(crate) async fn directory(
+    name: &str,
+    thread: Option<&str>,
+) -> Result<(Ssh, String, Option<Place>), Error> {
     let workspace = workspace::load(name)?;
     let ssh = Ssh::new(ssh::machine_at(&workspace.machine).ok_or(Error::NoStateDir)?)?;
-    let dir = match thread {
-        None => workspace.repo.to_string_lossy().into_owned(),
-        Some(id) => {
-            thread::list(&ssh, &workspace)
-                .await?
-                .into_iter()
-                .find(|place| thread::name(place) == id)
-                .ok_or_else(|| Error::UnknownThread {
-                    thread: id.to_owned(),
-                })?
-                .worktree
-        }
+    let Some(id) = thread else {
+        return Ok((ssh, workspace.repo.to_string_lossy().into_owned(), None));
     };
-    mentions(&ssh, &dir, harness).await
+    let place = thread::list(&ssh, &workspace)
+        .await?
+        .into_iter()
+        .find(|place| thread::name(place) == id)
+        .ok_or_else(|| Error::UnknownThread {
+            thread: id.to_owned(),
+        })?;
+    Ok((ssh, place.worktree.clone(), Some(place)))
 }
 
 /// One remote script (I-26: it rides the base64 envelope, and `dir` is quoted).

@@ -22,6 +22,13 @@ describe('About', () => {
     expect(screen.getByText(/keeps no fleet state/)).toBeTruthy()
   })
 
+  it('credits NVIDIA for the dictation model, as its CC-BY-4.0 licence asks', async () => {
+    mountSettings('desktop', '/settings/about')
+    const model = await screen.findByRole('link', { name: /Dictation model/ })
+    expect(model.getAttribute('href')).toBe('https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2')
+    expect(model.textContent).toContain('Parakeet-TDT-0.6B-v2 by NVIDIA · CC-BY-4.0')
+  })
+
   it('says who can open the dashboard, and names the tailnet', async () => {
     mountSettings('desktop', '/settings/about', { 'GET /api/about': [200, { ...contract.about, tailnet: 'home.ts.net' }] })
     expect(await screen.findByText('Only devices on your tailnet')).toBeTruthy()

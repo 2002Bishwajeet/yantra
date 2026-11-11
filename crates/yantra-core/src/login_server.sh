@@ -88,7 +88,9 @@ PLIST
         launchctl bootstrap "$domain" "$plist" ||
         launchctl print "$domain/$label" >/dev/null 2>&1 || return 1
     launchctl kickstart "$domain/$label" || return 1
-    for _ in 1 2 3 4 5; do
+    # kickstart does not wake a job that is already running, and the job checks
+    # a held socket every 10 s, so the wait is longer than that (Y-682).
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
         "$tmux" -L yantra -N ls >/dev/null 2>&1 && return 0
         sleep 1
     done

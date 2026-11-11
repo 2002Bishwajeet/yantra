@@ -54,6 +54,7 @@ pub mod sessions;
 pub mod snapshot;
 pub mod ssh;
 pub mod status;
+pub mod stt;
 pub mod terminfo;
 pub mod thread;
 pub mod tmux;

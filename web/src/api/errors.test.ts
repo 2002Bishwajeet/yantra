@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { answer } from '../test/daemon'
-import { ApiError, asApiError, isApiError, type Kind, micError } from './errors'
+import { ApiError, asApiError, dictateError, isApiError, isDictateKind, type Kind, micError } from './errors'
 import { attention, machines, notLooked, opened, spend } from './fixtures'
 import {
   aboutQuery,
@@ -40,6 +40,11 @@ describe('what an error says', () => {
       busy: new ApiError('busy', 'Could not start audio source').describe(),
       capture: new ApiError('capture', 'AbortError').describe(),
       allowed: new ApiError('allowed', '').describe(),
+      'dictation-off': dictateError('off', 'YANTRA_STT_URL is not set').describe(),
+      'stt-unreachable': dictateError('unreachable', '').describe(),
+      'too-long': dictateError('too-long', 'the clip is longer than 60 seconds').describe(),
+      silent: dictateError('silent', 'the service heard no words').describe(),
+      'stt-failed': dictateError('failed', 'the service answered 500').describe(),
     }
     for (const said of Object.values(sentences)) {
       expect(said).toMatch(/^[A-Z].*\.$/)
@@ -62,6 +67,17 @@ describe('what an error says', () => {
     expect(micError('insecure', 'http://pi:7717').describe()).toBe(
       'The microphone works only on the HTTPS address, on port 8443.',
     )
+  })
+
+  /** ADR-0043: the daemon's five reasons become five kinds, each with its own words. */
+  it('reads each reason dictation gives as its own kind', () => {
+    expect(dictateError('unreachable', '').describe()).toBe('Dictation is off: yantra-box does not answer.')
+    const kinds = (['off', 'unreachable', 'too-long', 'silent', 'failed'] as const).map((kind) => dictateError(kind, 'x').kind)
+    expect(kinds).toEqual(['dictation-off', 'stt-unreachable', 'too-long', 'silent', 'stt-failed'])
+    expect(dictateError('failed', 'the service answered 500').said).toBe('the service answered 500')
+    expect(isDictateKind('silent')).toBe(true)
+    expect(isDictateKind('toString')).toBe(false)
+    expect(isDictateKind(3)).toBe(false)
   })
 
   /** Each code the write authoriser answers means a different thing. */

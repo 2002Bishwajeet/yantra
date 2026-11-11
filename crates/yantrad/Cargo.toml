@@ -33,6 +33,8 @@ tokio.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# The one HTTP client in the tree, for `yantra-stt` (ADR-0043).
+ureq.workspace = true
 yantra-core.workspace = true
 
 # `tower` is axum's own; it is here only so a test can drive the router
