@@ -28,7 +28,7 @@ let server: Awaited<ReturnType<typeof daemon>>
 const sockets: ChatSocket[] = []
 
 /** A socket that reopens 10 ms after each drop, for as long as the page is visible. */
-function connect(url: string | ((after?: string) => string) = chatAddress('yantra-web'), pauses: number[] = [10]) {
+function connect(url: string | ((after?: string) => string) = chatAddress({ kind: 'workspace', workspace: 'yantra-web' }), pauses: number[] = [10]) {
   const events: ThreadEvent[] = []
   const errors: ChatError[] = []
   const opened = vi.fn()
@@ -64,14 +64,22 @@ afterEach(async () => {
 
 describe('the chat socket', () => {
   it('names the workspace, the thread when there is one, and the cursor after it', () => {
-    expect(chatAddress('a b')).toBe(`ws://127.0.0.1:${server.port}/api/workspaces/a%20b/chat`)
-    expect(chatAddress('w', '1a2b3c4d')).toBe(
+    expect(chatAddress({ kind: 'workspace', workspace: 'a b' })).toBe(`ws://127.0.0.1:${server.port}/api/workspaces/a%20b/chat`)
+    expect(chatAddress({ kind: 'workspace', workspace: 'w' }, '1a2b3c4d')).toBe(
       `ws://127.0.0.1:${server.port}/api/workspaces/w/chat?thread=1a2b3c4d`,
     )
-    expect(chatAddress('w', '1a2b3c4d', 'Y0a:812:0')).toBe(
+    expect(chatAddress({ kind: 'workspace', workspace: 'w' }, '1a2b3c4d', 'Y0a:812:0')).toBe(
       `ws://127.0.0.1:${server.port}/api/workspaces/w/chat?thread=1a2b3c4d&after=Y0a%3A812%3A0`,
     )
-    expect(chatAddress('w', undefined, 'Y0a:812:0')).toBe(`ws://127.0.0.1:${server.port}/api/workspaces/w/chat`)
+    expect(chatAddress({ kind: 'workspace', workspace: 'w' }, undefined, 'Y0a:812:0')).toBe(`ws://127.0.0.1:${server.port}/api/workspaces/w/chat`)
+  })
+
+  it('names the machine, with no workspace, for a home chat', () => {
+    const home = { kind: 'home', machine: 'mac book' } as const
+    expect(chatAddress(home)).toBe(`ws://127.0.0.1:${server.port}/api/machines/mac%20book/chat`)
+    expect(chatAddress(home, '6a1b', 'Y0a:1:0')).toBe(
+      `ws://127.0.0.1:${server.port}/api/machines/mac%20book/chat?thread=6a1b&after=Y0a%3A1%3A0`,
+    )
   })
 
   it('backs off as the daemon does: 1, 2, 4, then 8 seconds', () => {
@@ -79,7 +87,7 @@ describe('the chat socket', () => {
   })
 
   it('reopens a dropped socket after the last cursor it drew', async () => {
-    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const at = (after?: string) => chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d', after)
     const { events, errors, opened, dropped, restarted } = connect(at, [10])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
     const drawn = { threadId: '1a2b3c4d', cursor: 'r1:812:0', type: 'turn.started' }
@@ -99,7 +107,7 @@ describe('the chat socket', () => {
   })
 
   it('starts over when the daemon cannot continue from the cursor', async () => {
-    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const at = (after?: string) => chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d', after)
     const { events, opened, restarted } = connect(at, [10])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
     server.say(JSON.stringify({ threadId: '1a2b3c4d', cursor: 'r1:812:0', type: 'turn.started' }))
@@ -112,7 +120,7 @@ describe('the chat socket', () => {
   })
 
   it('starts over when a reopen has no cursor to ask after', async () => {
-    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const at = (after?: string) => chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d', after)
     const { events, opened, restarted } = connect(at, [10])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
     // An idle thread's transcript carries no cursor.
@@ -135,7 +143,7 @@ describe('the chat socket', () => {
   })
 
   it('does not start over on a reopen when nothing was drawn', async () => {
-    const { events, opened, restarted } = connect(chatAddress('yantra-web'), [10])
+    const { events, opened, restarted } = connect(chatAddress({ kind: 'workspace', workspace: 'yantra-web' }), [10])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
     server.hangUp()
     await settled(() => expect(opened).toHaveBeenCalledTimes(2))
@@ -146,7 +154,7 @@ describe('the chat socket', () => {
   })
 
   it('does not reopen a socket the page closed', async () => {
-    const { socket, opened } = connect(chatAddress('yantra-web'), [10])
+    const { socket, opened } = connect(chatAddress({ kind: 'workspace', workspace: 'yantra-web' }), [10])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
     socket.close()
     await new Promise((done) => setTimeout(done, 100))
@@ -191,7 +199,7 @@ describe('the chat socket', () => {
   })
 
   it('reports a failed turn once, though each reopen sends its end again', async () => {
-    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const at = (after?: string) => chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d', after)
     const { events, errors, opened } = connect(at, [10])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
     const failed = JSON.stringify(chatEvents[chatEvents.length - 1])
@@ -238,7 +246,7 @@ describe('the chat socket', () => {
   })
 
   it('types a missing login with whose it is, where, and the command, and says it once', async () => {
-    const { errors, opened } = connect(chatAddress('yantra-web', '1a2b3c4d'))
+    const { errors, opened } = connect(chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d'))
     await settled(() => expect(opened).toHaveBeenCalled())
     server.say(JSON.stringify(chatNotLoggedIn))
     server.hangUp()
@@ -293,7 +301,7 @@ describe('the chat socket', () => {
   })
 
   it('says an unknown thread once, not again as a close, and does not reopen', async () => {
-    const { errors, opened } = connect(chatAddress('yantra-web', 'ffffffff'), [10])
+    const { errors, opened } = connect(chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, 'ffffffff'), [10])
     await settled(() => expect(opened).toHaveBeenCalled())
     expect(server.asked).toEqual(['/api/workspaces/yantra-web/chat?thread=ffffffff'])
     server.say(JSON.stringify({ type: 'error', kind: 'unknownThread', said: 'web has no chat thread ffffffff' }))
@@ -305,7 +313,7 @@ describe('the chat socket', () => {
   })
 
   it('reopens after an error on a socket that stayed open and then dropped', async () => {
-    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const at = (after?: string) => chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d', after)
     const { errors, opened, dropped } = connect(at, [10])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
     server.say(JSON.stringify({ type: 'error', kind: 'unreachable', said: 'ssh: connection reset' }))
@@ -317,7 +325,7 @@ describe('the chat socket', () => {
   })
 
   it('reopens after an unreachable error and a clean close, every time', async () => {
-    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const at = (after?: string) => chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d', after)
     const { errors, opened, dropped } = connect(at)
     for (const n of [1, 2, 3, 4]) {
       await settled(() => expect(opened).toHaveBeenCalledTimes(n))
@@ -331,7 +339,7 @@ describe('the chat socket', () => {
   })
 
   it('keeps reopening when each one says thread.started and then unreachable', async () => {
-    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const at = (after?: string) => chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d', after)
     const { errors, opened, dropped } = connect(at)
     for (const n of [1, 2, 3]) {
       await settled(() => expect(opened).toHaveBeenCalledTimes(n))
@@ -346,7 +354,7 @@ describe('the chat socket', () => {
   })
 
   it('reports a failed turn once, though a reopen replays its start and a send went nowhere', async () => {
-    const at = (after?: string) => chatAddress('yantra-web', '1a2b3c4d', after)
+    const at = (after?: string) => chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d', after)
     const { socket, errors, opened, dropped } = connect(at, [200])
     await settled(() => expect(opened).toHaveBeenCalledTimes(1))
     const started = JSON.stringify({ threadId: '1a2b3c4d', cursor: 'r1:812:0', type: 'turn.started' })

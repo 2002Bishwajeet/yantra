@@ -47,7 +47,7 @@ type Over = Partial<ChatHeaderProps>
 /** The header in a router with the workspace route, so a picked thread can be followed. */
 async function show(over: Over = {}, url = '/w/site?view=chat') {
   const props: ChatHeaderProps = {
-    workspace: 'site',
+    target: { kind: 'workspace', workspace: 'site' },
     thread: null,
     busy: false,
     diffs: 0,
@@ -256,7 +256,7 @@ describe('the thread menu', () => {
       useEffect(() => {
         control.pick = set.current
       }, [])
-      return <ChatHeader busy={false} diff={{ open: false, onToggle: () => {}, onRefresh: () => {} }} diffRef={idle} diffs={0} terminal={{ open: false, onToggle: () => {} }} terminalRef={idle} added={false} onFix={() => {}} thread={thread} workspace="site" />
+      return <ChatHeader busy={false} diff={{ open: false, onToggle: () => {}, onRefresh: () => {} }} diffRef={idle} diffs={0} terminal={{ open: false, onToggle: () => {} }} terminalRef={idle} added={false} onFix={() => {}} thread={thread} target={{ kind: 'workspace', workspace: 'site' }} />
     }
     const root = createRootRoute({ component: Switch })
     const router = createRouter({ routeTree: root, history: createMemoryHistory() })
@@ -452,5 +452,106 @@ describe('the live state of each thread (Y-649)', () => {
     await show({ thread: id, busy: false })
     await openMenu()
     await waitFor(async () => expect((await rows())[0]!.textContent).toContain('Idle'))
+  })
+})
+
+describe('a home chat header (ADR-0046)', () => {
+  const calls: string[] = []
+  const stub = (removal: [number, unknown]) => {
+    calls.length = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((path: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? 'GET'} ${path}`)
+        return Promise.resolve(init?.method === 'DELETE' ? answer(...removal) : answer(200, contract.machineThreads))
+      }),
+    )
+  }
+
+  async function showHome(over: Partial<ChatHeaderProps> = {}, url = '/m/mac/home?thread=6a1b2c3d4e5f6a7b') {
+    const props: ChatHeaderProps = {
+      target: { kind: 'home', machine: 'mac' },
+      thread: null,
+      urlThread: '6a1b2c3d4e5f6a7b',
+      busy: false,
+      diffs: 0,
+      diff: { open: false, onToggle: () => {}, onRefresh: () => {} },
+      diffRef: idle,
+      terminal: { open: false, onToggle: () => {} },
+      terminalRef: idle,
+      added: false,
+      onFix: () => {},
+      ...over,
+    }
+    const root = createRootRoute()
+    const home = createRoute({ getParentRoute: () => root, path: '/m/$machine/home', component: () => <ChatHeader {...props} /> })
+    const router = createRouter({ routeTree: root.addChildren([home]), history: createMemoryHistory({ initialEntries: [url] }) })
+    await router.load()
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    )
+    return router
+  }
+
+  it('lists the machine\'s home threads by title and leaves the workspace ones out', async () => {
+    stub([204, undefined])
+    await showHome()
+    const menu = await openMenu('Threads, Say hello')
+    expect(within(menu).getByRole('menuitem', { name: /Say hello/ }).getAttribute('href')).toBe('/m/mac/home?thread=6a1b2c3d4e5f6a7b')
+    expect(within(menu).queryByText('Keep a thread store')).toBeNull()
+    expect(within(menu).getByRole('menuitem', { name: 'New thread' }).getAttribute('href')).toBe('/m/mac/home')
+    expect(calls).toEqual(['GET /api/machines/mac/threads'])
+  })
+
+  it('draws no Diff, terminal, Commit, Push or Open PR', async () => {
+    stub([204, undefined])
+    await showHome()
+    await trigger(/^Threads, /)
+    const names = screen.getAllByRole('button').map((one) => one.getAttribute('aria-label') ?? one.textContent ?? '')
+    expect(names.filter((name) => /^(Diff|Terminal|Commit|Push|Open PR|Git actions)/.test(name))).toEqual([])
+  })
+
+  it('has no Remove for a chat with no thread, and none while a turn runs', async () => {
+    stub([204, undefined])
+    await showHome({ urlThread: undefined })
+    expect((await screen.findByRole('button', { name: 'Remove' })).hasAttribute('disabled')).toBe(true)
+    cleanup()
+    await showHome({ busy: true })
+    expect((await screen.findByRole('button', { name: 'Remove' })).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('asks, then DELETEs the thread and leaves for a new one', async () => {
+    stub([204, undefined])
+    const router = await showHome()
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(calls).toContain('DELETE /api/machines/mac/threads/6a1b2c3d4e5f6a7b'))
+    await waitFor(() => expect(router.state.location.search).toEqual({}))
+    expect(router.state.location.pathname).toBe('/m/mac/home')
+  })
+
+  it.each([
+    [409, 'a turn is running'],
+    [503, 'mac did not answer'],
+  ])('shows an error surface with the daemon\'s words when Remove answers %i, and stays', async (status, said) => {
+    stub([status, said])
+    const router = await showHome()
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    expect(await within(dialog).findByText('The thread could not be removed')).toBeTruthy()
+    expect(within(dialog).getByText(said)).toBeTruthy()
+    expect(router.state.location.search).toEqual({ thread: '6a1b2c3d4e5f6a7b' })
+  })
+
+  it('says why the list failed and tries again', async () => {
+    calls.length = 0
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(answer(503, 'the store is not open'))))
+    await showHome()
+    await openMenu()
+    expect(await screen.findByText('The threads could not be listed')).toBeTruthy()
+    expect(screen.getByText('the store is not open')).toBeTruthy()
   })
 })

@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react'
+import { FolderOpen, RefreshCw } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Machine } from '@/api'
@@ -122,6 +122,19 @@ function Machines(props: { form: SessionForm; values: Values; preset: string }) 
         })}
       </div>
       {hub ? <HubJoin name={hub.name} /> : null}
+      {/* ADR-0046 decision 1.1: Claude in the machine's home folder, with no workspace. */}
+      {shown.some((one) => one.name === values.machine) ? (
+        <div>
+          <Button
+            icon={<FolderOpen />}
+            render={<Link params={{ machine: values.machine }} to="/m/$machine/home" />}
+            role="link"
+            variant="outlined"
+          >
+            Chat in home folder
+          </Button>
+        </div>
+      ) : null}
       <SuggestMachine form={form} machines={shown} preset={preset} values={values} />
       <LoginServerWarning chosen={values.machine} machines={machines.data} />
     </>

@@ -1,13 +1,13 @@
 # yantra web — the dashboard
 
-Seventeen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
+Eighteen routes over the API `yantrad` serves at `/api`, on TanStack Router — the
 work at `/`, every workspace and machine at `/fleet`, the machines compared at
 `/machines`, the guided Add a device at `/machines/add`, one machine at `/m/$machine`, one tmux session's terminal at
-`/m/$machine/s/$session`, one workspace's chat, terminal (with its transcript as History) and spend
+`/m/$machine/s/$session`, Claude in a machine's home folder at `/m/$machine/home` (Y-700), one workspace's chat, terminal (with its transcript as History) and spend
 at `/w/$name`, its file at `/w/$name/repair`, the four-step create at `/new`,
 spend at `/usage`, the setup checklist at `/setup`, the preferences at `/settings` and `/settings/$category`, and
 the phone's notifications at `/notifications`, and the rooms live agents share at
-`/rooms` and `/rooms/$room` (Y-536). A seventeenth, `/m3`, is the
+`/rooms` and `/rooms/$room` (Y-536). An eighteenth, `/m3`, is the
 component gallery and has a chunk behind it in dev builds only.
 `/` is the one eager route; every other screen arrives with its own chunk
 (ADR-0024 §3). The readings poll on TanStack Query and every write is a
@@ -871,7 +871,7 @@ public/
 src/
   api.ts             the wire shapes, read and written; every state is a tag
   contract.gen.ts    yantrad's own answers, `satisfies` those shapes. Generated
-  router.ts          TanStack Router: seventeen routes, one a dev-only gallery,
+  router.ts          TanStack Router: eighteen routes, one a dev-only gallery,
                      one of them eager, each with a loader that warms its reads
   work.ts            D3 §4's bands — who must act next, and the fourth state
                      that is nobody having read yet
@@ -921,6 +921,7 @@ src/
     machines/        `/machines` — a card per machine, its checks, and Doctor
     machine/         `/m/$machine`
     session/         `/w/$name` — chat, terminal (History), spend; `keys.ts` is the loop's chords
+    home-chat/       `/m/$machine/home` — `Chat` with the home target: no repository, no git controls (ADR-0046)
     session-terminal/`/m/$machine/s/$session` — the same terminal on a session
                      no workspace claims (ADR-0022)
     repair/          `/w/$name/repair` — the file itself (ADR-0020)

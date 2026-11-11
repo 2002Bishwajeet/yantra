@@ -603,6 +603,15 @@ export type Thread = {
   seen: number | null
 }
 
+/** One entry of `GET /api/machines/{m}/threads` (ADR-0046 decision 1.7): `workspace` is null for a home thread. */
+export type MachineThread = Thread & { workspace: string | null }
+
+/** `POST /api/machines/{m}/threads/new` with `{ prompt }`: a home thread whose first turn is running. */
+export type HomeOpened = {
+  thread: string
+  machine: string
+}
+
 /** `POST /api/workspaces/{name}/threads/new` with `{ issue }`. `draft` is the
  *  composer's first text. */
 export type ThreadOpened = {

@@ -10,6 +10,7 @@ import {
 import {
   attentionQuery,
   machineReadinessQuery,
+  machineThreadsQuery,
   machinesQuery,
   notificationsQuery,
   readinessQuery,
@@ -123,6 +124,22 @@ const sessionTerminal = createRoute({
     void client.prefetchQuery(sessionsQuery())
   },
   head: ({ params }) => titled(`${params.session} on ${params.machine}`),
+})
+
+// ADR-0046 decision 1.1: Claude in a machine's home folder, with no workspace and no repository.
+const homeChat = createRoute({
+  getParentRoute: () => root,
+  path: '/m/$machine/home',
+  validateSearch: (search: Record<string, unknown>): { thread?: string } => ({
+    // As /w/$name reads it: the daemon compares the id with its store, so anything else is its `unknownThread`.
+    thread: typeof search.thread === 'string' && search.thread !== '' ? search.thread : undefined,
+  }),
+  component: lazyRouteComponent(() => import('@/screens/home-chat/HomeChat'), 'HomeChat'),
+  loader: ({ context: { client }, params }) => {
+    void client.prefetchQuery(machinesQuery())
+    void client.prefetchQuery(machineThreadsQuery(params.machine))
+  },
+  head: ({ params }) => titled(`Home on ${params.machine}`),
 })
 
 const usage = createRoute({
@@ -296,6 +313,7 @@ export const routeTree = root.addChildren([
   machines,
   machine,
   sessionTerminal,
+  homeChat,
   usage,
   session,
   repair,

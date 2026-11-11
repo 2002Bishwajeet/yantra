@@ -25,6 +25,8 @@ export const keys = {
   threadStates: (name: string) => ['workspaces', name, 'thread-states'] as const,
   commands: (name: string, thread: string | null, harness: string) =>
     ['workspaces', name, 'commands', thread, harness] as const,
+  /** Rooted apart from `machines`: the sweep's prefix invalidation must not reread the store. */
+  machineThreads: (machine: string) => ['machine-threads', machine] as const,
   sessions: () => ['sessions'] as const,
   /** The whole sweep, or one machine's report under it. */
   readiness: (machine?: string) =>

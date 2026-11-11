@@ -3651,6 +3651,58 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 .collect::<Vec<_>>()),
         ),
         (
+            "machineThreads",
+            "MachineThread[]",
+            of(&[
+                (
+                    "site",
+                    "5a1b2c3d4e5f6a7b",
+                    Some("Keep a thread store"),
+                    format!("yantra/chat/site/{}", "5a1b2c3d4e5f6a7b"),
+                    format!(
+                        "/home/<user>/.yantra/worktrees/chat/site/{}",
+                        "5a1b2c3d4e5f6a7b"
+                    ),
+                ),
+                (
+                    "",
+                    "6a1b2c3d4e5f6a7b",
+                    Some("Say hello"),
+                    String::new(),
+                    String::new(),
+                ),
+            ]
+            .into_iter()
+            .map(|(workspace, id, title, branch, worktree)| {
+                MachineThread::of(
+                    Row {
+                        workspace: workspace.to_owned(),
+                        id: id.to_owned(),
+                        machine: "mac".to_owned(),
+                        branch,
+                        worktree,
+                        harness: Some("claude".to_owned()),
+                        session: None,
+                        title: title.map(str::to_owned),
+                        status: Status::Idle,
+                        created: SEEN,
+                        active: SEEN,
+                        seen: Some(SEEN),
+                    },
+                    &crate::chat::Registry::default(),
+                )
+            })
+            .collect::<Vec<_>>()),
+        ),
+        (
+            "homeOpened",
+            "HomeOpened",
+            of(&HomeOpened {
+                thread: "6a1b2c3d4e5f6a7b".to_owned(),
+                machine: "mac".to_owned(),
+            }),
+        ),
+        (
             "threadsFound",
             "ThreadFound[]",
             of(&[ThreadFound::of(Row {

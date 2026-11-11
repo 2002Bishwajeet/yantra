@@ -9,6 +9,7 @@ import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { ChevronDown, Diff, Plus, RefreshCw, SquareTerminal } from 'lucide-react'
+import type { ChatTarget } from '@/api/chat'
 import { useThreads } from '@/api/mutations'
 import { useThreadStates } from '@/api/queries'
 import { useTick } from '@/useTick'
@@ -23,10 +24,12 @@ import { Text } from '@/m3/text/Text'
 import { useRegisterLoopCommands } from '@/shell/loopCommands'
 import { Checks } from './Checks'
 import { GitActions } from './GitActions'
+import { HomeHeader } from './HomeHeader'
 import { elapsed, groupThreads, presenceWord, prMark, readOnlyWhy, threadTitle } from './threads'
 
 export type ChatHeaderProps = {
-  workspace: string
+  /** A home chat draws the thread menu and Remove, and no git (ADR-0046). */
+  target: ChatTarget
   /** The thread the daemon named for this chat; null until it has. */
   thread: string | null
   /** `?thread=`: the chat to continue, known before the daemon names it. */
@@ -49,9 +52,17 @@ export type ChatHeaderProps = {
   onReadOnly?: (why: string | null) => void
 }
 
+export function ChatHeader(props: ChatHeaderProps) {
+  const { target, thread, urlThread, busy, into } = props
+  if (target.kind === 'home') {
+    return <HomeHeader busy={busy} into={into} machine={target.machine} thread={thread} urlThread={urlThread} />
+  }
+  return <WorkspaceHeader {...props} workspace={target.workspace} />
+}
+
 /** Y-633: the Chat tab's top line. The threads read on mount and on Refresh, and never poll:
  *  each read is an ssh to the machine and a call to GitHub (Y-489). */
-export function ChatHeader(props: ChatHeaderProps) {
+function WorkspaceHeader(props: ChatHeaderProps & { workspace: string }) {
   const { workspace, thread, urlThread, busy, diffs, diff, diffRef, terminal, terminalRef, added, into, onFix, onReadOnly } =
     props
   const active = thread ?? urlThread ?? null

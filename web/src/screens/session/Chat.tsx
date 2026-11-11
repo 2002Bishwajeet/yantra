@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ImagePlus } from 'lucide-react'
 import type { Mentions, SlashCommand, Workspace } from '@/api'
-import { IMAGE_TYPES, type ChatError } from '@/api/chat'
+import { IMAGE_TYPES, type ChatError, type ChatTarget } from '@/api/chat'
 import { asApiError } from '@/api/errors'
 import { useCommands, useMentions } from '@/api/queries'
 import {
@@ -165,7 +165,10 @@ function mentionItems(
 const NO_COMMANDS_YET = 'The commands appear after the agent’s first reply.'
 
 export type ChatProps = {
-  workspace: Workspace
+  /** A workspace's worktree, or a machine's home folder (ADR-0046). */
+  target: ChatTarget
+  /** The record of a workspace target: its machine, and the diff and terminal that need it. */
+  workspace?: Workspace
   /** `?thread=`: the chat to continue. Read when the socket opens. */
   thread?: string
   /** The daemon named a new thread; the URL keeps it. */
@@ -181,12 +184,16 @@ export type ChatProps = {
  *  writes the tree the Terminal tab's agent is in. Every harness draws on the
  *  one timeline. */
 export function Chat(props: ChatProps) {
-  const { workspace, thread, onThread, initialDraft, slot } = props
-  const chat = useChat(workspace.name, thread, onThread)
+  const { target, workspace, thread, onThread, initialDraft, slot } = props
+  // A home chat has no repository, so nothing that reads one is drawn or asked.
+  const home = target.kind === 'home'
+  const where = target.kind === 'home' ? target.machine : target.workspace
+  const machine = target.kind === 'home' ? target.machine : (workspace?.machine ?? '')
+  const chat = useChat(target, thread, onThread)
   const { timeline, error, link } = chat
   // ADR-0045: an offline or gone thread opens read-only; ChatHeader reads the list that says so.
   const [readOnly, setReadOnly] = useState<string | null>(null)
-  const [draft, setDraft, recallInto] = useDraft(draftId(workspace.name, timeline.thread), initialDraft)
+  const [draft, setDraft, recallInto] = useDraft(home && !timeline.thread ? `home:${where}` : draftId(where, timeline.thread), initialDraft)
   const [showDiff, setShowDiff] = useState(false)
   const [showTerminal, setShowTerminal] = useState(false)
   const terminalButton = useRef<HTMLButtonElement>(null)
@@ -204,9 +211,10 @@ export function Chat(props: ChatProps) {
     [branch],
   )
   const editors = useEditors(
-    workspace.name,
+    home ? '' : where,
     timeline.thread,
-    showDiff || timeline.entries.some((entry) => entry.kind === 'diff' || (entry.kind === 'message' && entry.who === 'agent')),
+    !home &&
+      (showDiff || timeline.entries.some((entry) => entry.kind === 'diff' || (entry.kind === 'message' && entry.who === 'agent'))),
   )
   const [picked, setPicked] = useState<Harness>('claude')
   const [mode, setMode] = useState<PermissionMode>(() => recallMode(thread))
@@ -263,14 +271,14 @@ export function Chat(props: ChatProps) {
   // Escape shuts the trigger that starts here until the text changes.
   const [dismissed, setDismissed] = useState<number | null>(null)
   const [active, setActive] = useState(0)
-  const found = detectTrigger(draft, caret)
+  const found = home ? null : detectTrigger(draft, caret)
   const trigger = found && found.start !== dismissed ? found : null
   const menu = useId()
   const kind = trigger?.kind
-  const mentions = useMentions(workspace.name, timeline.thread, harness ?? 'claude', kind === 'path' || kind === 'skill')
+  const mentions = useMentions(where, timeline.thread, harness ?? 'claude', kind === 'path' || kind === 'skill')
   // Y-563: Claude is asked for its commands; an ACP agent sent its own on the socket.
   const asksClaude = (harness ?? 'claude') === 'claude'
-  const claudeCommands = useCommands(workspace.name, timeline.thread, 'claude', kind === 'command' && asksClaude)
+  const claudeCommands = useCommands(where, timeline.thread, 'claude', kind === 'command' && asksClaude)
   const commands = asksClaude ? claudeCommands.data?.commands : timeline.commands
   const asked = kind === 'command' ? (asksClaude ? claudeCommands : null) : mentions
   const query = trigger?.query ?? ''
@@ -460,11 +468,11 @@ export function Chat(props: ChatProps) {
         onReadOnly={setReadOnly}
         terminal={{ open: showTerminal, onToggle: () => (showTerminal ? closeTerminal() : setShowTerminal(true)) }}
         terminalRef={terminalButton}
+        target={target}
         thread={timeline.thread}
         urlThread={thread}
-        workspace={workspace.name}
       />
-      {showDiff ? (
+      {workspace && showDiff ? (
         <section aria-label="Branch diff" className="chat__branch">
           <DiffSheet
             editors={editors}
@@ -478,8 +486,9 @@ export function Chat(props: ChatProps) {
       <section aria-label="Conversation" className="chat__turns" hidden={showDiff}>
         {timeline.entries.length === 0 && link !== 'connecting' ? (
           <EmptyState title="Nothing asked yet">
-            Ask {agent} something about {workspace.name}. It works on a branch of its own, so the session in the
-            terminal is untouched.
+            {home
+              ? `${agent} works in the home folder on ${where}, with no repository. Ask it something.`
+              : `Ask ${agent} something about ${where}. It works on a branch of its own, so the session in the terminal is untouched.`}
           </EmptyState>
         ) : null}
         {rows.map((row) =>
@@ -487,7 +496,7 @@ export function Chat(props: ChatProps) {
             <WorkLog
               key={row.id}
               said={(message) => (
-                <Said agent={agent} machine={workspace.machine} message={message} worktree={editors.worktree} />
+                <Said agent={agent} machine={machine} message={message} worktree={editors.worktree} />
               )}
               work={row}
             />
@@ -495,11 +504,11 @@ export function Chat(props: ChatProps) {
             <Said
               agent={agent}
               key={row.entry.id}
-              machine={workspace.machine}
+              machine={machine}
               message={row.entry}
               worktree={editors.worktree}
             />
-          ) : row.entry.kind === 'diff' ? (
+          ) : row.entry.kind === 'diff' && workspace ? (
             <TurnDiff
               disabled={busy || link !== 'open'}
               diff={row.entry}
@@ -519,7 +528,7 @@ export function Chat(props: ChatProps) {
         ) : error ? (
           <ErrorSurface.Inline
             error={error}
-            eyebrow={`on ${workspace.machine}`}
+            eyebrow={`on ${machine}`}
             reset={chat.retry}
             title={
               error.kind === 'turnFailed'
@@ -619,7 +628,7 @@ export function Chat(props: ChatProps) {
             aria-autocomplete="list"
             aria-controls={trigger ? menu : undefined}
             aria-expanded={trigger !== null}
-            aria-label={`Message ${agent} in ${workspace.name}`}
+            aria-label={`Message ${agent} in ${where}`}
             disabled={link === 'closed' || readOnly !== null}
             enterSends={enterSends}
             onChange={(event) => {
@@ -679,7 +688,7 @@ export function Chat(props: ChatProps) {
                   type="file"
                 />
                 <Separator />
-                {harness ? (
+                {harness && !home ? (
                   <HarnessPicker
                     disabled={busy || link !== 'open'}
                     locked={locked}
@@ -718,7 +727,7 @@ export function Chat(props: ChatProps) {
         <Composer.Status quiet={timeline.requests.length > 0 && draft === '' && link === 'open'}>
           {status(timeline, harness)}
         </Composer.Status>
-        {showTerminal && timeline.thread ? (
+        {workspace && showTerminal && timeline.thread ? (
           <TerminalDrawer
             agent={agent}
             key={timeline.thread}
