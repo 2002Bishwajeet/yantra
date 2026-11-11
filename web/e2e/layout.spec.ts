@@ -1,4 +1,4 @@
-import { axe, expect, IPHONE_ADD_DEVICE, scenario, test } from './lib/test'
+import { axe, expect, scenario, test } from './lib/test'
 import { ROUTES, type Route } from './lib/routes'
 import { scrollTo } from './lib/scroller'
 
@@ -22,9 +22,8 @@ const SWEEP = [
 ] as readonly (Route | { id: string; path: string; heading: string })[]
 
 for (const one of SWEEP) {
-  test(`${one.id} ${one.path} keeps one left edge, one width and one scroll`, async ({ page, size, browserName }) => {
+  test(`${one.id} ${one.path} keeps one left edge, one width and one scroll`, async ({ page, size }) => {
     test.skip(size !== 'phone' && DIALOG_OFF_PHONE.includes(one.id), 'a dialog, not a page, off the phone')
-    test.fixme(browserName === 'webkit' && one.id === 'add-device', IPHONE_ADD_DEVICE)
     await scenario(page, ('scenario' in one && one.scenario) || 'busy')
     await page.goto(one.path)
     const body = page.locator('.m3-page').first()

@@ -8,7 +8,7 @@
 import { useId, useMemo, useRef, useState } from 'react'
 import { getFiletypeFromFileName, parsePatchFiles, type FileDiffMetadata, type SelectedLineRange } from '@pierre/diffs'
 import { FileDiff } from '@pierre/diffs/react'
-import { MessageSquarePlus } from 'lucide-react'
+import { MessageSquarePlus, Plus } from 'lucide-react'
 import type { Workspace } from '@/api'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -105,11 +105,23 @@ function FileSection(props: {
             // One open comment box at a time: a second selection would drop what is typed in it.
             enableGutterUtility: draft === null,
             enableLineSelection: draft === null,
-            onGutterUtilityClick: (range) => onStart({ path: entry.path, range }),
             onLineSelectionEnd: (range) => {
               if (range) onStart({ path: entry.path, range })
             },
           }}
+          renderGutterUtility={(getHoveredLine) => (
+            <button
+              aria-label="Comment on this line"
+              className="diff__gutter-utility"
+              onClick={() => {
+                const line = getHoveredLine()
+                if (line) onStart({ path: entry.path, range: { start: line.lineNumber, end: line.lineNumber, side: line.side } })
+              }}
+              type="button"
+            >
+              <Plus aria-hidden size={14} />
+            </button>
+          )}
           renderAnnotation={() => (
             <DiffComment
               label={`${entry.path} ${mine?.range ? rangeLabel(mine.range) : ''}`}

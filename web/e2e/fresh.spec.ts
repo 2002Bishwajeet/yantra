@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import type { Size } from './lib/sizes'
-import { axe, expect, IPHONE_ADD_DEVICE, scenario, screenshot, test } from './lib/test'
+import { axe, expect, scenario, screenshot, test } from './lib/test'
 import type { Scenario } from './lib/scenario'
 
 /* Y-578: a fresh install, screen by screen. Three things are asserted for every
@@ -137,6 +137,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     Copy: text('Copied'),
     'Show key': dialog,
     'Show QR code': expanded,
+    'tailscale.com/download': url('https://tailscale.com/download'),
     ...Object.fromEntries(['pi-5', 'nas'].map((n) => [n, url(`/machines/add?platform=linux&machine=${n}`)])),
   },
 }
@@ -259,8 +260,7 @@ function clipped(page: Page) {
 
 for (const destination of DESTINATIONS) {
   test.describe(`a fresh install at ${destination.path}`, () => {
-    test('draws, passes axe and is captured', async ({ page, size, browserName }) => {
-      test.fixme(browserName === 'webkit' && destination.id === 'add-device', IPHONE_ADD_DEVICE)
+    test('draws, passes axe and is captured', async ({ page, size }) => {
       await open(page, 'fresh', destination)
       // The page draws a random name; a fixed one keeps the capture the same each run.
       if (destination.id === 'new') await page.getByLabel('Name').fill('quiet-otter')
@@ -280,7 +280,6 @@ for (const destination of DESTINATIONS) {
     }
 
     test('answers every button', async ({ page, size, context, browserName }) => {
-      test.fixme(browserName === 'webkit' && destination.id === 'add-device', IPHONE_ADD_DEVICE)
       test.setTimeout(240_000)
       // WebKit has no clipboard permission to grant, and lets a tap write the clipboard without one.
       if (browserName !== 'webkit') await context.grantPermissions(['clipboard-read', 'clipboard-write'])

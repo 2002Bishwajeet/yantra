@@ -81,6 +81,14 @@ describe('the platform', () => {
   })
 })
 
+describe('a phone that is not on the tailnet', () => {
+  it('links to the Tailscale download page, underlined by the page and named by its address', async () => {
+    mountSettings('phone', at('platform=mobile'), fleet([], []))
+    const link = await screen.findByRole('link', { name: 'tailscale.com/download' })
+    expect(link.getAttribute('href')).toBe('https://tailscale.com/download')
+  })
+})
+
 const onPhone = (share?: () => Promise<void>) =>
   vi.stubGlobal('navigator', { userAgent: navigator.userAgent, clipboard: { writeText: vi.fn() }, ...(share ? { share } : {}) })
 const joinAt = at('platform=linux&machine=laptop')

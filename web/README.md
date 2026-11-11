@@ -823,7 +823,7 @@ render, the shell, the tokens, the colour scheme, `sw.test.ts` and
 834×1194, desktop 1440×1024** ([`lib/sizes.ts`](e2e/lib/sizes.ts)) — against
 `vite preview` over a real build rather than the dev server. A fourth, `phone-webkit`, runs
 the phone in WebKit with an iPhone profile (Y-660). It skips the image comparison, because every
-baseline is a Chromium render. `lib/axe.ts` runs
+baseline is a Chromium render. CI runs the Add a device and turn-diff tests there (Y-684). `lib/axe.ts` runs
 axe with `wcag2a wcag2aa wcag21a wcag21aa wcag22aa` and fails on any violation
 outside a spec's `known` list, and fails again the day a known one is fixed
 without the list being edited. **It waits for every CSS transition to end
@@ -857,7 +857,8 @@ no-op in the main checkout, where `node_modules` already resolves to itself.
 
 [`.github/workflows/web.yml`](../.github/workflows/web.yml) runs lint, both
 type-checks, the build, `npm test` and the budget in one job, and the e2e suite
-in three more — one per form factor, in that image.
+in three more — one per form factor, in that image. It also runs the Add a device
+and turn-diff tests in WebKit at iPhone size, in a fifth job (Y-684).
 
 ## Layout
 

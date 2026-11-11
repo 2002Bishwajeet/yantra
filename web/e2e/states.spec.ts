@@ -1,4 +1,4 @@
-import { axe, expect, IPHONE_ADD_DEVICE, keyboardWalk, scenario, screenshot, test } from './lib/test'
+import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { ROUTES, type RouteId } from './lib/routes'
 
 /** Y-351: every route on every error and empty scenario. What each route
@@ -101,10 +101,9 @@ const pending = (id: RouteId, which: Case) => {
 
 for (const one of ROUTES) {
   test.describe(`${one.id} ${one.path} states`, () => {
-    test(`on unreachable: ${UNREACHABLE[one.id]}`, async ({ page, size, browserName }) => {
+    test(`on unreachable: ${UNREACHABLE[one.id]}`, async ({ page, size }) => {
       const kind = UNREACHABLE[one.id]
       test.skip(kind === 'none', 'reads nothing the tailnet answers')
-      test.fixme(browserName === 'webkit' && one.id === 'add-device', IPHONE_ADD_DEVICE)
       pending(one.id, 'unreachable')
       await scenario(page, 'unreachable')
       await page.goto(one.path)

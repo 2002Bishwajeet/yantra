@@ -1,4 +1,4 @@
-import { axe, expect, scenario, test, WEBKIT_DIFF_BUTTON } from './lib/test'
+import { axe, expect, scenario, test } from './lib/test'
 import type { Page } from '@playwright/test'
 
 /** The diff panel (Y-491, ADR-0034 decisions 6 and 7) on the fixture chat. The
@@ -105,8 +105,7 @@ test.describe('the branch diff', () => {
 })
 
 test.describe('a turn’s diff', () => {
-  test('opens in the same viewer, and keeps Revert', async ({ page, browserName }) => {
-    test.fixme(browserName === 'webkit', WEBKIT_DIFF_BUTTON)
+  test('opens in the same viewer, and keeps Revert', async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto(`/w/${NAME}`)
     await composer(page).fill('run the core tests')

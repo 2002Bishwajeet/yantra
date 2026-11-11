@@ -87,6 +87,26 @@ describe('the viewer on the real renderers', () => {
     expect(screen.getByText('A binary file has no lines to show.')).toBeTruthy()
   })
 
+  it('names the utility button, and a press on it opens a comment on the hovered line', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Viewer data={DATA} onComment={() => {}} />
+      </QueryClientProvider>,
+    )
+    await gutter('change-addition', 3)
+    const line = document.querySelector('[data-path="src/new.rs"] diffs-container')!.shadowRoot!.querySelector('[data-line="3"]')!
+    // jsdom has no PointerEvent, and the library reads only mouse moves.
+    fireEvent(line, Object.assign(new MouseEvent('pointermove', { bubbles: true, composed: true }), { pointerType: 'mouse' }))
+    const button = await waitFor(() => {
+      const found = document.querySelector<HTMLButtonElement>('[data-path="src/new.rs"] button[aria-label="Comment on this line"]')
+      if (!found) throw new Error('the utility button is not drawn yet')
+      return found
+    })
+    expect(button.getAttribute('aria-label')).toBe('Comment on this line')
+    fireEvent.click(button)
+    expect(await screen.findByRole('textbox', { name: 'Comment on src/new.rs L3' })).toBeTruthy()
+  })
+
   it('draws the tree’s rows with their words, and reveals the file a row names', async () => {
     const reveal = vi.fn()
     Element.prototype.scrollIntoView = reveal
