@@ -99,7 +99,7 @@ function Stamp(props: { reads: Parameters<typeof stamp>[0]; now: number; classNa
 function CardHead(props: { id: string; title: string; words: ReactNode }) {
   return (
     <div className="dash__head">
-      <Text render={<h2 />} emphasized id={props.id} scale="title-large">
+      <Text className="dash__title" render={<h2 />} emphasized id={props.id} scale="title-large">
         {props.title}
       </Text>
       <Text scale="body-medium" tone="variant">
@@ -170,7 +170,12 @@ function Strip(props: {
             </span>
             <State className={one.asleep ? undefined : 'dash__down'} state="unknown">
               {one.name} {one.asleep ? 'asleep' : 'not answering'}
-              {one.since ? <span className="dash__long"> {one.since}</span> : null}
+              {one.since ? (
+                <span className="dash__long">
+                  {' '}
+                  <span className="dash__when">{one.since}</span>
+                </span>
+              ) : null}
             </State>
             <span aria-hidden="true" className="dash__dot">
               ·
@@ -197,11 +202,15 @@ function GithubRow(props: { item: Item; kind: 'review' | 'issue'; now: number })
         supporting={
           <>
             {item.title}
-            {age ? <> · <Mono>{age.text}</Mono></> : null}
+            {age ? <> · <Mono className="dash__when">{age.text}</Mono></> : null}
           </>
         }
       />
-      <Button render={<a href={item.url} rel="noreferrer" target="_blank" />} role="link">
+      <Button
+        render={<a href={item.url} rel="noreferrer" target="_blank" />}
+        role="link"
+        variant={kind === 'review' ? 'tonal' : 'text'}
+      >
         {kind === 'review' ? 'Review' : 'Open'}
       </Button>
     </Row>
@@ -245,8 +254,12 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
               {asked ? (
                 <>
                   {' '}
-                  · asked <Mono>{ago(now / 1000 - asked.at, now).text}</Mono>
-                  {isAge(now / 1000 - asked.at) ? ' ago' : null} · {asked.said}
+                  · asked{' '}
+                  <Mono className="dash__when">
+                    {ago(now / 1000 - asked.at, now).text}
+                    {isAge(now / 1000 - asked.at) ? ' ago' : null}
+                  </Mono>{' '}
+                  · {asked.said}
                 </>
               ) : null}
             </State>
@@ -255,6 +268,7 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
         <Button
           render={<Link params={{ name: workspace.name }} search={{ view: 'chat' }} to="/w/$name" />}
           role="link"
+          variant="tonal"
         >
           Answer
         </Button>
@@ -390,7 +404,7 @@ function RunningRow(props: {
             </State>
           }
         />
-        <Mono className="dash__elapsed">{seconds === null ? '' : elapsed(seconds)}</Mono>
+        <Mono className="dash__elapsed dash__when">{seconds === null ? '' : elapsed(seconds)}</Mono>
       </div>
       {seconds === null ? null : (
         <Track
@@ -429,7 +443,7 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
             {longest > 0 ? (
               <>
                 {' '}
-                · longest <Mono>{elapsed(longest)}</Mono>
+                · longest <Mono className="dash__when">{elapsed(longest)}</Mono>
               </>
             ) : null}
           </>
@@ -483,15 +497,12 @@ function Worth(props: {
     )
   }
   return (
-    <Card aria-labelledby="dash-worth" className="dash__worth" surface="tertiary">
-      <div className="dash__worth-head">
-        <Eyebrow render={<h2 />} id="dash-worth">
-          Worth a look
-        </Eyebrow>
-        <Text scale="body-medium">
-          {unknown ? 'unclaimed sessions unknown' : `${plural(rows.length, 'session')} no workspace claims`}
-        </Text>
-      </div>
+    <Card aria-labelledby="dash-worth" className="dash__worth" surface="high">
+      <CardHead
+        id="dash-worth"
+        title="Worth a look"
+        words={unknown ? 'unclaimed sessions unknown' : `${plural(rows.length, 'session')} no workspace claims`}
+      />
       {sessions.looked === 'never' ? (
         <NotLooked what="Sessions have" />
       ) : unknown ? (
@@ -499,43 +510,47 @@ function Worth(props: {
       ) : rows.length === 0 ? (
         <State state="idle">every tmux session on the machines that answered belongs to a workspace</State>
       ) : (
-        <ul className="dash__unclaimed-list">
-          {rows.map(({ machine, session }) => (
-            <li className="dash__unclaimed" key={`${machine} ${session.name}`}>
-              <State state="unknown">
-                <span className="dash__name">{session.name}</span>
-                <span className="dash__meta">
-                  {machine} · {plural(session.windows, 'window')} ·{' '}
-                  <Mono>{ago(now / 1000 - session.created_at, now).text}</Mono>
-                </span>
-              </State>
-              <Button
-                className="dash__attach"
-                render={<Link params={{ machine, session: session.name }} to="/m/$machine/s/$session" />}
-                role="link"
-                variant="text"
-              >
-                Attach
-              </Button>
-              {openedByHand(session.name) ? null : (
-                <Suspense fallback={kill(false)}>
-                  <KillSession
-                    machine={machine}
-                    row={
-                      <Row>
-                        <RowText
-                          headline={session.name}
-                          supporting={`${machine} · ${plural(session.windows, 'window')} · ${ago(now / 1000 - session.created_at, now).text}`}
-                        />
-                      </Row>
-                    }
-                    session={session.name}
-                    trigger={kill(true)}
-                  />
-                </Suspense>
-              )}
-            </li>
-          ))}
+        <ul className="dash__rows">
+          {rows.map(({ machine, session }) => {
+            const age = ago(now / 1000 - session.created_at, now).text
+            const supporting = (
+              <>
+                {machine} · {plural(session.windows, 'window')} · <Mono className="dash__when">{age}</Mono>
+              </>
+            )
+            return (
+              <li key={`${machine} ${session.name}`}>
+                <Row tone="lowest">
+                  <Tile name={session.name} />
+                  <RowText headline={session.name} supporting={supporting} />
+                  {openedByHand(session.name) ? null : (
+                    <Suspense fallback={kill(false)}>
+                      <KillSession
+                        machine={machine}
+                        row={
+                          <Row>
+                            <RowText
+                              headline={session.name}
+                              supporting={`${machine} · ${plural(session.windows, 'window')} · ${age}`}
+                            />
+                          </Row>
+                        }
+                        session={session.name}
+                        trigger={kill(true)}
+                      />
+                    </Suspense>
+                  )}
+                  <Button
+                    render={<Link params={{ machine, session: session.name }} to="/m/$machine/s/$session" />}
+                    role="link"
+                    variant="text"
+                  >
+                    Attach
+                  </Button>
+                </Row>
+              </li>
+            )
+          })}
         </ul>
       )}
     </Card>
@@ -558,7 +573,7 @@ function IdleRow(props: { row: Extract<WorkRow, { kind: 'workspace' }>; sessions
         <State size="small" state={mark}>
           {words}
         </State>
-        {started === null ? null : <Mono className="dash__age">{ago(now / 1000 - started, now).text}</Mono>}
+        {started === null ? null : <Mono className="dash__age dash__when">{ago(now / 1000 - started, now).text}</Mono>}
       </Row>
     </li>
   )
@@ -672,7 +687,7 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
                 <State className="dash__recent-words" size="small" state={one.mark}>
                   {one.words} · {one.machine}
                 </State>
-                <Mono className="dash__age">{ago(now / 1000 - one.at, now).text}</Mono>
+                <Mono className="dash__age dash__when">{ago(now / 1000 - one.at, now).text}</Mono>
               </Row>
             </li>
           ))}
