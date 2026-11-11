@@ -31,3 +31,8 @@
   line-height: 18px;
   color: var(--md-sys-color-on-surface-variant);
 }
+
+.session-terminal__status {
+  flex: none;
+  white-space: nowrap;
+}

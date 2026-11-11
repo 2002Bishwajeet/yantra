@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router'
 import { useSessions } from '@/api/hooks'
 import { ago } from '@/lib/time'
@@ -26,6 +27,7 @@ const route = getRouteApi('/m/$machine/s/$session')
 export function SessionTerminal() {
   const { machine, session } = route.useParams()
   const factor = useFormFactor()
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
   const navigate = useNavigate()
   const sessions = useSessions()
   const now = useTick(true)
@@ -45,7 +47,7 @@ export function SessionTerminal() {
     />
   )
   return (
-    <Page>
+    <Page className="session-terminal">
       <PageHeader
         actions={factor === 'phone' ? undefined : kill}
         // The route's own title, so the phone app bar and the page say the
@@ -73,6 +75,7 @@ export function SessionTerminal() {
             </Mono>
           ) : null}
         </div>
+        <div className="session-terminal__status" ref={setSlot} />
         {factor === 'phone' ? kill : null}
       </div>
       <Talk machine={machine} />
@@ -80,6 +83,7 @@ export function SessionTerminal() {
         height={factor === 'phone' ? '55vh' : '65vh'}
         key={`${machine}/${session}`}
         label={`tmux ${session} on ${machine}`}
+        statusIn={slot}
         target={{ machine, session }}
       >
         {factor === 'phone' ? <KeyRow /> : null}

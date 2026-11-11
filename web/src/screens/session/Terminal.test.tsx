@@ -228,7 +228,7 @@ describe('the terminal in the dashboard', () => {
 
   /** **WCAG 2.1.2, and the reason the pane is not a trap.** Tab is the shell's:
    *  it goes down the socket and moves no focus. Escape is the shell's too.
-   *  Only the pair leaves, and it leaves to the status line under the pane. */
+   *  Only the pair leaves, and it leaves to the hint under the pane. */
   it('sends Tab and Escape to the shell, and leaves the pane on Escape then Tab', async () => {
     await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))
@@ -245,7 +245,7 @@ describe('the terminal in the dashboard', () => {
     expect(daemonised.heard[2]).toEqual({ bytes: [0x1b] })
 
     press(area, 'Tab', 9)
-    expect(document.activeElement).toBe(screen.getByRole('status'))
+    expect(document.activeElement).toBe(document.querySelector('.terminal__escape'))
     // The Tab that left was not also typed into the session.
     expect(daemonised.heard.length).toBe(3)
   })
@@ -548,5 +548,72 @@ describe('a one-off terminal for an install step', () => {
     daemonised.say('no install on cachyos-g14 left a step 0; press Install again')
     await settled(() => expect(screen.getByRole('alert').textContent).toContain('press Install again'))
     expect(told).toBeUndefined()
+  })
+})
+
+/** **Y-720.** A page with a header gives the status a slot, so the line drops
+ *  its label and the pane keeps the rows under it. */
+describe('the status line in a header slot', () => {
+  const step: Target = { machine: MACHINE, step: 0, at: 100 }
+  let slot: HTMLDivElement
+
+  beforeEach(() => {
+    slot = document.createElement('div')
+    document.body.append(slot)
+  })
+  afterEach(() => slot.remove())
+
+  const inSlot = (target: Target = { machine: MACHINE, workspace: 'yantra' }) =>
+    renderRouted(<Terminal label={label(target)} statusIn={slot} target={target} />)
+
+  it('draws a short line in the slot, and none under the pane', async () => {
+    await inSlot()
+    const status = within(slot).getByRole('status')
+    expect(status.textContent).toBe('Connecting')
+    expect(document.querySelector('.terminal > .terminal__status')).toBeNull()
+
+    await settled(() => expect(status.textContent).toMatch(/^Attached · \d+×\d+$/))
+    expect(status.textContent).not.toContain('yantra')
+  })
+
+  it('leaves the pane for the hint, which a screen reader still gets', async () => {
+    await inSlot()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    const area = document.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement
+    area.focus()
+    press(area, 'Escape', 27)
+    press(area, 'Tab', 9)
+    expect(document.activeElement).toBe(document.querySelector('.terminal__escape'))
+    expect(area.getAttribute('aria-describedby')).toBe(document.querySelector('.terminal__escape')?.id)
+  })
+
+  it('says a refusal in the slot, and keeps the reason beside the pane', async () => {
+    await inSlot()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    daemonised.say('ssh: connect to host cachyos-g14 port 22: No route to host')
+    await settled(() => expect(screen.getByRole('alert').textContent).toContain('No route to host'))
+    expect(within(slot).getByRole('status').textContent).toBe('Refused')
+  })
+
+  it('says a dropped socket that ran out of attempts as Ended', async () => {
+    await inSlot()
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    freeze()
+    daemonised.keepHangingUp()
+    daemonised.hangUp()
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+      await settled(() =>
+        expect(within(slot).getByRole('status').textContent).toBe(`Reconnecting · ${attempt} of ${ATTEMPTS}`),
+      )
+      await vi.advanceTimersByTimeAsync(PAUSE)
+    }
+    await settled(() => expect(within(slot).getByRole('status').textContent).toBe('Ended'))
+  })
+
+  it('says how a one-off command ended', async () => {
+    await inSlot(step)
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+    daemonised.say('{"exit":0}')
+    await settled(() => expect(within(slot).getByRole('status').textContent).toBe('Exited 0'))
   })
 })

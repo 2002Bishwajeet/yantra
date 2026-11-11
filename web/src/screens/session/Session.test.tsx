@@ -243,7 +243,8 @@ describe('one workspace, three views the URL carries', () => {
     )
     await open('landing', 'terminal')
 
-    expect(await screen.findByText('connecting · landing on macbook')).toBeTruthy()
+    // The page title names the session, so the status in the bar says only how it is going.
+    expect(await screen.findByText('Connecting')).toBeTruthy()
     expect(document.querySelector('.session__terminal')?.textContent).not.toMatch(/tmux/i)
   })
 
@@ -412,6 +413,28 @@ describe("the Terminal's History", () => {
     await open('landing', 'spend')
     await screen.findByRole('link', { name: 'Spend', current: 'page' })
     expect(screen.queryByRole('button', { name: 'Show History' })).toBeNull()
+  })
+})
+
+describe("the Terminal's status", () => {
+  it('sits in the bar with the tabs, short, and the phone has no fallback banner', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    }))
+    daemon()
+    await open('landing', 'terminal')
+
+    const status = await screen.findByRole('status')
+    const bar = document.querySelector('.session__bar') as HTMLElement
+    expect(bar.contains(status)).toBe(true)
+    expect(status.textContent).toMatch(/^(Connecting|Reconnecting)/)
+    expect(document.querySelector('.terminal > .terminal__status')).toBeNull()
+    expect(screen.queryByText(/is the fallback/)).toBeNull()
   })
 })
 
