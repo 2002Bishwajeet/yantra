@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as contract from '@/contract.gen'
 import type { Check } from '@/api'
 import type { Reading } from '@/api/client'
-import { grant, grantPage, held, signedIn } from './github'
+import { grant, grantPage, held, hiddenNote, signedIn } from './github'
 
 const checked = (state: Check['state']): Reading<Check> => ({
   looked: 'ok',
@@ -76,5 +76,12 @@ describe('grantPage', () => {
     expect(grantPage('Iv1.abc')).toBe('https://github.com/settings/connections/applications/Iv1.abc')
     expect(grantPage(null)).toBe('https://github.com/settings/applications')
     expect(grantPage('')).toBe('https://github.com/settings/applications')
+  })
+})
+
+describe('hiddenNote', () => {
+  it('says a private membership is not listed, and names the organisations it sees none from', () => {
+    expect(hiddenNote(['a', 'b'])).toBe('A private membership is not listed. No repository from a, b.')
+    expect(hiddenNote([])).toBe('A private membership is not listed.')
   })
 })

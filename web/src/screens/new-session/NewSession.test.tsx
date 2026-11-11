@@ -316,6 +316,7 @@ describe('step 2, where the code comes from', () => {
       'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.abc123' }],
       'GET /api/repos/hidden': [200, { ...contract.hiddenOrgs, data: ['acme-corp', 'utopia-php'] }],
     })
+    expect(screen.getByText('A private membership is not listed. No repository from acme-corp, utopia-php.')).toBeTruthy()
     const menu = await openAccount()
     const link = within(menu).getByRole('menuitem', { name: 'Grant access on GitHub' })
     expect(within(menu).getByText('No repository from acme-corp, utopia-php')).toBeTruthy()
@@ -340,6 +341,7 @@ describe('step 2, where the code comes from', () => {
 
   it('still links the grant page, with no organisation line, when it can name none', async () => {
     await toRepos({ 'GET /api/repos/hidden': [200, { ...contract.hiddenOrgs, data: [] }] })
+    expect(screen.getByText('A private membership is not listed.')).toBeTruthy()
     const menu = await openAccount()
     expect(within(menu).getByRole('menuitem', { name: 'Grant access on GitHub' })).toBeTruthy()
     expect(within(menu).queryByText(/No repository from/)).toBeNull()
@@ -356,6 +358,7 @@ describe('step 2, where the code comes from', () => {
       'GET /api/repos/hidden': reply,
     })
     expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
+    expect(screen.queryByText(/private membership/)).toBeNull()
     const menu = await openAccount()
     expect(within(menu).queryByText(/No repository from/)).toBeNull()
     const link = within(menu).getByRole('menuitem', { name: 'Grant access on GitHub' })
@@ -917,7 +920,7 @@ describe('the suggested machine (Y-517)', () => {
   it('preselects the top machine and says why, and Continue enables with a name', async () => {
     mountNew('desktop', '/new', ranked(placed('pi', 45, 'it is idle and it has RAM to spare'), placed('cachyos-g14', 20, 'x')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(screen.getByRole('status').textContent).toBe('Suggested: pi')
+    expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle and it has RAM to spare')
     type('Name', 'quiet-otter')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
   })
@@ -928,7 +931,7 @@ describe('the suggested machine (Y-517)', () => {
       'GET /api/readiness': [200, { looked: 'ok', age_seconds: 0, data: [] }],
     })
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi · not checked yet'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle · not checked yet'))
   })
 
   it('says the top machine is not ready yet when its report is not ready', async () => {
@@ -936,7 +939,7 @@ describe('the suggested machine (Y-517)', () => {
       ...ranked(placed('pi', 45, 'it is idle')),
       'GET /api/readiness': [200, { looked: 'ok', age_seconds: 0, data: [readyReport('pi', false)] }],
     })
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi · not ready yet'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle · not ready yet'))
   })
 
   it('keeps the plain words while the sweep has not been read', async () => {
@@ -944,7 +947,7 @@ describe('the suggested machine (Y-517)', () => {
       ...ranked(placed('pi', 45, 'it is idle')),
       'GET /api/readiness': [200, { looked: 'failed', age_seconds: 0, error: 'ssh: nothing' }],
     })
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle'))
   })
 
   it('takes the first of a tie, which the daemon sorts by name', async () => {
@@ -954,7 +957,7 @@ describe('the suggested machine (Y-517)', () => {
 
   it('does not preselect a machine whose chip cannot be pressed', async () => {
     mountNew('desktop', '/new', ranked(placed('bishwajeets-macbook-pro', 45, 'it is idle')))
-    expect(await screen.findByText('Suggested: bishwajeets-macbook-pro')).toBeTruthy()
+    expect(await screen.findByText(/^Suggested: bishwajeets-macbook-pro, because/)).toBeTruthy()
     expect(pressed()).toEqual([])
   })
 
@@ -972,14 +975,14 @@ describe('the suggested machine (Y-517)', () => {
   it('yields to ?machine= and to a default machine', async () => {
     mountNew('desktop', '/new?machine=pi', ranked(placed('cachyos-g14', 45, 'it is idle')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(await screen.findByText('Suggested: cachyos-g14')).toBeTruthy()
+    expect(await screen.findByText(/^Suggested: cachyos-g14, because/)).toBeTruthy()
     expect(pressed()).toEqual(['pi'])
     cleanup()
     unmountNew()
 
     writePrefs({ general: { defaultMachine: 'pi' } })
     mountNew('desktop', '/new', ranked(placed('cachyos-g14', 45, 'it is idle')))
-    await screen.findByText('Suggested: cachyos-g14')
+    await screen.findByText(/^Suggested: cachyos-g14, because/)
     await waitFor(() => expect(pressed()).toEqual(['pi']))
   })
 
@@ -992,14 +995,14 @@ describe('the suggested machine (Y-517)', () => {
   it('skips a top machine whose chip cannot be pressed, and names the one it picks', async () => {
     mountNew('desktop', '/new', ranked(placed('bishwajeets-macbook-pro', 60, 'it is idle'), placed('pi', 45, 'it has RAM to spare')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(screen.getByRole('status').textContent).toBe('Suggested: pi')
+    expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it has RAM to spare')
   })
 
   it('never overwrites a pick made by hand', async () => {
     mountNew('desktop', '/new', ranked(placed('cachyos-g14', 45, 'it is idle')))
     await screen.findByRole('group', { name: 'Machine' })
     press('pi')
-    await screen.findByText('Suggested: cachyos-g14')
+    await screen.findByText(/^Suggested: cachyos-g14, because/)
     expect(pressed()).toEqual(['pi'])
   })
 
@@ -1013,7 +1016,8 @@ describe('the suggested machine (Y-517)', () => {
     })
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('No machine could be suggested')
-    expect(alert.textContent).toContain('yantrad has not looked at the tailnet yet')
+    expect(alert.textContent).toContain('Choose a machine from the chips.')
+    expect(alert.textContent).not.toContain('yantrad has not looked')
     press('cachyos-g14')
     expect(pressed()).toEqual(['cachyos-g14'])
     fireEvent.click(within(alert).getByRole('button', { name: 'Ask again' }))
@@ -1109,16 +1113,15 @@ describe('the hub (Y-627)', () => {
     const chips = await group()
     const note = await screen.findByRole('note')
     expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
-    expect(note.textContent).toMatch(/after an account on it joins/)
-    expect(note.textContent).toMatch(/separate account without sudo on yantra-box, named karigar/)
-    expect(await within(note).findByText(COMMAND)).toBeTruthy()
-    expect(within(note).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+    expect(note.textContent).toMatch(/yantra-box needs a karigar account to run sessions/)
+    expect(within(note).queryByText(COMMAND)).toBeNull()
+    expect(within(note).getByRole('link', { name: 'Set it up' }).getAttribute('href')).toBe('/m/yantra-box')
   })
 
   it('draws no chip and a note for a hub no report speaks of', async () => {
     mount(swept(null))
     const chips = await group()
-    expect((await screen.findByRole('note')).textContent).toMatch(/without sudo/)
+    expect((await screen.findByRole('note')).textContent).toMatch(/karigar account/)
     expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
   })
 
@@ -1152,7 +1155,7 @@ describe('the hub (Y-627)', () => {
   it('gives the note without the command when /api/about is missing', async () => {
     mount(swept(said('absent', 'Permission denied (publickey)')), '/new', { 'GET /api/about': [404, 'gone'] })
     const note = await screen.findByRole('note')
-    expect(note.textContent).toMatch(/without sudo/)
+    expect(note.textContent).toMatch(/karigar account/)
     expect(within(note).queryByText(/curl -fsSL/)).toBeNull()
   })
 })

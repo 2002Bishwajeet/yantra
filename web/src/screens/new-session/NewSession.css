@@ -536,10 +536,29 @@ span.ns__crumb {
 }
 
 /* A suggestion is one line; the full text stays in the DOM for a reader. */
-.ns__suggest .ns__note {
+.ns__suggest .ns__note,
+.ns__one {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ns__accountrow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ns__join {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.ns__accountrow > .ns__one {
+  margin: 0;
 }

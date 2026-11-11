@@ -13,8 +13,10 @@ import { cloneFolders } from './clonePath'
 import { pickMachine, type Source, type Values } from './form'
 import type { SessionForm } from './useSessionForm'
 
-function Failed(props: { title: string; error: ApiError | null; retry: () => void }) {
+function Failed(props: { title: string; error: ApiError | null; retry: () => void; brief?: string }) {
   if (!props.error) return null
+  // The daemon's own words are operator detail; step 1 says what to do instead.
+  const error = props.brief ? { ...props.error, said: '', describe: () => props.brief as string } : props.error
   return (
     <ErrorSurface.Inline
       action={
@@ -22,7 +24,7 @@ function Failed(props: { title: string; error: ApiError | null; retry: () => voi
           Ask again
         </Button>
       }
-      error={props.error}
+      error={error}
       title={props.title}
     />
   )
@@ -59,14 +61,19 @@ export function SuggestMachine(props: { form: SessionForm; values: Values; machi
 
   return (
     <>
-      <Text aria-live="polite" render={<p role="status" />} className="ns__note" scale="body-medium" tone="variant">
+      <Text aria-live="polite" render={<p role="status" />} className="ns__note ns__one" scale="body-medium" tone="variant">
         {placement.data
           ? top
-            ? `Suggested: ${top.machine}${caveat}`
+            ? `Suggested: ${top.machine}, because ${top.reason}${caveat}`
             : 'No machine reports a heartbeat, so none is suggested.'
           : ''}
       </Text>
-      <Failed error={placement.error} retry={() => mutate({})} title="No machine could be suggested" />
+      <Failed
+        brief="Choose a machine from the chips."
+        error={placement.error}
+        retry={() => mutate({})}
+        title="No machine could be suggested"
+      />
     </>
   )
 }

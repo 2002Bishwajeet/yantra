@@ -28,6 +28,12 @@ export const grantPage = (clientId: string | null) =>
     ? `https://github.com/settings/connections/applications/${encodeURIComponent(clientId)}`
     : 'https://github.com/settings/applications'
 
+/** Never claims a full list: GitHub cannot name a private membership in an organisation that restricts the app. */
+export const hiddenNote = (orgs: string[]) =>
+  orgs.length === 0
+    ? 'A private membership is not listed.'
+    : `A private membership is not listed. No repository from ${orgs.join(', ')}.`
+
 export const REFUSED = 'GitHub refused the grant'
 
 /** Why a sign-in ended with no grant: the OAuth App opted in to token expiry. */

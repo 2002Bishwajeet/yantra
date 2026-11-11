@@ -3,10 +3,9 @@ import { Link } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Machine } from '@/api'
 import { fromReading } from '@/api/client'
-import { useAbout, useMachines } from '@/api/hooks'
+import { useMachines } from '@/api/hooks'
 import { keys } from '@/api/keys'
 import { LOGIN_SERVER_COMMAND, noLoginServer } from '@/lib/checks'
-import { joinCommand, joinUrl } from '@/lib/join'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { FilterChip } from '@/m3/chip/Chip'
@@ -48,21 +47,18 @@ function LoginServerWarning(props: { machines: Machine[]; chosen: string }) {
 }
 
 /** Y-627: the hub is the daemon's own host. It gets no chip until an account
- *  on it has joined, and this says how to make one. */
+ *  on it has joined; the machine page holds the join command. */
 function HubJoin(props: { name: string }) {
   const { name } = props
-  const url = joinUrl(location, useAbout().data)
   return (
-    <Text render={<div role="note" />} className="ns__note" scale="body-medium" tone="variant">
-      <p>
-        {name} runs sessions after an account on it joins. Make a separate account without sudo on {name}, named
-        karigar, log in to it there, and run the join command.
-      </p>
-      {url ? <Copyable text={joinCommand(url)} what="the join command" /> : null}
+    <div className="ns__join" role="note">
+      <Text render={<p />} className="ns__note ns__one" scale="body-medium" tone="variant">
+        {name} needs a karigar account to run sessions.
+      </Text>
       <Button render={<Link params={{ machine: name }} to="/m/$machine" />} role="link" variant="text">
-        Open
+        Set it up
       </Button>
-    </Text>
+    </div>
   )
 }
 

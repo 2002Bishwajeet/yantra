@@ -6,7 +6,7 @@ import type { Repo } from '@/api'
 import { asApiError } from '@/api/errors'
 import { useGithub, useGithubReadiness, useHiddenOrgs, useRepos } from '@/api/hooks'
 import { dirsQuery } from '@/api/queries'
-import { grant, grantPage, REFUSED } from '@/lib/github'
+import { grant, grantPage, hiddenNote, REFUSED } from '@/lib/github'
 import { derive } from '@/lib/name'
 import { at } from '@/lib/time'
 import { Chevron, Control, Icon, Label } from '@/composer/Control'
@@ -47,34 +47,41 @@ function Account(props: { login: string | null; asked: boolean; clientId: string
   const login = props.login ?? 'signed in'
   const named = hidden.looked === 'ok' && hidden.data.length > 0 ? hidden.data : null
   return (
-    <Menu>
-      <MenuTrigger render={<Control aria-label={`GitHub account: ${login}`} className="ns__account" />}>
-        <Icon icon={GitBranch} />
-        <Label>{login}</Label>
-        <Chevron />
-      </MenuTrigger>
-      <MenuPopup align="start" aria-label="GitHub account">
-        <Text className="ns__status" render={<p />} scale="body-medium" tone="variant">
-          {props.asked ? 'Private repositories included' : 'GitHub not asked yet'}
-        </Text>
-        <MenuLinkItem
-          aria-describedby={named ? 'ns-hidden-orgs' : undefined}
-          href={grantPage(props.clientId)}
-          rel="noreferrer"
-          target="_blank"
-        >
-          Grant access on GitHub
-        </MenuLinkItem>
-        {named ? (
-          <Text className="ns__status" id="ns-hidden-orgs" render={<p />} scale="body-small" tone="variant">
-            No repository from {named.join(', ')}
+    <div className="ns__accountrow">
+      <Menu>
+        <MenuTrigger render={<Control aria-label={`GitHub account: ${login}`} className="ns__account" />}>
+          <Icon icon={GitBranch} />
+          <Label>{login}</Label>
+          <Chevron />
+        </MenuTrigger>
+        <MenuPopup align="start" aria-label="GitHub account">
+          <Text className="ns__status" render={<p />} scale="body-medium" tone="variant">
+            {props.asked ? 'Private repositories included' : 'GitHub not asked yet'}
           </Text>
-        ) : null}
-        <MenuLinkItem render={<Link params={{ category: 'providers' }} to="/settings/$category" />}>
-          Use another account
-        </MenuLinkItem>
-      </MenuPopup>
-    </Menu>
+          <MenuLinkItem
+            aria-describedby={named ? 'ns-hidden-orgs' : undefined}
+            href={grantPage(props.clientId)}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Grant access on GitHub
+          </MenuLinkItem>
+          {named ? (
+            <Text className="ns__status" id="ns-hidden-orgs" render={<p />} scale="body-small" tone="variant">
+              No repository from {named.join(', ')}
+            </Text>
+          ) : null}
+          <MenuLinkItem render={<Link params={{ category: 'providers' }} to="/settings/$category" />}>
+            Use another account
+          </MenuLinkItem>
+        </MenuPopup>
+      </Menu>
+      {hidden.looked === 'ok' ? (
+        <Text className="ns__one" render={<p title={hiddenNote(hidden.data)} />} scale="body-small" tone="variant">
+          {hiddenNote(hidden.data)}
+        </Text>
+      ) : null}
+    </div>
   )
 }
 

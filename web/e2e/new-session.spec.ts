@@ -1,6 +1,6 @@
 import { at, axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
-import { scrollHeight } from './lib/scroller'
+import { scrollHeight, scrollTo } from './lib/scroller'
 
 /** `/new` (Y-349): the four steps of NewSession, NewSessionSource,
  *  NewSessionLocal, NewSessionStart and NewSessionCloning. The fixture's
@@ -27,10 +27,10 @@ test.describe('the four steps', () => {
     const chips = page.getByRole('group', { name: 'Machine' })
     await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toBeEnabled()
     await expect(chips.getByRole('button', { name: 'thinkpad · unreachable' })).toBeDisabled()
-    // Y-517: the daemon's top machine is preselected, with the reason.
+    // Y-517: the daemon's top machine is preselected, with the reason, cut to one line.
     await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByRole('status').filter({ hasText: 'Suggested' })).toHaveText(
-      'Suggested: cachyos-g14',
+      /^Suggested: cachyos-g14, because .+/,
     )
     await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
@@ -391,10 +391,17 @@ test.describe('the steps fit a phone (Y-719)', () => {
           .map((node) => node.textContent),
       )
       expect(tall).toEqual([])
-      const button = await page.getByRole('button', { name: action }).boundingBox()
-      expect(button).not.toBeNull()
-      // The phone shell scrolls .shell__main, so the page fits when it does not scroll or its foot stays in view.
-      expect((await scrollHeight(page)) <= 844 || button!.y + button!.height <= 844).toBe(true)
+      await expect(page.getByRole('button', { name: action })).toBeVisible()
+      // The foot sticks to the screen, so it is always in view. The step fits when its last card
+      // ends above the foot with the scroller at the top.
+      await scrollTo(page, 0)
+      const fit = await page.evaluate(() => {
+        const cards = document.querySelectorAll('.ns__card')
+        const foot = document.querySelector('.ns__foot')!.getBoundingClientRect()
+        return { content: cards[cards.length - 1].getBoundingClientRect().bottom, foot: foot.top }
+      })
+      expect(fit.content).toBeLessThanOrEqual(fit.foot + 1)
+      expect(fit.content).toBeLessThanOrEqual(844)
     }
 
     await page.getByLabel('Name').fill('quiet-otter')
