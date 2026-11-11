@@ -226,7 +226,15 @@
 
 .settings__fact > dd {
   margin: 0;
-  word-break: break-all;
+  min-width: 0;
+}
+
+.settings__fact--wide {
+  grid-column: 1 / -1;
+}
+
+.settings__line {
+  display: block;
 }
 
 .settings__channel {

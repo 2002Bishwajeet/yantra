@@ -49,21 +49,23 @@ describe('General', () => {
     mountSettings('desktop', '/settings/general')
     const select = await screen.findByRole('combobox', { name: 'Default machine for new sessions' })
     expect((select as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('none')
-    expect(screen.getByText(/preselects nothing/)).toBeTruthy()
+    expect(screen.getByText(/Preselected in New session when reachable/)).toBeTruthy()
   })
 
-  it('says the rest is fixed, and that everything is saved on this device', async () => {
+  it('draws no row that cannot change, and says everything is saved on this device', async () => {
     mountSettings('desktop', '/settings/general')
-    expect(await screen.findByText('fixed')).toBeTruthy()
-    expect(screen.getByText('English')).toBeTruthy()
-    expect(screen.getByText(/Saved on this device/)).toBeTruthy()
+    expect(await screen.findByText(/Saved on this device/)).toBeTruthy()
+    expect(screen.queryByText('Confirmations')).toBeNull()
+    expect(screen.queryByText('Language')).toBeNull()
+    expect(screen.queryByText('fixed')).toBeNull()
+    expect(screen.queryByText('English')).toBeNull()
   })
 
   /** D7 §4.9: a Finish setup card someone hid has a way back, and another
    *  row's write does not bring it back by accident. */
   it('offers a hidden setup card back, and keeps it hidden across other writes', async () => {
     mountSettings('desktop', '/settings/general')
-    await screen.findByText('fixed')
+    await screen.findByText(/Saved on this device/)
     expect(screen.queryByRole('button', { name: 'Show the setup card' })).toBeNull()
     act(() => hideSetupCard())
     fireEvent.click(await screen.findByRole('radio', { name: 'Clock' }))

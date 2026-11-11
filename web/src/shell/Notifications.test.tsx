@@ -45,6 +45,9 @@ describe('notifications on the desktop', () => {
     expect(rows.at(-1)!.textContent).toContain('api is waiting for trust')
     const answer = popover.getByRole('link', { name: 'Answer' })
     expect(answer.getAttribute('href')).toBe('/w/api?view=chat')
+    // One filled button at most: Answer is tonal and Mark all read is text.
+    expect(popover.getAllByRole('button').filter((b) => b.dataset.variant === 'filled').length).toBeLessThanOrEqual(1)
+    expect(answer.dataset.variant).toBe('tonal')
     expect(popover.getByRole('link', { name: 'Settings' }).getAttribute('href')).toBe('/settings/notifications')
   })
 
@@ -65,7 +68,7 @@ describe('notifications on the desktop', () => {
 })
 
 describe('install and join rows (Y-399)', () => {
-  it('shows the full warning, the commands via Copyable, a machine tile and Open', async () => {
+  it('shows the full warning, the commands via Copyable, a machine tile and a row that links to the machine', async () => {
     mount('desktop', '/', {
       overrides: { '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [joined, installStopped] } } },
     })
@@ -77,13 +80,17 @@ describe('install and join rows (Y-399)', () => {
     expect(joinedItem!.textContent).toContain(joined.said)
     expect(joinedItem!.querySelector('.m3-row__supporting')!.classList.contains('m3-wrap')).toBe(true)
     expect(joinedItem!.querySelector('.m3-tile--icon')).toBeTruthy()
-    expect(within(joinedItem!).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/pi-5')
+    expect(within(joinedItem!).queryByRole('button', { name: 'Open' })).toBeNull()
+    expect(joinedItem!.querySelector('a.m3-row')!.getAttribute('href')).toBe('/m/pi-5')
 
     const installItem = items.find((item) => item.textContent?.includes('needs your password'))
     expect(installItem).toBeTruthy()
     expect(installItem!.textContent).toContain('sudo apt-get install -y tmux')
     expect(within(installItem!).getByRole('button', { name: 'Copy the command' })).toBeTruthy()
-    expect(within(installItem!).getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/pi-5')
+    expect(within(installItem!).queryByText('Open')).toBeNull()
+    expect(installItem!.querySelector('a.m3-row')!.getAttribute('href')).toBe('/m/pi-5')
+    // The commands stay outside the link: a link cannot hold a button.
+    expect(installItem!.querySelector('a.m3-row button')).toBeNull()
   })
 
   it('a plain join is done and never draws a letter avatar', async () => {
