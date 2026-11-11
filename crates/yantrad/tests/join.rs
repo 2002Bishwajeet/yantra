@@ -287,7 +287,7 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
     let last = reports.lines().last().context("nothing was reported")?;
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(last)?,
-        serde_json::json!({ "user": KARIGAR }),
+        serde_json::json!({ "user": KARIGAR, "code": "" }),
         "{reports}"
     );
 
@@ -359,13 +359,14 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         "the agent runs under a dynamic uid, not {uid}"
     );
 
-    // The report: the account the script ran as, and no machine name.
+    // The report: the account the script ran as, no machine name, and the
+    // empty code of a script served with none (ADR-0044 decision 13).
     let reports = sh(&systemd, &format!("cat {REPORTS}"))?;
     let last = reports.lines().last().context("nothing was reported")?;
     let body: serde_json::Value = serde_json::from_str(last)?;
     assert_eq!(
         body,
-        serde_json::json!({ "user": UNPRIVILEGED }),
+        serde_json::json!({ "user": UNPRIVILEGED, "code": "" }),
         "{reports}"
     );
 
