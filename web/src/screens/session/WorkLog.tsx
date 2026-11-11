@@ -26,8 +26,8 @@ const STATUS: Record<Tool['status'], { state: MarkState; word: string }> = {
   failed: { state: 'failed', word: 'failed' },
 }
 
-function Call(props: { tool: Tool }) {
-  const { tool } = props
+function Call(props: { tool: Tool; alone: boolean; turn: MarkState }) {
+  const { tool, alone, turn } = props
   const status = STATUS[tool.status]
   return (
     <article className="chat__call">
@@ -35,9 +35,11 @@ function Call(props: { tool: Tool }) {
         <Text scale="label-large" tone="variant">
           {KIND[tool.itemType]}
         </Text>
-        <State size="small" state={status.state}>
-          {status.word}
-        </State>
+        {alone && status.state === turn ? null : (
+          <State size="small" state={status.state}>
+            {status.word}
+          </State>
+        )}
       </div>
       {tool.title ? <Mono className="chat__tool-title chat__code">{tool.title}</Mono> : null}
       {tool.output ? (
@@ -74,7 +76,7 @@ export function WorkLog(props: { work: Work; said: (message: Message) => ReactNo
       </button>
       <div className="chat__work-body" hidden={!open} id={body}>
         {work.items.map((item) =>
-          item.kind === 'tool' ? <Call key={item.id} tool={item} /> : <div key={item.id}>{said(item)}</div>,
+          item.kind === 'tool' ? <Call alone={work.calls === 1} key={item.id} tool={item} turn={work.state} /> : <div key={item.id}>{said(item)}</div>,
         )}
       </div>
     </section>

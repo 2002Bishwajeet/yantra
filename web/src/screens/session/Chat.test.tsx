@@ -640,9 +640,11 @@ describe('the chat', () => {
       const log = await settled(() => screen.getByText('cargo test').closest('article')!)
       expect(row().getAttribute('aria-expanded')).toBe('true')
       expect(within(log).getByText('Command')).toBeTruthy()
-      expect(within(log).getByText('running')).toBeTruthy()
+      // One call: the row shows the state, so the call does not draw it again.
+      expect(within(log).queryByText('running')).toBeNull()
 
       say(of('item.completed'))
+      // The call is done while the turn still runs, so the two states differ and the call says so.
       await settled(() => expect(within(log).getByText('done')).toBeTruthy())
 
       ended({ state: 'completed', stopReason: 'end_turn', durationMs: 4000 })
@@ -716,9 +718,11 @@ describe('the chat', () => {
       expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(true)
       type('')
       // The command sits on a code surface, apart from the heading.
-      const code = panel.querySelector('.chat__code')
+      const code = panel.querySelector('.pending__command')
       expect(code?.contains(screen.getByText('cargo test'))).toBe(true)
       expect(code?.textContent).not.toContain('Run the unit tests')
+      // One surface holds the command: no second box inside it.
+      expect(code?.querySelector('.chat__code')).toBeNull()
 
       await approve(decision)
       await settled(() => expect(frames()).toEqual([{ type: 'answer', requestId: 'r1', decision }]))

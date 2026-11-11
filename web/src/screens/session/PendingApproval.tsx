@@ -40,7 +40,7 @@ export function PendingApproval(props: {
       <div className="pending__head">
         <Text render={<h3 />} scale="title-small">{`${agent} ${ASKS[request.requestType]}`}</Text>
         {request.title ? (
-          <div className="chat__code">
+          <div className="pending__command">
             <Copyable text={request.title} what="the command" />
           </div>
         ) : (

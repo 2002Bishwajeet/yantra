@@ -56,7 +56,12 @@ describe('TurnSettings', () => {
     const radios = within(group).getAllByRole('radio')
     expect(radios.map((one) => one.getAttribute('aria-label'))).toEqual(MODES.map((one) => one.label))
     radios.forEach((one, at) => {
-      expect(document.getElementById(one.getAttribute('aria-describedby') ?? '')?.textContent).toBe(MODES[at].description)
+      // aria-describedby is a list of ids split on whitespace, as a screen reader resolves it.
+      const text = (one.getAttribute('aria-describedby') ?? '')
+        .split(/\s+/)
+        .map((token) => document.getElementById(token)?.textContent)
+        .join(' ')
+      expect(text).toBe(MODES[at].description)
     })
     expect(radios[0].getAttribute('aria-checked')).toBe('true')
   })

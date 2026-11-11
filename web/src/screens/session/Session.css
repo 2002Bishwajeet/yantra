@@ -334,7 +334,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 4px var(--m3-row-padding) var(--m3-row-padding);
+  padding: 4px 12px 10px;
 }
 
 .chat__work-body[hidden] {
@@ -374,8 +374,12 @@
   overflow-wrap: anywhere;
 }
 
-.chat__code .m3-copyable__text {
-  overflow-wrap: anywhere;
+.pending__command .m3-copyable__text {
+  background: var(--md-sys-color-surface-container-highest);
+  border-radius: var(--md-sys-shape-corner-small);
+  font-family: var(--md-ref-typeface-mono);
+  font-size: var(--md-sys-typescale-body-medium-size);
+  line-height: var(--md-sys-typescale-body-medium-line-height);
   white-space: pre-wrap;
 }
 

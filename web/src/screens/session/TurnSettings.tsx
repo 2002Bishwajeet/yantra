@@ -73,7 +73,7 @@ function Group<T extends string | number>(props: {
       >
         {options.map((one) => (
           <Radio.Root
-            aria-describedby={one.description ? `${id}-${one.label}` : undefined}
+            aria-describedby={one.description ? `${id}-${String(one.value ?? DEFAULT)}` : undefined}
             aria-label={one.label}
             className="turn-settings__option m3-interactive"
             key={one.label}
@@ -87,7 +87,7 @@ function Group<T extends string | number>(props: {
             <span className="turn-settings__text">
               <span>{one.label}</span>
               {one.description ? (
-                <span className="turn-settings__description" id={`${id}-${one.label}`}>
+                <span className="turn-settings__description" id={`${id}-${String(one.value ?? DEFAULT)}`}>
                   {one.description}
                 </span>
               ) : null}
