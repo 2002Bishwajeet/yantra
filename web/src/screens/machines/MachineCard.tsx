@@ -147,6 +147,15 @@ export function MachineCard(props: MachineCardProps) {
     watch: null,
   })
   const chip = chipOf(verdict, seen?.text ?? null)
+  // The machine cannot be reached, so a tally of checks nobody could ask says nothing.
+  const reach =
+    verdict.kind === 'refused' ||
+    verdict.kind === 'unjoined' ||
+    verdict.kind === 'browser' ||
+    verdict.kind === 'changed' ||
+    verdict.kind === 'unreachable'
+      ? verdict
+      : null
 
   return (
     <Card aria-labelledby={`machine-${machine.name}`} className="machines__card">
@@ -176,22 +185,31 @@ export function MachineCard(props: MachineCardProps) {
         </div>
       ) : (
         <>
-          <ul className="machines__checks">
-            {shown.map((check) => (
-              <CheckLine
-                check={check}
-                key={check.check}
-                machine={machine.name}
-                pressable={verdict.kind !== 'asleep' && verdict.kind !== 'expired'}
-              />
-            ))}
-          </ul>
+          {reach ? (
+            <>
+              <Text render={<p />} className="machines__about" scale="body-medium">
+                {reachWords(reach.kind, machine.name).cause}
+              </Text>
+              <SshSaid detail={reach.detail} />
+            </>
+          ) : (
+            <ul className="machines__checks">
+              {shown.map((check) => (
+                <CheckLine
+                  check={check}
+                  key={check.check}
+                  machine={machine.name}
+                  pressable={verdict.kind !== 'asleep' && verdict.kind !== 'expired'}
+                />
+              ))}
+            </ul>
+          )}
           {sudo?.state === 'absent' ? (
             <Text render={<p role="note" />} className="machines__about" scale="body-small" tone="error">
               Agents here can use sudo: {sudo.detail}. Join a separate account without sudo, named karigar.
             </Text>
           ) : null}
-          {verdict.kind === 'unasked' ? null : (
+          {verdict.kind === 'unasked' || reach ? null : (
             <Text className="machines__summary" scale="body-small" tone="variant">
               {summary(tally(checks))}
             </Text>

@@ -15,10 +15,10 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Snackbar } from '@/m3/snackbar/Snackbar'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Doctor } from '@/screens/machines/Doctor'
-import { counted, rowMark, rowWord, tally } from '@/screens/machines/facts'
+import { counted, optionalAbsent, rowMark, rowWord, tally } from '@/screens/machines/facts'
 import { joinUrl } from '@/lib/join'
 import { useTick } from '@/useTick'
 import { answer, LOST_MS, needsSudo, newestInstall } from './install'
@@ -28,9 +28,10 @@ import type { Verdicted } from './useVerdict'
 import { sorted, startable, titleOf, type Verdict } from './verdict'
 import './Readiness.css'
 
-function CheckLine(props: { check: Check; machine: string }) {
+function CheckLine(props: { check: Check; machine: string; fix?: boolean }) {
   const { check, machine } = props
-  const fix = check.state === 'absent' ? fixOf(check, machine) : null
+  const showFix = props.fix ?? true
+  const fix = showFix && check.state === 'absent' ? fixOf(check, machine) : null
   return (
     <li className="machine__check">
       <State size="small" state={rowMark(check)}>
@@ -64,27 +65,38 @@ function CheckLine(props: { check: Check; machine: string }) {
   )
 }
 
-function Checks(props: { checks: Check[]; machine: string }) {
+function Checks(props: { checks: Check[]; machine: string; fix?: boolean }) {
   return (
     <ul className="machine__checks">
       {sorted(props.checks).map((check) => (
-        <CheckLine check={check} key={check.check} machine={props.machine} />
+        <CheckLine check={check} fix={props.fix} key={check.check} machine={props.machine} />
       ))}
     </ul>
   )
 }
 
-/** Y-676: the probes' raw words, one press away, so a phone's page is not a wall of them. */
+/** Y-676: the words of the probes that failed, one press away. A probe that passed has nothing to say. */
 function ProbeSaid(props: { checks: Check[] }) {
-  const said = props.checks.filter((one) => one.detail)
+  const said = props.checks.filter((one) => one.state !== 'present' && one.detail)
   if (said.length === 0) return null
   return (
     <Disclosure summary="What ssh said">
       {said.map((one) => (
-        <div className="m3-mono m3-wrap" key={one.check}>
+        <Text className="m3-wrap" key={one.check} render={<div />} scale="body-small">
           {nameOf(one.check)}: {withoutSignIn(one.detail)}
-        </div>
+        </Text>
       ))}
+    </Disclosure>
+  )
+}
+
+/** ADR-0031 §9: the microphone is optional, so it waits behind a closed row. A Mac never offers it. */
+function Optional(props: { checks: Check[]; machine: string; fix: boolean }) {
+  const optional = props.checks.filter(optionalAbsent)
+  if (optional.length === 0) return null
+  return (
+    <Disclosure summary="Optional: microphone">
+      <Checks checks={optional} fix={props.fix} machine={props.machine} />
     </Disclosure>
   )
 }
@@ -100,6 +112,7 @@ function Commands(props: {
 }) {
   const { result, machine, onTerminal, emphasis } = props
   if (result.commands.length === 0) return null
+  const firstSudo = result.commands.findIndex(needsSudo)
   return (
     <div className="readiness__left">
       <Text render={<p />} scale="label-large">
@@ -110,7 +123,7 @@ function Commands(props: {
           <li className="readiness__command" key={command}>
             <Copyable text={command} what={`the command for ${machine}`} />
             {needsSudo(command) ? (
-              <Button data-sudo-opener="" onClick={() => onTerminal({ index, command, at: result.at })} variant={emphasis}>
+              <Button data-sudo-opener="" onClick={() => onTerminal({ index, command, at: result.at })} variant={index === firstSudo ? emphasis : 'tonal'}>
                 Open a terminal
               </Button>
             ) : null}
@@ -185,6 +198,9 @@ export function ReadinessCard(props: {
   const already = install.error?.status === 409
   const refused = install.error && !already ? install.error : null
   const join = joinUrl(location, about.data)
+  // One filled action: New session when a session can start, else Check again on a manual machine.
+  const sessionFirst = verdict.kind === 'ready' || (verdict.kind === 'manual' && verdict.ready)
+  const checkFirst = verdict.kind === 'manual' && !verdict.ready
   const corner = !['asleep', 'expired', 'unasked', 'installing', 'pending'].includes(verdict.kind)
 
   return (
@@ -205,12 +221,14 @@ export function ReadinessCard(props: {
             {titleOf(verdict, name)}
           </Text>
           {readiness.looked === 'ok' && checks.length > 0 && verdict.kind !== 'asleep' ? (
-            <Mono className="readiness__count">
+            <Text className="readiness__count" scale="body-small" tone="variant">
               {counted(tallied)} · asked {readiness.age_seconds}s ago
-            </Mono>
+            </Text>
           ) : null}
         </div>
-        {corner ? <Doctor machine={name} /> : null}
+        {corner ? (
+          <Doctor machine={name} variant={checkFirst ? 'filled' : undefined} />
+        ) : null}
       </div>
 
       {running ? (
@@ -271,6 +289,7 @@ export function ReadinessCard(props: {
         checks={checks}
         join={join}
         lastSeen={lastSeen}
+        micFix={state.os !== 'macOS'}
         name={name}
         readiness={readiness}
         retry={() => ask(name)}
@@ -318,7 +337,7 @@ export function ReadinessCard(props: {
         ) : null}
         {verdict.kind === 'unasked' ? <Doctor first machine={name} variant="tonal" /> : null}
         {verdict.kind === 'ready' || verdict.kind === 'manual' ? (
-          <Button render={<Link to="/new" />} role="link" variant={verdict.kind === 'ready' ? 'filled' : 'tonal'}>
+          <Button render={<Link to="/new" />} role="link" variant={sessionFirst ? 'filled' : 'tonal'}>
             New session
           </Button>
         ) : null}
@@ -345,12 +364,6 @@ export function ReadinessCard(props: {
   )
 }
 
-/** D7 §4.3: the thirteen, folded to one line. The count is already under the title. */
-function folded(checks: Check[]): string {
-  const names = checks.map((one) => nameOf(one.check))
-  return names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : names.join(', ')
-}
-
 function Body(props: {
   verdict: Verdict
   name: string
@@ -358,9 +371,11 @@ function Body(props: {
   readiness: Reading<Report>
   lastSeen: string | null
   join: string | null
+  micFix: boolean
   retry: () => void
 }) {
-  const { verdict, name, checks, readiness, lastSeen, join, retry } = props
+  const { verdict, name, checks, readiness, lastSeen, join, micFix, retry } = props
+  const failing = checks.filter((one) => one.state !== 'present')
   switch (verdict.kind) {
     case 'pending':
       return (
@@ -396,29 +411,24 @@ function Body(props: {
     case 'unreachable':
       return (
         <ReachFailure detail={verdict.detail} join={join} kind={verdict.kind} name={name}>
-          {checks.length > 0 ? <Checks checks={checks} machine={name} /> : null}
+          {failing.length > 0 ? <Checks checks={failing} machine={name} /> : null}
         </ReachFailure>
       )
     case 'ready':
       return (
         <>
-          <Disclosure summary={folded(checks)}>
-            <Checks checks={checks} machine={name} />
-          </Disclosure>
+          <Optional checks={checks} fix={micFix} machine={name} />
           <ProbeSaid checks={checks} />
         </>
       )
     default: {
-      const first = sorted(checks).find((one) => one.state === 'absent')
-      const rest = checks.filter((one) => one !== first)
+      const first = sorted(checks).find((one) => one.state === 'absent' && !optionalAbsent(one))
+      const rest = checks.filter((one) => one !== first && one.state !== 'present' && !optionalAbsent(one))
       return (
         <>
           {first ? <Checks checks={[first]} machine={name} /> : null}
-          {rest.length > 0 ? (
-            <Disclosure summary={folded(rest)}>
-              <Checks checks={rest} machine={name} />
-            </Disclosure>
-          ) : null}
+          {rest.length > 0 ? <Checks checks={rest} fix={false} machine={name} /> : null}
+          <Optional checks={checks} fix={micFix} machine={name} />
           <ProbeSaid checks={checks} />
         </>
       )

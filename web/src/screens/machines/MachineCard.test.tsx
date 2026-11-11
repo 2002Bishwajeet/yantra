@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   RouterProvider,
   createMemoryHistory,
@@ -121,5 +121,32 @@ describe("the joined account and sudo (Y-628)", () => {
     renderCard(aMachine(), withSudo("unknown", "could not be asked"));
     await screen.findByText("ssh");
     expect(screen.queryByRole("note")).toBeNull();
+  });
+});
+
+describe("a machine ssh cannot reach (Y-714)", () => {
+  const checks: Check[] = [
+    { check: "reachable", state: "absent", detail: "ssh: connect to host cachyos-g14 port 22: No route to host" },
+    { check: "tmux", state: "unknown", detail: "could not be asked" },
+    { check: "agent-cli", state: "unknown", detail: "could not be asked" },
+    { check: "terminfo", state: "unknown", detail: "could not be asked" },
+  ];
+
+  it("says one sentence of cause, with no per-check list and no tally", async () => {
+    renderCard(aMachine(), checks);
+    await screen.findByText(/can’t reach cachyos-g14 over ssh/);
+    expect(screen.getAllByText(/can’t reach cachyos-g14 over ssh/)).toHaveLength(1);
+    expect(screen.queryByText("tmux")).toBeNull();
+    expect(screen.queryByText(/could not be asked/)).toBeNull();
+    expect(screen.queryByText(/of 4/)).toBeNull();
+  });
+
+  it("keeps ssh’s own words behind What ssh said, in the body font", async () => {
+    renderCard(aMachine(), checks);
+    const press = await screen.findByRole("button", { name: /What ssh said/ });
+    expect(screen.queryByText(/No route to host/)).toBeNull();
+    fireEvent.click(press);
+    const said = screen.getByText(/No route to host/);
+    expect(said.classList.contains("m3-mono")).toBe(false);
   });
 });

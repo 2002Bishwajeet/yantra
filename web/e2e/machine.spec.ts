@@ -1,10 +1,13 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 
 /* Y-347, and D7 §4.3 since Y-396: one machine's page at all three sizes.
    Readiness leads, and its verdict decides the one action. */
 
 const card = (page: Page, name: string) => page.getByRole('region', { name })
+
+/** Y-714: one filled action a card; a tonal link is a Base UI button with data-variant. */
+const filled = (scope: Locator) => scope.locator('[data-variant="filled"]')
 
 /** D7 B2: nothing on the page is wider than the screen. */
 async function fits(page: Page) {
@@ -19,14 +22,15 @@ test.describe('one machine on a busy fleet', () => {
     await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
   })
 
-  test('leads with a ready verdict and folds the ten checks', async ({ page }) => {
+  test('leads with a ready verdict and lists no check that passed', async ({ page }) => {
     const ready = card(page, 'Readiness')
     await expect(ready.getByRole('heading', { name: 'Ready for sessions' })).toBeVisible()
     await expect(ready.getByText(/^10 of 10 · asked/)).toBeVisible()
     await expect(ready.getByRole('link', { name: 'New session' })).toBeVisible()
-    await ready.getByRole('button', { name: /^Show (?!What ssh said)/ }).click()
-    await expect(ready.getByText('ok', { exact: true })).toHaveCount(10)
-    await expect(ready.getByText('gh signed in', { exact: true })).toBeVisible()
+    await expect(ready.getByText('ok', { exact: true })).toHaveCount(0)
+    await expect(ready.locator('.machine__check')).toHaveCount(0)
+    await expect(ready.getByRole('button', { name: /What ssh said/ })).toHaveCount(0)
+    await expect(filled(ready)).toHaveCount(1)
 
     const about = card(page, 'About')
     await expect(about.getByText(/linux/).first()).toBeVisible()
@@ -141,6 +145,8 @@ test.describe('one machine missing a basic', () => {
     const ready = card(page, 'Readiness')
     await expect(ready.getByRole('heading', { name: 'tmux, git and claude are missing' })).toBeVisible({ timeout: 15_000 })
     await expect(ready.getByRole('button', { name: 'Install' })).toBeVisible()
+    await expect(filled(ready)).toHaveCount(1)
+    await expect(filled(ready)).toHaveText('Install')
     // The shell's FAB is D7 T8's; this page offers no session of its own.
     await expect(ready.getByRole('link', { name: 'New session' })).toHaveCount(0)
     await expect(card(page, 'Workspaces on this machine').getByRole('link', { name: 'New session' })).toHaveCount(0)
@@ -148,7 +154,39 @@ test.describe('one machine missing a basic', () => {
   })
 })
 
-/* Y-676: a phone reads the first fix, not a wall of probe text. */
+/* Y-714: a machine with a gap shows its first fix and one filled action, and no mono outside a command. */
+test.describe('a machine with a gap', () => {
+  test('/m/nas has one filled button, at most one fix and no stray mono', async ({ page }) => {
+    await scenario(page, 'busy')
+    await page.goto('/m/nas')
+    const ready = card(page, 'Readiness')
+    await expect(ready.getByRole('button', { name: 'Install' })).toBeVisible({ timeout: 15_000 })
+    await expect(filled(ready)).toHaveCount(1)
+    expect(await ready.locator('.machine__fix').count()).toBeLessThanOrEqual(1)
+    const stray = await page.$$eval(
+      '.machine__card .m3-mono',
+      (all) => all.filter((one) => !one.closest('.m3-copyable')).length,
+    )
+    expect(stray).toBe(0)
+    await fits(page)
+  })
+
+  test('draws the probe text in the body font', async ({ page }) => {
+    await scenario(page, 'busy')
+    await page.goto('/m/nas')
+    const ready = card(page, 'Readiness')
+    await ready.getByRole('button', { name: /^Show What ssh said/ }).click({ timeout: 15_000 })
+    const line = ready.getByText(/^tmux: /)
+    await expect(line).toBeVisible()
+    const [said, mono] = await Promise.all([
+      line.evaluate((el) => getComputedStyle(el).fontFamily),
+      page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--md-ref-typeface-mono').trim()),
+    ])
+    expect(said).not.toContain(mono.split(',')[0]!.replace(/["']/g, ''))
+  })
+})
+
+/* Y-676, Y-714: a phone reads the first fix, not a wall of probe text. */
 test.describe('a machine page on a phone', () => {
   test.skip(({ size }) => size !== 'phone', 'the phone owns the page length')
 
@@ -157,23 +195,25 @@ test.describe('a machine page on a phone', () => {
   })
 
   for (const name of ['nas', 'cachyos-g14']) {
-    test(`/m/${name} is under two screens, with the probe text behind What ssh said`, async ({ page }) => {
+    test(`/m/${name} is under two screens, with the failed probes behind What ssh said`, async ({ page }) => {
       await page.goto(`/m/${name}`)
       const readiness = card(page, 'Readiness')
-      await expect(readiness.getByRole('button', { name: /^Show What ssh said/ })).toBeVisible({ timeout: 15_000 })
+      const press = readiness.getByRole('button', { name: /^Show What ssh said/ })
+      await expect(readiness.getByRole('heading', { level: 2 })).toBeVisible({ timeout: 15_000 })
       const { tall, high } = await page.evaluate(() => ({
         tall: document.documentElement.scrollHeight,
         high: window.innerHeight,
       }))
       expect(tall).toBeLessThan(2 * high)
-      if (name === 'nas') {
-        const copy = readiness.getByRole('button', { name: /^Copy the command that fixes/ }).first()
-        if ((await copy.count()) > 0) expect((await copy.boundingBox())!.y).toBeLessThan(600)
+      if (name === 'cachyos-g14') {
+        // Every check passed, so there is no probe text to fold.
+        await expect(press).toHaveCount(0)
+      } else {
+        const said = readiness.getByText(/^tmux: /)
+        await expect(said).toBeHidden()
+        await press.click()
+        await expect(said).toBeVisible()
       }
-      const mono = readiness.locator('.m3-mono.m3-wrap')
-      await expect(mono).toHaveCount(0)
-      await readiness.getByRole('button', { name: /^Show What ssh said/ }).click()
-      await expect(mono.first()).toBeVisible()
       await fits(page)
     })
   }

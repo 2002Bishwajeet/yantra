@@ -13,6 +13,9 @@ afterEach(() => {
   unmount()
 })
 
+const openEverything = () =>
+  document.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]').forEach((one) => fireEvent.click(one))
+
 const card = (name: string) => within(screen.getByRole('region', { name }))
 
 describe('/m/cachyos-g14 on the busy fleet', () => {
@@ -28,11 +31,10 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     expect(ready.getByRole('button', { name: 'Check again' })).toBeTruthy()
     expect(screen.getAllByText('ready').length).toBeGreaterThan(0)
 
-    // The ten are folded to one line until asked for, by the names D7 §3.5 gives them.
-    fireEvent.click(ready.getByRole('button', { name: /^Show (?!What ssh said)/ }))
-    expect(ready.getAllByText('ok')).toHaveLength(10)
-    expect(ready.getByText('gh signed in')).toBeTruthy()
-    expect(ready.getByText('claude signed in')).toBeTruthy()
+    // Y-714: ten checks passed, so the card lists none and has no probe text to show.
+    expect(ready.queryByText('ok')).toBeNull()
+    expect(ready.queryByText('gh signed in')).toBeNull()
+    expect(ready.queryByRole('button', { name: /What ssh said/ })).toBeNull()
 
     const about = card('About')
     expect(about.getByText('linux')).toBeTruthy()
@@ -201,11 +203,21 @@ describe('About on the machine page', () => {
   })
 })
 
+describe('the machine page keeps monospace for commands (Y-714)', () => {
+  it('has a .m3-mono only inside a .m3-copyable, with every disclosure open', async () => {
+    mount('desktop', '/m/cachyos-g14')
+    await screen.findByText(/^looked /)
+    openEverything()
+    const stray = [...document.querySelectorAll('.machine__card .m3-mono')].filter((one) => !one.closest('.m3-copyable'))
+    expect(stray.map((one) => one.textContent)).toEqual([])
+  })
+})
+
 describe('the machine page in plain words', () => {
   it('names no ADR, invariant, beat or yantra-agent anywhere, with every check open', async () => {
     mount('desktop', '/m/cachyos-g14')
     await screen.findByText(/^looked /)
-    fireEvent.click(card('Readiness').getByRole('button', { name: /^Show (?!What ssh said)/ }))
+    openEverything()
     expect((document.body.textContent ?? '').match(/.{30}(ADR-\d|I-\d\d|beat|yantra-agent).{20}/)?.[0]).toBeUndefined()
   })
 })

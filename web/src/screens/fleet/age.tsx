@@ -16,10 +16,11 @@ export function Ago(props: { seconds: number; className?: string }) {
 }
 
 /** How long since an epoch second, moved once a second — a clock, not a read. */
-export function Since(props: { at: number; className?: string }) {
-  const { at, className } = props
+export function Since(props: { at: number; className?: string; plain?: boolean }) {
+  const { at, className, plain } = props
   const now = useTick(true)
-  return <Mono className={className}>{elapsed(now / 1000 - at)}</Mono>
+  const age = elapsed(now / 1000 - at)
+  return plain ? <span className={className}>{age}</span> : <Mono className={className}>{age}</Mono>
 }
 
 /** The boards' `opened 3d ago` beside their `opened 9 Jun`, so the caller

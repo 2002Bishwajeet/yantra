@@ -31,7 +31,7 @@ export const markOf = (state: CheckState): MarkState => marks[state]
 export const wordOf = (state: CheckState): string => words[state]
 
 /** ADR-0031 §9: a microphone that is not installed is no fault. */
-const optionalAbsent = (check: Check) => check.check === 'mic' && check.state === 'absent'
+export const optionalAbsent = (check: Check) => check.check === 'mic' && check.state === 'absent'
 
 export type Tally = { present: number; absent: number; unknown: number; total: number }
 

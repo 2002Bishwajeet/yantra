@@ -11,7 +11,9 @@ import { Text } from '@/m3/text/Text'
 export function SshSaid(props: { detail: string; kind?: AnswerFailure; children?: ReactNode }) {
   return (
     <Disclosure summary={props.kind === 'listing' ? 'The full error' : 'What ssh said'}>
-      <div className="m3-mono m3-wrap">{withoutSignIn(props.detail)}</div>
+      <Text className="m3-wrap" render={<div />} scale="body-small">
+        {withoutSignIn(props.detail)}
+      </Text>
       {props.children}
     </Disclosure>
   )
