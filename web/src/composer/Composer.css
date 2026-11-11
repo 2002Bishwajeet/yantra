@@ -206,8 +206,9 @@
     color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
 }
 
-/* Recording is the one state that must catch the eye: primary, not the pressed tonal fill. */
-.composer-dictate[data-state="listening"] {
+/* Recording is the one state that must catch the eye: primary, not the pressed tonal fill.
+   Two classes so it outranks `.composer-control[aria-pressed]`, which comes later. */
+.composer-control.composer-dictate[data-state="listening"] {
   color: var(--md-sys-color-on-primary);
   background: var(--md-sys-color-primary);
 }
