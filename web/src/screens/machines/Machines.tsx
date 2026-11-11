@@ -15,7 +15,6 @@ import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Text } from '@/m3/text/Text'
-import { useFormFactor } from '@/shell/formFactor'
 import { useFab } from '@/shell/primary'
 import { unreachable } from '@/work'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
@@ -47,7 +46,6 @@ export function Machines() {
   const readiness = useReadiness()
   const sessions = useSessions()
   const workspaces = loaded(useWorkspaces())
-  const factor = useFormFactor()
   // D7 §4.4: on the phone and the tablet the FAB carries Add a device.
   const fab = useFab()
 
@@ -84,7 +82,6 @@ export function Machines() {
   const cardOf = (machine: Machine) => (
     <MachineCard
       checks={checksOf(checks, machine.name)}
-      condensed={factor === 'phone'}
       machine={machine}
       pending={readiness.looked === 'pending'}
       sessions={countOf(machine.name)}
@@ -105,7 +102,7 @@ export function Machines() {
             </Button>
           )
         }
-        stamp={<Looked reads={[machines, readiness, sessions]} />}
+        stamp={<Looked plain reads={[machines, readiness, sessions]} />}
         title="Machines"
       />
 

@@ -34,18 +34,20 @@ describe('/machines on the busy fleet', () => {
     const good = card('cachyos-g14')
     // Every basic is present, so the chip reads the verdict, not `online` (D7 §3.3).
     expect(good.getByText('ready')).toBeTruthy()
-    // The check name table (`lib/checks.ts`), never a raw id (D7 §3.5).
+    // Y-714: what passes is counted, never listed, on the desktop as on the phone.
     for (const check of ['ssh', 'tmux', 'claude', 'terminfo']) {
-      expect(good.getByText(check)).toBeTruthy()
+      expect(good.queryByText(check)).toBeNull()
     }
-    expect(good.getAllByText('ok')).toHaveLength(4)
+    expect(good.queryByText('ok')).toBeNull()
     expect(good.getByText('10 of 10')).toBeTruthy()
     // Everything passes, so nothing asks the machine again.
     expect(good.queryByRole('button')).toBeNull()
 
     const short = card('pi-5')
     expect(short.getByText('missing')).toBeTruthy()
-    expect(short.getByText('no `claude` on PATH there')).toBeTruthy()
+    // The check name table (`lib/checks.ts`), never a raw id (D7 §3.5).
+    expect(short.getByText('claude')).toBeTruthy()
+    expect(short.getByText('no claude on PATH there')).toBeTruthy()
     expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeTruthy()
     // `git` is not in pi-5's report at all, so it counts as missing too (D7 §3.3).
     expect(short.getByText('2 missing')).toBeTruthy()
@@ -229,6 +231,15 @@ describe('/machines on the busy fleet', () => {
     await waitFor(() =>
       expect(asked).toContain('DELETE /api/machines/cachyos-g14/sessions/scratch'),
     )
+  })
+})
+
+describe('/machines keeps monospace for commands (Y-714)', () => {
+  it.each(['desktop', 'phone'] as const)('has no .m3-mono outside a command on the %s, age line included', async (size) => {
+    mount(size, '/machines')
+    await screen.findByText(/^looked /)
+    const stray = [...document.querySelectorAll('.m3-mono')].filter((one) => !one.closest('.m3-copyable'))
+    expect(stray).toHaveLength(0)
   })
 })
 

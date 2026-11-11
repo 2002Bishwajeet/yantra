@@ -34,7 +34,7 @@ function CheckLine(props: { check: Check; machine: string; pressable: boolean })
         {rowWord(check)}
       </Text>
       <Text className="machines__detail m3-wrap" scale="body-small" tone="variant">
-        {failed ? reachWords(reachableFailure(check.detail), machine).cause : check.detail}
+        {failed ? reachWords(reachableFailure(check.detail), machine).cause : check.detail.replaceAll('`', '')}
       </Text>
       {failed && pressable ? <SshSaid detail={check.detail} /> : null}
     </li>
@@ -120,21 +120,17 @@ function CopyJoin() {
 export type MachineCardProps = {
   machine: Machine
   checks: Check[]
-  /** The phone board condenses a card that passes: the failing checks are
-   *  named and the rest are one line. */
-  condensed: boolean
   pending: boolean
   /** Tmux sessions the machine reported; null when it did not answer. */
   sessions: number | null
 }
 
 export function MachineCard(props: MachineCardProps) {
-  const { machine, checks, condensed, pending, sessions } = props
+  const { machine, checks, pending, sessions } = props
   const four = CARD_CHECKS.flatMap((name) => {
     const check = checkNamed(checks, name)
     return check ? [check] : []
   })
-  const shown = condensed ? four.filter((one) => one.state !== 'present') : four
   // ADR-0046: not one of the four, so its warning is a line of its own. Unknown is not absent (R-23).
   const sudo = checkNamed(checks, 'no-sudo')
   // D3 §5.7's one clock, as the board prints it: `2h` under a day, `7 Jul` past one.
@@ -146,6 +142,9 @@ export function MachineCard(props: MachineCardProps) {
     events: [],
     watch: null,
   })
+  // Y-714: a card names what needs the owner and counts the rest. A ready machine
+  // with gaps lists those gaps, which are not always among the four.
+  const shown = verdict.kind === 'manual' ? verdict.absent : four.filter((one) => one.state !== 'present')
   const chip = chipOf(verdict, seen?.text ?? null)
   // The machine cannot be reached, so a tally of checks nobody could ask says nothing.
   const reachable = checkNamed(checks, 'reachable')

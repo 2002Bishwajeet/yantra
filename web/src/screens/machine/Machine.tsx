@@ -237,7 +237,7 @@ export function Machine() {
   return (
     <Page>
       <PageHeader
-        stamp={<Looked reads={[machines, readiness, sessions]} />}
+        stamp={<Looked plain reads={[machines, readiness, sessions]} />}
         subtitle={
           chip ? (
             <Chip tone={chip.error ? 'error' : 'lowest'}>

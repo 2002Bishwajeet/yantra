@@ -5,11 +5,12 @@ import { useTick } from '@/useTick'
 import { elapsed, isAge, oldest } from './clock'
 
 /** An age the daemon already counted, in mono with the instant in `title`. */
-export function Ago(props: { seconds: number; className?: string }) {
-  const { seconds, className } = props
+export function Ago(props: { seconds: number; className?: string; plain?: boolean }) {
+  const { seconds, className, plain } = props
   const clock = ago(seconds)
+  const face = plain ? className : className ? `m3-mono ${className}` : 'm3-mono'
   return (
-    <time className={className ? `m3-mono ${className}` : 'm3-mono'} dateTime={clock.iso} title={clock.title}>
+    <time className={face} dateTime={clock.iso} title={clock.title}>
       {clock.text}
     </time>
   )
@@ -37,14 +38,23 @@ export function SinceAgo(props: { at: number }) {
 }
 
 /** The boards' `looked 4s ago` beside a title. */
-export function Looked(props: { reads: Reading<unknown>[]; className?: string }) {
-  const { reads, className } = props
+export function Looked(props: { reads: Reading<unknown>[]; className?: string; plain?: boolean }) {
+  const { reads, className, plain } = props
   const age = oldest(reads)
   if (age === null) return null
-  return (
-    <Mono className={className} data-slot="looked">
-      looked <Ago seconds={age} />
+  const body = (
+    <>
+      looked <Ago plain={plain} seconds={age} />
       {isAge(age) ? ' ago' : null}
+    </>
+  )
+  return plain ? (
+    <span className={className} data-slot="looked">
+      {body}
+    </span>
+  ) : (
+    <Mono className={className} data-slot="looked">
+      {body}
     </Mono>
   )
 }
