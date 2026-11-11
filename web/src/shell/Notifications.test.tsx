@@ -114,6 +114,49 @@ describe('install and join rows (Y-399)', () => {
   })
 })
 
+describe('row taps (Y-722)', () => {
+  const at = (n: number, kind: Event['kind'], workspace: string | null, machine: string | null): Event =>
+    ({ at: 1785522000 + n, kind, workspace, machine, said: `${kind} said`, commands: [] }) as Event
+
+  it.each(['finished', 'crashed', 'killed', 'check_failed', 'checks_passed', 'reviewed'] as const)(
+    'a %s row is a link to the workspace',
+    async (kind) => {
+      mount('desktop', '/', {
+        overrides: {
+          '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [at(1, kind, 'api', 'pi-5')] } },
+        },
+      })
+      const popover = await open()
+      const item = (await popover.findAllByRole('listitem')).find((one) => one.textContent?.includes('said'))!
+      expect(item.querySelector('a.m3-row')!.getAttribute('href')).toBe('/w/api')
+    },
+  )
+
+  it('an unreachable row is a link to the machine', async () => {
+    mount('desktop', '/', {
+      overrides: {
+        '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [at(1, 'unreachable', null, 'pi-5')] } },
+      },
+    })
+    const popover = await open()
+    const item = (await popover.findAllByRole('listitem')).find((one) => one.textContent?.includes('said'))!
+    expect(item.querySelector('a.m3-row')!.getAttribute('href')).toBe('/m/pi-5')
+  })
+
+  it('a trust row links to the workspace and keeps Answer outside the link', async () => {
+    mount('desktop', '/', {
+      overrides: {
+        '/api/notifications': { body: { looked: 'ok', age_seconds: 0, data: [at(1, 'awaiting_trust', 'api', null)] } },
+      },
+    })
+    const popover = await open()
+    const item = (await popover.findAllByRole('listitem')).find((one) => one.textContent?.includes('said'))!
+    expect(item.querySelector('a.m3-row')!.getAttribute('href')).toBe('/w/api')
+    expect(item.querySelector('a.m3-row a, a.m3-row button')).toBeNull()
+    expect(within(item).getByRole('link', { name: 'Answer' }).getAttribute('href')).toBe('/w/api?view=chat')
+  })
+})
+
 describe('repeated unreachable rows (Y-669)', () => {
   it('fold into one row whose supporting line carries the count', async () => {
     const gone = (at: number): Event => ({

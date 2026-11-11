@@ -52,6 +52,8 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
   )
   const render = entry.href ? (
     <a href={entry.href} rel="noreferrer" target="_blank" />
+  ) : entry.workspace ? (
+    <Link onClick={onOpen} params={{ name: entry.workspace }} to="/w/$name" />
   ) : entry.open ? (
     <Link onClick={onOpen} params={{ machine: entry.open }} to="/m/$machine" />
   ) : undefined
@@ -60,7 +62,10 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
       <Row render={render} tone="lowest">
         <EntryTile tile={entry.tile} />
         <EntryText entry={entry} supporting={supporting} />
-        {entry.answer ? (
+        <Mono className="notifications__age">{ago(now / 1000 - entry.at, now).text}</Mono>
+      </Row>
+      {entry.answer ? (
+        <div className="notifications__answer">
           <Button
             onClick={onOpen}
             role="link"
@@ -70,9 +75,8 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
           >
             Answer
           </Button>
-        ) : null}
-        <Mono className="notifications__age">{ago(now / 1000 - entry.at, now).text}</Mono>
-      </Row>
+        </div>
+      ) : null}
       {commands.length ? (
         <div className="notifications__commands">
           {commands.map((command, index) => (

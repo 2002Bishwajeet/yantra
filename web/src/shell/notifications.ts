@@ -16,8 +16,10 @@ export type Entry = {
   wrap?: boolean
   /** A trust prompt: the row offers Answer, into this workspace's chat. */
   answer?: string
-  /** A join or install event: the row offers Open, into the machine page. */
+  /** A machine event: tapping the row opens this machine's page. */
   open?: string
+  /** A workspace event: tapping the row opens this workspace. */
+  workspace?: string
   /** An install left these for a person to run, verbatim, via `Copyable`. */
   commands?: string[]
   /** A GitHub item opens on GitHub. */
@@ -103,7 +105,13 @@ function ofEvent(event: Event, index: number): Entry {
 
   const watched = PULL_EVENTS[event.kind]
   if (watched) {
-    return { ...base, headline: `${who}: ${watched.headline}`, supporting: event.said, mark: watched.mark }
+    return {
+      ...base,
+      headline: `${who}: ${watched.headline}`,
+      supporting: event.said,
+      mark: watched.mark,
+      workspace: event.workspace ?? undefined,
+    }
   }
 
   const headline =
@@ -121,6 +129,8 @@ function ofEvent(event: Event, index: number): Entry {
     ...base,
     headline,
     supporting,
+    workspace: event.workspace ?? undefined,
+    open: !event.workspace && event.kind === 'unreachable' ? (event.machine ?? undefined) : undefined,
     answer: event.kind === 'awaiting_trust' && event.workspace ? event.workspace : undefined,
   }
 }
