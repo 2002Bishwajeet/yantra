@@ -61,3 +61,4 @@ Caddy proxies to the daemon's socket. The script names `caddy` as the proxy acco
 `https://$DOMAIN` as `YANTRA_ORIGIN` in `/etc/yantra/daemon.env`
 ([behind Caddy](../docs/appliance.md#behind-caddy-on-a-name-you-own)). A second run does not add the
 lines again, and it restarts `yantrad` only when it changes one. A new `DOMAIN` costs every passkey.
+A box named before the passkey gets its `YANTRA_ORIGIN` from the Caddyfile on its next update.

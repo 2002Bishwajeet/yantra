@@ -157,6 +157,11 @@ package runs Caddy as `caddy`. On the box,
 
 4. Reload Caddy: `sudo systemctl reload caddy`.
 
+**A box that `domain-setup.sh` named before the passkey gets its origin on its next update.** When
+`/etc/caddy/Caddyfile` proxies to the socket and `daemon.env` names no `YANTRA_ORIGIN`, `install.sh`
+adds `YANTRA_ORIGIN=https://<the Caddyfile's name>` and says so. The update then restarts the
+daemon, and the owner enrols the phone with `yantra passkey code`.
+
 **The cost: any process that runs as `caddy` can name a caller.** It writes the one address that the
 daemon judges. A local process that reaches Caddy is still refused, because Caddy then forwards
 this box's own address. Caddy's `X-Forwarded-For` must hold one address, as the line in step 3
