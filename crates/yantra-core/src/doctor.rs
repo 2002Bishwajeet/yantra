@@ -976,12 +976,28 @@ async fn hook_commands<E: Exec>(exec: &E) -> Result<Uses, Check> {
     Ok(uses)
 }
 
-/// Precedes the names [`hooks`] could not find.
+/// Precedes the pane shell's name, then each name [`hooks`] could not find.
 const UNRESOLVED: &str = "yantra-unresolved";
 
+/// Where installers put the programs hooks name, searched for one `PATH` lacks.
+/// fnm's `aliases/default` is stable; its multishell path is temporary.
+const BIN_DIRS: [&str; 9] = [
+    "\"$HOME\"/.local/bin",
+    "\"$HOME\"/.local/share/fnm/aliases/default/bin",
+    "\"$HOME\"/.nvm/versions/node/*/bin",
+    "\"$HOME\"/.volta/bin",
+    "\"$HOME\"/.bun/bin",
+    "\"$HOME\"/.cargo/bin",
+    "/opt/homebrew/bin",
+    "/home/linuxbrew/.linuxbrew/bin",
+    "/usr/local/bin",
+];
+
 /// Y-640: a hook whose program the agent's `PATH` lacks fails each time the
-/// agent starts. The probe runs with the `PATH` a pane gets (Y-707): ssh's on
-/// Linux, and on a Mac the running server's, which cannot be asked without one.
+/// agent starts. tmux starts an agent as `<default-shell> -c`, so the probe
+/// reads `PATH` through that shell, from the `PATH` a pane starts with
+/// (Y-707, Y-729): ssh's on Linux, and on a Mac the running server's, which
+/// cannot be asked without one. An *absent* ends with one fix for that shell.
 async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Error>) -> Check {
     let could_not =
         |err: &dyn std::fmt::Display| unknown(HOOKS, format!("could not be asked: {err}"));
@@ -994,9 +1010,29 @@ async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Erro
     }
 
     let words: Vec<String> = uses.keys().map(|name| sq(name)).collect();
+    // `show-options` starts no server; with none, tmux would take `$SHELL`.
+    let shell = tmux.map_or_else(String::new, |tmux| {
+        format!(
+            "$({} show-options -gv default-shell 2>/dev/null)",
+            tmux.command()
+        )
+    });
     let probe = format!(
-        "echo {UNRESOLVED}; for n in {}; do command -v \"$n\" >/dev/null 2>&1 || echo \"$n\"; done",
-        words.join(" ")
+        "s={shell}\n\
+         case $s in (/*) ;; (*) s=${{SHELL:-/bin/sh}} ;; esac\n\
+         p=$(\"$s\" -c 'echo yantra-pane-path; printenv PATH' </dev/null 2>/dev/null \
+         | awk 'seen {{ print; exit }} /^yantra-pane-path$/ {{ seen = 1 }}')\n\
+         case $p in (/*) PATH=$p ;; esac\n\
+         echo {UNRESOLVED}; echo \"${{s##*/}}\"\n\
+         for n in {words}; do\n\
+         \x20 command -v \"$n\" >/dev/null 2>&1 && continue\n\
+         \x20 d=\n\
+         \x20 for c in {dirs}; do [ -f \"$c/$n\" ] && [ -x \"$c/$n\" ] && {{ d=$c; break; }}; done\n\
+         \x20 case $d in (\"$HOME\"/*) d=\"~/${{d#\"$HOME\"/}}\" ;; esac\n\
+         \x20 echo \"$n $d\"\n\
+         done\n",
+        words = words.join(" "),
+        dirs = BIN_DIRS.join(" "),
     );
     let os = match os {
         Ok(os) => *os,
@@ -1028,19 +1064,27 @@ async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Erro
     let Some((_, after)) = said.split_once(&format!("{UNRESOLVED}\n")) else {
         return unknown(HOOKS, "the probe answered nothing Yantra reads");
     };
-    let missing: Vec<String> = after
-        .lines()
-        .filter_map(|line| uses.get_key_value(line.trim()))
-        .map(|(name, (events, sources))| {
-            let events: Vec<&str> = events.iter().map(String::as_str).collect();
-            let sources: Vec<&str> = sources.iter().map(String::as_str).collect();
-            format!(
-                "`{name}` ({} in {})",
-                events.join(", "),
-                sources.join(" and ")
-            )
-        })
-        .collect();
+    let mut lines = after.lines();
+    let shell = lines.next().unwrap_or_default().trim();
+    let (mut missing, mut found_in) = (Vec::new(), Vec::new());
+    for line in lines {
+        let line = line.trim();
+        let (name, dir) = line.split_once(' ').unwrap_or((line, ""));
+        let Some((name, (events, sources))) = uses.get_key_value(name) else {
+            continue;
+        };
+        let events: Vec<&str> = events.iter().map(String::as_str).collect();
+        let sources: Vec<&str> = sources.iter().map(String::as_str).collect();
+        missing.push(format!(
+            "`{name}` ({} in {})",
+            events.join(", "),
+            sources.join(" and ")
+        ));
+        found_in.push((
+            name.as_str(),
+            Some(dir.trim()).filter(|dir| !dir.is_empty()),
+        ));
+    }
     if missing.is_empty() {
         let names: Vec<&str> = uses.keys().map(String::as_str).collect();
         return present(
@@ -1054,10 +1098,67 @@ async fn hooks<E: Exec>(exec: &E, tmux: Option<&Tmux>, os: &Result<Os, ssh::Erro
     absent(
         HOOKS,
         format!(
-            "the agent's PATH lacks {}, so those hooks fail each time an agent starts",
-            missing.join("; ")
+            "the agent's PATH lacks {}, so those hooks fail each time an agent starts. Fix: {}",
+            missing.join("; "),
+            fix_line(shell, &found_in)
         ),
     )
+}
+
+/// The one line that gives `shell -c` each missing program, as `(name, the
+/// directory that holds it)`. `fish -c` reads config.fish and `zsh -c` reads
+/// .zshenv; bash and sh read no file, so the program goes on sshd's `PATH`.
+fn fix_line(shell: &str, missing: &[(&str, Option<&str>)]) -> String {
+    let mut dirs: Vec<&str> = Vec::new();
+    for dir in missing.iter().filter_map(|(_, dir)| *dir) {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    let (add, or) = match shell {
+        "fish" => (
+            format!(
+                "add `fish_add_path {}` to ~/.config/fish/config.fish",
+                dirs.join(" ")
+            ),
+            "or add its directory to ~/.config/fish/config.fish",
+        ),
+        "zsh" => {
+            let dirs: Vec<String> = dirs
+                .iter()
+                .map(|dir| {
+                    dir.strip_prefix('~')
+                        .map_or_else(|| (*dir).to_owned(), |rest| format!("$HOME{rest}"))
+                })
+                .collect();
+            (
+                format!(
+                    "add `export PATH=\"{}:$PATH\"` to ~/.zshenv",
+                    dirs.join(":")
+                ),
+                "or add its directory to ~/.zshenv",
+            )
+        }
+        _ => {
+            let links: Vec<String> = missing
+                .iter()
+                .filter_map(|(name, dir)| Some(format!("{}/{name}", (*dir)?)))
+                .collect();
+            (
+                format!("run `sudo ln -s {} /usr/local/bin/`", links.join(" ")),
+                "or link it into /usr/local/bin",
+            )
+        }
+    };
+    let mut parts: Vec<String> = missing
+        .iter()
+        .filter(|(_, dir)| dir.is_none())
+        .map(|(name, _)| format!("install `{name}`, {or}"))
+        .collect();
+    if !dirs.is_empty() {
+        parts.push(add);
+    }
+    parts.join("; ")
 }
 
 /// Groups whose members sudo lets in on a stock install; macOS admins are in `admin`.
@@ -1852,10 +1953,13 @@ mod tests {
         assert_eq!(found.state, State::Unknown, "{}", found.detail);
     }
 
-    /// Y-640: a machine's Claude files, and the names its agent's PATH lacks.
+    /// Y-640: a machine's Claude files, and the names its agent's PATH lacks,
+    /// each with the directory that holds it. `shell` is the server's
+    /// default-shell; with no server the probe gets `$SHELL`, bash.
     struct Agent {
         os: Os,
         server: bool,
+        shell: &'static str,
         settings: &'static str,
         installed: &'static str,
         plugin_hooks: &'static str,
@@ -1886,6 +1990,7 @@ mod tests {
             Self {
                 os: Os::Other,
                 server: false,
+                shell: "fish",
                 settings,
                 installed: INSTALLED,
                 plugin_hooks,
@@ -1921,7 +2026,14 @@ mod tests {
             } else if command.contains("hooks/hooks.json") {
                 (0, file(self.plugin_hooks), String::new())
             } else if command.contains(UNRESOLVED) {
-                (0, format!("{UNRESOLVED}\n{}", self.missing), String::new())
+                let asks = command.contains("show-options -gv default-shell");
+                let shell = if self.server && asks {
+                    self.shell
+                } else {
+                    "bash"
+                };
+                let said = format!("{UNRESOLVED}\n{shell}\n{}", self.missing);
+                (0, said, String::new())
             } else if command.contains("list-sessions") {
                 match self.server {
                     true => (0, String::new(), String::new()),
@@ -1987,7 +2099,7 @@ mod tests {
         let probe = &agent.asked(UNRESOLVED)[0];
         assert!(probe.contains("'claude-mem' 'node'"), "{probe}");
         assert!(
-            !probe.contains("/bin/sh"),
+            !probe.contains("'/bin/sh'"),
             "a path is not looked up: {probe}"
         );
     }
@@ -2111,16 +2223,99 @@ mod tests {
         assert!(agent.asked("run-shell").is_empty(), "{probe}");
     }
 
-    /// A pane on Linux gets ssh's PATH, server or not, so ssh answers.
+    /// A pane on Linux starts with ssh's PATH, server or not, and runs under
+    /// the server's default-shell, or `$SHELL` when none answers (Y-729).
     #[tokio::test]
     async fn linux_asks_over_ssh_with_or_without_a_server() {
-        for server in [false, true] {
-            let mut linux = Agent::new(ENABLED, CLAUDE_MEM, "");
+        for (server, fix) in [
+            (
+                true,
+                "add `fish_add_path ~/.local/bin` to ~/.config/fish/config.fish",
+            ),
+            (false, "run `sudo ln -s ~/.local/bin/node /usr/local/bin/`"),
+        ] {
+            let mut linux = Agent::new(ENABLED, CLAUDE_MEM, "node ~/.local/bin\n");
             linux.server = server;
-            assert_eq!(linux.check().await.state, State::Present);
+            let found = linux.check().await;
+            assert_eq!(found.state, State::Absent, "{}", found.detail);
+            assert!(found.detail.ends_with(fix), "{server}: {}", found.detail);
+            let probe = &linux.asked(UNRESOLVED)[0];
+            assert!(probe.contains("show-options -gv default-shell"), "{probe}");
+            assert!(probe.contains("${SHELL:-/bin/sh}"), "{probe}");
             assert!(linux.asked("run-shell").is_empty());
             assert!(linux.asked("show-environment").is_empty());
         }
+    }
+
+    /// The detail a Linux pane under `shell` gets for `missing`.
+    async fn fix_for(shell: &'static str, missing: &'static str) -> String {
+        let mut linux = Agent::new(ENABLED, CLAUDE_MEM, missing);
+        (linux.server, linux.shell) = (true, shell);
+        let found = linux.check().await;
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        for private in ["/Users/me", "/home/"] {
+            assert!(!found.detail.contains(private), "{}", found.detail);
+        }
+        found.detail
+    }
+
+    const BOTH: &str = "claude-mem ~/.local/bin\nnode ~/.local/share/fnm/aliases/default/bin\n";
+
+    /// `fish -c` reads config.fish, so both directories go on one line there.
+    #[tokio::test]
+    async fn a_fish_pane_is_told_to_fish_add_path() {
+        let detail = fix_for("fish", BOTH).await;
+        assert!(
+            detail.ends_with(
+                ". Fix: add `fish_add_path ~/.local/bin ~/.local/share/fnm/aliases/default/bin` \
+                 to ~/.config/fish/config.fish"
+            ),
+            "{detail}"
+        );
+    }
+
+    /// `zsh -c` reads only .zshenv, where `~` in quotes would not expand.
+    #[tokio::test]
+    async fn a_zsh_pane_is_told_to_export_in_zshenv() {
+        let detail = fix_for("zsh", BOTH).await;
+        assert!(
+            detail.ends_with(
+                ". Fix: add `export PATH=\"$HOME/.local/bin:$HOME/.local/share/fnm/aliases/default/bin:$PATH\"` \
+                 to ~/.zshenv"
+            ),
+            "{detail}"
+        );
+    }
+
+    /// `bash -c` reads no file, and /usr/local/bin is on sshd's PATH.
+    #[tokio::test]
+    async fn any_other_pane_is_told_to_link_into_usr_local_bin() {
+        let detail = fix_for("bash", BOTH).await;
+        assert!(
+            detail.ends_with(
+                ". Fix: run `sudo ln -s ~/.local/bin/claude-mem \
+                 ~/.local/share/fnm/aliases/default/bin/node /usr/local/bin/`"
+            ),
+            "{detail}"
+        );
+    }
+
+    /// A program in no known directory is to be installed, on the same line.
+    #[tokio::test]
+    async fn a_program_found_nowhere_is_to_be_installed() {
+        let detail = fix_for("fish", "claude-mem ~/.local/bin\nnode \n").await;
+        assert!(
+            detail.ends_with(
+                ". Fix: install `node`, or add its directory to ~/.config/fish/config.fish; \
+                 add `fish_add_path ~/.local/bin` to ~/.config/fish/config.fish"
+            ),
+            "{detail}"
+        );
+        let detail = fix_for("sh", "node\n").await;
+        assert!(
+            detail.ends_with(". Fix: install `node`, or link it into /usr/local/bin"),
+            "{detail}"
+        );
     }
 
     /// A Mac's next server is the LaunchAgent's, whose PATH ssh does not have.
@@ -2135,7 +2330,8 @@ mod tests {
         assert!(mac.asked("launchctl").is_empty(), "doctor is a read");
     }
 
-    /// The three probes under a real `sh`, with `$HOME` a scratch directory.
+    /// The three probes under a real `sh`, with `$HOME` a scratch directory
+    /// and `$SHELL` the `fish` in it.
     struct Local(std::path::PathBuf);
 
     impl Exec for Local {
@@ -2143,6 +2339,7 @@ mod tests {
             let out = std::process::Command::new("sh")
                 .args(["-c", command])
                 .env("HOME", &self.0)
+                .env("SHELL", self.0.join("fish"))
                 .output()
                 .expect("sh is on every machine this builds on");
             Ok(ssh::Output {
@@ -2174,18 +2371,34 @@ mod tests {
         std::fs::write(
             plugin.join("hooks/hooks.json"),
             r#"{"hooks": {"SessionStart": [{"hooks": [
-                {"type": "command", "command": "yantra-no-such-program", "args": []}
+                {"type": "command", "command": "yantra-pane-program", "args": []},
+                {"type": "command", "command": "yantra-local-program", "args": []}
             ]}]}}"#,
         )
         .expect("a file");
+        // The pane's shell puts pane-bin on PATH, which ssh's PATH lacks (Y-729).
+        let executable = |path: std::path::PathBuf, body: &str| {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
+            std::fs::write(&path, body).expect("a file");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("a mode");
+        };
+        executable(
+            home.join("fish"),
+            "#!/bin/sh\nPATH=\"$HOME/pane-bin:$PATH\"\nexec /bin/sh \"$@\"\n",
+        );
+        executable(home.join("pane-bin/yantra-pane-program"), "#!/bin/sh\n");
+        executable(home.join(".local/bin/yantra-local-program"), "#!/bin/sh\n");
 
         let found = hooks(&Local(home.clone()), None, &Ok(Os::Other)).await;
         let _ = std::fs::remove_dir_all(&home);
         assert_eq!(found.state, State::Absent, "{}", found.detail);
         assert_eq!(
             found.detail,
-            "the agent's PATH lacks `yantra-no-such-program` (SessionStart in p@m), so those \
-             hooks fail each time an agent starts"
+            "the agent's PATH lacks `yantra-local-program` (SessionStart in p@m), so those \
+             hooks fail each time an agent starts. Fix: add `fish_add_path ~/.local/bin` to \
+             ~/.config/fish/config.fish"
         );
     }
 
