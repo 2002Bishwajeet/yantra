@@ -261,7 +261,8 @@ Three things about that command are deliberate, and two of them were measured ra
 **It proxies to the socket, never to an address.** On the socket the kernel names the account that
 connected, and `tailscaled` runs as root. So uid 0 is the proxy, and its `X-Forwarded-For` is the
 caller. Over TCP, a request from this machine's own address is refused, because any account here
-could have sent it ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)).
+could have sent it ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)). To put Caddy in front instead, name its account
+in `YANTRA_PROXY_ACCOUNT` ([behind Caddy](appliance.md#behind-caddy-on-a-name-you-own)).
 
 **Port 8443, not `/`.** `/` on this machine's HTTPS is code-server's and stays that way. A subpath
 would have cost the PWA its service-worker scope — a worker's scope is its path — and made every

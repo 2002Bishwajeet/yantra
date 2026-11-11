@@ -1026,6 +1026,9 @@ the peer's uid is the gate.
   exactly one address: absent is a 403, a list or junk is a 503 (nothing was decided about the
   caller), and an address this daemon bound is a 403, because the account that opened the first
   connection is unknown. Any other address goes through ADR-0016's predicate.
+- **The account `YANTRA_PROXY_ACCOUNT` names gets exactly uid 0's rules** (ADR-0042, amended
+  2026-11-11, Y-727), so Caddy can proxy to the socket. `main.rs` resolves the name once at start;
+  unset, empty or unknown trusts nobody. A join script that a proxy fetched does not name the socket.
 - **The daemon's own uid, or a member of the group `yantra`, is this machine.** The caller is `whois`
   of the first bound address. The header is ignored. Membership is the primary gid or the group's
   member list, read with `nix` on a blocking thread (I-13); a lookup that fails refuses.

@@ -5,8 +5,9 @@
 //! points** ([ADR-0042](../../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md)).
 //! On TCP the peer is the caller, and a peer that is one of this daemon's own
 //! addresses is refused: any account on this machine could have opened it. On
-//! the Unix socket `SO_PEERCRED` names the account. uid 0 is `tailscale serve`,
-//! whose `X-Forwarded-For` is the caller; the daemon's own account or a member
+//! the Unix socket `SO_PEERCRED` names the account. uid 0 is `tailscale serve`
+//! and the one account `YANTRA_PROXY_ACCOUNT` names is a proxy such as Caddy;
+//! either's `X-Forwarded-For` is the caller. The daemon's own account or a member
 //! of the `yantra` group is this machine; any other account may only join itself.
 //!
 //! Until Y-112 the API answered 405 to every write and the dashboard handed
@@ -91,7 +92,8 @@ impl Connected<IncomingStream<'_, UnixListener>> for Peer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Hop {
     Tcp(IpAddr),
-    /// uid 0 on the socket: `tailscale serve`, as `tailscaled` runs as root.
+    /// A proxy on the socket: uid 0, which is `tailscale serve` as `tailscaled`
+    /// runs as root, or the account [`Authoriser::proxied_by`] names.
     Serve,
     /// The daemon's own account or a member of [`GROUP`], so the caller is
     /// this machine.
@@ -113,6 +115,7 @@ pub struct Authoriser<I> {
     inventory: I,
     bound: Arc<[IpAddr]>,
     me: u32,
+    proxy: Option<u32>,
     socket: Arc<std::path::Path>,
 }
 
@@ -122,8 +125,20 @@ impl<I: Inventory> Authoriser<I> {
             inventory,
             bound: bound.iter().map(SocketAddr::ip).collect(),
             me: nix::unistd::geteuid().as_raw(),
+            proxy: None,
             socket: socket.into(),
         }
+    }
+
+    /// Trust one more account as a proxy, with exactly uid 0's rules (ADR-0042).
+    #[must_use]
+    pub fn proxied_by(self, uid: Option<u32>) -> Self {
+        Self { proxy: uid, ..self }
+    }
+
+    /// The peer is a proxy, so its caller is another machine.
+    pub(crate) fn is_proxy(&self, peer: &Peer) -> bool {
+        matches!(*peer, Peer::Unix(Some(uid)) if uid == 0 || Some(uid) == self.proxy)
     }
 
     /// Who to ask, for a route that names the caller's machine.
@@ -136,7 +151,7 @@ impl<I: Inventory> Authoriser<I> {
         match *peer {
             Peer::Tcp(from) => Hop::Tcp(from.ip()),
             Peer::Unix(None) => Hop::Unknown,
-            Peer::Unix(Some(0)) => Hop::Serve,
+            _ if self.is_proxy(peer) => Hop::Serve,
             Peer::Unix(Some(uid)) if uid == self.me => Hop::Owner,
             Peer::Unix(Some(uid)) => tokio::task::spawn_blocking(move || account(uid))
                 .await
@@ -152,11 +167,11 @@ impl<I: Inventory> Authoriser<I> {
             }
             Hop::Tcp(from) => Ok(*from),
             Hop::Serve => {
-                let from = forwarded(headers)?
-                    .ok_or(Refused::Hop("`tailscale serve` forwarded no address"))?;
+                let from =
+                    forwarded(headers)?.ok_or(Refused::Hop("the proxy forwarded no address"))?;
                 if self.bound.contains(&from) {
                     return Err(Refused::Hop(
-                        "`tailscale serve` forwarded this machine's own address, so the account that called is unknown",
+                        "the proxy forwarded this machine's own address, so the account that called is unknown",
                     ));
                 }
                 Ok(from)
@@ -209,6 +224,22 @@ fn forwarded(headers: &HeaderMap) -> Result<Option<IpAddr>, Refused> {
         .ok_or(Refused::Forwarded(
             "`tailscale serve` forwarded something that is not one address, and it writes exactly one",
         ))
+}
+
+/// The uid of the proxy account `name`. Unset, empty or unknown trusts nobody,
+/// so a bad name fails closed.
+pub fn proxy_account(name: Option<&str>) -> Option<u32> {
+    let Some(name) = name.filter(|name| !name.is_empty()) else {
+        tracing::info!("no proxy account is set, so only uid 0 is a proxy on the socket");
+        return None;
+    };
+    let Ok(Some(user)) = User::from_name(name) else {
+        tracing::warn!("no account {name}, so no proxy account is trusted");
+        return None;
+    };
+    let uid = user.uid.as_raw();
+    tracing::info!("trusting {name} (uid {uid}) as a proxy on the socket");
+    Some(uid)
 }
 
 /// Any lookup error refuses: the account is then [`Hop::Unknown`].
@@ -1464,8 +1495,8 @@ async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
     let script = join::daemon_address(&bound)
         .and_then(|daemon| {
             // ADR-0042: a script fetched on the socket reports on it too, but
-            // uid 0 is `serve`, whose caller is another machine with no socket.
-            let socket = matches!(from, Peer::Unix(Some(uid)) if uid != 0)
+            // a proxy's caller is another machine with no socket.
+            let socket = (matches!(from, Peer::Unix(Some(_))) && !state.authoriser.is_proxy(&from))
                 .then_some(&*state.authoriser.socket);
             join::script(daemon, &prepared.public_key, socket)
         })
@@ -4494,6 +4525,78 @@ mod tests {
             matches!(stranger, Refused::NotAPeer(judged) if judged == address(9)),
             "{stranger:?}"
         );
+    }
+
+    /// The account `YANTRA_PROXY_ACCOUNT` names, such as `caddy`.
+    const PROXY: u32 = 4242;
+
+    /// ADR-0042, amended 2026-11-11: the named proxy account gets exactly uid
+    /// 0's rules, and nothing more.
+    #[tokio::test]
+    async fn the_proxy_account_names_the_phone_it_forwarded() {
+        let fake = || {
+            tailnet(vec![
+                (address(1), caller(ME, &[])),
+                (address(2), caller(ME, &[])),
+            ])
+        };
+        let proxied = || on_this_machine(fake()).proxied_by(Some(PROXY));
+
+        let phone = allowed(
+            &proxied(),
+            &Peer::Unix(Some(PROXY)),
+            &forwarded(&["100.64.0.2"]),
+        )
+        .await
+        .expect("the owner's phone");
+        assert_eq!(phone.user, ME);
+
+        for headers in [HeaderMap::new(), forwarded(&["100.64.0.1"])] {
+            let refused = allowed(&proxied(), &Peer::Unix(Some(PROXY)), &headers)
+                .await
+                .expect_err("not proved");
+            assert!(matches!(refused, Refused::Hop(_)), "{refused:?}");
+            assert_eq!(refused.into_response().status(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    #[tokio::test]
+    async fn an_account_not_named_as_the_proxy_is_not_the_serve_hop() {
+        let fake = tailnet(vec![
+            (address(1), caller(ME, &[])),
+            (address(2), caller(ME, &[])),
+        ]);
+
+        let refused = allowed(
+            &on_this_machine(fake),
+            &Peer::Unix(Some(PROXY)),
+            &forwarded(&["100.64.0.2"]),
+        )
+        .await
+        .expect_err("not a proxy");
+
+        assert!(matches!(refused, Refused::Account(_)), "{refused:?}");
+    }
+
+    /// The join script reports on the socket only when no proxy fetched it.
+    #[test]
+    fn is_proxy_names_uid_0_and_the_proxy_account_only() {
+        let authoriser = on_this_machine(tailnet(vec![])).proxied_by(Some(PROXY));
+
+        assert!(authoriser.is_proxy(&SERVE));
+        assert!(authoriser.is_proxy(&Peer::Unix(Some(PROXY))));
+        assert!(!authoriser.is_proxy(&daemon_account()));
+        assert!(!authoriser.is_proxy(&Peer::Unix(Some(PROXY + 1))));
+        assert!(!authoriser.is_proxy(&Peer::Unix(None)));
+        assert!(!authoriser.is_proxy(&tcp(address(2))));
+    }
+
+    #[test]
+    fn a_proxy_account_that_is_unset_empty_or_unknown_trusts_nobody() {
+        assert_eq!(proxy_account(None), None);
+        assert_eq!(proxy_account(Some("")), None);
+        assert_eq!(proxy_account(Some("root")), Some(0));
+        assert_eq!(proxy_account(Some("no-such-yantra-proxy-account")), None);
     }
 
     /// ADR-0017 §3, kept for the `serve` hop: a list, a second line or a value

@@ -56,6 +56,8 @@ const PORT: u16 = yantra_core::join::DAEMON_PORT;
 /// systemd sets `RUNTIME_DIRECTORY` from the unit's `RuntimeDirectory=yantra`.
 const RUNTIME: &str = "/run/yantra";
 const SOCKET: &str = "yantrad.sock";
+/// systemd loads it from `/etc/yantra/daemon.env`, which `write_relay` leaves alone.
+const PROXY_ACCOUNT: &str = "YANTRA_PROXY_ACCOUNT";
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -217,7 +219,9 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             .join(SOCKET);
     // ADR-0042: the set bound here is exactly the set that is this machine, so
     // the authoriser is built from it rather than from anything that could drift.
-    let authoriser = write::Authoriser::new(inventory.clone(), &addresses, &socket);
+    let proxy = write::proxy_account(std::env::var(PROXY_ACCOUNT).ok().as_deref());
+    let authoriser =
+        write::Authoriser::new(inventory.clone(), &addresses, &socket).proxied_by(proxy);
     let ssh_dir = yantra_core::identity::dir().unwrap_or_else(|error| {
         tracing::warn!("no ssh identity can be served: {error}");
         PathBuf::new()
