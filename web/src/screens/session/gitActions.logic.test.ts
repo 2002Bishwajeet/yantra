@@ -48,6 +48,18 @@ describe('a read-only thread (ADR-0045)', () => {
     expect(items.filter((item) => item.kind !== 'open_pr_link').every((item) => item.disabled && item.reason === why)).toBe(true)
     expect(items.find((item) => item.kind === 'open_pr_link')?.disabled).toBe(false)
   })
+
+  it('offers Forget thread, on, for a gone thread, and no Remove worktree', () => {
+    const items = buildMenuItems({ ...idle, readOnly: why, gone: true })
+    expect(items.find((item) => item.id === 'remove')).toEqual({
+      id: 'remove',
+      label: 'Forget thread',
+      kind: 'remove',
+      disabled: false,
+      reason: null,
+    })
+    expect(items.filter((item) => item.id !== 'remove').every((item) => item.disabled)).toBe(true)
+  })
 })
 
 describe('buildMenuItems', () => {

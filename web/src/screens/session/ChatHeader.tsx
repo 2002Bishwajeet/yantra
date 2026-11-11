@@ -236,6 +236,7 @@ export function ChatHeader(props: ChatHeaderProps) {
       <GitActions
         busy={busy}
         diffs={diffs}
+        gone={current?.presence === 'gone'}
         key={thread ?? ''}
         listed={pr}
         onRemoved={() => {
