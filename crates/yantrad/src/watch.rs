@@ -291,21 +291,38 @@ pub async fn poll(
     teller.tell_pulls(&notes, watched, events).await;
 }
 
+/// What a [`discover`] pass did.
+#[derive(Debug, Default)]
+pub struct Discovered {
+    pub ran: bool,
+    /// GitHub could not be asked for some workspace's PRs (Y-731).
+    pub unreachable: bool,
+}
+
+impl Discovered {
+    /// A pass that could not reach GitHub has not seen every PR open at
+    /// start, so the next pass is still the baseline (I-59).
+    pub fn ends_the_baseline(&self) -> bool {
+        self.ran && !self.unreachable
+    }
+}
+
 /// Adds the open PRs of every workspace's threads. It removes nothing: a
 /// machine asleep or a look that failed tells nobody anything. `baseline`
-/// marks the start-up rebuild; it answers whether the pass ran.
+/// marks the start-up rebuild.
 pub async fn discover(
     pulls: &Pulls,
     github: &Github,
     token: Option<Token>,
     baseline: bool,
-) -> bool {
+) -> Discovered {
     let Some(token) = token else {
-        return false;
+        return Discovered::default();
     };
     let Ok(listing) = workspace::list() else {
-        return false;
+        return Discovered::default();
     };
+    let mut unreachable = false;
     for workspace in listing.workspaces {
         match thread::open_pulls(&workspace.name, github, &token).await {
             Ok(found) => {
@@ -313,10 +330,19 @@ pub async fn discover(
                     track(pulls, watched, baseline).await;
                 }
             }
-            Err(error) => tracing::debug!("no PRs read for {}: {error}", workspace.name),
+            Err(error) => {
+                unreachable |= matches!(
+                    error,
+                    thread::Failed::Github(github::Error::Unreachable { .. })
+                );
+                tracing::debug!("no PRs read for {}: {error}", workspace.name);
+            }
         }
     }
-    true
+    Discovered {
+        ran: true,
+        unreachable,
+    }
 }
 
 /// Starts watching a PR, and leaves one already watched as it is.
@@ -509,6 +535,40 @@ pub(crate) mod tests {
             Look::Keep(vec![PrPhase::CheckFailed, PrPhase::Reviewed])
         );
         assert_eq!(look(&mut watched, answer()), Look::Keep(Vec::new()));
+    }
+
+    /// Y-731: a rebuild GitHub did not answer keeps the baseline, and a second
+    /// baseline pass leaves a PR it already tracks as it is.
+    #[tokio::test]
+    async fn an_unreachable_rebuild_keeps_the_baseline_for_the_next_pass() {
+        let unreachable = Discovered {
+            ran: true,
+            unreachable: true,
+        };
+        assert!(!unreachable.ends_the_baseline());
+        assert!(
+            !Discovered::default().ends_the_baseline(),
+            "no grant, no pass"
+        );
+        let answered = Discovered {
+            ran: true,
+            unreachable: false,
+        };
+        assert!(answered.ends_the_baseline());
+
+        let pulls = Pulls::default();
+        let pr = |number| Watched {
+            workspace: "web".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+            number,
+            url: format!("https://github.com/o/r/pull/{number}"),
+        };
+        track(&pulls, pr(1), true).await;
+        track(&pulls, pr(1), false).await;
+        track(&pulls, pr(2), true).await;
+        let held = pulls.read().await;
+        assert!(held.values().all(|tracked| tracked.baseline));
     }
 
     /// A failed first look leaves the baseline for the first look that lands.

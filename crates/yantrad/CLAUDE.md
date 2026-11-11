@@ -113,6 +113,8 @@ asked. Two answers are *absent* and both are earned — no grant, and a grant Gi
 could not be reached says nothing about the grant. It has no `failed`: a look it could not take is
 already *unknown* inside the check. `doctor::github` is a pure mapper over `GET /user`'s answer, and
 `refresh.rs` is what asks — on the slow clock, since it spends the owner's quota like the inbox does.
+An unreachable GitHub is read again after 5 s, doubling up to the normal interval, and an answer of
+any kind waits the full interval (Y-731).
 The look logs each change between accepted and refused, with the login and never the token (Y-648).
 
 **The grant itself is `GET /api/github`, and it never carries the token.** `connected`, the login,
@@ -266,7 +268,8 @@ reaches the phone ([M16](../../docs/plans/m16-the-coding-loop.md) §3.6).
 - **The first look at a PR the start-up rebuild found says nothing.** It records a baseline, as
   the agents notifier does, so a restart does not repeat what was said before it. A PR added after
   that pass, by `pr open` or a later discover pass, starts with nothing told, so a check that ended
-  before its first look is still said.
+  before its first look is still said. A pass that could not reach GitHub does not end the
+  rebuild, so the next pass is still the baseline (Y-731).
 - **A failed look tells nobody anything.** Discovery removes nothing when a machine is asleep. A PR
   leaves the watch when it merges, when it closes, or after eight failed looks in a row, as T3 Code's
   does; discovery adds an open one back.

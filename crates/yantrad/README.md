@@ -173,6 +173,8 @@ departs from the fleet's interval. The fleet poll pays for itself by keeping the
 this one warms nothing and spends a quota that is not Yantra's — the owner's own `gh` and `git`
 draw on the same token. GitHub asks for it directly: `/notifications` answers `X-Poll-Interval: 60`,
 so the fleet's interval would poll it at twice the rate its own server requests.
+An unreachable GitHub is read again after 5 s, doubling up to the normal interval, and an answer of
+any kind waits the full interval (Y-731).
 `GET /api/readiness/github` is the check about **this** host (Y-175, Y-342): whether the grant the
 daemon holds is present and still accepted. It is a route of its own rather than a tenth check on
 every report, since an answer about this machine copied onto each machine's card claims something no
