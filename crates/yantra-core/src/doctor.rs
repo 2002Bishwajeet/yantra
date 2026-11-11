@@ -395,6 +395,16 @@ fn diagnose(diagnosis: &str) -> (Check, Check) {
             ),
         );
     }
+    // Linux and macOS both start with ssh's own words before the resolver's.
+    if said.contains("could not resolve hostname") {
+        return (
+            unreachable(format!("{UNRESOLVED_NAME}: {diagnosis}")),
+            unknown(
+                SSHD,
+                "the name did not resolve, so no server was asked whether one is listening",
+            ),
+        );
+    }
     (
         unreachable(format!("ssh got no answer: {diagnosis}")),
         unknown(
@@ -402,6 +412,27 @@ fn diagnose(diagnosis: &str) -> (Check, Check) {
             "nothing answered, so whether one is listening is not known",
         ),
     )
+}
+
+/// What [`diagnose`] says when ssh could not look the name up. [`on_tailnet`]
+/// matches on it.
+const UNRESOLVED_NAME: &str = "this host could not resolve the machine's name";
+
+/// The `reachable` check for a machine the caller knows is a tailnet peer. Only
+/// the caller knows that (ADR-0009), and only then is the fix the resolver.
+/// Every other check comes back unchanged.
+pub fn on_tailnet(check: &Check) -> Check {
+    let mut check = check.clone();
+    if check.check == REACHABLE && check.detail.starts_with(UNRESOLVED_NAME) {
+        check.detail = format!(
+            "this host cannot resolve tailnet names: Tailscale's resolver 100.100.100.100 is \
+             not in this host's /etc/resolv.conf, often because NetworkManager rewrote the \
+             file. Fix: run `sudo systemctl restart tailscaled` so it writes the file again; \
+             to keep the fix, run systemd-resolved with NetworkManager (Y-711) · {}",
+            check.detail
+        );
+    }
+    check
 }
 
 async fn tmux<E: Exec>(exec: &E) -> (Check, Option<Tmux>) {
@@ -1473,6 +1504,47 @@ mod tests {
         let (reachable, sshd) = diagnose("no diagnostics; the connection dropped silently");
         assert_eq!(reachable.state, State::Absent);
         assert_ne!(sshd.state, State::Absent, "{}", sshd.detail);
+    }
+
+    /// Y-710: the Linux and the macOS words for a name this host cannot look up.
+    #[test]
+    fn a_name_that_does_not_resolve_is_its_own_diagnosis() {
+        for said in [
+            "ssh: Could not resolve hostname yantra-box: Name or service not known",
+            "ssh: Could not resolve hostname yantra-box: Temporary failure in name resolution",
+            "ssh: Could not resolve hostname yantra-box: nodename nor servname provided, or not known",
+        ] {
+            let (reachable, sshd) = diagnose(said);
+            assert_eq!(reachable.state, State::Absent);
+            assert_eq!(sshd.state, State::Unknown, "{}", sshd.detail);
+            assert!(reachable.detail.contains("resolve"), "{}", reachable.detail);
+            assert!(reachable.detail.contains(said), "{}", reachable.detail);
+            assert!(!reachable.detail.contains("ssh got no answer"));
+        }
+    }
+
+    #[test]
+    fn on_tailnet_names_the_resolver_fix_and_touches_nothing_else() {
+        let said = "ssh: Could not resolve hostname yantra-box: Name or service not known";
+        let (reachable, sshd) = diagnose(said);
+        let fixed = on_tailnet(&reachable);
+        assert_eq!(fixed.state, State::Absent);
+        assert!(
+            fixed
+                .detail
+                .starts_with("this host cannot resolve tailnet names"),
+            "{}",
+            fixed.detail
+        );
+        assert!(fixed.detail.contains("100.100.100.100"));
+        assert!(fixed.detail.contains("sudo systemctl restart tailscaled"));
+        assert!(fixed.detail.contains(said));
+
+        let (refused, _) = diagnose("ssh: connect to host pi port 22: Connection refused");
+        assert_eq!(on_tailnet(&refused), refused);
+        let ran = present(REACHABLE, "a command ran there and reported its own status");
+        assert_eq!(on_tailnet(&ran), ran);
+        assert_eq!(on_tailnet(&sshd), sshd);
     }
 
     /// R-23, at the one point a consumer reads: a machine nothing could be asked

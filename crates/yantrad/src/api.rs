@@ -501,6 +501,8 @@ pub(crate) fn answered(
     snapshot: &Snapshot,
     beats: &BTreeMap<String, Reading<Heartbeat>>,
 ) -> doctor::Report {
+    // A name Tailscale lists is one this host should resolve, so the fix is the resolver.
+    let peer = node_id(&report.machine, snapshot).is_some();
     doctor::Report {
         machine: report.machine.clone(),
         checks: report
@@ -508,6 +510,7 @@ pub(crate) fn answered(
             .iter()
             .map(|check| match check.check {
                 doctor::HEARTBEAT => heard_from(&report.machine, snapshot, beats),
+                _ if peer => doctor::on_tailnet(check),
                 _ => check.clone(),
             })
             .collect(),
@@ -2759,5 +2762,44 @@ pub(crate) mod tests {
                 );
             }
         }
+    }
+
+    /// Y-710: only a tailnet peer's unresolved name is the resolver's fault.
+    #[test]
+    fn an_unresolved_tailnet_peer_names_the_resolver_fix() {
+        let snapshot = Snapshot {
+            machines: Some(Arc::new(Reading::new(Ok(vec![machine(
+                "n1",
+                "yantra-box",
+                true,
+            )])))),
+            ..Snapshot::default()
+        };
+        let report = |name: &str| doctor::Report {
+            machine: name.to_owned(),
+            checks: vec![doctor::Check {
+                check: "reachable",
+                state: doctor::State::Absent,
+                detail: format!(
+                    "this host could not resolve the machine's name: ssh: Could not resolve \
+                     hostname {name}: Name or service not known"
+                ),
+                took_ms: None,
+            }],
+        };
+        let detail = |name: &str| {
+            answered(&report(name), &snapshot, &BTreeMap::new()).checks[0]
+                .detail
+                .clone()
+        };
+
+        let peer = detail("yantra-box");
+        assert!(
+            peer.starts_with("this host cannot resolve tailnet names"),
+            "{peer}"
+        );
+        assert!(peer.contains("100.100.100.100"), "{peer}");
+
+        assert_eq!(detail("elsewhere"), report("elsewhere").checks[0].detail);
     }
 }
