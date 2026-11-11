@@ -4,7 +4,7 @@
 `useMutation` per write, each invalidating by key. `hooks.ts` is what a route calls. `socket.ts` is
 the two terminal sockets. `mic.ts` is push-to-talk ([ADR-0031](../../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md)
 §4–6): `openMic` opens the microphone, an AudioWorklet (`mic.worklet.ts`) and the socket on a press,
-`toPcm16` resamples to 16 kHz mono s16le in 640-byte frames, and `close` is the release. `client.ts` holds `fetchJson`, the `Looked` envelope, and the
+`toPcm16` resamples to 16 kHz mono s16le in 640-byte frames, and `close` is the release. With `onText` the same press is dictation ([ADR-0043](../../../docs/adr/0043-dictation-runs-a-local-speech-model.md) §4) on `dictateAddress`: the release sends `end` and waits for the one text frame. `dictationQuery` is §6's health read, through the daemon. `client.ts` holds `fetchJson`, the `Looked` envelope, and the
 `QueryClient` defaults. `chat.ts` is the chat socket, and its `diff()` asks for a thread's branch diff (Y-491); the editor links read the thread list through `useThreads`. `useDraftMessage`, `useCommit`, `usePush` and `useOpenPr` are the four git verbs on a thread (Y-493); each is a POST a person asks for and none polls. `useThreadSearch` is the palette's thread search, a `GET /api/threads?q=` that reads the daemon's store and asks no machine (Y-689). `fixtures.ts` is for tests only.
 
 ## Errors
@@ -24,6 +24,8 @@ beneath it in mono. `error.status` is there where a code arrived.
 | `denied` | `getUserMedia` refused the permission | "This browser was not allowed to use the microphone." |
 | `no-device` | `getUserMedia` found no microphone | "This browser found no microphone to use." |
 | `stopped` | the browser or iOS ended the microphone's track mid-press | "The browser took the microphone away, so the stream stopped." |
+
+| `dictation-off`, `stt-unreachable`, `too-long`, `silent`, `stt-failed` | dictation's text frame, `{error, said}`, as `dictateError` maps it | "Dictation is off: yantra-box does not answer." and four more, in `errors.ts` |
 
 The microphone also uses `refused` for a socket that never opened, and `socket` for the daemon's text
 frame, each with a microphone sentence from `mic.ts`.

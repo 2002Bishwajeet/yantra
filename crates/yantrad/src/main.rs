@@ -30,6 +30,7 @@ mod chat;
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod contract;
+mod dictate;
 mod events;
 mod github;
 mod heartbeat;
@@ -184,7 +185,8 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
                 .merge(terminal::router(authoriser.clone(), fleet.left.clone()))
                 .merge(layout::router(authoriser.clone()))
                 .merge(carry::router(authoriser.clone(), fleet.carry.clone()))
-                .merge(mic::router(authoriser)),
+                .merge(mic::router(authoriser.clone()))
+                .merge(dictate::router(authoriser)),
         )
         .merge(heartbeat::router())
         .with_state(fleet)

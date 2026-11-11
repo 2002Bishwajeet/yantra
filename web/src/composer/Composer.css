@@ -190,6 +190,28 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+.composer__status[data-tone="error"] {
+  color: var(--md-sys-color-error);
+}
+
+/* Dictate: a hold, not a tap, so the page must not scroll, select or open a menu under it. */
+.composer-dictate {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    transform var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects),
+    background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects),
+    color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+/* Recording is the one state that must catch the eye: primary, not the pressed tonal fill. */
+.composer-dictate[data-state="listening"] {
+  color: var(--md-sys-color-on-primary);
+  background: var(--md-sys-color-primary);
+}
+
 /* Control */
 
 .composer-control {

@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { waitFor } from '@testing-library/react'
 import { ApiError } from './errors'
-import { FRAME_BYTES, micAddress, openMic, START, toPcm16, type MicState } from './mic'
+import { dictateAddress, FRAME_BYTES, micAddress, openMic, START, toPcm16, type MicState } from './mic'
 import { browser, sine } from '@/test/mic'
 
 afterEach(() => {
@@ -63,7 +63,7 @@ describe('one press', () => {
     const fake = browser()
     const states: MicState[] = []
     const onEnd = vi.fn()
-    const mic = openMic('pi', { onEnd, onState: (state) => states.push(state) })
+    const mic = openMic(micAddress('pi'), { onEnd, onState: (state) => states.push(state) })
 
     expect(fake.asked).toHaveBeenCalledWith({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
@@ -90,7 +90,7 @@ describe('one press', () => {
 
   it('stops every track and closes the socket and the context on release', async () => {
     const fake = browser()
-    const mic = openMic('pi', { onEnd: () => {}, onState: () => {} })
+    const mic = openMic(micAddress('pi'), { onEnd: () => {}, onState: () => {} })
     fake.allow()
     fake.socket().open()
     await waitFor(() => expect(fake.node()).toBeDefined())
@@ -108,7 +108,7 @@ describe('one press', () => {
     // Safari's prompt takes the focus, which ends the first hold.
     const fake = browser()
     const onEnd = vi.fn<(error: ApiError | null) => void>()
-    const mic = openMic('pi', { onEnd, onState: () => {} })
+    const mic = openMic(micAddress('pi'), { onEnd, onState: () => {} })
     mic.close()
     expect(fake.socket().closed).toBe(true)
     expect(fake.context().closed).toBe(true)
@@ -126,7 +126,7 @@ describe('one press', () => {
   it('says why when a prompt answered after the release refuses', async () => {
     const fake = browser()
     const onEnd = vi.fn<(error: ApiError | null) => void>()
-    openMic('pi', { onEnd, onState: () => {} }).close()
+    openMic(micAddress('pi'), { onEnd, onState: () => {} }).close()
     fake.refuse('NotAllowedError', 'Permission denied')
     await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1))
     expect(onEnd.mock.calls[0][0]?.kind).toBe('denied')
@@ -135,7 +135,7 @@ describe('one press', () => {
   it('is a silent release before the request resolves when the permission was already granted', async () => {
     const fake = browser({ permission: 'granted' })
     const onEnd = vi.fn()
-    const mic = openMic('pi', { onEnd, onState: () => {} })
+    const mic = openMic(micAddress('pi'), { onEnd, onState: () => {} })
     // The Permissions API answers on a later turn.
     await Promise.resolve()
     await Promise.resolve()
@@ -153,7 +153,7 @@ describe('one press', () => {
   it('sends what was heard before the socket opened, then closes it', async () => {
     const fake = browser()
     const onEnd = vi.fn()
-    const mic = openMic('pi', { onEnd, onState: () => {} })
+    const mic = openMic(micAddress('pi'), { onEnd, onState: () => {} })
     fake.allow()
     await waitFor(() => expect(fake.node()).toBeDefined())
     let carry = START
@@ -183,7 +183,7 @@ describe('one press', () => {
   it('is refused when a socket released while connecting never opens', async () => {
     const fake = browser()
     const onEnd = vi.fn<(error: ApiError | null) => void>()
-    const mic = openMic('pi', { onEnd, onState: () => {} })
+    const mic = openMic(micAddress('pi'), { onEnd, onState: () => {} })
     fake.allow()
     await waitFor(() => expect(fake.node()).toBeDefined())
     fake.node().push(sine(1024, 48_000))
@@ -202,7 +202,7 @@ describe('a press whose setup throws', () => {
     const fake = browser()
     broken()
     const onEnd = vi.fn<(error: ApiError | null) => void>()
-    const mic = openMic('pi', { onEnd, onState: () => {} })
+    const mic = openMic(micAddress('pi'), { onEnd, onState: () => {} })
     expect(onEnd).toHaveBeenCalledTimes(1)
     const error = onEnd.mock.calls[0][0]
     expect(error?.kind).toBe('capture')
@@ -218,7 +218,7 @@ describe('a press that ends on its own', () => {
   const ended = async (act: (fake: ReturnType<typeof browser>) => void | Promise<void>, secure = true) => {
     const fake = browser({ secure })
     const onEnd = vi.fn<(error: ApiError | null) => void>()
-    openMic('pi', { onEnd, onState: () => {} })
+    openMic(micAddress('pi'), { onEnd, onState: () => {} })
     await act(fake)
     await waitFor(() => expect(onEnd).toHaveBeenCalled())
     expect(onEnd).toHaveBeenCalledTimes(1)
@@ -294,5 +294,90 @@ describe('a press that ends on its own', () => {
     expect(error.said).toBe(said)
     expect(error.describe()).toBe('The microphone on the machine stopped.')
     expect(fake.socket().closed).toBe(true)
+  })
+})
+
+/** ADR-0043 §4: the same press, but the release is `end` and the answer is one text frame. */
+describe('a dictation', () => {
+  const dictating = async () => {
+    const fake = browser()
+    const states: MicState[] = []
+    const onEnd = vi.fn<(error: ApiError | null) => void>()
+    const onText = vi.fn<(text: string) => void>()
+    const mic = openMic(dictateAddress('site', 't1'), { onEnd, onState: (state) => states.push(state), onText })
+    fake.allow()
+    fake.socket().open()
+    await waitFor(() => expect(fake.node()).toBeDefined())
+    fake.node().push(sine(128, 48_000))
+    return { fake, states, onEnd, onText, mic }
+  }
+
+  it('addresses the workspace and the thread on the page’s own host', () => {
+    vi.stubGlobal('location', new URL('https://yantra.example.ts.net:8443/w/site'))
+    expect(dictateAddress('site', 't 1')).toBe('wss://yantra.example.ts.net:8443/api/dictate?workspace=site&thread=t+1')
+    expect(dictateAddress()).toBe('wss://yantra.example.ts.net:8443/api/dictate')
+  })
+
+  it('sends end on release, keeps the socket open, and gives the text once', async () => {
+    const { fake, states, onEnd, onText, mic } = await dictating()
+    mic.close()
+    expect(fake.socket().sent.at(-1)).toBe('end')
+    expect(fake.socket().closed).toBe(false)
+    expect(fake.track.stop).toHaveBeenCalled()
+    expect(states.at(-1)).toBe('transcribing')
+    expect(onEnd).not.toHaveBeenCalled()
+
+    fake.socket().say(JSON.stringify({ text: 'use tokio' }))
+    expect(onText).toHaveBeenCalledWith('use tokio')
+    expect(onEnd).toHaveBeenCalledWith(null)
+    expect(fake.socket().closed).toBe(true)
+  })
+
+  it('sends end after the frames that waited for a socket still connecting', async () => {
+    const fake = browser()
+    const onText = vi.fn()
+    const mic = openMic(dictateAddress('site'), { onEnd: () => {}, onState: () => {}, onText })
+    fake.allow()
+    await waitFor(() => expect(fake.node()).toBeDefined())
+    for (let from = 0; from < 48_000 * 0.1; from += 128) fake.node().push(sine(128, 48_000, from))
+    mic.close()
+    expect(fake.socket().sent).toEqual([])
+    fake.socket().open()
+    const sent = fake.socket().sent
+    expect(sent.length).toBeGreaterThan(1)
+    expect(sent.at(-1)).toBe('end')
+    expect(sent.slice(0, -1).every((frame) => frame instanceof Uint8Array)).toBe(true)
+  })
+
+  it.each([
+    ['off', 'dictation-off'],
+    ['unreachable', 'stt-unreachable'],
+    ['too-long', 'too-long'],
+    ['silent', 'silent'],
+    ['failed', 'stt-failed'],
+  ])('reads the daemon’s %s as %s and writes nothing', async (error, kind) => {
+    const { fake, onEnd, onText, mic } = await dictating()
+    mic.close()
+    fake.socket().say(JSON.stringify({ error, said: 'the daemon’s reason' }))
+    expect(onText).not.toHaveBeenCalled()
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    const said = onEnd.mock.calls[0][0]
+    expect(said?.kind).toBe(kind)
+    expect(said?.said).toBe('the daemon’s reason')
+    expect(fake.socket().closed).toBe(true)
+  })
+
+  it('reads a frame it cannot parse, and a close before any answer, as a failed service', async () => {
+    const first = await dictating()
+    first.mic.close()
+    first.fake.socket().say('not json')
+    expect(first.onEnd.mock.calls[0][0]?.kind).toBe('stt-failed')
+    expect(first.onEnd.mock.calls[0][0]?.said).toBe('not json')
+
+    const second = await dictating()
+    second.mic.close()
+    second.fake.socket().hangUp()
+    expect(second.onEnd.mock.calls[0][0]?.kind).toBe('stt-failed')
+    expect(second.onText).not.toHaveBeenCalled()
   })
 })

@@ -130,6 +130,29 @@ was 2 to 3.** Score 3.0 and 15 hotwords fixed six terms and inserted nothing.
 Parakeet-TDT-0.6B-v2, int8, in sherpa-onnx, with 2.0 to 3.0 as the hotword score and a list of names
 only. See [ADR-0043](../adr/0043-dictation-runs-a-local-speech-model.md).
 
+## Addendum, 2026-11-11: measured on `yantra-box` (Y-682)
+
+**The box is three times faster than the estimate in §4.** The estimate was 0.2 to 0.3.
+
+- **Setup.** `yantra-stt bench` (the Rust service, sherpa-onnx 2.0.1 through its crate), built on the
+  box, with the same int8 files and six clips as §4. Four threads. The 2.2 s model load is excluded.
+
+| Setting | Threads | RTF | Peak RSS |
+| --- | --- | --- | --- |
+| `modified_beam_search`, no hotwords | 4 | 0.090 | 0.95 GB |
+| `modified_beam_search`, 13 hotwords per stream | 4 | 0.088 | 0.95 GB |
+
+- **Per-stream hotwords work** (measured). §4 left this *not verified*. With the list given to
+  `create_stream_with_hotwords` and no global file, `axum`, `yantrad`, `systemd`, `ControlMaster` and
+  `ControlPersist` were fixed, as in §4. `serde` stayed *sir* and `rustfmt` stayed *rustmint*.
+- **`bpe.vocab` is `tokens.txt` with a score column.** The file §4 used is reproduced byte for byte by
+  `awk '{printf "%s\t%g\n", $1, -($2+1)/1000}' tokens.txt`.
+- **A glibc trap.** A binary built on a newer glibc does not run on the box (glibc 2.41).
+  `cargo zigbuild` cannot link sherpa-onnx's prebuilt C++ libraries, because zig links libc++ and they
+  need libstdc++. Building on the box works.
+- **Not measured:** real speech, a phone microphone, and the hotword list `yantrad` builds from a
+  workspace, which can hold up to 200 entries.
+
 ## Sources
 
 All accessed 2026-11-08.
@@ -154,3 +177,4 @@ All accessed 2026-11-08.
 - Open ASR Leaderboard — <https://huggingface.co/spaces/hf-audio/open_asr_leaderboard> (page returned no table to the fetch tool)
 - Piper voice `en_US-lessac-medium`, `piper-tts` 1.8.0 (pip, run locally)
 - Measurements: `~/yantra-stt-research/run.py` and `hot.txt`, 2026-11-08, on the owner's laptop.
+- Measurements on `yantra-box`: `yantra-stt bench`, 2026-11-11 (Y-682).

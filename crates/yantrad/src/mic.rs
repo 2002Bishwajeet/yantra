@@ -156,8 +156,13 @@ async fn refuse(socket: &mut WebSocket, machine: &str, error: &mic::Error) {
     let said = chain(error);
     tracing::warn!("mic on {machine} stopped: {said}");
     let _ = socket.send(Message::Text(said.into())).await;
+    close(socket).await;
+}
+
+/// A close, then the socket drained: unread client data (a pong) at drop makes
+/// the kernel reset the socket and lose the last frame. Dictation ends the same way.
+pub(crate) async fn close(socket: &mut WebSocket) {
     let _ = socket.send(Message::Close(None)).await;
-    // Unread client data (a pong) at drop makes the kernel reset the socket and lose the reason.
     let _ = tokio::time::timeout(Duration::from_secs(1), async {
         while let Some(Ok(_)) = socket.recv().await {}
     })

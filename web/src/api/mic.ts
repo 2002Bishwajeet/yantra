@@ -1,4 +1,4 @@
-import { type ApiError, micError, type MicKind } from '@/api/errors'
+import { ApiError, dictateError, isDictateKind, micError, type MicKind } from '@/api/errors'
 import tap from './mic.worklet.ts?worker&url'
 
 /** ADR-0031 §4: what the daemon's `pw-cat` plays. 16 kHz mono s16le. */
@@ -6,8 +6,19 @@ export const RATE = 16_000
 /** 20 ms of audio per binary frame. */
 export const FRAME_BYTES = 640
 
+const socketBase = () => location.origin.replace(/^http/, 'ws')
+
 export function micAddress(machine: string): string {
-  return `${location.origin.replace(/^http/, 'ws')}/api/machines/${encodeURIComponent(machine)}/mic`
+  return `${socketBase()}/api/machines/${encodeURIComponent(machine)}/mic`
+}
+
+/** ADR-0043 §4: the workspace names the hotwords, and the thread adds its own words. */
+export function dictateAddress(workspace?: string, thread?: string | null): string {
+  const query = new URLSearchParams()
+  if (workspace) query.set('workspace', workspace)
+  if (thread) query.set('thread', thread)
+  const asked = query.toString()
+  return `${socketBase()}/api/dictate${asked ? `?${asked}` : ''}`
 }
 
 /** Where the next output sample falls, in input samples from the start of the
@@ -58,17 +69,33 @@ function fromCapture(cause: unknown): ApiError {
 }
 
 /** The context first, so a socket that cannot be made leaves no context open. */
-function connect(machine: string): { context: AudioContext; socket: WebSocket } {
+function connect(address: string): { context: AudioContext; socket: WebSocket } {
   const context = new AudioContext()
   try {
-    return { context, socket: new WebSocket(micAddress(machine)) }
+    return { context, socket: new WebSocket(address) }
   } catch (cause) {
     void context.close().catch(() => {})
     throw cause
   }
 }
 
-export type MicState = 'opening' | 'listening'
+export type MicState = 'opening' | 'listening' | 'transcribing'
+
+/** Dictation's one text frame: the words, or why there are none. */
+function heardFrom(data: string): { text: string } | ApiError {
+  try {
+    const said: unknown = JSON.parse(data)
+    if (typeof said === 'object' && said !== null) {
+      if ('text' in said && typeof said.text === 'string') return { text: said.text }
+      if ('error' in said && isDictateKind(said.error)) {
+        return dictateError(said.error, 'said' in said ? String(said.said) : '')
+      }
+    }
+  } catch {
+    // Not JSON: the daemon's words go to the person as they are.
+  }
+  return dictateError('failed', data)
+}
 
 /** One press: the microphone, the audio graph and the socket. */
 export type Mic = { close: () => void }
@@ -78,10 +105,20 @@ export type Mic = { close: () => void }
  *  track and closes the context at once, so the microphone is never open
  *  while the button is up (§6). The socket closes once it has sent what was
  *  heard. `onEnd` runs once — `null` for a release, the reason for anything
- *  else, including a permission that a prompt granted after the release. */
+ *  else, including a permission that a prompt granted after the release.
+ *  With `onText` the press is dictation (ADR-0043 §4): the release sends `end`
+ *  and the socket stays open for the one text frame that answers it. */
 export function openMic(
-  machine: string,
-  { onEnd, onState }: { onEnd: (error: ApiError | null) => void; onState: (state: MicState) => void },
+  address: string,
+  {
+    onEnd,
+    onState,
+    onText,
+  }: {
+    onEnd: (error: ApiError | null) => void
+    onState: (state: MicState) => void
+    onText?: (text: string) => void
+  },
 ): Mic {
   if (!window.isSecureContext) {
     onEnd(micError('insecure', location.origin))
@@ -90,7 +127,7 @@ export function openMic(
 
   let made: ReturnType<typeof connect>
   try {
-    made = connect(machine)
+    made = connect(address)
   } catch (cause) {
     onEnd(micError('capture', wordsOf(cause)))
     return { close: () => {} }
@@ -158,6 +195,12 @@ export function openMic(
       if (!prompted) finish(null)
       return
     }
+    if (onText) {
+      onState('transcribing')
+      // `onopen` sends `end` after what is waiting.
+      if (socket.readyState === WebSocket.OPEN) socket.send('end')
+      return
+    }
     // `onopen` sends what is waiting, then closes.
     if (socket.readyState === WebSocket.CONNECTING && waiting.length > 0) return
     hangUp()
@@ -184,6 +227,10 @@ export function openMic(
     opened = true
     for (const frame of waiting.splice(0)) socket.send(frame)
     if (released && !ended) {
+      if (onText) {
+        socket.send('end')
+        return
+      }
       hangUp()
       finish(null)
       return
@@ -191,12 +238,20 @@ export function openMic(
     ready()
   }
   socket.onmessage = (frame: MessageEvent<string | ArrayBuffer>) => {
-    if (typeof frame.data === 'string') fail(micError('socket', frame.data))
+    if (typeof frame.data !== 'string') return
+    if (!onText) return fail(micError('socket', frame.data))
+    const heard = heardFrom(frame.data)
+    if (heard instanceof ApiError) return fail(heard)
+    if (ended) return
+    hangUp()
+    onText(heard.text)
+    finish(null)
   }
   // A refused upgrade is an error event and then the close that ends it.
   socket.onerror = () => {}
   socket.onclose = () => {
     if (ended || hungUp) return
+    if (onText && opened) return fail(dictateError('failed', 'the daemon closed dictation before it answered'))
     fail(
       opened
         ? micError('socket', 'the daemon closed the microphone')
