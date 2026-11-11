@@ -472,6 +472,7 @@ async fn every_script() -> Vec<(String, String)> {
             std::net::SocketAddr::from(([100, 64, 0, 1], join::DAEMON_PORT)),
             "ssh-ed25519 AAAA yantra",
             None,
+            None,
         )
         .expect("a usable key"),
     );

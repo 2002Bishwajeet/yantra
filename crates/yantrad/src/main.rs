@@ -240,8 +240,8 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         }
     };
     let proxy = write::proxy_account(std::env::var(PROXY_ACCOUNT).ok().as_deref());
-    let authoriser = write::Authoriser::new(inventory.clone(), &addresses, &socket, passkeys)
-        .proxied_by(proxy);
+    let authoriser =
+        write::Authoriser::new(inventory.clone(), &addresses, &socket, passkeys).proxied_by(proxy);
     let ssh_dir = yantra_core::identity::dir().unwrap_or_else(|error| {
         tracing::warn!("no ssh identity can be served: {error}");
         PathBuf::new()

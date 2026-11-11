@@ -25,6 +25,11 @@ pub enum Error {
     )]
     UnusableSocket,
 
+    #[error(
+        "a join code is up to 16 letters, digits and dashes, so this one is not written into a script"
+    )]
+    UnusableCode,
+
     #[error("this machine holds no tailnet address, so a joined machine has nowhere to report")]
     NoAddress,
 }
@@ -46,6 +51,7 @@ pub fn script(
     daemon: SocketAddr,
     public_key: &str,
     socket: Option<&Path>,
+    code: Option<&str>,
 ) -> Result<String, Error> {
     // Each value sits inside single quotes, so a quote or a newline would end it.
     let usable = !public_key.is_empty()
@@ -64,7 +70,12 @@ pub fn script(
     {
         return Err(Error::UnusableSocket);
     }
+    let code = code.unwrap_or_default();
+    if code.len() > 16 || !code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(Error::UnusableCode);
+    }
     Ok(SCRIPT
+        .replace("__YANTRA_CODE__", code)
         .replace("__YANTRA_DAEMON__", &daemon.to_string())
         .replace("__YANTRA_KEY__", public_key)
         .replace("__YANTRA_VERSION__", crate::about::VERSION)
@@ -83,7 +94,7 @@ mod tests {
     #[test]
     fn the_script_carries_all_three_values_and_no_placeholder() {
         let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
-        let script = script(daemon, KEY, None).expect("a usable key");
+        let script = script(daemon, KEY, None, None).expect("a usable key");
 
         assert!(script.contains("DAEMON='100.64.0.1:7717'"), "{script}");
         assert!(script.contains(&format!("KEY='{KEY}'")));
@@ -96,17 +107,40 @@ mod tests {
     #[test]
     fn the_socket_is_written_only_when_the_script_came_on_it() {
         let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
-        let over_tcp = script(daemon, KEY, None).expect("a usable key");
+        let over_tcp = script(daemon, KEY, None, None).expect("a usable key");
         assert!(over_tcp.contains("SOCKET=''"), "{over_tcp}");
 
         let socket = Path::new("/run/yantra/yantrad.sock");
-        let on_socket = script(daemon, KEY, Some(socket)).expect("a usable path");
+        let on_socket = script(daemon, KEY, Some(socket), None).expect("a usable path");
         assert!(on_socket.contains("SOCKET='/run/yantra/yantrad.sock'"));
         for hostile in ["/run/y'; id; '", "/run/a b", "/run/$(id)"] {
             assert!(
                 matches!(
-                    script(daemon, KEY, Some(Path::new(hostile))),
+                    script(daemon, KEY, Some(Path::new(hostile)), None),
                     Err(Error::UnusableSocket)
+                ),
+                "{hostile:?}"
+            );
+        }
+    }
+
+    /// ADR-0044 decision 13: the code `GET /join?code=` names goes in the
+    /// script, and a code a shell would read does not.
+    #[test]
+    fn the_join_code_is_written_and_a_hostile_one_is_refused() {
+        let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
+        let written = script(daemon, KEY, None, Some("AB23CD45")).expect("a usable code");
+        assert!(written.contains("CODE='AB23CD45'"), "{written}");
+        assert!(
+            written.contains(r#"\"code\":\"$CODE\""#),
+            "the report posts it"
+        );
+
+        for hostile in ["a'b", "$(id)", "a b", "AAAAAAAAAAAAAAAAA"] {
+            assert!(
+                matches!(
+                    script(daemon, KEY, None, Some(hostile)),
+                    Err(Error::UnusableCode)
                 ),
                 "{hostile:?}"
             );
@@ -117,7 +151,7 @@ mod tests {
     #[test]
     fn the_script_carries_the_login_server_function() {
         let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
-        let script = script(daemon, KEY, None).expect("a usable key");
+        let script = script(daemon, KEY, None, None).expect("a usable key");
         assert!(script.contains(crate::tmux::LOGIN_SERVER));
         assert!(script.contains("login_server() {"));
         assert!(script.contains("login_server \"$tmux\""));
@@ -217,7 +251,7 @@ mod tests {
     #[test]
     fn the_script_parses_as_posix_sh() {
         let daemon = SocketAddr::new(IpAddr::from([100, 64, 0, 1]), DAEMON_PORT);
-        let script = script(daemon, KEY, None).expect("a usable key");
+        let script = script(daemon, KEY, None, None).expect("a usable key");
         let out = std::process::Command::new("sh")
             .args(["-n", "-c", &script])
             .output()
@@ -238,7 +272,7 @@ mod tests {
             "ssh-ed25519 AAAA\nexit",
         ] {
             assert!(
-                matches!(script(daemon, hostile, None), Err(Error::UnusableKey)),
+                matches!(script(daemon, hostile, None, None), Err(Error::UnusableKey)),
                 "{hostile:?}"
             );
         }

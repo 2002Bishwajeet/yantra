@@ -2,9 +2,10 @@
 #
 # Join this machine to a Yantra fleet (Y-387, docs/adr/0029-a-machine-joins-itself.md).
 #
-#     curl -fsSL https://<appliance>.<tailnet>.ts.net:8443/join | sh
+#     curl -fsSL 'https://<appliance>.<tailnet>.ts.net:8443/join?code=<code>' | sh
 #
-# or `http://<appliance's tailnet address>:7717/join` where HTTPS is not on.
+# The dashboard's Add a machine shows this command with a fresh code, which the
+# join needs from another machine (ADR-0044 decision 13).
 # On the appliance itself, fetch it on the daemon's socket (ADR-0042):
 #
 #     curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yantra/join | sh
@@ -19,11 +20,12 @@ set -eu
 # Each case pattern opens with `(`: bash 3.2 ends a `$(…)` at an unpaired `)` (Y-635).
 
 # yantrad writes these when it serves this script. SOCKET is set only when
-# the script was fetched on the daemon's socket.
+# the script was fetched on the daemon's socket, and CODE only when it was not.
 DAEMON='__YANTRA_DAEMON__'
 KEY='__YANTRA_KEY__'
 VERSION='__YANTRA_VERSION__'
 SOCKET='__YANTRA_SOCKET__'
+CODE='__YANTRA_CODE__'
 REPO=2002Bishwajeet/yantra
 
 say() { printf 'join: %s\n' "$*"; }
@@ -371,10 +373,11 @@ PLIST
 }
 
 # The daemon names this machine from the address the request comes from, so
-# the body carries the account and nothing else (ADR-0016, ADR-0029).
+# the body carries the account and the code and nothing else (ADR-0016,
+# ADR-0029, ADR-0044).
 report() {
     reply=$(daemon_curl -sS --max-time 30 -w '\n%{http_code}' -H 'Content-Type: application/json' \
-        -d "{\"user\":\"$user\"}" "http://$DAEMON/api/join") ||
+        -d "{\"user\":\"$user\",\"code\":\"$CODE\"}" "http://$DAEMON/api/join") ||
         fail "could not reach yantrad at $DAEMON, so it does not know this machine joined. Run this again."
     status=$(printf '%s\n' "$reply" | tail -n 1)
     body=$(printf '%s\n' "$reply" | sed '$d')
@@ -444,7 +447,8 @@ use_sshd_instead() {
     fi
     say "Tailscale SSH is off, and the appliance logs in with its key."
     # sshd answers with another host key, which yantrad would refuse as changed.
-    if ! daemon_curl -fsS --max-time 30 -o /dev/null -X POST "http://$DAEMON/api/join/forget-host-key"; then
+    if ! daemon_curl -fsS --max-time 30 -o /dev/null -X POST -H 'Content-Type: application/json' \
+        -d "{\"code\":\"$CODE\"}" "http://$DAEMON/api/join/forget-host-key"; then
         say "yantrad kept Tailscale SSH's old host key, so its next check fails on a changed key. Run sudo -u yantra -H yantra forget-host-key $machine on the appliance."
     fi
     needed=0

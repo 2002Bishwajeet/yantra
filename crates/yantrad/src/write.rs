@@ -298,6 +298,14 @@ impl<I: Inventory> Authoriser<I> {
     }
 }
 
+/// `?code=`, read by hand as `?force=true` is. The script checks its shape.
+fn code_in(uri: &Uri) -> Option<String> {
+    uri.query()?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("code="))
+        .map(str::to_owned)
+}
+
 /// `None` for an absent header; one address, or refuse (ADR-0017 §3).
 fn forwarded(headers: &HeaderMap) -> Result<Option<IpAddr>, Refused> {
     let mut forwarded = headers.get_all(FORWARDED_FOR).iter();
@@ -637,8 +645,9 @@ pub(crate) async fn dashboard_origin(fleet: &Fleet) -> Option<String> {
 }
 
 /// The routes under `/api` that check their caller themselves, or need none:
-/// About (decision 8), the join, which needs a code or the socket (decision
-/// 13), and the four halves of the two ceremonies (decisions 1, 2).
+/// About (decision 8), the join and its last step, which need a code or the
+/// socket (decision 13), and the four halves of the two ceremonies
+/// (decisions 1, 2).
 fn unchecked(method: &axum::http::Method, path: &str) -> bool {
     use axum::http::Method;
     match *method {
@@ -646,6 +655,7 @@ fn unchecked(method: &axum::http::Method, path: &str) -> bool {
         Method::POST => matches!(
             path,
             "/join"
+                | "/join/forget-host-key"
                 | "/passkey/register/start"
                 | "/passkey/register/finish"
                 | "/passkey/login/start"
@@ -1704,8 +1714,12 @@ async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Result<Response, Refused> {
     let caller = joining(&state.authoriser, &from, &headers, None).await?;
+    let code = (!on_this_machine(&state.authoriser, &from))
+        .then(|| code_in(&uri))
+        .flatten();
     let dir = state.fleet.facts.ssh_dir.clone();
     let one_at_a_time = state.fleet.joins.lock().await;
     // `ssh-keygen` is a subprocess, so off the worker (I-13).
@@ -1731,9 +1745,9 @@ async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
         .and_then(|daemon| {
             // ADR-0042: a script fetched on the socket reports on it too, but
             // a proxy's caller is another machine with no socket.
-            let socket = (matches!(from, Peer::Unix(Some(_))) && !state.authoriser.is_proxy(&from))
-                .then_some(&*state.authoriser.socket);
-            join::script(daemon, &prepared.public_key, socket)
+            let socket =
+                on_this_machine(&state.authoriser, &from).then_some(&*state.authoriser.socket);
+            join::script(daemon, &prepared.public_key, socket, code.as_deref())
         })
         .map_err(|error| Refused::Verb {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -1761,6 +1775,15 @@ async fn serve_script<I: Inventory + Clone + Send + Sync + 'static>(
 #[serde(deny_unknown_fields)]
 struct Join {
     user: String,
+    /// The code `GET /join?code=` put in the script (ADR-0044 decision 13).
+    #[serde(default)]
+    code: Option<String>,
+}
+
+/// Whether `peer` is an account on this machine's socket other than a proxy,
+/// so it joins with no code (ADR-0044 decision 13).
+fn on_this_machine<I: Inventory>(authoriser: &Authoriser<I>, peer: &Peer) -> bool {
+    matches!(peer, Peer::Unix(Some(_))) && !authoriser.is_proxy(peer)
 }
 
 /// `yantra ssh-identity --machine <m> --user <u>` on the wire, with the
@@ -1778,6 +1801,14 @@ async fn join_as<I: Inventory + Clone + Send + Sync + 'static>(
             status: StatusCode::BAD_REQUEST,
             said: identity::Error::UnusableUser { user: join.user }.to_string(),
         });
+    }
+    if !on_this_machine(&state.authoriser, &from)
+        && !join
+            .code
+            .as_deref()
+            .is_some_and(|code| state.authoriser.passkeys.take_join(code, &caller.node))
+    {
+        return Err(Refused::JoinCode);
     }
     let machine = caller_machine(&state.authoriser, &caller).await?;
 
@@ -1857,12 +1888,27 @@ struct Forgotten {
 /// `yantra forget-host-key <machine>` on the wire, with the machine taken from
 /// the caller as [`join_as`] takes it (Y-621). Tailscale SSH has a host key of
 /// its own, so the join's switch to sshd changes the key this daemon recorded.
+/// The owner, or the machine a join code joined a moment ago, which is the
+/// join script's last step (ADR-0044 decision 13).
 async fn forget_host_key<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
+    joined: Option<Json<Joining>>,
 ) -> Result<Json<Forgotten>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let code = joined
+        .and_then(|Json(joined)| joined.code)
+        .filter(|code| !code.is_empty());
+    let caller = match code {
+        Some(code) => {
+            let caller = joining(&state.authoriser, &from, &headers, None).await?;
+            if !state.authoriser.passkeys.joined(&code, &caller.node) {
+                return Err(Refused::JoinCode);
+            }
+            caller
+        }
+        None => allowed(&state.authoriser, &from, &headers).await?,
+    };
     let machine = caller_machine(&state.authoriser, &caller).await?;
     let target = ssh::Machine {
         host: machine.clone(),
@@ -1882,6 +1928,12 @@ async fn forget_host_key<I: Inventory + Clone + Send + Sync + 'static>(
     drop(one_at_a_time);
     tracing::info!("forgot {machine}'s host key for {}: {removed}", caller.node);
     Ok(Json(Forgotten { machine, removed }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Joining {
+    code: Option<String>,
 }
 
 /// `doctor` on the machine that just joined. Only a *refused* reach is an
@@ -4236,6 +4288,8 @@ pub(crate) enum Refused {
     Account(Option<String>),
     /// ADR-0044 decision 11: no live session cookie and no agent token.
     SignIn,
+    /// ADR-0044 decision 13: a join from another machine with no live code.
+    JoinCode,
     /// ADR-0044 decision 5: a write whose `Origin` is not the dashboard's.
     Origin(String),
     /// ADR-0044 decision 12: an agent token outside its workspace's room and
@@ -4319,6 +4373,10 @@ impl IntoResponse for Refused {
             Self::SignIn => (
                 StatusCode::UNAUTHORIZED,
                 "sign in from the dashboard, or run this on the hub".to_owned(),
+            ),
+            Self::JoinCode => (
+                StatusCode::UNAUTHORIZED,
+                "a join from another machine needs a fresh code: open Add a machine in the dashboard and run the command it shows".to_owned(),
             ),
             Self::Origin(origin) => (
                 StatusCode::FORBIDDEN,
@@ -7617,21 +7675,58 @@ mod tests {
         router::<Fake, ()>(direct(joining_tailnet()), fleet.clone())
     }
 
-    /// Y-387's row, in one request: the body carries the account, the tailnet
-    /// supplies the machine, and the block carries both.
-    #[tokio::test]
-    async fn a_machine_joins_itself_under_the_name_the_tailnet_gives_it() {
-        let dir = join_scratch("itself");
-        let fleet = join_fleet(&dir);
+    /// A router whose authoriser holds one join code, and the body that
+    /// joins as `biswa` with it.
+    fn coded(inventory: Fake, fleet: &Fleet) -> (Router, String) {
+        let passkeys = Passkeys::trusting();
+        let code = passkeys.join_code();
+        let authoriser = Authoriser::new(
+            inventory,
+            &[],
+            std::path::Path::new("yantrad.sock"),
+            passkeys,
+        );
+        let body = format!(r#"{{"user":"biswa","code":"{code}"}}"#);
+        (router::<Fake, ()>(authoriser, fleet.clone()), body)
+    }
 
-        let (status, _, body) = join_send(
-            joins(&fleet),
+    /// ADR-0044 decision 13: a join from another machine needs a live code,
+    /// once.
+    #[tokio::test]
+    async fn a_join_from_another_machine_needs_a_code_once() {
+        let dir = join_scratch("coded");
+        let fleet = join_fleet(&dir);
+        let (app, body) = coded(joining_tailnet(), &fleet);
+
+        let (status, _, said) = join_send(
+            app.clone(),
             "POST",
             "/join",
             tcp(address(7)),
             r#"{"user":"biswa"}"#,
         )
         .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{said}");
+        assert!(said.contains("Add a machine"), "{said}");
+
+        let (status, _, said) =
+            join_send(app.clone(), "POST", "/join", tcp(address(7)), &body).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+
+        let (status, _, _) = join_send(app, "POST", "/join", tcp(address(7)), &body).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "a used code");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Y-387's row, in one request: the body carries the account, the tailnet
+    /// supplies the machine, and the block carries both.
+    #[tokio::test]
+    async fn a_machine_joins_itself_under_the_name_the_tailnet_gives_it() {
+        let dir = join_scratch("itself");
+        let fleet = join_fleet(&dir);
+        let (app, joined) = coded(joining_tailnet(), &fleet);
+
+        let (status, _, body) = join_send(app, "POST", "/join", tcp(address(7)), &joined).await;
 
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(
@@ -7833,14 +7928,8 @@ mod tests {
             },
         );
 
-        let (status, _, body) = join_send(
-            router::<Fake, ()>(direct(tailnet), fleet.clone()),
-            "POST",
-            "/join",
-            tcp(address(7)),
-            r#"{"user":"biswa"}"#,
-        )
-        .await;
+        let (app, joined) = coded(tailnet, &fleet);
+        let (status, _, body) = join_send(app, "POST", "/join", tcp(address(7)), &joined).await;
 
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(body.contains(r#""machine":"joining-box""#), "{body}");
@@ -7935,15 +8024,9 @@ mod tests {
         let owners = "Host joining-box\n    User someone-else\n";
         std::fs::write(dir.join("config"), owners).expect("an owner's block");
         let fleet = join_fleet(&dir);
+        let (app, joined) = coded(joining_tailnet(), &fleet);
 
-        let (status, _, body) = join_send(
-            joins(&fleet),
-            "POST",
-            "/join",
-            tcp(address(7)),
-            r#"{"user":"biswa"}"#,
-        )
-        .await;
+        let (status, _, body) = join_send(app, "POST", "/join", tcp(address(7)), &joined).await;
 
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(

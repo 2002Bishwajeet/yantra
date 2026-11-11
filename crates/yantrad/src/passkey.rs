@@ -169,6 +169,8 @@ struct Held {
     saved: Saved,
     enrol: Codes,
     join: Codes,
+    /// Join codes taken, with the node that took each and when it would end.
+    joined: Vec<(String, String, u64)>,
     ceremonies: HashMap<String, (u64, Ceremony)>,
     /// Agent token hash to its workspace (decision 12).
     agents: HashMap<String, String>,
@@ -328,9 +330,31 @@ impl Passkeys {
         self.lock().join.make(now(), life)
     }
 
-    /// Uses a join code once.
-    pub fn take_join(&self, code: &str) -> bool {
-        self.lock().join.take(code, now())
+    /// Uses a join code once, for the machine whose node is `node`. The code
+    /// then stays good for that node's [`Self::joined`] until it would have
+    /// expired, so the script's last step can follow the join.
+    pub fn take_join(&self, code: &str, node: &str) -> bool {
+        let now = now();
+        let life = self.0.code_life;
+        let mut state = self.lock();
+        if !state.join.take(code, now) {
+            return false;
+        }
+        state.joined.retain(|(_, _, ends)| *ends > now);
+        state
+            .joined
+            .push((normal(code), node.to_owned(), now + life));
+        true
+    }
+
+    /// Whether `code` joined the machine whose node is `node`, recently.
+    pub fn joined(&self, code: &str, node: &str) -> bool {
+        let (code, now) = (normal(code), now());
+        let state = self.lock();
+        state
+            .joined
+            .iter()
+            .any(|(taken, by, ends)| *taken == code && by == node && *ends > now)
     }
 
     /// The live session `token` names. An ended one is dropped and the file
@@ -1190,6 +1214,22 @@ pub(crate) mod tests {
 
         assert!(!codes.take(&one, 1));
         assert!(!codes.take(&two, 1));
+    }
+
+    #[test]
+    fn a_join_code_joins_once_and_then_names_only_the_node_that_took_it() {
+        let passkeys = Passkeys::memory();
+        let code = passkeys.join_code();
+
+        assert!(!passkeys.joined(&code, "nMAC"), "not taken yet");
+        assert!(passkeys.take_join(&code, "nMAC"));
+        assert!(!passkeys.take_join(&code, "nMAC"), "used once");
+        assert!(passkeys.joined(&code, "nMAC"));
+        assert!(!passkeys.joined(&code, "nOTHER"));
+        assert!(
+            !passkeys.take_join(&passkeys.enrol_code(), "nMAC"),
+            "kinds differ"
+        );
     }
 
     #[test]
