@@ -78,7 +78,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # .cargo/config.toml links the host target with mold, so CI needs it too.
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+        # Y-724: from GitHub releases; the runners' Ubuntu mirror failed DNS for hours on 2026-11-11.
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: mold
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
       - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
@@ -99,7 +102,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+        # Y-724: from GitHub releases; the runners' Ubuntu mirror failed DNS for hours on 2026-11-11.
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: mold
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
       - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
@@ -242,7 +248,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+        # Y-724: from GitHub releases; the runners' Ubuntu mirror failed DNS for hours on 2026-11-11.
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: mold
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
       - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
@@ -260,7 +269,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install mold
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+        # Y-724: from GitHub releases; the runners' Ubuntu mirror failed DNS for hours on 2026-11-11.
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        with:
+          tool: mold
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
       # cargo-zigbuild needs a zig; the version lives in the composite action.
