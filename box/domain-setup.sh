@@ -5,6 +5,8 @@
 set -euo pipefail
 domain=${DOMAIN:?set DOMAIN to the dashboard name}
 ip=$(tailscale ip -4)
+daemon_env=/etc/yantra/daemon.env
+[ -e "$daemon_env" ] || { echo "domain-setup: install Yantra first, $daemon_env is missing." >&2; exit 1; }
 caddy_url='https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com/caddy-dns/cloudflare'
 
 apt-get install -y -qq dnsmasq curl >/dev/null
@@ -33,6 +35,15 @@ if [ ! -s /etc/caddy/cloudflare.env ]; then
 fi
 chown caddy:caddy /etc/caddy/cloudflare.env
 
+# ADR-0042, amended 2026-11-11: on the socket the daemon trusts the account it is told is its proxy.
+if ! grep -qx 'YANTRA_PROXY_ACCOUNT=caddy' "$daemon_env"; then
+    sed -i '/^YANTRA_PROXY_ACCOUNT=/d' "$daemon_env"
+    echo 'YANTRA_PROXY_ACCOUNT=caddy' >>"$daemon_env"
+    chown yantra:yantra "$daemon_env"
+    chmod 600 "$daemon_env"
+    systemctl restart yantrad
+fi
+
 # header_up replaces X-Forwarded-For: the daemon refuses more than one address (ADR-0017).
 # resolvers: the challenge must be checked on public DNS, not through split DNS.
 cat >/etc/caddy/Caddyfile <<CFG
@@ -46,7 +57,7 @@ https://$domain {
         dns cloudflare {env.CF_API_TOKEN}
         resolvers 1.1.1.1
     }
-    reverse_proxy $ip:7717 {
+    reverse_proxy unix//run/yantra/yantrad.sock {
         header_up X-Forwarded-For {remote_host}
     }
 }

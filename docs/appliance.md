@@ -125,7 +125,8 @@ not install `gh`, and `provision.sh` is gone: its fleet half belongs to the dash
 front of the same socket. On the socket the kernel names the account that connected, and `yantrad`
 trusts only root as a proxy until you name one more account
 ([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md), amended 2026-11-11). The Debian
-package runs Caddy as `caddy`.
+package runs Caddy as `caddy`. On the box,
+[`box/domain-setup.sh`](../box/domain-setup.sh) does all four steps.
 
 1. Add one line to `/etc/yantra/daemon.env` with `sudoedit`. The file stays `0600` and owned by
    `yantra`, and `yantra relay` and `yantra github` keep lines that they do not own:
