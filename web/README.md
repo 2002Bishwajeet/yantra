@@ -913,6 +913,7 @@ src/
     Bell.tsx  BellPopover.tsx  NotificationsScreen.tsx
                      one set of notifications, at three widths
     formFactor.ts    phone / tablet / desktop, from three media queries
+    UpdateNotice.tsx a banner on every page but About when a newer release is out; Dismiss is a pref
     prefs.ts         `localStorage` under one versioned key (ADR-0024 §5)
   screens/
     dashboard/       `/` — the bands, the status strip, and the first run
