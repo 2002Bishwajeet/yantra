@@ -49,7 +49,7 @@ Rules for this run (CLAUDE.md §B7, the build loop):
 - Do not create or change anything under docs/adr/, and do not add or change an invariant in a crate tracker. If the row needs either, stop and say so.
 - Commit messages are "Y-NNN: <what changed>" and carry no AI attribution of any kind.
 - Never run the podman suite, \`just check\`, or Playwright in any form (\`just web-e2e\`, \`npm run e2e\`, \`npx playwright test\`). CI runs them on the PR. Rows run in parallel, and parallel local suites run the box out of memory. The one exception: when your gate includes \`just web-e2e\`, a fix agent may run \`just web-e2e --update-snapshots=changed <spec>\` to regenerate a baseline that its change was meant to alter, and commits the new images. Never regenerate a baseline on the host: its fonts differ. You may run \`just fmt-check\`, \`just lint\`, \`cargo nextest run -p <crate>\` without YANTRA_REQUIRE_PODMAN, and the web lint and unit tests.
-- Web code: load the skills vercel-react-best-practices, tanstack-router-best-practices, tanstack-query-best-practices, playwright-best-practices, accessibility and mobile-native before you write any. Every screen you touch must feel native on a phone: check it at 390 px with touch, safe areas and no hover-only control. Errors are typed and every error path is tested.`
+- Web code: load the skills vercel-react-best-practices, tanstack-router-best-practices, tanstack-query-best-practices, playwright-best-practices, accessibility, mobile-native, m3-expressive and emil-design-eng before you write any. A screen is designed, not dumped: build it from the web/src/m3 kit with M3 Expressive type, shape, colour and spacing; show what needs the owner first and hide what passed; never show raw probe output or a monospace wall where a designed row fits. Every screen you touch must feel native on a phone: check it at 390 px with touch, safe areas and no hover-only control. Errors are typed and every error path is tested.`
 
 function lock() {
   let tail = Promise.resolve()
@@ -306,7 +306,7 @@ async function walkUntilGreen(row, wt, plan) {
 
 const shown = (w) =>
   w.needs.length
-    ? `\nThe walk ran the branch on the real fleet. Read each screenshot and each text file with the Read tool and judge them against the row's outcome in tracker.md: ${w.shots.join(', ')}. Check the copy word by word in the text files, never only in an image: an eye reading a screenshot corrects a misspelt word. A wrong or misspelt word, a layout broken at 390 px, an error or an empty screen where the row expects content is blocking. The walker saw: ${w.seen || 'nothing noted'}.${w.mac === 'pass' ? ' `just test-mac` passed on the real Mac.' : ''}`
+    ? `\nThe walk ran the branch on the real fleet. Read each screenshot and each text file with the Read tool and judge them against the row's outcome in tracker.md: ${w.shots.join(', ')}. Check the copy word by word in the text files, never only in an image: an eye reading a screenshot corrects a misspelt word. A wrong or misspelt word, a layout broken at 390 px, an error or an empty screen where the row expects content is blocking. Load the m3-expressive skill and judge the design too: raw text dumps, monospace walls, unstyled lists, weak hierarchy, cramped or uneven spacing, or detail the owner does not need shown before what needs the owner is blocking. The walker saw: ${w.seen || 'nothing noted'}.${w.mac === 'pass' ? ' `just test-mac` passed on the real Mac.' : ''}`
     : ''
 
 async function runRow(row) {
