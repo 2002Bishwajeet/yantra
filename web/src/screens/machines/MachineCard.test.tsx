@@ -176,7 +176,7 @@ describe("a ready machine with gaps (Y-714)", () => {
     expect(screen.queryByText("tmux")).toBeNull();
     expect(screen.queryByText("terminfo")).toBeNull();
     expect(screen.queryByText("ok")).toBeNull();
-    expect(screen.getByText("a hook command is not on PATH")).toBeTruthy();
+    expect(screen.getByText("hook command not on PATH")).toBeTruthy();
   });
 
   it("shows the sudo gap once, in its note, and keeps the other gaps as lines", async () => {
@@ -187,7 +187,7 @@ describe("a ready machine with gaps (Y-714)", () => {
     expect(said).toHaveLength(1);
     expect(said[0].getAttribute("role")).toBe("note");
     expect(screen.queryByText("The joined account can use sudo")).toBeNull();
-    expect(screen.getByText("a hook command is not on PATH")).toBeTruthy();
+    expect(screen.getByText("hook command not on PATH")).toBeTruthy();
     const filled = Array.from(document.body.querySelectorAll("button, a")).filter((one) =>
       /filled/.test(one.className),
     );

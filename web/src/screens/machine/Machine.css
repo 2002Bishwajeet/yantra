@@ -103,12 +103,16 @@
 
 .machine__line {
   display: grid;
-  grid-template-columns: minmax(0, 150px) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 190px) auto minmax(0, 1fr);
   align-items: center;
   column-gap: 10px;
   flex: 1;
   min-width: 0;
   min-height: 24px;
+}
+
+.machine__line .m3-state {
+  white-space: nowrap;
 }
 
 .machine__line .machine__word {

@@ -232,6 +232,10 @@ test.describe('the problems on a machine page', () => {
       const words = ((await cause.textContent()) ?? '').trim().split(/\s+/).length
       expect(words).toBeLessThanOrEqual(8)
       expect((await cause.boundingBox())!.height).toBeLessThanOrEqual(24)
+      const [client, scroll] = await cause.evaluate((el) => [el.clientWidth, el.scrollWidth])
+      expect(scroll).toBeLessThanOrEqual(client)
+      // The name does not wrap either: one line of label-small is under 24 px.
+      expect((await row.locator('.m3-state').boundingBox())!.height).toBeLessThanOrEqual(24)
       expect((await row.boundingBox())!.height).toBeLessThanOrEqual(56)
     }
     // Y-714: only the first fix is offered, so one Fix is closed and the rest have none.
@@ -241,6 +245,7 @@ test.describe('the problems on a machine page', () => {
     if (size === 'phone') expect((await fix.boundingBox())!.height).toBeGreaterThanOrEqual(48)
     await fix.click()
     await expect(ready.getByRole('button', { name: /^Copy/ })).toBeVisible()
+    expect(await ready.locator('.machine__fix').textContent()).not.toContain('`')
     for (const text of await ready.locator('.m3-copyable__text').all()) {
       const [client, scroll, height] = await text.evaluate((el) => [el.clientWidth, el.scrollWidth, el.clientHeight])
       expect(scroll).toBeGreaterThanOrEqual(client)

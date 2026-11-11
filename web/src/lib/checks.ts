@@ -133,10 +133,10 @@ const SHORT_ABSENT: Record<string, string> = {
   terminfo: 'lacks xterm-256color',
   'provider-cli': 'gh not found',
   'provider-auth': 'gh not signed in',
-  'login-session': 'claude has no credential here',
-  'folder-access': 'macOS blocks Desktop, Documents and Downloads',
-  hooks: 'a hook command is not on PATH',
-  'no-sudo': 'the joined account can use sudo',
+  'login-session': 'claude not signed in',
+  'folder-access': 'macOS blocks your folders',
+  hooks: 'hook command not on PATH',
+  'no-sudo': 'it can use sudo',
 }
 
 /** What is wrong, in at most eight words. The daemon's own detail waits behind the row's Fix. */
@@ -149,7 +149,7 @@ export function causeOf(check: Pick<Check, 'check' | 'state'> & Partial<Pick<Che
   if (check.check === 'heartbeat') {
     const older = olderAgent(check)
     if (!older) return 'no usage reports arrive'
-    return older.agent ? `v${older.agent}; yantrad is v${older.daemon}` : 'sends no version'
+    return older.agent ? 'older than yantrad' : 'sends no version'
   }
   return SHORT_ABSENT[check.check] ?? 'could not be asked'
 }
@@ -194,6 +194,9 @@ export const withoutSignIn = (said: string): string =>
     .split('\n')
     .filter((line) => !/https:\/\/login\.tailscale\.com\//i.test(line))
     .join('\n')
+
+/** The daemon writes markdown; a row of the page shows plain words. */
+export const withoutMarkdown = (said: string): string => said.replace(/`/g, '')
 
 /** `ssh::Error::Transport` after yantrad's `because` (sessions.rs pins it). */
 const TRANSPORT = /^ssh to \S+ failed before the command reported a status/

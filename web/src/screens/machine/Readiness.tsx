@@ -5,7 +5,7 @@ import { fromReading, type Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useAbout } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { causeOf, fixOf, isNightly, nameOf, olderAgent, tookOf, withoutSignIn } from '@/lib/checks'
+import { causeOf, fixOf, isNightly, nameOf, olderAgent, tookOf, withoutMarkdown, withoutSignIn } from '@/lib/checks'
 import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -57,7 +57,7 @@ function CheckLine(props: { check: Check; machine: string; fix?: boolean; nightl
             ? `Open Terminal on ${machine} and run:`
             : `Run this on ${machine}:`
   // An older agent's words only repeat the command in the fix.
-  const said = check.detail && !olderAgent(check) && !optionalAbsent(check) ? withoutSignIn(check.detail) : null
+  const said = check.detail && !olderAgent(check) && !optionalAbsent(check) ? withoutMarkdown(withoutSignIn(check.detail)) : null
   return (
     <li className="machine__check">
       <Disclosure action="Fix" className="machine__fixrow" summary={line}>

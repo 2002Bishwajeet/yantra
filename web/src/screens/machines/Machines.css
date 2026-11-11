@@ -82,6 +82,21 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+.machines__check .m3-state {
+  white-space: nowrap;
+}
+
+/* On the phone the state word gives way to the cause, as on the machine page. */
+@media (max-width: 599px) {
+  .machines__check {
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  }
+
+  .machines__check .machines__word {
+    display: none;
+  }
+}
+
 .machines__check .m3-disclosure {
   grid-column: 1 / -1;
   margin-top: 4px;

@@ -198,6 +198,9 @@ test.describe('the problems on a machine card', () => {
       expect(words).toBeLessThanOrEqual(8)
       // Not wrapped: one line of body-small text, whatever the width.
       expect(((await cause.boundingBox())!.height)).toBeLessThanOrEqual(24)
+      // Not cut: no ellipsis, so the whole cause shows.
+      const [client, scroll] = await cause.evaluate((el) => [el.clientWidth, el.scrollWidth])
+      expect(scroll).toBeLessThanOrEqual(client)
     }
     const note = mac.getByRole('note')
     await expect(note).toHaveText('Agents here can use sudo')

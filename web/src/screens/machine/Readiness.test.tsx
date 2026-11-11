@@ -592,7 +592,7 @@ describe('the Readiness card', () => {
     expect(card().getByRole('heading', { name: 'a hook cannot run' })).toBeTruthy()
     expect(card().queryByText(/lacks `node`/)).toBeNull()
     pressFix()
-    expect(card().getAllByText(/lacks `node` \(SessionStart in claude-mem@thedotmack\)/)).toHaveLength(1)
+    expect(card().getAllByText(/lacks node \(SessionStart in claude-mem@thedotmack\)/)).toHaveLength(1)
     expect(card().getByText(/put its directory on PATH in your login shell/)).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
@@ -816,7 +816,8 @@ describe('one short line per problem (Y-733)', () => {
     expect(card().queryByRole('button', { name: /^Copy/ })).toBeNull()
     fireEvent.click(fix)
     expect(fix.getAttribute('aria-expanded')).toBe('true')
-    expect(within(row).getByText(/tmux is not on PATH or in any of/)).toBeTruthy()
+    const opened = within(row).getByText(/tmux is not on PATH or in any of/)
+    expect(opened.textContent).toBe('tmux is not on PATH or in any of: $HOME/.local/bin. Install tmux there')
   })
 
   it('shows Copy on a command only after Fix, and keeps the command on one line', async () => {
