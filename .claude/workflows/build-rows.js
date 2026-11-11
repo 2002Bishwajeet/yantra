@@ -280,6 +280,8 @@ async function verifyUntilGreen(row, wt, plan, rounds) {
 const WALK = `${REPO}/.claude/workflows/walk.sh`
 const WALK_WAIT = (log) => `${BLOCK(log, 'WALK_EXIT')} Never return while it runs.`
 async function walk(row, wt) {
+  // The branch's own walk.sh, so a row that changes the walk is walked by its change; the guard stays main's.
+  const WALK = `${wt}/.claude/workflows/walk.sh`
   return serialWalk(() =>
     agent(
       `Walk ${row.id} in ${wt} on the real product. Do not change any tracked file.
