@@ -9,18 +9,23 @@ const looks = [
   ['desktop-chromium', chromium, { viewport: { width: 1440, height: 1024 } }],
 ]
 const slug = (route) => route.replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9]+/g, '-') || 'home'
+// Y-687: walk.sh's second hop is a device of the owner's with no cookie, so its home is the sign-in screen.
+const shots = routes.map((route) => [`${base}${route}`, slug(route)])
+if (process.env.WALK_SIGNIN) shots.push([`${process.env.WALK_SIGNIN}/`, 'sign-in'])
 const errors = []
 for (const [name, type, options] of looks) {
   const browser = await type.launch()
-  const context = await browser.newContext({ ...options, baseURL: base, reducedMotion: 'reduce', colorScheme: 'light' })
-  for (const route of routes) {
+  const context = await browser.newContext({ ...options, reducedMotion: 'reduce', colorScheme: 'light' })
+  for (const [url, shot] of shots) {
     const page = await context.newPage()
-    page.on('pageerror', (e) => errors.push(`${name} ${route}: ${e.message}`))
-    page.on('console', (m) => m.type() === 'error' && errors.push(`${name} ${route}: console: ${m.text()}`))
-    await page.goto(route, { waitUntil: 'load' })
+    page.on('pageerror', (e) => errors.push(`${name} ${shot}: ${e.message}`))
+    // Every read on the sign-in hop is a 401 on purpose, and the browser logs each one.
+    const expected = (m) => shot === 'sign-in' && m.text().includes('401')
+    page.on('console', (m) => m.type() === 'error' && !expected(m) && errors.push(`${name} ${shot}: console: ${m.text()}`))
+    await page.goto(url, { waitUntil: 'load' })
     // The fleet arrives over a socket after load, so no network-idle moment exists to wait for.
     await page.waitForTimeout(5000)
-    const file = `${out}/${slug(route)}-${name}`
+    const file = `${out}/${shot}-${name}`
     // A reviewer reading an image corrects a misspelt word without noticing (Y-660's planted fault), so the text goes beside it.
     writeFileSync(`${file}.txt`, await page.locator('body').innerText())
     if (name === 'desktop-chromium') await page.screenshot({ path: `${file}.png`, fullPage: true })
