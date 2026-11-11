@@ -156,7 +156,10 @@ describe('/usage when nothing can be reached', () => {
   it('is one page-sized error with Try again', async () => {
     mount('desktop', '/usage', scenario('unreachable'))
     const alert = await screen.findByRole('alert', {}, { timeout: 2000 })
-    expect(alert.textContent).toContain('Nothing here can be reached')
+    expect(alert.textContent).toContain('The daemon could not read the fleet')
+    expect(alert.textContent).toContain('The daemon answered, but every read of the fleet failed the same way.')
+    expect(alert.textContent).not.toContain('Nothing here can be reached')
+    expect(alert.textContent).not.toContain('off the tailnet')
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
   })
 })

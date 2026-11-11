@@ -472,5 +472,6 @@ describe('what `/w/{name}` draws when there is no session behind it', () => {
     expect(said.textContent).toContain('The workspaces could not be read')
     fireEvent.click(within(said).getByRole('button', { name: 'Details' }))
     expect(said.textContent).toContain('connection refused')
+    expect(said.textContent).not.toContain('off the tailnet')
   })
 })

@@ -16,7 +16,7 @@ import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Text } from '@/m3/text/Text'
 import { useFab } from '@/shell/primary'
-import { unreachable } from '@/work'
+import { daemonCouldNotRead, unreachable } from '@/work'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { Looked } from '@/screens/fleet/age'
 import { checksOf, unclaimed } from './facts'
@@ -55,11 +55,10 @@ export function Machines() {
       <Page>
         <PageHeader title="Machines" />
         <ErrorSurface.Page
-          error={fromReading(machines)!}
+          error={daemonCouldNotRead(nothing)}
           eyebrow="Machines read"
           reset={() => void client.invalidateQueries()}
-          title="Nothing here can be reached"
-          unknowns={['off the tailnet', 'yantrad down']}
+          title="The daemon could not read the fleet"
         />
       </Page>
     )

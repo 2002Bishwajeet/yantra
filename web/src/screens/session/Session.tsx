@@ -95,7 +95,6 @@ export function Workspace(props: {
           eyebrow="Session"
           reset={() => void client.invalidateQueries()}
           title="The workspaces could not be read"
-          unknowns={['off the tailnet', 'yantrad down']}
         />
       </Page>
     )

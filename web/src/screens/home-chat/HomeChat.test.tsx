@@ -61,5 +61,6 @@ describe('the home chat route', () => {
     const alert = title.closest('[role="alert"]') as HTMLElement
     fireEvent.click(within(alert).getByRole('button', { name: 'Details' }))
     expect(within(alert).getByText('tailscale did not answer')).toBeTruthy()
+    expect(alert.textContent).not.toContain('off the tailnet')
   })
 })
