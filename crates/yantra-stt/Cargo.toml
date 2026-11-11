@@ -1,0 +1,24 @@
+[package]
+name = "yantra-stt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# `query` for the hotwords of `POST /transcribe`.
+axum = { workspace = true, features = ["query"] }
+clap.workspace = true
+serde.workspace = true
+sherpa-onnx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+yantra-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tower.workspace = true

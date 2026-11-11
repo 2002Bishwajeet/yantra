@@ -288,7 +288,7 @@ fn read_query(uri: &Uri) -> ChatQuery {
     query
 }
 
-fn decoded(value: &str) -> Option<String> {
+pub(crate) fn decoded(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;

@@ -61,9 +61,9 @@ export function Footer(props: { controls?: ReactNode; actions: ReactNode }) {
 /** A state change, said politely and shown. It stays in the page when empty so a reader's
  *  software already holds the region when the first words arrive. `quiet` keeps it said but
  *  not drawn, for a moment when the placeholder already shows the same words. */
-export function Status(props: { children: ReactNode; quiet?: boolean }) {
+export function Status(props: { children: ReactNode; quiet?: boolean; id?: string; tone?: 'error' }) {
   return (
-    <p className={clsx('composer__status', props.quiet && 'm3-sr-only')} role="status">
+    <p className={clsx('composer__status', props.quiet && 'm3-sr-only')} data-tone={props.tone} id={props.id} role="status">
       {props.children}
     </p>
   )

@@ -20,6 +20,9 @@ import { Attachments } from '@/composer/Attachments'
 import * as Composer from '@/composer/Composer'
 import { Icon as ControlIcon, Control, Separator } from '@/composer/Control'
 import { ContextRing } from '@/composer/ContextRing'
+import { DictateButton } from '@/composer/Dictate'
+import { dictationStatus, useDictation } from '@/composer/useDictation'
+import { insertDictation } from '@/composer/dictation'
 import { draftId, useDraft } from '@/composer/draft'
 import { useEnterSends } from '@/composer/enterSends'
 import { buildPromptHistoryEntries, stepPromptHistory, type PromptHistoryPosition } from '@/composer/history'
@@ -431,6 +434,19 @@ export function Chat(props: ChatProps) {
     addComment(block)
     box.current?.focus()
   }
+  // ADR-0043 §4: the words land at the caret as plain text, and the owner sends them.
+  const dictation = useDictation({
+    workspace: home ? undefined : where,
+    thread: timeline.thread,
+    onText: (words) => {
+      const field = box.current
+      const next = insertDictation(draft, field?.selectionStart ?? draft.length, field?.selectionEnd ?? draft.length, words)
+      caretTo.current = next.caret
+      setDraft(next.text)
+    },
+  })
+  const dictated = dictationStatus(dictation)
+  const dictateStatus = useId()
 
   const [asked1, ...others] = timeline.requests
   const answerOf = (request: RequestOpened) => (decision: Decision, answers?: Record<string, string[]>) =>
@@ -672,6 +688,11 @@ export function Chat(props: ChatProps) {
                 >
                   <ControlIcon icon={ImagePlus} />
                 </Control>
+                <DictateButton
+                  describedBy={dictateStatus}
+                  dictation={dictation}
+                  disabled={link === 'closed' || readOnly !== null}
+                />
                 <input
                   accept={IMAGE_TYPES.join(',')}
                   hidden
@@ -724,6 +745,15 @@ export function Chat(props: ChatProps) {
         <Composer.Status quiet>
           {status(timeline, harness)}
         </Composer.Status>
+        {dictation.shown ? (
+          <Composer.Status
+            id={dictateStatus}
+            quiet={dictated === ''}
+            tone={dictation.error || dictation.blocked ? 'error' : undefined}
+          >
+            {dictated}
+          </Composer.Status>
+        ) : null}
         {workspace && showTerminal && timeline.thread ? (
           <TerminalDrawer
             agent={agent}

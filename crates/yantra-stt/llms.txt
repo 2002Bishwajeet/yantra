@@ -1,0 +1,11 @@
+# yantra-stt
+
+> The dictation service on the box (ADR-0043): Parakeet-TDT-0.6B-v2 in sherpa-onnx behind `POST /transcribe`.
+
+- [CLAUDE.md](CLAUDE.md): the rules for this crate.
+- [tracker.md](tracker.md): open work.
+- [README.md](README.md): install, the unit, and the measured speed on the box.
+- [src/main.rs](src/main.rs): `yantra-stt serve --listen <addr> --model <dir>` and `yantra-stt bench --model <dir> [--hotwords <file>] <wav...>`, which prints the real-time factor (decode time over audio time, load excluded) and the peak RSS.
+- [src/http.rs](src/http.rs): `POST /transcribe` takes raw 16 kHz mono s16le PCM, at most 60 seconds, with `?hotwords=` one per line, and answers `{"text": "..."}`; `GET /health` answers 200. One decode at a time. An odd body or a NUL in a hotword is 400, a body over 60 seconds is 413, and a failed decode is 500.
+- [src/model.rs](src/model.rs): the model, `nemo_transducer` with `modified_beam_search`, `bpe` units and the score from `yantra_core::stt`.
+- [yantra-stt.service](yantra-stt.service): the systemd user unit. `StandardOutput=null`, stderr to the journal, and `Restart=always` so it waits out a tailnet address that comes up late.

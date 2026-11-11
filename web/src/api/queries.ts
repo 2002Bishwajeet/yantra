@@ -397,6 +397,21 @@ export const aboutQuery = () =>
     refetchInterval: SLOW_POLL_MS,
   })
 
+/** ADR-0043 §6: whether `yantra-stt` answers, read through the daemon because
+ *  the HTTPS page cannot reach its tailnet address. Asked each time the Chat
+ *  opens, and again after a failed utterance or a press while the box is
+ *  away, never on a timer. */
+export type Dictation = { state: 'off' | 'unreachable' | 'ready' }
+
+export const dictationQuery = () =>
+  queryOptions({
+    queryKey: keys.dictation(),
+    queryFn: ({ signal }) => fetchJson<Dictation>('/api/dictate/health', { signal }, fields('state')),
+    staleTime: Infinity,
+    refetchOnMount: 'always',
+    retry: false,
+  })
+
 /** Y-343. The 404 is a key not made yet, and the first join makes it
  *  (ADR-0029), so `null` is an answer rather than an error: a refetch then
  *  keeps it on screen, where an error would flip back to pending (Y-390). It

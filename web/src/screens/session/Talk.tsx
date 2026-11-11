@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEve
 import { Mic as MicIcon } from 'lucide-react'
 import { type ApiError, micError } from '@/api/errors'
 import { useMachineReadiness } from '@/api/hooks'
-import { type Mic, type MicState, openMic } from '@/api/mic'
+import { type Mic, micAddress, type MicState, openMic } from '@/api/mic'
 import { Button } from '@/m3/button/Button'
 import { Mono } from '@/m3/text/Text'
 import './Talk.css'
@@ -31,7 +31,7 @@ function Hold({ machine }: { machine: string }) {
     setError(null)
     setState('opening')
     let ended = false
-    const opened = openMic(machine, {
+    const opened = openMic(micAddress(machine), {
       onState: setState,
       onEnd: (error) => {
         ended = true

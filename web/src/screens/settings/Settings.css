@@ -210,6 +210,11 @@
   margin: 0;
 }
 
+/* A licence id broken at its hyphens reads as two words. */
+.settings__licence {
+  white-space: nowrap;
+}
+
 .settings__facts {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
