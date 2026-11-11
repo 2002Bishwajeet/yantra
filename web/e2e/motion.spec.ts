@@ -107,7 +107,7 @@ const goMachines = async (page: Parameters<typeof scenario>[0], size: string) =>
 test.describe('route changes with motion', () => {
   test.use({ reducedMotion: 'no-preference' })
 
-  test('each change runs one transition and back runs it backwards', async ({ page, size }) => {
+  test('a tab fades through, a page slides in, and back slides it out', async ({ page, size }) => {
     test.skip(size === 'tablet', 'the phone bar and the desktop links are enough')
     await scenario(page, 'busy')
     await watchTransitions(page)
@@ -122,7 +122,7 @@ test.describe('route changes with motion', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Machines' })).toBeVisible()
     const seen = await transitions(page)
     expect(seen).toHaveLength(3)
-    expect(seen.map((types) => types[0])).toEqual(['forward', 'forward', 'back'])
+    expect(seen.map((types) => types[0])).toEqual(['tab', 'forward', 'back'])
     // The chrome is its own transition group, so the bar does not slide.
     if (before) expect(await bar.boundingBox()).toEqual(before)
   })

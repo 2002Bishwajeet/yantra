@@ -328,6 +328,20 @@
   &::view-transition-new(root) { animation-name: shell-axis-in-back; }
 }
 
+/* Y-732: M3 fade through between tabs. The old page is gone before the new one
+   arrives, so the two never show at once, and nothing moves sideways. */
+@keyframes shell-tab-out { to { opacity: 0; } }
+@keyframes shell-tab-in { from { opacity: 0; transform: scale(0.98); } }
+
+:root:active-view-transition-type(tab) {
+  &::view-transition-old(root) {
+    animation: shell-tab-out 90ms var(--md-sys-motion-easing-emphasized-accelerate) both;
+  }
+  &::view-transition-new(root) {
+    animation: shell-tab-in 210ms var(--md-sys-motion-easing-emphasized-decelerate) 90ms both;
+  }
+}
+
 /* Covers a browser that has startViewTransition and no types, where the
    router never asks `transitionTypes`. The pseudo-elements take no taps. */
 @media (prefers-reduced-motion: reduce) {

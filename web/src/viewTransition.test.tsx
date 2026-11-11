@@ -49,11 +49,15 @@ afterEach(() => {
 })
 
 describe('transitionTypes', () => {
-  it('pushes forward', () => {
-    expect(transitionTypes({ fromLocation: at('/', 0), toLocation: at('/machines', 1) })).toEqual(['forward'])
+  it('fades through between two tabs, either way', () => {
+    expect(transitionTypes({ fromLocation: at('/', 0), toLocation: at('/machines', 1) })).toEqual(['tab'])
+    expect(transitionTypes({ fromLocation: at('/machines', 1), toLocation: at('/', 0) })).toEqual(['tab'])
+  })
+  it('pushes forward into a page under a tab', () => {
+    expect(transitionTypes({ fromLocation: at('/machines', 1), toLocation: at('/m/pi-5', 2) })).toEqual(['forward'])
   })
   it('goes back to a lower history index', () => {
-    expect(transitionTypes({ fromLocation: at('/machines', 1), toLocation: at('/', 0) })).toEqual(['back'])
+    expect(transitionTypes({ fromLocation: at('/m/pi-5', 2), toLocation: at('/machines', 1) })).toEqual(['back'])
   })
   it('does not animate a search change on the same path', () => {
     expect(transitionTypes({ fromLocation: at('/usage', 1), toLocation: at('/usage', 2) })).toBe(false)
@@ -82,7 +86,7 @@ describe('a route change in the router', () => {
     await h1('pi-5')
     history.back()
     await h1('Machines')
-    expect(calls.map((c) => c[0])).toEqual(['forward', 'forward', 'back'])
+    expect(calls.map((c) => c[0])).toEqual(['tab', 'forward', 'back'])
   })
 
   it('runs none under reduce and still changes the screen', async () => {

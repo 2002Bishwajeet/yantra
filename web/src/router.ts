@@ -25,6 +25,7 @@ import { RouteError } from '@/m3/error-boundary/ErrorBoundary'
 import { Home } from '@/screens/dashboard/Home'
 import type { RoutePrimary } from '@/shell/primary'
 import { Nowhere, Shell } from '@/shell/Shell'
+import { isDestination } from '@/shell/destinations'
 import { asView, type View } from '@/views'
 import { asSpan, type Span } from '@/screens/usage/span'
 
@@ -336,6 +337,8 @@ type TransitionInfo = {
 export function transitionTypes({ fromLocation, toLocation }: TransitionInfo): string[] | false {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false
   if (!fromLocation || fromLocation.pathname === toLocation.pathname) return false
+  // Y-732: tabs are peers, so they fade through; a slide says one page opened from another.
+  if (isDestination(fromLocation.pathname) && isDestination(toLocation.pathname)) return ['tab']
   const back = (toLocation.state.__TSR_index ?? 0) < (fromLocation.state.__TSR_index ?? 0)
   return [back ? 'back' : 'forward']
 }
