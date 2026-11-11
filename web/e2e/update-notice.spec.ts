@@ -4,7 +4,7 @@ import { axe, expect, scenario, screenshot, test } from './lib/test'
  *  and desktop widths. Update opens About, and Dismiss hides it for good. */
 test.describe('the update notice', () => {
   test.beforeEach(async ({ page }) => {
-    await scenario(page, 'busy')
+    await scenario(page, 'busy', { update: true })
     await page.goto('/machines')
   })
 
