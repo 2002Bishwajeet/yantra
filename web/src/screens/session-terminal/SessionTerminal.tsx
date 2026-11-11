@@ -54,7 +54,7 @@ export function SessionTerminal() {
         // same thing (`router.test.tsx`).
         title={`${session} on ${machine}`}
       />
-      <div className="session-terminal__row">
+      <div className="session-terminal__row" data-factor={factor}>
         <div className="session-terminal__meta">
           <Text render={<p />} scale="body-small" tone="variant">
             <Mono>{session}</Mono> is a tmux session on{' '}
