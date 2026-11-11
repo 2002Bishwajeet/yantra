@@ -113,6 +113,47 @@ export function fixOf(check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'
   return CHECKS[check.check]?.fix(machine) ?? null
 }
 
+/** A nightly's version carries `-nightly.`; a Mac has no build of it (ADR-0027). */
+export const isNightly = (version: string | undefined): boolean => /-nightly\./.test(version ?? '')
+
+const SHORT_REACH: Record<ReachableFailure, string> = {
+  refused: 'key refused',
+  unjoined: 'no account named',
+  browser: 'waits for a browser sign-in',
+  changed: 'host key changed',
+  unreachable: 'ssh cannot reach it',
+}
+
+const SHORT_ABSENT: Record<string, string> = {
+  sshd: 'not answering',
+  tmux: 'not installed',
+  git: 'not installed',
+  'agent-cli': 'not installed',
+  mic: 'not installed',
+  terminfo: 'lacks xterm-256color',
+  'provider-cli': 'gh not installed',
+  'provider-auth': 'gh not signed in',
+  'login-session': 'claude has no credential here',
+  'folder-access': 'macOS blocks Desktop, Documents and Downloads',
+  hooks: 'a hook command is not on PATH',
+  'no-sudo': 'the joined account can use sudo',
+}
+
+/** What is wrong, in at most eight words. The daemon's own detail waits behind the row's Fix. */
+export function causeOf(check: Pick<Check, 'check' | 'state'> & Partial<Pick<Check, 'detail'>>): string {
+  if (check.state === 'present') return ''
+  const detail = check.detail ?? ''
+  if (check.state !== 'absent') return 'could not be asked'
+  if (noLoginServer(detail)) return 'no tmux server from a login'
+  if (check.check === 'reachable') return SHORT_REACH[reachableFailure(detail)]
+  if (check.check === 'heartbeat') {
+    const older = olderAgent(check)
+    if (!older) return 'no usage reports arrive'
+    return older.agent ? `v${older.agent}; yantrad is v${older.daemon}` : 'sends no version'
+  }
+  return SHORT_ABSENT[check.check] ?? 'could not be asked'
+}
+
 /** An id this table does not know is not one a session needs. */
 export const sessionNeeds = (check: string): boolean => CHECKS[check]?.session ?? false
 

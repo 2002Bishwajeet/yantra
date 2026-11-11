@@ -26,7 +26,7 @@ test.describe('the machines on a busy fleet', () => {
     const short = card(page, 'pi-5')
     // The check name table, never a raw id (D7 §3.5).
     await expect(short.getByText('claude', { exact: true })).toBeVisible()
-    await expect(short.getByText('no claude on PATH there')).toBeVisible()
+    await expect(short.getByText('not installed')).toBeVisible()
     await expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeVisible()
     // `git` is not in pi-5's report at all, so it counts as missing too.
     await expect(short.getByText('2 missing')).toBeVisible()
@@ -180,5 +180,31 @@ test.describe('the machines list with no clipboard', () => {
     await button.click()
     await expect(page.getByText(/This page has no clipboard/)).toBeVisible()
     await expect(button).toBeVisible()
+  })
+})
+
+/* Y-733: one short line per problem on a card, and the sudo note is one line. */
+test.describe('the problems on a machine card', () => {
+  test('keeps each failing row to one line of at most eight words, and the sudo note to one', async ({ page, size }) => {
+    await scenario(page, 'problems')
+    await page.goto('/machines')
+    await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
+    const mac = card(page, 'macbook')
+    const rows = mac.locator('.machines__check')
+    await expect(rows.first()).toBeVisible()
+    for (const row of await rows.all()) {
+      const cause = row.locator('.machines__detail')
+      const words = ((await cause.textContent()) ?? '').trim().split(/\s+/).length
+      expect(words).toBeLessThanOrEqual(8)
+      // Not wrapped: one line of body-small text, whatever the width.
+      expect(((await cause.boundingBox())!.height)).toBeLessThanOrEqual(24)
+    }
+    const note = mac.getByRole('note')
+    await expect(note).toHaveText('Agents here can use sudo')
+    expect((await note.boundingBox())!.height).toBeLessThanOrEqual(24)
+    await expect(mac.getByRole('button', { name: /^Fix/ })).toHaveCount(0)
+    const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+    expect(over).toBeLessThanOrEqual(0)
+    await screenshot(page, 'machines', 'problems', size)
   })
 })

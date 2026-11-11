@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   answerFailure,
+  causeOf,
   CHECK_IDS,
   fixOf,
+  isNightly,
   joinFixes,
   LOGIN_SERVER_COMMAND,
   noLoginServer,
@@ -262,5 +264,56 @@ describe('how long a step took', () => {
     expect(tookOf(0)).toBe('0 ms')
     expect(tookOf(84)).toBe('84 ms')
     expect(tookOf(1_240)).toBe('1.2 s')
+  })
+})
+
+describe('the short cause of a check (Y-733)', () => {
+  const words = (said: string) => said.split(/\s+/).filter(Boolean).length
+  const details = [
+    '',
+    'no tool there',
+    NO_SERVER,
+    'Permission denied (publickey).',
+    'host key verification failed',
+    'requires an additional check',
+    'yantra-agent here is v0.3.2 and yantrad is v0.11.1-nightly.20261111000000.abc1234. Update it on pi: `curl x | bash`',
+    'yantra-agent here sends no version, so it predates yantrad v0.11.0. Update it on pi: `curl x | bash`',
+  ]
+
+  it('says each id in eight words or fewer, absent or unknown, with no backtick', () => {
+    for (const id of [...CHECK_IDS, 'mic', 'made-up']) {
+      for (const state of ['absent', 'unknown'] as const) {
+        for (const detail of details) {
+          const said = causeOf({ check: id, state, detail })
+          expect(said, `${id} ${state}`).not.toBe('')
+          expect(words(said), `${id} ${state}: ${said}`).toBeLessThanOrEqual(8)
+          expect(said).not.toMatch(/`/)
+        }
+      }
+    }
+  })
+
+  it('gives the cause the plan names', () => {
+    const absent = (check: string, detail = '') => causeOf({ check, state: 'absent', detail })
+    expect(absent('tmux')).toBe('not installed')
+    expect(absent('terminfo')).toBe('lacks xterm-256color')
+    expect(absent('provider-cli')).toBe('gh not installed')
+    expect(absent('provider-auth')).toBe('gh not signed in')
+    expect(absent('login-session')).toBe('claude has no credential here')
+    expect(absent('login-session', NO_SERVER)).toBe('no tmux server from a login')
+    expect(absent('heartbeat')).toBe('no usage reports arrive')
+    expect(absent('heartbeat', details[7]!)).toBe('sends no version')
+    expect(absent('heartbeat', details[6]!)).toBe('v0.3.2; yantrad is v0.11.1-nightly.20261111000000.abc1234')
+    expect(absent('reachable', 'Permission denied (publickey).')).toBe('key refused')
+    expect(absent('reachable', 'ssh: names no account')).toBe('no account named')
+    expect(absent('reachable', 'connection timed out')).toBe('ssh cannot reach it')
+    expect(absent('made-up')).toBe('could not be asked')
+    expect(causeOf({ check: 'tmux', state: 'unknown' })).toBe('could not be asked')
+  })
+
+  it('knows a nightly by its version', () => {
+    expect(isNightly('0.11.1-nightly.20261111000000.abc1234')).toBe(true)
+    expect(isNightly('0.11.0')).toBe(false)
+    expect(isNightly(undefined)).toBe(false)
   })
 })

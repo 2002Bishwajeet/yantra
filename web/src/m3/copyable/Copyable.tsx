@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
+import { clsx } from 'clsx'
 import { Button } from '@/m3/button/Button'
 import { Mono, Text } from '@/m3/text/Text'
 import './Copyable.css'
@@ -39,15 +40,15 @@ export function useCopy(text: string) {
 }
 
 /** Text a person copies. A caller that needs the same copy elsewhere passes
- *  its own `useCopy` result as `copier`. */
-export function Copyable(props: { text: string; what: string; copier?: ReturnType<typeof useCopy> }) {
+ *  its own `useCopy` result as `copier`. `line` keeps a command on one line that scrolls sideways. */
+export function Copyable(props: { text: string; what: string; line?: boolean; copier?: ReturnType<typeof useCopy> }) {
   const { text, what } = props
   const own = useCopy(text)
   const { ref, said, copy } = props.copier ?? own
   return (
     <div className="m3-copyable">
       <div className="m3-copyable__row">
-        <Mono className="m3-copyable__text" ref={ref} translate="no">
+        <Mono className={clsx('m3-copyable__text', props.line && 'm3-copyable__text--line')} ref={ref} translate="no">
           {text}
         </Mono>
         <Button

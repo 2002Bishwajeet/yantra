@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test'
 
 export type Scenario =
   | 'busy'
+  | 'problems'
   | 'empty'
   | 'unreachable'
   | 'down'

@@ -96,28 +96,63 @@
   list-style: none;
 }
 
+/* Y-733: a check is one line, the cause cut with an ellipsis; its fix waits behind Fix. */
 .machine__check {
+  min-width: 0;
+}
+
+.machine__line {
   display: grid;
   grid-template-columns: minmax(0, 150px) auto minmax(0, 1fr);
   align-items: center;
   column-gap: 10px;
+  flex: 1;
+  min-width: 0;
   min-height: 24px;
 }
 
-.machine__check .machine__word {
+.machine__line .machine__word {
   color: var(--md-sys-color-on-surface-variant);
 }
 
-/* D7 B2: on the phone a check is two lines, the name and its state, then the
-   detail below at full width. */
+.machine__cause {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.machine__check .machine__fixrow {
+  border: 0;
+  border-radius: 0;
+}
+
+.machine__check .machine__fixrow .m3-disclosure__row {
+  min-height: 40px;
+  padding: 0;
+}
+
+.machine__check .machine__fixrow .m3-disclosure__summary {
+  flex: 1;
+}
+
+.machine__check .machine__fixrow .m3-disclosure__content {
+  padding: 0 0 8px;
+}
+
+/* On the phone the state word gives way to the cause, and the Fix target is 48 px. */
 @media (max-width: 599px) {
-  .machine__check {
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 2px;
+  .machine__line {
+    grid-template-columns: minmax(0, auto) minmax(0, 1fr);
   }
 
-  .machine__check .machine__detail {
-    grid-column: 1 / -1;
+  .machine__line .machine__word {
+    display: none;
+  }
+
+  .machine__check .machine__fixrow .m3-disclosure__trigger {
+    height: 48px;
+    min-width: 48px;
   }
 }
 

@@ -20,6 +20,13 @@ afterEach(() => {
 })
 
 describe('Copyable', () => {
+  it('scrolls a long command sideways on a line, and wraps it otherwise (Y-733)', () => {
+    const { rerender } = render(<Copyable text={TEXT} what="the join command" />)
+    expect(screen.getByText(TEXT).classList.contains('m3-copyable__text--line')).toBe(false)
+    rerender(<Copyable line text={TEXT} what="the join command" />)
+    expect(screen.getByText(TEXT).classList.contains('m3-copyable__text--line')).toBe(true)
+  })
+
   it('says nothing before a copy, and the hint holds no text node', () => {
     render(<Copyable text={TEXT} what="the join command" />)
     expect(screen.getByText(TEXT)).toBeTruthy()

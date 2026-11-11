@@ -642,10 +642,13 @@ fn behind(agent: Option<&str>, daemon: &str, os: &Os, machine: &str) -> Option<S
 /// passes the daemon (ADR-0013: the daemon goes first). Linux takes `--agent`,
 /// because a bare `install.sh` there installs the whole appliance. A nightly
 /// has no tag of its own to pin, so Linux follows the nightly channel there.
+/// A Mac has no nightly archive (ADR-0027), so under a nightly it takes the
+/// latest stable, the release that nightly builds on.
 fn update_command(os: &Os, version: &str, nightly: bool) -> Option<String> {
     const SCRIPT: &str =
         "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh |";
     match os {
+        Os::MacOs if nightly => Some(format!("{SCRIPT} bash")),
         Os::MacOs => Some(format!("{SCRIPT} YANTRA_VERSION={version} bash")),
         Os::Linux if nightly => Some(format!("{SCRIPT} bash -s -- --agent --channel nightly")),
         Os::Linux => Some(format!(
@@ -1983,7 +1986,7 @@ pub(crate) mod tests {
             Some(
                 format!(
                     "yantra-agent here is v0.10.2 and yantrad is v{NIGHTLY}. Update it on mac: \
-                     `{SCRIPT} YANTRA_VERSION=0.11.0 bash`"
+                     `{SCRIPT} bash`"
                 )
                 .as_str()
             )
