@@ -395,6 +395,28 @@ The cost is that **an archive published before this carries no units**, which is
 v0.1.0. The script says so and installs nothing rather than failing on a missing file, and
 [`installer.rs`](../crates/yantrad/tests/installer.rs) holds it to that.
 
+### Update an agent
+
+**[Y-713](../tracker.md): the dashboard says when a machine's `yantra-agent` is older than
+`yantrad`.** The machine's readiness gives the command that updates it. The box updates its own
+agent, but a joined machine does not. The command pins the daemon's own version, as the join command
+does, so an agent never passes the daemon (ADR-0013: the daemon goes first). On a joined Linux
+machine, run it as an account with sudo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_VERSION=<daemon version> bash -s -- --agent
+```
+
+A nightly has no tag to pin, so under a nightly daemon the command names `--channel nightly` instead.
+A Mac drops `-s -- --agent`. A nightly has no macOS archive, so under a nightly daemon a Mac is held
+to the stable release that nightly builds on, one patch below it.
+
+`--agent` verifies the archive as a full install does. Then it replaces `/usr/local/bin/yantra-agent`
+and `yantra-agent.service`, keeps `/etc/yantra/agent.env` and restarts the agent. It installs no
+`yantrad`, because a second `yantrad` would make the machine a second appliance. With no
+`agent.env` there is no agent to update, so it refuses and names the join command.
+`yantra-agent --version` prints what a machine runs.
+
 ## Uninstall
 
 **[Y-407](../tracker.md):** `install.sh --uninstall`, or piped the same way the install itself is:

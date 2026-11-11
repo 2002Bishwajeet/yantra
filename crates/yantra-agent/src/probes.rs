@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use time::OffsetDateTime;
+use yantra_core::about;
 use yantra_core::agent::CANDIDATES;
 use yantra_core::heartbeat::{Heartbeat, Power};
 
@@ -69,6 +70,7 @@ pub fn beat(fixed: &Fixed) -> Heartbeat {
         free_disk_mb: free_disk_mb(),
         cpu_busy_pct: cpu_busy_pct(),
         power: power(),
+        version: Some(about::VERSION.to_owned()),
     }
 }
 
@@ -349,6 +351,16 @@ mod tests {
     // both are the same machine in the same state.
     const PMSET_BATTERY: &str = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=<id>)\t100%; discharging; 2:51 remaining present: true\n";
     const PMSET_BATTERY_NO_ESTIMATE: &str = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=<id>)\t100%; discharging; (no estimate) present: true\n";
+
+    /// The daemon marks an agent older than itself from this field (Y-713).
+    #[test]
+    fn every_beat_carries_this_build_s_version() {
+        let fixed = Fixed {
+            arch: "x86_64",
+            labels: Vec::new(),
+        };
+        assert_eq!(beat(&fixed).version.as_deref(), Some(about::VERSION));
+    }
 
     /// A directory that looks like `/sys/class/power_supply`, because the two
     /// states this fleet cannot produce — a desktop with no battery, and a

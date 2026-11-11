@@ -28,6 +28,7 @@ use axum::body::Body;
 use axum::http::Request;
 use serde_json::Value;
 use tower::ServiceExt as _;
+use yantra_core::about;
 use yantra_core::agent::Running;
 use yantra_core::attention::{Attention, Item};
 use yantra_core::doctor;
@@ -673,6 +674,7 @@ fn beat(power: Power) -> Heartbeat {
         free_disk_mb: 214003,
         cpu_busy_pct: 15,
         power,
+        version: Some(about::VERSION.to_owned()),
     }
 }
 

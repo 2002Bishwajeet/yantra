@@ -30,6 +30,12 @@
 #
 #     curl -fsSL <url>/install.sh | bash -s -- --channel nightly
 #
+# `--agent` updates yantra-agent alone, on a Linux machine that joined a box
+# (Y-713). It replaces the binary and its unit, keeps /etc/yantra/agent.env and
+# restarts the agent. It installs no yantrad:
+#
+#     curl -fsSL <url>/install.sh | bash -s -- --agent
+#
 # `--uninstall` reverses it (Y-407):
 #
 #     curl -fsSL <url>/install.sh | bash -s -- --uninstall
@@ -284,18 +290,20 @@ if [ "${YANTRA_YES:-}" = 1 ]; then
     yes=yes
 fi
 uninstalling=no
+agent_only=no
 channel=
 while [ "$#" -gt 0 ]; do
     case "$1" in
     --yes) yes=yes ;;
     --uninstall) uninstalling=yes ;;
+    --agent) agent_only=yes ;;
     --channel=*) channel=${1#--channel=} ;;
     --channel)
         [ "$#" -ge 2 ] || fail "--channel needs stable or nightly"
         channel=$2
         shift
         ;;
-    *) fail "$1 is not an option. The options are --yes, --channel stable|nightly and --uninstall." ;;
+    *) fail "$1 is not an option. The options are --yes, --channel stable|nightly, --agent and --uninstall." ;;
     esac
     shift
 done
@@ -303,6 +311,11 @@ case "$channel" in
 "" | stable | nightly) ;;
 *) fail "$channel is not a channel. Name stable or nightly." ;;
 esac
+if [ "$agent_only" = yes ]; then
+    [ "$uninstalling" = no ] || fail "--agent and --uninstall do not go together"
+    [ -e "$AGENT_ENV" ] ||
+        fail "$AGENT_ENV is missing, so there is no agent here to update. Run the join command on this machine"
+fi
 # A person names the channel; the unit never does, so it reads the one kept.
 channel_named=$channel
 if [ -z "$channel" ] && [ -e "$CHANNEL_FILE" ]; then
@@ -445,14 +458,18 @@ MARK
     printf '%s\n' "$off"
 }
 
-if [ "$interactive" = yes ]; then
-    mark
-fi
+if [ "$agent_only" = yes ]; then
+    echo "install: this updates yantra-agent alone, and keeps $AGENT_ENV."
+else
+    if [ "$interactive" = yes ]; then
+        mark
+    fi
 
-echo "install: this installs Yantra — three binaries, its updater, four systemd units and a yantra account."
-echo "install: every device you use with Yantra must be on one tailnet, logged in to the same Tailscale account."
-if [ "$interactive" = yes ]; then
-    echo "install: it asks before it installs Tailscale or turns on HTTPS, then starts the dashboard and prints its address."
+    echo "install: this installs Yantra — three binaries, its updater, four systemd units and a yantra account."
+    echo "install: every device you use with Yantra must be on one tailnet, logged in to the same Tailscale account."
+    if [ "$interactive" = yes ]; then
+        echo "install: it asks before it installs Tailscale or turns on HTTPS, then starts the dashboard and prints its address."
+    fi
 fi
 
 # `MAJOR MINOR PATCH RANK STAMP`, so semver's order is a numeric sort: a
@@ -536,6 +553,18 @@ if [ -e "$staged/install.sh" ] && [ -e "$staged/yantra-update.service" ]; then
     updates=yes
 else
     updates=no
+fi
+
+# Y-713: a machine that joined a box takes the agent alone. join.sh leaves an
+# installed agent alone, and a second yantrad there would be a second appliance.
+if [ "$agent_only" = yes ]; then
+    as_root install -m 755 "$staged/yantra-agent" "$BIN_DIR/yantra-agent.new"
+    as_root mv -f "$BIN_DIR/yantra-agent.new" "$BIN_DIR/yantra-agent"
+    as_root install -m 644 "$staged/yantra-agent.service" /etc/systemd/system/
+    as_root systemctl daemon-reload
+    as_root systemctl restart yantra-agent.service
+    echo "install: yantra-agent v$VERSION is in $BIN_DIR, and yantra-agent.service restarted."
+    exit 0
 fi
 
 # yantrad reaches this box over ssh too (ADR-0009). It logs in to the person's account,

@@ -23,7 +23,9 @@ An **address**, never a name — a MagicDNS short name resolves to `127.0.1.1`, 
 not listen.
 
 It measures the seven fields itself, on Linux and macOS: architecture and capability labels once at
-start, free RAM, free disk, CPU load and power state every beat. Every reader that cannot answer
+start, free RAM, free disk, CPU load and power state every beat. Each beat also carries the agent's
+version, so the dashboard can say when the agent is older than the daemon. `yantra-agent --version`
+prints it. Every reader that cannot answer
 reports the value that loses a placement rather than a guess, because the alternative is placing work
 on a machine that cannot take it.
 

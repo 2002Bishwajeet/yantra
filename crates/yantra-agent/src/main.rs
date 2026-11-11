@@ -24,6 +24,7 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use yantra_core::about;
 use yantra_core::heartbeat::Heartbeat;
 
 mod probes;
@@ -41,6 +42,11 @@ const TIMEOUT: Duration = Duration::from_secs(3);
 const DAEMON: &str = "YANTRA_DAEMON";
 
 fn main() -> ExitCode {
+    // Before the configuration, so a machine with none can still say what it runs.
+    if asks_version(env::args().skip(1)) {
+        println!("yantra-agent {}", about::VERSION);
+        return ExitCode::SUCCESS;
+    }
     let daemon = match env::var(DAEMON).map_err(|_| unset()).and_then(parse_daemon) {
         Ok(daemon) => daemon,
         Err(reason) => {
@@ -59,6 +65,11 @@ fn main() -> ExitCode {
         INTERVAL.as_secs()
     );
     run(daemon, move || probes::beat(&fixed))
+}
+
+fn asks_version(mut args: impl Iterator<Item = String>) -> bool {
+    args.next()
+        .is_some_and(|arg| arg == "--version" || arg == "-V")
 }
 
 fn unset() -> String {
@@ -197,6 +208,7 @@ mod tests {
             free_disk_mb: 214003,
             cpu_busy_pct: 15,
             power: Power::Ac,
+            version: None,
         }
     }
 
@@ -225,6 +237,16 @@ mod tests {
             stream.write_all(response).expect("the daemon answers");
             request
         })
+    }
+
+    #[test]
+    fn version_is_asked_by_either_spelling_and_nothing_else() {
+        let asks = |args: &[&str]| asks_version(args.iter().map(|arg| (*arg).to_owned()));
+        assert!(asks(&["--version"]));
+        assert!(asks(&["-V"]));
+        assert!(!asks(&[]));
+        assert!(!asks(&["-v"]));
+        assert!(!asks(&["run", "--version"]));
     }
 
     #[test]

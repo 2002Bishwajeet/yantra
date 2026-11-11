@@ -317,6 +317,7 @@ mod tests {
             free_disk_mb: 1,
             cpu_busy_pct,
             power: Power::Ac,
+            version: None,
         }
     }
 

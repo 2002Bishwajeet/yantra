@@ -630,6 +630,7 @@ mod tests {
             free_disk_mb: 1,
             cpu_busy_pct: 0,
             power: Power::Ac,
+            version: None,
         };
         let skewed = Candidate {
             machine: "skewed".to_owned(),

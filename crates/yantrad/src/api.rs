@@ -29,6 +29,7 @@ use axum::{Json, response::IntoResponse};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use yantra_core::heartbeat::{Heartbeat, Power};
+use yantra_core::inventory::{MachineInfo, Os};
 use yantra_core::snapshot::{Reading, Snapshot};
 use yantra_core::status::{MachineStatus, Verdict};
 use yantra_core::{about, doctor, github, identity, update};
@@ -568,6 +569,10 @@ impl Checked {
 /// **No age threshold.** A beat that arrived is *present* carrying how long ago;
 /// which ages mean a dead agent is ADR-0013 §7's, and this daemon names none of
 /// those states.
+///
+/// An agent older than this daemon, or one that sends no version, is *absent*
+/// with the command that updates it (ADR-0013's 2026-11-11 amendment). The
+/// check is a warning, so a session still starts there.
 fn heard_from(
     machine: &str,
     snapshot: &Snapshot,
@@ -579,33 +584,84 @@ fn heard_from(
         detail,
         took_ms: None,
     };
-    let Some(id) = node_id(machine, snapshot) else {
+    let Some(node) = node(machine, snapshot) else {
         return says(
             doctor::State::Unknown,
             "no tailnet node here answers to that name, so whether it has reported is not known"
                 .to_owned(),
         );
     };
-    match beats.get(id) {
-        Some(reading) => says(
-            doctor::State::Present,
-            format!("last report {}s ago", reading.age().as_secs()),
-        ),
-        None => says(
+    let Some(reading) = beats.get(&node.id) else {
+        return says(
             doctor::State::Absent,
             "no report since Yantra started. The join command offers Yantra's agent, which \
              reports CPU, memory and disk"
                 .to_owned(),
+        );
+    };
+    match behind(
+        reading.value().version.as_deref(),
+        about::VERSION,
+        &node.os,
+        machine,
+    ) {
+        Some(detail) => says(doctor::State::Absent, detail),
+        None => says(
+            doctor::State::Present,
+            format!("last report {}s ago", reading.age().as_secs()),
         ),
     }
 }
 
-fn node_id<'a>(machine: &str, snapshot: &'a Snapshot) -> Option<&'a str> {
+/// What readiness says of an agent that runs behind `daemon`, or `None` when
+/// it does not. A Mac installs stable releases only, so under a nightly daemon
+/// it is behind only when it is older than the release that nightly builds on.
+fn behind(agent: Option<&str>, daemon: &str, os: &Os, machine: &str) -> Option<String> {
+    let nightly = about::stable_below(daemon);
+    let wanted = match (os, &nightly) {
+        (Os::MacOs, Some(stable)) => stable.as_str(),
+        _ => daemon,
+    };
+    let here = match agent {
+        None => format!("sends no version, so it predates yantrad v{daemon}"),
+        Some(version) if about::older(version, wanted) => {
+            format!("is v{version} and yantrad is v{daemon}")
+        }
+        Some(_) => return None,
+    };
+    let update = match update_command(os, wanted, nightly.is_some()) {
+        Some(command) => format!(": `{command}`"),
+        None => ".".to_owned(),
+    };
+    Some(format!(
+        "yantra-agent here {here}. Update it on {machine}{update}"
+    ))
+}
+
+/// What updates the agent on a machine to `version`, pinned so it never
+/// passes the daemon (ADR-0013: the daemon goes first). Linux takes `--agent`,
+/// because a bare `install.sh` there installs the whole appliance. A nightly
+/// has no tag of its own to pin, so Linux follows the nightly channel there.
+fn update_command(os: &Os, version: &str, nightly: bool) -> Option<String> {
+    const SCRIPT: &str =
+        "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh |";
+    match os {
+        Os::MacOs => Some(format!("{SCRIPT} YANTRA_VERSION={version} bash")),
+        Os::Linux if nightly => Some(format!("{SCRIPT} bash -s -- --agent --channel nightly")),
+        Os::Linux => Some(format!(
+            "{SCRIPT} YANTRA_VERSION={version} bash -s -- --agent"
+        )),
+        _ => None,
+    }
+}
+
+fn node<'a>(machine: &str, snapshot: &'a Snapshot) -> Option<&'a MachineInfo> {
     let machines = snapshot.machines.as_deref()?.value().as_ref().ok()?;
-    machines
-        .iter()
-        .find(|one| one.name == machine)
-        .map(|one| one.id.as_str())
+    machines.iter().find(|one| one.name == machine)
+}
+
+fn node_id<'a>(machine: &str, snapshot: &'a Snapshot) -> Option<&'a str> {
+    node(machine, snapshot).map(|one| one.id.as_str())
 }
 
 /// A file that did not load is not a workspace that is not there, and saying it
@@ -1232,7 +1288,6 @@ pub(crate) mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tower::ServiceExt as _;
-    use yantra_core::inventory::{MachineInfo, Os};
     use yantra_core::sessions::{self, MachineSessions};
     use yantra_core::snapshot::Snapshot;
     use yantra_core::status::{self, Report};
@@ -1299,6 +1354,7 @@ pub(crate) mod tests {
             free_disk_mb: 214003,
             cpu_busy_pct: 15,
             power,
+            version: Some(about::VERSION.to_owned()),
         }
     }
 
@@ -1838,6 +1894,124 @@ pub(crate) mod tests {
                 .is_some_and(|d| d.contains("join command") && !d.contains("yantra-agent")),
             "{silent}"
         );
+    }
+
+    /// One machine with `os` that sent one beat carrying `version`, answered
+    /// the way `/readiness` answers it.
+    fn heartbeat_of(os: Os, version: Option<&str>) -> doctor::Check {
+        let mut node = machine("n-1", "laptop", true);
+        node.os = os;
+        let snapshot = Snapshot {
+            machines: Some(Arc::new(Reading::new(Ok(vec![node])))),
+            ..Snapshot::default()
+        };
+        let beats = BTreeMap::from([(
+            "n-1".to_owned(),
+            Reading::new(Heartbeat {
+                version: version.map(str::to_owned),
+                ..beat(Power::Ac)
+            }),
+        )]);
+        let report = answered(&checked("laptop"), &snapshot, &beats);
+        report.checks[1].clone()
+    }
+
+    const SCRIPT: &str =
+        "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh |";
+
+    #[test]
+    fn an_older_mac_agent_is_absent_with_the_command_pinned_to_this_daemon() {
+        let check = heartbeat_of(Os::MacOs, Some("0.0.1"));
+        assert_eq!(check.state, doctor::State::Absent);
+        assert_eq!(
+            check.detail,
+            format!(
+                "yantra-agent here is v0.0.1 and yantrad is v{v}. Update it on laptop: \
+                 `{SCRIPT} YANTRA_VERSION={v} bash`",
+                v = about::VERSION
+            )
+        );
+    }
+
+    #[test]
+    fn an_older_linux_agent_is_told_to_update_only_the_agent() {
+        let check = heartbeat_of(Os::Linux, Some("0.0.1"));
+        assert_eq!(check.state, doctor::State::Absent);
+        assert!(
+            check.detail.ends_with(&format!(
+                "`{SCRIPT} YANTRA_VERSION={} bash -s -- --agent`",
+                about::VERSION
+            )),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn an_agent_that_sends_no_version_predates_this_daemon() {
+        let check = heartbeat_of(Os::Linux, None);
+        assert_eq!(check.state, doctor::State::Absent);
+        assert!(
+            check.detail.starts_with(&format!(
+                "yantra-agent here sends no version, so it predates yantrad v{}. Update it on laptop: `",
+                about::VERSION
+            )),
+            "{}",
+            check.detail
+        );
+    }
+
+    #[test]
+    fn an_older_agent_on_another_os_gets_no_command() {
+        let check = heartbeat_of(Os::Windows, Some("0.0.1"));
+        assert_eq!(check.state, doctor::State::Absent);
+        assert!(
+            check.detail.ends_with("Update it on laptop."),
+            "{}",
+            check.detail
+        );
+    }
+
+    /// A nightly has no macOS archive and no tag to pin. A Mac is held to the
+    /// release the nightly builds on, and Linux follows the nightly channel.
+    #[test]
+    fn a_nightly_daemon_holds_a_mac_to_its_stable_release_and_linux_to_nightly() {
+        const NIGHTLY: &str = "0.11.1-nightly.20261111000000.abc1234";
+        assert_eq!(behind(Some("0.11.0"), NIGHTLY, &Os::MacOs, "mac"), None);
+        assert_eq!(
+            behind(Some("0.10.2"), NIGHTLY, &Os::MacOs, "mac").as_deref(),
+            Some(
+                format!(
+                    "yantra-agent here is v0.10.2 and yantrad is v{NIGHTLY}. Update it on mac: \
+                     `{SCRIPT} YANTRA_VERSION=0.11.0 bash`"
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(
+            behind(Some("0.11.0"), NIGHTLY, &Os::Linux, "box").as_deref(),
+            Some(
+                format!(
+                    "yantra-agent here is v0.11.0 and yantrad is v{NIGHTLY}. Update it on box: \
+                     `{SCRIPT} bash -s -- --agent --channel nightly`"
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(behind(Some(NIGHTLY), NIGHTLY, &Os::Linux, "box"), None);
+    }
+
+    #[test]
+    fn an_equal_or_newer_agent_is_present() {
+        for version in [
+            about::VERSION,
+            "999.0.0",
+            "999.0.0-nightly.20261111000000.abc1234",
+        ] {
+            let check = heartbeat_of(Os::MacOs, Some(version));
+            assert_eq!(check.state, doctor::State::Present, "{version}");
+            assert!(check.detail.starts_with("last report "), "{}", check.detail);
+        }
     }
 
     /// I-5 is why the join is on the node id, and this is what it costs: a

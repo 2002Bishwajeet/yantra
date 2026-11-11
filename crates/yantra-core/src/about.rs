@@ -20,6 +20,28 @@ pub fn newer(published: &crate::github::Release) -> bool {
     newer_than(published, VERSION)
 }
 
+/// Whether `version` orders below `than`. Either one unparsable is not older,
+/// so a caller warns only on versions it can read (Y-713).
+pub fn older(version: &str, than: &str) -> bool {
+    use crate::github::Release;
+    Release::parse(version)
+        .zip(Release::parse(than))
+        .is_some_and(|(version, than)| than.is_newer_than(&version))
+}
+
+/// The stable release a nightly builds on: release.yml numbers a nightly one
+/// patch past the last tag. `None` for a stable version or one it cannot read.
+pub fn stable_below(nightly: &str) -> Option<String> {
+    crate::github::Release::parse(nightly)?;
+    let (core, _) = nightly
+        .strip_prefix('v')
+        .unwrap_or(nightly)
+        .split_once('-')?;
+    let (head, patch) = core.rsplit_once('.')?;
+    let patch = patch.parse::<u64>().ok()?.checked_sub(1)?;
+    Some(format!("{head}.{patch}"))
+}
+
 fn newer_than(published: &crate::github::Release, running: &str) -> bool {
     // An unparsable running version orders below every release, so a check
     // says *newer* rather than *current* when it cannot tell.
@@ -52,6 +74,28 @@ mod tests {
             !newer_than(&release("0.10.3"), nightly),
             "stable below a nightly"
         );
+    }
+
+    #[test]
+    fn older_orders_nightlies_and_ignores_what_it_cannot_read() {
+        assert!(older("0.3.2", "0.11.0"));
+        assert!(!older("0.11.0", "0.11.0"));
+        assert!(!older("0.12.0", "0.11.0"));
+        assert!(older("0.11.0", "0.11.1-nightly.20261111000000.abc1234"));
+        assert!(!older("0.11.1-nightly.20261111000000.abc1234", "0.11.0"));
+        assert!(!older("garbage", "0.11.0"));
+        assert!(!older("0.3.2", "garbage"));
+    }
+
+    #[test]
+    fn a_nightly_builds_on_the_release_one_patch_below() {
+        assert_eq!(
+            stable_below("0.11.1-nightly.20261111000000.abc1234").as_deref(),
+            Some("0.11.0")
+        );
+        assert_eq!(stable_below("0.11.0"), None);
+        assert_eq!(stable_below("0.11.0-nightly.20261111000000.abc1234"), None);
+        assert_eq!(stable_below("garbage"), None);
     }
 
     #[test]

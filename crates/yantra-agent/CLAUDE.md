@@ -1,7 +1,8 @@
 # yantra-agent — working notes
 
 **The agent is complete apart from its install story** (R-12, M7): [`src/probes.rs`](src/probes.rs)
-measures the seven fields and [`src/main.rs`](src/main.rs) is the loop and the POST.
+measures the seven fields and adds the agent's own `version` (Y-713). [`src/main.rs`](src/main.rs) is
+the loop and the POST, and answers `--version` before it reads any configuration.
 
 Scoped to this crate; the root [`CLAUDE.md`](../../CLAUDE.md) still binds.
 
