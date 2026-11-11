@@ -473,8 +473,8 @@ fn a_write_needs_the_owners_passkey() -> Result<()> {
         .context("the Mac's session")?
         .to_owned();
     hub.sh(&format!(
-        "rm -f /tmp/socket && cat > /tmp/socket.py <<'PY'\n{SOCKET_CLIENT}\nPY\n\
-         setsid python3 /tmp/socket.py {token} >/dev/null 2>&1 < /dev/null &"
+        "rm -f /tmp/socket && cat > /tmp/ws_client.py <<'PY'\n{SOCKET_CLIENT}\nPY\n\
+         setsid python3 /tmp/ws_client.py {token} >/dev/null 2>&1 < /dev/null &"
     ))?;
     assert!(
         socket_said(&hub, "HTTP/1.1 101 Switching Protocols", 10)?,
