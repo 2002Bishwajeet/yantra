@@ -12,8 +12,9 @@
 //! carries keeps two sessions with no thread on one node apart; the daemon
 //! keeps no list of the ids.
 //!
-//! **Every request passes [`allowed`] first**, so only the owner's own untagged
-//! nodes reach a room in this row. The label comes from identity and never
+//! **Every request passes [`allowed`] or [`identify`] first**, so only the
+//! owner, or an agent token on its own workspace's rooms (ADR-0044 decision
+//! 12), reaches a room. The label comes from identity and never
 //! from the body: the caller's machine is `whois` joined to the tailnet list on
 //! the stable id, as `/api/join` does. `X-Yantra-Thread` only routes, and only
 //! when the workspace it names is on the caller's machine: the workspace's ssh
@@ -42,7 +43,7 @@ use yantra_core::room_file::{self, Definition};
 use yantra_core::workspace;
 
 use crate::room::Rooms;
-use crate::write::{Authoriser, Peer, Refused, allowed};
+use crate::write::{Authoriser, Peer, Refused, Who, allowed, identify};
 
 const THREAD: &str = "x-yantra-thread";
 const SESSION: &str = "mcp-session-id";
@@ -121,7 +122,7 @@ async fn stream<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Response, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    identify(&state.authoriser, &from, &headers).await?;
     Ok((StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "POST")]).into_response())
 }
 
@@ -131,7 +132,13 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let who = identify(&state.authoriser, &from, &headers).await?;
+    if let Who::Agent { workspace, .. } = &who
+        && thread_workspace(&headers).is_some_and(|named| named != workspace)
+    {
+        return Err(Refused::AgentScope);
+    }
+    let caller = who.caller().clone();
     let Ok(message) = serde_json::from_slice::<Value>(&body) else {
         return Ok(refused(&Value::Null, PARSE_ERROR, "Parse error"));
     };
@@ -300,6 +307,30 @@ async fn machine_of<I: Inventory>(
         })
 }
 
+/// The workspace `X-Yantra-Thread` names, if it names one.
+fn thread_workspace(headers: &HeaderMap) -> Option<&str> {
+    let named = headers.get(THREAD)?.to_str().ok()?;
+    Some(
+        named
+            .split_once('/')
+            .map_or(named, |(workspace, _)| workspace),
+    )
+}
+
+/// An agent token reaches a room only when the room is its workspace's
+/// (ADR-0044 decision 12).
+fn may_reach(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
+    let Who::Agent { workspace, .. } = who else {
+        return Ok(());
+    };
+    let home = rooms.view(name).map_err(missing)?.0.workspace;
+    if home.as_deref() == Some(workspace.as_str()) {
+        Ok(())
+    } else {
+        Err(Refused::AgentScope)
+    }
+}
+
 /// The header's thread, when its workspace is on the caller's machine.
 async fn thread_of<I>(
     headers: &HeaderMap,
@@ -375,7 +406,9 @@ async fn resume<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let who = identify(&state.authoriser, &from, &headers).await?;
+    may_reach(&who, &state.rooms, &name)?;
+    let caller = who.caller();
     state.rooms.resume(&name).map_err(|error| Refused::Verb {
         status: StatusCode::NOT_FOUND,
         said: error.to_string(),
@@ -730,15 +763,19 @@ async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
     Path(name): Path<String>,
     post: Result<Json<Post>, JsonRejection>,
 ) -> Result<Json<RoomPosted>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let who = identify(&state.authoriser, &from, &headers).await?;
+    may_reach(&who, &state.rooms, &name)?;
     let post = json_only(post, "{\"text\": \"...\"}")?;
-    let machine = machine_of(&state.authoriser, &caller.node)
+    let machine = machine_of(&state.authoriser, &who.caller().node)
         .await
         .map_err(|said| Refused::Verb {
             status: StatusCode::SERVICE_UNAVAILABLE,
             said,
         })?;
-    let label = format!("owner on {}", machine.name);
+    let label = match &who {
+        Who::Owner(..) => format!("owner on {}", machine.name),
+        Who::Agent { workspace, .. } => format!("{} · {workspace}", machine.name),
+    };
     let sent = state
         .rooms
         .post(&name, &label, &post.text)
@@ -1022,7 +1059,12 @@ mod tests {
         let closing = watch::Sender::new(false);
         App {
             router: routes(
-                Authoriser::new(inventory, &[], std::path::Path::new("yantrad.sock")),
+                Authoriser::new(
+                    inventory,
+                    &[],
+                    std::path::Path::new("yantrad.sock"),
+                    crate::passkey::Passkeys::trusting(),
+                ),
                 rooms,
                 locate(),
                 resolve(),

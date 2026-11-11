@@ -36,7 +36,7 @@ use yantra_core::inventory::Inventory;
 use yantra_core::mic::{self, Stream};
 
 use crate::terminal::{MISSES, PING_EVERY};
-use crate::write::{Authoriser, Peer, Refused, allowed, chain};
+use crate::write::{Authoriser, Peer, Refused, allowed_socket, chain, until_revoked};
 
 /// What starts the writer for a machine: [`mic::open_at`], or a pipe in a test.
 type Open = Arc<dyn Fn(&str) -> Result<Stream, mic::Error> + Send + Sync>;
@@ -72,7 +72,7 @@ async fn talk<I: Inventory + Clone + Send + Sync + 'static>(
     Path(machine): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let (caller, revoked) = allowed_socket(&state.authoriser, &from, &headers).await?;
     install::check_machine(&machine).map_err(|error| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said: error.to_string(),
@@ -82,7 +82,7 @@ async fn talk<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(upgrade.on_upgrade(move |socket| async move {
         // At once, so the pipe holds the first frames while ssh connects.
         let opened = (state.open)(&machine);
-        bridge(socket, &machine, opened).await;
+        until_revoked(revoked, bridge(socket, &machine, opened)).await;
     }))
 }
 
@@ -267,6 +267,7 @@ mod tests {
             tailnet(vec![(LOCAL, caller(ME, &[]))]),
             &[SocketAddr::new(LOCAL, 7717)],
             std::path::Path::new("yantrad.sock"),
+            crate::passkey::Passkeys::trusting(),
         );
         let said = status(real(ours), MIC, "X-Forwarded-For: 100.64.0.2\r\n").await;
         assert!(said.starts_with("HTTP/1.1 403"), "{said}");

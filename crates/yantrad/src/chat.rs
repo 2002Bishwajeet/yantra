@@ -127,7 +127,7 @@ use yantra_core::workspace::{self, Workspace};
 
 use crate::store::Store;
 use crate::terminal::{MISSES, PING_EVERY};
-use crate::write::{Authoriser, Refused, allowed, chain, checked};
+use crate::write::{Authoriser, Refused, allowed_socket, chain, checked, until_revoked};
 
 /// How many transcript records an attach replays.
 const HISTORY: usize = 200;
@@ -194,10 +194,10 @@ async fn chat<I: Inventory + Clone + Send + Sync + 'static>(
     uri: Uri,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&authoriser, &from, &headers).await?;
+    let (caller, revoked) = allowed_socket(&authoriser, &from, &headers).await?;
     let query = read_query(&uri);
     tracing::info!("chat {name} for {}", caller.node);
-    Ok(served(upgrade, name.clone(), query, move || {
+    Ok(served(upgrade, name.clone(), query, revoked, move || {
         Fleet::of(&name, registry)
     }))
 }
@@ -215,13 +215,17 @@ async fn home_chat<I: Inventory + Clone + Send + Sync + 'static>(
     uri: Uri,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&authoriser, &from, &headers).await?;
+    let (caller, revoked) = allowed_socket(&authoriser, &from, &headers).await?;
     checked(&machine)?;
     let query = read_query(&uri);
     tracing::info!("chat home on {machine} for {}", caller.node);
-    Ok(served(upgrade, keep::HOME.to_owned(), query, move || {
-        Home::on(&machine, registry)
-    }))
+    Ok(served(
+        upgrade,
+        keep::HOME.to_owned(),
+        query,
+        revoked,
+        move || Home::on(&machine, registry),
+    ))
 }
 
 /// Upgrades to a conversation on the machine `machine` makes.
@@ -229,11 +233,15 @@ fn served<M: Machine>(
     upgrade: WebSocketUpgrade,
     name: String,
     query: ChatQuery,
+    revoked: Option<tokio::sync::watch::Receiver<bool>>,
     machine: impl FnOnce() -> Result<M, String> + Send + 'static,
 ) -> Response {
     sized(upgrade).on_upgrade(move |mut socket| async move {
         match machine() {
-            Ok(machine) => converse(Arc::new(machine), &name, query, &mut socket).await,
+            Ok(machine) => {
+                let talk = converse(Arc::new(machine), &name, query, &mut socket);
+                until_revoked(revoked, talk).await;
+            }
             Err(said) => {
                 tracing::warn!("chat {name}: {said}");
                 let _ = socket.say(&failure(Kind::Unreachable, said)).await;
@@ -7221,7 +7229,12 @@ mod tests {
         let app = Router::new().nest(
             "/api",
             router(
-                Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock")),
+                Authoriser::new(
+                    fake,
+                    &[],
+                    std::path::Path::new("yantrad.sock"),
+                    crate::passkey::Passkeys::trusting(),
+                ),
                 Registry::default(),
             ),
         );
@@ -7298,6 +7311,7 @@ mod tests {
                 tailnet(vec![(LOCAL, caller(ME, &[]))]),
                 &[],
                 std::path::Path::new("yantrad.sock"),
+                crate::passkey::Passkeys::trusting(),
             ),
             Registry::default(),
         );

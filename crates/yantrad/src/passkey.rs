@@ -12,6 +12,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use axum::extract::{ConnectInfo, Path as Route, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, post};
+use axum::{Json, Router};
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
@@ -20,6 +25,10 @@ use webauthn_rs::prelude::{
     PublicKeyCredential, RegisterPublicKeyCredential, RequestChallengeResponse, Url, Uuid,
     Webauthn, WebauthnBuilder, WebauthnError,
 };
+use yantra_core::inventory::Inventory;
+
+use crate::heartbeat::Fleet;
+use crate::write::{Authoriser, Peer, Refused, Who, allowed, chain, identify};
 
 /// The one cookie (decision 4). `__Host-` makes the browser refuse it without
 /// `Secure` and `Path=/`, or with a `Domain`.
@@ -156,7 +165,7 @@ enum Ceremony {
 }
 
 #[derive(Default)]
-struct State {
+struct Held {
     saved: Saved,
     enrol: Codes,
     join: Codes,
@@ -170,7 +179,6 @@ struct State {
 /// The relying party: the hub's MagicDNS name and its dashboard origin.
 pub struct Relying {
     pub id: String,
-    pub origin: String,
     webauthn: Webauthn,
 }
 
@@ -183,7 +191,6 @@ impl Relying {
             .map_err(|_| Error::Relying(name.to_owned()))?;
         Ok(Self {
             id: name.to_owned(),
-            origin,
             webauthn,
         })
     }
@@ -206,7 +213,7 @@ impl Drop for AgentToken {
 struct Shared {
     /// `None` keeps everything in memory, for a test.
     file: Option<PathBuf>,
-    state: Mutex<State>,
+    state: Mutex<Held>,
     relying: Mutex<Option<Arc<Relying>>>,
     code_life: u64,
     /// Test-only: every request counts as signed in, so the route tests that
@@ -264,9 +271,9 @@ impl Passkeys {
     fn with(file: Option<PathBuf>, saved: Saved, code_life: u64) -> Self {
         Self(Arc::new(Shared {
             file,
-            state: Mutex::new(State {
+            state: Mutex::new(Held {
                 saved,
-                ..State::default()
+                ..Held::default()
             }),
             relying: Mutex::default(),
             code_life,
@@ -290,7 +297,7 @@ impl Passkeys {
         self.0.trusting
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Held> {
         self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -598,7 +605,7 @@ impl Passkeys {
         Ok(signed)
     }
 
-    fn save(&self, state: &State) -> Result<(), Error> {
+    fn save(&self, state: &Held) -> Result<(), Error> {
         let Some(file) = &self.0.file else {
             return Ok(());
         };
@@ -628,7 +635,7 @@ fn write(file: &Path, saved: &Saved) -> Result<(), Error> {
     std::fs::rename(&temp, file).map_err(failed)
 }
 
-fn sign_in(state: &mut State, passkey: &str, device: &str, now: u64) -> (String, Session) {
+fn sign_in(state: &mut Held, passkey: &str, device: &str, now: u64) -> (String, Session) {
     let token = token();
     state.saved.sessions.retain(|s| s.ends > now);
     let session = Session {
@@ -643,13 +650,13 @@ fn sign_in(state: &mut State, passkey: &str, device: &str, now: u64) -> (String,
     (token, session)
 }
 
-fn end(state: &mut State, id: &str) {
+fn end(state: &mut Held, id: &str) {
     if let Some(sender) = state.ended.remove(id) {
         sender.send_replace(true);
     }
 }
 
-fn ceremony(state: &mut State, now: u64, ceremony: Ceremony) -> String {
+fn ceremony(state: &mut Held, now: u64, ceremony: Ceremony) -> String {
     state
         .ceremonies
         .retain(|_, (made, _)| *made + CEREMONY_LIFE > now);
@@ -658,7 +665,7 @@ fn ceremony(state: &mut State, now: u64, ceremony: Ceremony) -> String {
     id
 }
 
-fn take_ceremony(state: &mut State, id: &str, now: u64) -> Option<Ceremony> {
+fn take_ceremony(state: &mut Held, id: &str, now: u64) -> Option<Ceremony> {
     let (made, ceremony) = state.ceremonies.remove(id)?;
     (made + CEREMONY_LIFE > now).then_some(ceremony)
 }
@@ -752,6 +759,312 @@ pub fn bearer(headers: &axum::http::HeaderMap) -> Option<&str> {
     (scheme.eq_ignore_ascii_case("bearer") && !token.trim().is_empty()).then(|| token.trim())
 }
 
+/// The sign-in routes (decisions 1 to 4, 9 and 13). The gate in `write.rs`
+/// lets the four ceremony halves through unchecked; every other route here
+/// needs the owner.
+pub fn router<I, S>(authoriser: Authoriser<I>, fleet: Fleet) -> Router<S>
+where
+    I: Inventory + Clone + Send + Sync + 'static,
+    S: Clone + Send + Sync + 'static,
+{
+    Router::new()
+        .route("/passkey", get(listed::<I>))
+        .route("/passkey/code", post(enrol_code::<I>))
+        .route("/passkey/{name}", delete(removed::<I>))
+        .route("/passkey/register/start", post(register_start::<I>))
+        .route("/passkey/register/finish", post(register_finish::<I>))
+        .route("/passkey/login/start", post(login_start::<I>))
+        .route("/passkey/login/finish", post(login_finish::<I>))
+        .route("/sessions/{id}", delete(revoked::<I>))
+        .route("/sessions/revoke-others", post(revoked_others::<I>))
+        .route("/join/code", post(join_code::<I>))
+        .with_state(Signing { authoriser, fleet })
+}
+
+#[derive(Clone)]
+struct Signing<I> {
+    authoriser: Authoriser<I>,
+    fleet: Fleet,
+}
+
+impl<I: Inventory> Signing<I> {
+    fn passkeys(&self) -> &Passkeys {
+        self.authoriser.passkeys()
+    }
+
+    /// The relying party for the hub's MagicDNS name, from the last tailnet look.
+    async fn relying(&self) -> Result<Arc<Relying>, Refused> {
+        let name = {
+            let model = self.fleet.model.read().await;
+            crate::api::this_node_name(&model, &self.fleet.facts.listening_on).map(str::to_owned)
+        };
+        let name = name.ok_or_else(|| {
+            Refused::Unlooked("the hub does not know its MagicDNS name yet".to_owned())
+        })?;
+        self.passkeys().relying(&name).map_err(refused)
+    }
+}
+
+fn refused(error: Error) -> Refused {
+    let status = match &error {
+        Error::WrongCode | Error::Unknown => StatusCode::UNAUTHORIZED,
+        Error::NoCeremony | Error::BadName | Error::Webauthn(_) => StatusCode::BAD_REQUEST,
+        Error::Taken(_) => StatusCode::CONFLICT,
+        Error::Relying(_) => StatusCode::SERVICE_UNAVAILABLE,
+        Error::Unwritable(..) => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    Refused::Verb {
+        status,
+        said: chain(&error),
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Code {
+    code: String,
+    /// Seconds.
+    expires_in: u64,
+}
+
+async fn enrol_code<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+) -> Result<Json<Code>, Refused> {
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    tracing::info!("an enrolment code for {}", caller.node);
+    Ok(Json(Code {
+        code: state.passkeys().enrol_code(),
+        expires_in: state.passkeys().0.code_life,
+    }))
+}
+
+#[derive(Debug, serde::Serialize)]
+struct JoinCode {
+    code: String,
+    expires_in: u64,
+    /// What the owner pastes on the new machine.
+    command: String,
+}
+
+async fn join_code<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+) -> Result<Json<JoinCode>, Refused> {
+    allowed(&state.authoriser, &from, &headers).await?;
+    let origin = crate::write::dashboard_origin(&state.fleet)
+        .await
+        .ok_or_else(|| {
+            Refused::Unlooked("the hub does not know its MagicDNS name yet".to_owned())
+        })?;
+    let code = state.passkeys().join_code();
+    Ok(Json(JoinCode {
+        command: format!("curl -fsSL '{origin}/join?code={code}' | sh"),
+        code,
+        expires_in: state.passkeys().0.code_life,
+    }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnrolStart {
+    code: String,
+    device: String,
+}
+
+#[derive(Debug, serde::Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
+struct SignInStart {
+    device: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Finish<T> {
+    ceremony: String,
+    credential: T,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Begun<T> {
+    ceremony: String,
+    options: T,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Shown {
+    id: String,
+    passkey: String,
+    device: String,
+    made: u64,
+    ends: u64,
+    this_device: bool,
+}
+
+impl Shown {
+    fn of(session: Session, this: Option<&str>) -> Self {
+        Self {
+            this_device: this == Some(session.id.as_str()),
+            id: session.id,
+            passkey: session.passkey,
+            device: session.device,
+            made: session.made,
+            ends: session.ends,
+        }
+    }
+}
+
+async fn register_start<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    Json(asked): Json<EnrolStart>,
+) -> Result<Json<Begun<CreationChallengeResponse>>, Refused> {
+    let relying = state.relying().await?;
+    let (ceremony, options) = state
+        .passkeys()
+        .enrol_start(&relying, &asked.code, &asked.device)
+        .map_err(refused)?;
+    Ok(Json(Begun { ceremony, options }))
+}
+
+async fn register_finish<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    Json(asked): Json<Finish<RegisterPublicKeyCredential>>,
+) -> Result<Response, Refused> {
+    let relying = state.relying().await?;
+    let (token, session) = state
+        .passkeys()
+        .enrol_finish(&relying, &asked.ceremony, &asked.credential)
+        .map_err(refused)?;
+    tracing::info!("enrolled the passkey {}", session.passkey);
+    Ok(signed_in(&token, session))
+}
+
+async fn login_start<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    asked: Option<Json<SignInStart>>,
+) -> Result<Json<Begun<RequestChallengeResponse>>, Refused> {
+    let relying = state.relying().await?;
+    let asked = asked.map(|Json(asked)| asked).unwrap_or_default();
+    let (ceremony, options) = state
+        .passkeys()
+        .sign_in_start(&relying, asked.device.as_deref())
+        .map_err(refused)?;
+    Ok(Json(Begun { ceremony, options }))
+}
+
+async fn login_finish<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    Json(asked): Json<Finish<PublicKeyCredential>>,
+) -> Result<Response, Refused> {
+    let relying = state.relying().await?;
+    let (token, session) = state
+        .passkeys()
+        .sign_in_finish(&relying, &asked.ceremony, &asked.credential)
+        .map_err(refused)?;
+    tracing::info!("{} signed in with {}", session.device, session.passkey);
+    Ok(signed_in(&token, session))
+}
+
+fn signed_in(token: &str, session: Session) -> Response {
+    (
+        [(header::SET_COOKIE, cookie(token))],
+        Json(serde_json::json!({"session": Shown::of(session.clone(), Some(&session.id))})),
+    )
+        .into_response()
+}
+
+/// The owner, and the session this request carries, if any.
+async fn owner<I: Inventory>(
+    state: &Signing<I>,
+    from: &Peer,
+    headers: &HeaderMap,
+) -> Result<Option<Session>, Refused> {
+    match identify(&state.authoriser, from, headers).await? {
+        Who::Owner(_, session) => Ok(session),
+        Who::Agent { .. } => Err(Refused::AgentScope),
+    }
+}
+
+async fn listed<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, Refused> {
+    let this = owner(&state, &from, &headers).await?;
+    let this = this.as_ref().map(|session| session.id.as_str());
+    let relying = state.relying().await.ok();
+    let (keys, sessions) = state.passkeys().list();
+    Ok(Json(serde_json::json!({
+        "relying_party": relying.map(|relying| relying.id.clone()),
+        "passkeys": keys
+            .into_iter()
+            .map(|(name, made)| serde_json::json!({"name": name, "made": made}))
+            .collect::<Vec<_>>(),
+        "sessions": sessions
+            .into_iter()
+            .map(|session| Shown::of(session, this))
+            .collect::<Vec<_>>(),
+    })))
+}
+
+async fn removed<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Route(name): Route<String>,
+) -> Result<Response, Refused> {
+    let this = owner(&state, &from, &headers).await?;
+    if !state.passkeys().remove(&name).map_err(refused)? {
+        return Err(not_found(format!("no passkey is named {name}")));
+    }
+    tracing::info!("removed the passkey {name} and its sessions");
+    let mine = this.is_some_and(|session| session.passkey == name);
+    Ok(gone(mine))
+}
+
+async fn revoked<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Route(id): Route<String>,
+) -> Result<Response, Refused> {
+    let this = owner(&state, &from, &headers).await?;
+    if !state.passkeys().revoke(&id).map_err(refused)? {
+        return Err(not_found(format!("no session has the id {id}")));
+    }
+    tracing::info!("revoked the session {id}");
+    Ok(gone(this.is_some_and(|session| session.id == id)))
+}
+
+async fn revoked_others<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, Refused> {
+    let this = owner(&state, &from, &headers).await?;
+    let keep = this.map(|session| session.id).unwrap_or_default();
+    let ended = state.passkeys().revoke_others(&keep).map_err(refused)?;
+    tracing::info!("signed out {ended} other sessions");
+    Ok(Json(serde_json::json!({"revoked": ended})))
+}
+
+/// 204, and the cookie cleared when the session ended was this one.
+fn gone(mine: bool) -> Response {
+    if mine {
+        (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cleared())]).into_response()
+    } else {
+        StatusCode::NO_CONTENT.into_response()
+    }
+}
+
+fn not_found(said: String) -> Refused {
+    Refused::Verb {
+        status: StatusCode::NOT_FOUND,
+        said,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 pub(crate) mod tests {
@@ -760,6 +1073,10 @@ pub(crate) mod tests {
     use webauthn_authenticator_rs::softpasskey::SoftPasskey;
 
     pub(crate) const HUB: &str = "hub.example.ts.net";
+
+    pub(crate) fn origin() -> Url {
+        Url::parse(&format!("https://{HUB}:8443")).expect("an origin")
+    }
 
     fn scratch(label: &str) -> PathBuf {
         let dir =
@@ -776,9 +1093,8 @@ pub(crate) mod tests {
             .enrol_start(&relying, &code, name)
             .expect("an open code");
         let mut soft = SoftPasskey::new(true);
-        let origin = Url::parse(&relying.origin).expect("an origin");
         let credential = soft
-            .do_registration(origin, challenge)
+            .do_registration(origin(), challenge)
             .expect("the soft authenticator registers");
         let (token, session) = passkeys
             .enrol_finish(&relying, &id, &credential)
@@ -825,7 +1141,7 @@ pub(crate) mod tests {
             .sign_in_start(&relying, Some("Mac"))
             .expect("a passkey is enrolled");
         let answer = soft
-            .do_authentication(Url::parse(&relying.origin).expect("url"), challenge)
+            .do_authentication(origin(), challenge)
             .expect("the soft authenticator signs");
         let (second, session) = passkeys
             .sign_in_finish(&relying, &id, &answer)
@@ -905,9 +1221,7 @@ pub(crate) mod tests {
         let (mut soft, here, kept) = enrolled(&passkeys, "iPhone");
         let relying = passkeys.relying(HUB).expect("name");
         let (id, challenge) = passkeys.sign_in_start(&relying, None).expect("enrolled");
-        let answer = soft
-            .do_authentication(Url::parse(&relying.origin).expect("url"), challenge)
-            .expect("signs");
+        let answer = soft.do_authentication(origin(), challenge).expect("signs");
         let (there, _) = passkeys.sign_in_finish(&relying, &id, &answer).expect("ok");
 
         assert_eq!(passkeys.revoke_others(&kept.id).expect("in memory"), 1);

@@ -48,6 +48,7 @@ use crate::api::{Answer, Checked};
 use crate::chat::Doing;
 use crate::events::{self, Event};
 use crate::heartbeat::Fleet;
+use crate::passkey::{self, Passkeys};
 use crate::refresh::Model;
 use crate::store::{self, Row, Status, Store};
 
@@ -117,16 +118,48 @@ pub struct Authoriser<I> {
     me: u32,
     proxy: Option<u32>,
     socket: Arc<std::path::Path>,
+    passkeys: Passkeys,
+}
+
+/// Who a request is, once [`identify`] has decided (ADR-0044 decisions 5, 10, 12).
+#[derive(Debug, Clone)]
+pub(crate) enum Who {
+    /// The owner: on the socket with no session, or on the network with one.
+    Owner(Caller, Option<passkey::Session>),
+    /// A session or Chat turn the daemon started, by the workspace it is in.
+    Agent { caller: Caller, workspace: String },
+}
+
+impl Who {
+    pub(crate) fn caller(&self) -> &Caller {
+        match self {
+            Self::Owner(caller, _) | Self::Agent { caller, .. } => caller,
+        }
+    }
+}
+
+/// What a request on the network presents (ADR-0044 decisions 5, 12).
+enum Presented {
+    /// The daemon's own account or the `yantra` group on the socket (decision 10).
+    Socket,
+    Session(passkey::Session),
+    Agent(String),
 }
 
 impl<I: Inventory> Authoriser<I> {
-    pub fn new(inventory: I, bound: &[SocketAddr], socket: &std::path::Path) -> Self {
+    pub fn new(
+        inventory: I,
+        bound: &[SocketAddr],
+        socket: &std::path::Path,
+        passkeys: Passkeys,
+    ) -> Self {
         Self {
             inventory,
             bound: bound.iter().map(SocketAddr::ip).collect(),
             me: nix::unistd::geteuid().as_raw(),
             proxy: None,
             socket: socket.into(),
+            passkeys,
         }
     }
 
@@ -139,6 +172,10 @@ impl<I: Inventory> Authoriser<I> {
     /// The peer is a proxy, so its caller is another machine.
     pub(crate) fn is_proxy(&self, peer: &Peer) -> bool {
         matches!(*peer, Peer::Unix(Some(uid)) if uid == 0 || Some(uid) == self.proxy)
+    }
+
+    pub(crate) fn passkeys(&self) -> &Passkeys {
+        &self.passkeys
     }
 
     /// Who to ask, for a route that names the caller's machine.
@@ -160,7 +197,15 @@ impl<I: Inventory> Authoriser<I> {
     }
 
     /// ADR-0042 decisions 3 to 5, and ADR-0017 §3 for the header's shape.
-    fn caller_address(&self, hop: &Hop, headers: &HeaderMap) -> Result<IpAddr, Refused> {
+    /// `signed_in` is a live session cookie, which names the person, so a
+    /// `serve` hop from this machine's own address passes with it (ADR-0044
+    /// decision 5).
+    fn caller_address(
+        &self,
+        hop: &Hop,
+        headers: &HeaderMap,
+        signed_in: bool,
+    ) -> Result<IpAddr, Refused> {
         match hop {
             Hop::Tcp(from) if self.bound.contains(from) => {
                 Err(Refused::OwnAddress(self.socket.clone()))
@@ -169,7 +214,7 @@ impl<I: Inventory> Authoriser<I> {
             Hop::Serve => {
                 let from =
                     forwarded(headers)?.ok_or(Refused::Hop("the proxy forwarded no address"))?;
-                if self.bound.contains(&from) {
+                if self.bound.contains(&from) && !signed_in {
                     return Err(Refused::Hop(
                         "the proxy forwarded this machine's own address, so the account that called is unknown",
                     ));
@@ -184,10 +229,57 @@ impl<I: Inventory> Authoriser<I> {
         }
     }
 
+    /// What the request presents. On the network that is a live session
+    /// cookie or an agent token, and anything else is 401 (ADR-0044
+    /// decisions 5, 11 and 12). The socket's owner presents nothing
+    /// (decision 10), and any other socket account is refused as before.
+    fn presented(&self, hop: &Hop, headers: &HeaderMap) -> Result<Presented, Refused> {
+        match hop {
+            Hop::Owner => Ok(Presented::Socket),
+            Hop::Other(name) => Err(Refused::Account(Some(name.clone()))),
+            Hop::Unknown => Err(Refused::Account(None)),
+            Hop::Tcp(_) | Hop::Serve => {
+                if let Some(token) = passkey::bearer(headers) {
+                    return self
+                        .passkeys
+                        .agent(token)
+                        .map(Presented::Agent)
+                        .ok_or(Refused::SignIn);
+                }
+                passkey::token_in(headers)
+                    .and_then(|token| self.passkeys.session(token))
+                    .map(Presented::Session)
+                    .ok_or(Refused::SignIn)
+            }
+        }
+    }
+
+    /// The whole decision: what the request presents, then ADR-0016's
+    /// predicate on the address it comes from.
+    async fn decide(&self, hop: &Hop, headers: &HeaderMap) -> Result<Who, Refused> {
+        #[cfg(test)]
+        if self.passkeys.is_trusting() {
+            return Ok(Who::Owner(self.judge(hop, headers, false).await?, None));
+        }
+        let presented = self.presented(hop, headers)?;
+        let signed_in = matches!(presented, Presented::Session(_));
+        let caller = self.judge(hop, headers, signed_in).await?;
+        Ok(match presented {
+            Presented::Socket => Who::Owner(caller, None),
+            Presented::Session(session) => Who::Owner(caller, Some(session)),
+            Presented::Agent(workspace) => Who::Agent { caller, workspace },
+        })
+    }
+
     /// ADR-0016 §2 on the address [`Self::caller_address`] picks. Every branch
     /// that cannot *prove* the caller is this owner's own untagged node refuses.
-    async fn judge(&self, hop: &Hop, headers: &HeaderMap) -> Result<Caller, Refused> {
-        let from = self.caller_address(hop, headers)?;
+    async fn judge(
+        &self,
+        hop: &Hop,
+        headers: &HeaderMap,
+        signed_in: bool,
+    ) -> Result<Caller, Refused> {
+        let from = self.caller_address(hop, headers, signed_in)?;
         let caller = self
             .inventory
             .whois(from)
@@ -408,19 +500,34 @@ struct Remembered<I> {
 }
 
 /// Every route that acts calls this, and only the two join routes call
-/// [`joining`] in its place.
+/// [`joining`] in its place. It passes the owner alone; an agent token gets
+/// 403 here, and the routes an agent may use call [`identify`].
 pub(crate) async fn allowed<I: Inventory>(
     authoriser: &Authoriser<I>,
     peer: &Peer,
     headers: &HeaderMap,
 ) -> Result<Caller, Refused> {
-    let hop = authoriser.hop(peer).await;
-    authoriser.judge(&hop, headers).await
+    match identify(authoriser, peer, headers).await? {
+        Who::Owner(caller, _) => Ok(caller),
+        Who::Agent { .. } => Err(Refused::AgentScope),
+    }
 }
 
-/// [`allowed`], except that another account on the socket may join itself
-/// (ADR-0042 §3): `GET /join` names no `user`, and `POST /api/join` must name
-/// that account. It is then this machine, as the owner's account is.
+/// The owner or an agent, for the routes ADR-0044 decision 12 opens to one.
+pub(crate) async fn identify<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    peer: &Peer,
+    headers: &HeaderMap,
+) -> Result<Who, Refused> {
+    let hop = authoriser.hop(peer).await;
+    authoriser.decide(&hop, headers).await
+}
+
+/// ADR-0016's predicate alone, with no cookie: another account on the socket
+/// may join itself (ADR-0042 §3). `GET /join` names no `user`, and `POST
+/// /api/join` must name that account. It is then this machine, as the
+/// owner's account is. A join from another machine also needs a code, which
+/// [`join_as`] checks (ADR-0044 decision 13).
 pub(crate) async fn joining<I: Inventory>(
     authoriser: &Authoriser<I>,
     peer: &Peer,
@@ -428,7 +535,135 @@ pub(crate) async fn joining<I: Inventory>(
     user: Option<&str>,
 ) -> Result<Caller, Refused> {
     let hop = admit(authoriser.hop(peer).await, user);
-    authoriser.judge(&hop, headers).await
+    authoriser.judge(&hop, headers, false).await
+}
+
+/// [`allowed`] for a WebSocket upgrade, with the receiver that turns `true`
+/// when the caller's session is revoked (ADR-0044 decision 9).
+pub(crate) async fn allowed_socket<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    peer: &Peer,
+    headers: &HeaderMap,
+) -> Result<(Caller, Option<tokio::sync::watch::Receiver<bool>>), Refused> {
+    match identify(authoriser, peer, headers).await? {
+        Who::Owner(caller, session) => {
+            let revoked = session.map(|session| authoriser.passkeys.ended(&session.id));
+            Ok((caller, revoked))
+        }
+        Who::Agent { .. } => Err(Refused::AgentScope),
+    }
+}
+
+/// Runs a socket's bridge until its session is revoked. Dropping the bridge
+/// drops the socket, which closes it.
+pub(crate) async fn until_revoked(
+    revoked: Option<tokio::sync::watch::Receiver<bool>>,
+    bridge: impl std::future::Future<Output = ()>,
+) {
+    let Some(mut revoked) = revoked else {
+        return bridge.await;
+    };
+    tokio::select! {
+        () = bridge => {}
+        _ = revoked.wait_for(|ended| *ended) => tracing::info!("closed a revoked session's socket"),
+    }
+}
+
+/// What the `/api` gate needs: who the caller is, and the model that names the
+/// dashboard's origin.
+#[derive(Clone)]
+pub(crate) struct Gate<I> {
+    pub(crate) authoriser: Authoriser<I>,
+    pub(crate) fleet: Fleet,
+}
+
+/// ADR-0044 decision 8: every `/api` route checks its caller here, the reads
+/// in `api.rs` among them, before its own handler runs. A write, and every
+/// WebSocket upgrade, also needs the dashboard's `Origin` when it names one
+/// (decision 5), and an agent token reaches only [`agent_may`]'s routes.
+pub(crate) async fn gate<I: Inventory + Clone + Send + Sync + 'static>(
+    State(gate): State<Gate<I>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<Peer>>()
+        .map(|info| info.0);
+    let (method, path) = (request.method().clone(), request.uri().path().to_owned());
+    // Cloned, because the request's body is not `Sync` and the check awaits.
+    let headers = request.headers().clone();
+    match passes(&gate, &method, &path, &headers, peer).await {
+        Ok(()) => next.run(request).await,
+        Err(refused) => refused.into_response(),
+    }
+}
+
+async fn passes<I: Inventory>(
+    gate: &Gate<I>,
+    method: &axum::http::Method,
+    path: &str,
+    headers: &HeaderMap,
+    peer: Option<Peer>,
+) -> Result<(), Refused> {
+    if unchecked(method, path) {
+        return Ok(());
+    }
+    let who = identify(
+        &gate.authoriser,
+        &peer.ok_or(Refused::Account(None))?,
+        headers,
+    )
+    .await?;
+    let writes = !matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD)
+        || headers.contains_key(axum::http::header::UPGRADE);
+    if writes && let Some(origin) = headers.get(axum::http::header::ORIGIN) {
+        let origin = origin.to_str().unwrap_or("an unreadable origin");
+        if Some(origin) != dashboard_origin(&gate.fleet).await.as_deref() {
+            return Err(Refused::Origin(origin.to_owned()));
+        }
+    }
+    match who {
+        Who::Agent { .. } if !agent_may(method, path) => Err(Refused::AgentScope),
+        _ => Ok(()),
+    }
+}
+
+/// `https://<MagicDNS>:8443`, from the last tailnet look.
+pub(crate) async fn dashboard_origin(fleet: &Fleet) -> Option<String> {
+    let model = fleet.model.read().await;
+    let machines = model.machines.as_deref()?.value().as_ref().ok()?;
+    crate::api::https_of(machines, &fleet.facts.listening_on)
+}
+
+/// The routes under `/api` that check their caller themselves, or need none:
+/// About (decision 8), the join, which needs a code or the socket (decision
+/// 13), and the four halves of the two ceremonies (decisions 1, 2).
+fn unchecked(method: &axum::http::Method, path: &str) -> bool {
+    use axum::http::Method;
+    match *method {
+        Method::GET => path == "/about",
+        Method::POST => matches!(
+            path,
+            "/join"
+                | "/passkey/register/start"
+                | "/passkey/register/finish"
+                | "/passkey/login/start"
+                | "/passkey/login/finish"
+        ),
+        _ => false,
+    }
+}
+
+/// ADR-0044 decision 12: the room and task tools, and nothing else. The task
+/// and room handlers check the workspace.
+fn agent_may(method: &axum::http::Method, path: &str) -> bool {
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    match parts.as_slice() {
+        ["mcp"] | ["tasks"] | ["tasks", _] | ["tasks", _, _] => true,
+        ["rooms", _, "messages" | "resume"] => method == axum::http::Method::POST,
+        _ => false,
+    }
 }
 
 fn admit(hop: Hop, user: Option<&str>) -> Hop {
@@ -3999,6 +4234,13 @@ pub(crate) enum Refused {
     /// ADR-0042 §3: an account on the socket that is not this machine's owner,
     /// by name when it has one.
     Account(Option<String>),
+    /// ADR-0044 decision 11: no live session cookie and no agent token.
+    SignIn,
+    /// ADR-0044 decision 5: a write whose `Origin` is not the dashboard's.
+    Origin(String),
+    /// ADR-0044 decision 12: an agent token outside its workspace's room and
+    /// task routes.
+    AgentScope,
     /// The last tailnet look is missing or failed, so "which machine" has no
     /// answer yet; 503, because `null` would read as "no machine holds it".
     Unlooked(String),
@@ -4074,6 +4316,20 @@ impl IntoResponse for Refused {
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("could not name the machine: {said}"),
             ),
+            Self::SignIn => (
+                StatusCode::UNAUTHORIZED,
+                "sign in from the dashboard, or run this on the hub".to_owned(),
+            ),
+            Self::Origin(origin) => (
+                StatusCode::FORBIDDEN,
+                format!(
+                    "a write from {origin} is refused: only the dashboard's own page may write"
+                ),
+            ),
+            Self::AgentScope => (
+                StatusCode::FORBIDDEN,
+                "an agent reaches only its own workspace's room and task tools".to_owned(),
+            ),
             Self::Verb { status, said } | Self::Unlogged { status, said } => (status, said),
         };
         tracing::warn!("refused: {said}");
@@ -4118,7 +4374,12 @@ mod tests {
     /// Bound to nothing, so no peer is ever ours and every test below reads the
     /// address exactly as ADR-0016 wrote it.
     fn direct(fake: Fake) -> Authoriser<Fake> {
-        Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock"))
+        Authoriser::new(
+            fake,
+            &[],
+            std::path::Path::new("yantrad.sock"),
+            crate::passkey::Passkeys::trusting(),
+        )
     }
 
     /// Bound to [`address(1)`], so that address is this machine.
@@ -4127,6 +4388,7 @@ mod tests {
             fake,
             &[SocketAddr::new(address(1), 7717)],
             std::path::Path::new("/run/yantra/yantrad.sock"),
+            crate::passkey::Passkeys::trusting(),
         )
     }
 
@@ -4324,6 +4586,152 @@ mod tests {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     }
 
+    fn signed_in(fake: Fake, bound: &[SocketAddr]) -> (Authoriser<Fake>, HeaderMap) {
+        let passkeys = Passkeys::memory();
+        let (_, token, _) = crate::passkey::tests::enrolled(&passkeys, "iPhone");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            format!("{}={token}", passkey::COOKIE)
+                .parse()
+                .expect("ASCII"),
+        );
+        let authoriser = Authoriser::new(
+            fake,
+            bound,
+            std::path::Path::new("/run/yantra/yantrad.sock"),
+            passkeys,
+        );
+        (authoriser, headers)
+    }
+
+    /// ADR-0044 decision 5: the owner's node with no cookie is 401, and with
+    /// one it is the owner.
+    #[tokio::test]
+    async fn the_owners_node_needs_a_live_cookie() {
+        let (authoriser, cookie) = signed_in(mine(2), &[]);
+
+        let refused = allowed(&authoriser, &tcp(address(2)), &HeaderMap::new())
+            .await
+            .expect_err("no cookie");
+        assert!(matches!(refused, Refused::SignIn), "{refused:?}");
+        assert_eq!(refused.into_response().status(), StatusCode::UNAUTHORIZED);
+
+        let caller = allowed(&authoriser, &tcp(address(2)), &cookie).await;
+        assert!(caller.is_ok(), "{caller:?}");
+    }
+
+    /// A cookie names the person, and it does not make a stranger's node theirs.
+    #[tokio::test]
+    async fn a_live_cookie_from_someone_elses_node_is_still_refused() {
+        let fake = tailnet(vec![(address(3), caller(ME + 1, &[]))]);
+        let (authoriser, cookie) = signed_in(fake, &[]);
+
+        let refused = allowed(&authoriser, &tcp(address(3)), &cookie)
+            .await
+            .expect_err("not this owner");
+        assert!(matches!(refused, Refused::NotYours(_)), "{refused:?}");
+    }
+
+    /// The one change to ADR-0042 decision 3: `serve` forwarding this
+    /// machine's own address passes with a live cookie, and only with one.
+    #[tokio::test]
+    async fn the_serve_hop_from_this_machine_passes_only_with_a_cookie() {
+        let fake = tailnet(vec![(address(1), caller(ME, &[]))]);
+        let (authoriser, mut cookie) = signed_in(fake, &[SocketAddr::new(address(1), 7717)]);
+        cookie.insert(FORWARDED_FOR, "100.64.0.1".parse().expect("ASCII"));
+
+        assert!(allowed(&authoriser, &SERVE, &cookie).await.is_ok());
+
+        let refused = allowed(&authoriser, &SERVE, &forwarded(&["100.64.0.1"]))
+            .await
+            .expect_err("no cookie");
+        assert!(matches!(refused, Refused::SignIn), "{refused:?}");
+    }
+
+    /// Decision 10: the socket's owner needs no cookie, and another account
+    /// on it is refused with one.
+    #[tokio::test]
+    async fn the_socket_owner_needs_no_cookie_and_another_account_gets_none() {
+        let (authoriser, cookie) = signed_in(mine(1), &[SocketAddr::new(address(1), 7717)]);
+
+        assert!(
+            allowed(&authoriser, &daemon_account(), &HeaderMap::new())
+                .await
+                .is_ok()
+        );
+
+        let hop = Hop::Other("karigar".to_owned());
+        let refused = authoriser.decide(&hop, &cookie).await.expect_err("karigar");
+        assert!(matches!(refused, Refused::Account(Some(_))), "{refused:?}");
+    }
+
+    /// Decision 12: an agent token is an agent, and [`allowed`] refuses it.
+    #[tokio::test]
+    async fn an_agent_token_is_an_agent_and_never_the_owner() {
+        let passkeys = Passkeys::memory();
+        let minted = passkeys.mint_agent("web");
+        let authoriser = Authoriser::new(mine(2), &[], std::path::Path::new("s"), passkeys);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {}", minted.token).parse().expect("ASCII"),
+        );
+
+        let who = identify(&authoriser, &tcp(address(2)), &headers).await;
+        assert!(
+            matches!(&who, Ok(Who::Agent { workspace, .. }) if workspace == "web"),
+            "{who:?}"
+        );
+        let refused = allowed(&authoriser, &tcp(address(2)), &headers)
+            .await
+            .expect_err("an agent");
+        assert_eq!(refused.into_response().status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn an_agent_may_use_the_room_and_task_routes_and_nothing_else() {
+        use axum::http::Method;
+
+        for (method, path) in [
+            (Method::POST, "/mcp"),
+            (Method::POST, "/tasks"),
+            (Method::GET, "/tasks/t1"),
+            (Method::GET, "/tasks/t1/wait"),
+            (Method::POST, "/rooms/r1/messages"),
+            (Method::POST, "/rooms/r1/resume"),
+        ] {
+            assert!(agent_may(&method, path), "{method} {path}");
+        }
+        for (method, path) in [
+            (Method::GET, "/rooms"),
+            (Method::GET, "/rooms/r1"),
+            (Method::DELETE, "/rooms/r1"),
+            (Method::GET, "/workspaces"),
+            (Method::POST, "/workspaces/web/up"),
+            (Method::GET, "/passkey"),
+            (Method::POST, "/passkey/code"),
+            (Method::GET, "/repos"),
+        ] {
+            assert!(!agent_may(&method, path), "{method} {path}");
+        }
+    }
+
+    #[test]
+    fn only_about_the_join_and_the_ceremonies_skip_the_gate() {
+        use axum::http::Method;
+
+        assert!(unchecked(&Method::GET, "/about"));
+        assert!(unchecked(&Method::POST, "/join"));
+        assert!(unchecked(&Method::POST, "/passkey/login/finish"));
+        assert!(
+            !unchecked(&Method::GET, "/join"),
+            "GET /join is outside /api"
+        );
+        assert!(!unchecked(&Method::POST, "/passkey/code"));
+        assert!(!unchecked(&Method::POST, "/about"));
+    }
+
     #[tokio::test]
     async fn this_owners_untagged_node_is_allowed() {
         let fake = tailnet(vec![(address(2), caller(ME, &[]))]);
@@ -4401,7 +4809,12 @@ mod tests {
         }
 
         let refused = allowed(
-            &Authoriser::new(Down, &[], std::path::Path::new("yantrad.sock")),
+            &Authoriser::new(
+                Down,
+                &[],
+                std::path::Path::new("yantrad.sock"),
+                crate::passkey::Passkeys::trusting(),
+            ),
             &tcp(address(2)),
             &HeaderMap::new(),
         )
@@ -4689,6 +5102,7 @@ mod tests {
             .caller_address(
                 &Hop::Other("karigar".to_owned()),
                 &forwarded(&["100.64.0.2"]),
+                true,
             )
             .expect_err("only the owner's accounts act");
         assert!(matches!(&other, Refused::Account(Some(name)) if name == "karigar"));
@@ -6984,7 +7398,12 @@ mod tests {
         let (fleet, trigger) = update_fleet("down", true);
 
         let (status, _) = ask_update(
-            Authoriser::new(Down, &[], std::path::Path::new("yantrad.sock")),
+            Authoriser::new(
+                Down,
+                &[],
+                std::path::Path::new("yantrad.sock"),
+                crate::passkey::Passkeys::trusting(),
+            ),
             fleet,
         )
         .await;
@@ -7331,6 +7750,7 @@ mod tests {
                 fake,
                 &fleet.facts.listening_on,
                 std::path::Path::new("/run/yantra/yantrad.sock"),
+                crate::passkey::Passkeys::trusting(),
             )
         };
         let mut tailnet = joining_tailnet();

@@ -27,24 +27,30 @@ use yantra_core::delegate::{self, Progress, Task};
 use yantra_core::install;
 use yantra_core::inventory::Inventory;
 use yantra_core::ssh::{self, Machine, Ssh};
+use yantra_core::workspace;
 
-use crate::write::{Authoriser, Peer, Refused, allowed, chain};
+use crate::write::{Authoriser, Peer, Refused, Who, chain, identify};
 
 struct Entry {
     machine: String,
     harness: &'static str,
     task: Arc<Task>,
+    /// The workspace of the agent token that started it, if one did.
+    workspace: Option<String>,
 }
 
 type Tasks = Arc<Mutex<BTreeMap<String, Arc<Entry>>>>;
 /// Turns a machine's name into where ssh goes. A test points it at its fixture.
 type Locate = Arc<dyn Fn(&str) -> Option<Machine> + Send + Sync>;
+/// Turns a workspace's name into its machine's. A test names its own.
+type Home = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 #[derive(Clone)]
 struct Delegates<I> {
     authoriser: Authoriser<I>,
     tasks: Tasks,
     locate: Locate,
+    home: Home,
     /// [`crate::heartbeat::Fleet::closing`].
     closing: watch::Sender<bool>,
 }
@@ -54,12 +60,14 @@ where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
 {
-    routes(authoriser, Arc::new(ssh::machine_at), closing)
+    let home: Home = Arc::new(|name| workspace::load(name).ok().map(|w| w.machine));
+    routes(authoriser, Arc::new(ssh::machine_at), home, closing)
 }
 
 fn routes<I, S>(
     authoriser: Authoriser<I>,
     locate: Locate,
+    home: Home,
     closing: watch::Sender<bool>,
 ) -> Router<S>
 where
@@ -76,6 +84,7 @@ where
             authoriser,
             tasks: Tasks::default(),
             locate,
+            home,
             closing,
         })
 }
@@ -186,8 +195,10 @@ fn read_out(id: &str, entry: &Entry) -> Read {
     }
 }
 
-fn find(tasks: &Tasks, id: &str) -> Result<Arc<Entry>, Refused> {
-    tasks
+/// Task `id`, which an agent reaches only when its own token started it
+/// (ADR-0044 decision 12).
+fn find(tasks: &Tasks, id: &str, scope: Option<&str>) -> Result<Arc<Entry>, Refused> {
+    let entry = tasks
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get(id)
@@ -195,7 +206,23 @@ fn find(tasks: &Tasks, id: &str) -> Result<Arc<Entry>, Refused> {
         .ok_or_else(|| Refused::Verb {
             status: StatusCode::NOT_FOUND,
             said: format!("no task `{id}`: it was removed, or the daemon has restarted since"),
-        })
+        })?;
+    if scope.is_some_and(|scope| entry.workspace.as_deref() != Some(scope)) {
+        return Err(Refused::AgentScope);
+    }
+    Ok(entry)
+}
+
+/// The caller, and the workspace an agent caller is bound to.
+async fn scoped<I: Inventory>(
+    state: &Delegates<I>,
+    from: &Peer,
+    headers: &HeaderMap,
+) -> Result<(String, Option<String>), Refused> {
+    Ok(match identify(&state.authoriser, from, headers).await? {
+        Who::Owner(caller, _) => (caller.node, None),
+        Who::Agent { caller, workspace } => (caller.node, Some(workspace)),
+    })
 }
 
 fn bad(said: String) -> Refused {
@@ -233,9 +260,14 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Json(asked): Json<Start>,
 ) -> Result<(StatusCode, Json<Started>), Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let (node, scope) = scoped(&state, &from, &headers).await?;
     // The name reaches `ssh`'s argv (ADR-0009).
     install::check_machine(&asked.machine).map_err(|error| bad(error.to_string()))?;
+    if let Some(scope) = &scope
+        && (state.home)(scope).as_deref() != Some(asked.machine.as_str())
+    {
+        return Err(Refused::AgentScope);
+    }
     let harness: Harness = asked.harness.parse().map_err(bad)?;
     let harness_name = harness.name();
     let machine = (state.locate)(&asked.machine).ok_or_else(|| Refused::Verb {
@@ -243,11 +275,7 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
         said: "this daemon has no directory for its ssh sockets".to_owned(),
     })?;
     let ssh = Ssh::new(machine).map_err(|error| refused(&error.into()))?;
-    tracing::info!(
-        "delegate to {harness_name} on {} for {}",
-        asked.machine,
-        caller.node
-    );
+    tracing::info!("delegate to {harness_name} on {} for {node}", asked.machine,);
 
     // Spawned, so a caller that hangs up mid-prepare still leaves a task that
     // `DELETE` can find, rather than a worktree no task records.
@@ -259,6 +287,7 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
             machine: asked.machine,
             harness: harness_name,
             task: Arc::new(task),
+            workspace: scope,
         });
         let answer = started(&id, &entry);
         tasks
@@ -281,11 +310,12 @@ async fn list<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<Listed>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    let (_, scope) = scoped(&state, &from, &headers).await?;
     let tasks = state.tasks.lock().unwrap_or_else(PoisonError::into_inner);
     Ok(Json(
         tasks
             .iter()
+            .filter(|(_, entry)| scope.is_none() || entry.workspace == scope)
             .map(|(id, entry)| Listed {
                 task: started(id, entry),
                 state: self::state(&entry.task.progress()).0,
@@ -300,8 +330,8 @@ async fn read<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Read>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
-    let entry = find(&state.tasks, &id)?;
+    let (_, scope) = scoped(&state, &from, &headers).await?;
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
     Ok(Json(read_out(&id, &entry)))
 }
 
@@ -311,9 +341,9 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Read>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
-    let entry = find(&state.tasks, &id)?;
-    tracing::info!("stop task {id} for {}", caller.node);
+    let (node, scope) = scoped(&state, &from, &headers).await?;
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
+    tracing::info!("stop task {id} for {node}");
     if let Err(error) = entry.task.stop().await {
         tracing::warn!("task {id} has no fresh summary: {}", chain(&error));
     }
@@ -327,12 +357,12 @@ async fn steer<I: Inventory + Clone + Send + Sync + 'static>(
     Path(id): Path<String>,
     Json(asked): Json<Steer>,
 ) -> Result<Json<Read>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let (node, scope) = scoped(&state, &from, &headers).await?;
     if asked.prompt.trim().is_empty() {
         return Err(bad("a steer needs a prompt".to_owned()));
     }
-    let entry = find(&state.tasks, &id)?;
-    tracing::info!("steer task {id} for {}", caller.node);
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
+    tracing::info!("steer task {id} for {node}");
     entry
         .task
         .steer(&asked.prompt)
@@ -347,9 +377,9 @@ async fn wait<I: Inventory + Clone + Send + Sync + 'static>(
     Path(id): Path<String>,
     RawQuery(query): RawQuery,
 ) -> Result<Json<Waited>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    let (_, scope) = scoped(&state, &from, &headers).await?;
     let limit = limit(query.as_deref()).map_err(bad)?;
-    let entry = find(&state.tasks, &id)?;
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
     let settled = until_closing(&state.closing, entry.task.wait(limit))
         .await
         .ok_or_else(|| Refused::Verb {
@@ -405,9 +435,9 @@ async fn remove<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Removed>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
-    let entry = find(&state.tasks, &id)?;
-    tracing::info!("remove task {id} for {}", caller.node);
+    let (node, scope) = scoped(&state, &from, &headers).await?;
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
+    tracing::info!("remove task {id} for {node}");
     // Kept on failure, so the caller can try the removal again.
     entry.task.remove().await.map_err(|error| refused(&error))?;
     state
@@ -455,8 +485,14 @@ mod tests {
             owner: ME,
         };
         routes(
-            Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock")),
+            Authoriser::new(
+                fake,
+                &[],
+                std::path::Path::new("yantrad.sock"),
+                crate::passkey::Passkeys::trusting(),
+            ),
             locate,
+            Arc::new(|_| None),
             watch::Sender::new(false),
         )
     }
