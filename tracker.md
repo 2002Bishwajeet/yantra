@@ -574,6 +574,7 @@ deleted everywhere else.
 | Y-723 | Let the build loop keep building while CI runs | 🔵 review | claude | — | Owner, 2026-11-11: agents build and ship; CI is delegated and looked at only when it fails. **Done when** `build-rows.js` frees a build slot when the builder commits, so CI, the walk, review and ship wait in the background and the next row starts building. **Merged 2026-11-11.** |
 | Y-724 | Install mold in CI without the Ubuntu mirror | 🔵 review | claude | — | On 2026-11-11 the GitHub runners could not resolve the Ubuntu mirror, so every Rust job failed at `apt-get install mold`. **Done when** each workflow installs mold through `taiki-e/install-action` and the Rust jobs pass. |
 | Y-725 | Stop the build loop waiting on a dead job or a folder claim | 🔵 review | claude | — | On 2026-11-11 Y-687's gate died with its agent and four wait agents waited 2.5 h; its folder claims held four rows. **Done when** background jobs start with `setsid` and a pid, a wait ends when the job dies, and only two claims on one file clash. |
+| Y-726 | Name the command when the channel file is missing | 🔵 review | claude | — | A box installed before Y-662 has no `/etc/yantra/channel`, and the daemon may not create it. **Done when** the switch's refusal names `sudo yantra update --channel <channel>`. |
 ### Landing site — out of milestone
 
 Owner's ask, 2026-08-01: a *coming soon* page. **This is not M4.** The dashboard is a read-only
