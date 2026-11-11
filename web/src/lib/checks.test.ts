@@ -7,6 +7,7 @@ import {
   LOGIN_SERVER_COMMAND,
   noLoginServer,
   nameOf,
+  olderAgent,
   reachableFailure,
   reachWords,
   sessionNeeds,
@@ -85,13 +86,17 @@ describe('the check name table', () => {
     expect(sessionNeeds('no-sudo')).toBe(false)
   })
 
-  /** Y-713: api.rs `heard_from`'s sentence for an older agent, word for word. */
+  /** Y-713: api.rs `behind`'s sentences for an older agent, word for word. */
   it('gives an older agent the command in its detail, and an absent one the join text', () => {
-    const LINUX = 'curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --agent'
-    const older = `yantra-agent here is v0.3.2, older than this daemon's v0.11.0. Update it on laptop: \`${LINUX}\``
+    const NIGHTLY = '0.11.1-nightly.20261111000000.abc1234'
+    const LINUX = 'curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --agent --channel nightly'
+    const older = `yantra-agent here is v0.3.2 and yantrad is v${NIGHTLY}. Update it on laptop: \`${LINUX}\``
+    expect(olderAgent({ check: 'heartbeat', detail: older })).toEqual({ agent: '0.3.2', daemon: NIGHTLY })
     expect(fixOf({ check: 'heartbeat', detail: older }, 'laptop')).toEqual({ by: 'command', command: LINUX, where: 'machine' })
-    const elsewhere = "yantra-agent here sends no version, older than this daemon's v0.11.0. Update it on winbox."
+    const elsewhere = 'yantra-agent here sends no version, so it predates yantrad v0.11.0. Update it on winbox.'
+    expect(olderAgent({ check: 'heartbeat', detail: elsewhere })).toEqual({ agent: null, daemon: '0.11.0' })
     expect(fixOf({ check: 'heartbeat', detail: elsewhere }, 'winbox')?.by).toBe('hand')
+    expect(olderAgent({ check: 'heartbeat', detail: 'no report since Yantra started' })).toBeNull()
     expect(fixOf({ check: 'heartbeat', detail: 'no report since Yantra started' }, 'pi')?.by).toBe('hand')
   })
 

@@ -5,7 +5,7 @@ import { fromReading, type Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useAbout } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { fixOf, nameOf, tookOf, withoutSignIn } from '@/lib/checks'
+import { fixOf, nameOf, olderAgent, tookOf, withoutSignIn } from '@/lib/checks'
 import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -75,9 +75,10 @@ function Checks(props: { checks: Check[]; machine: string; fix?: boolean }) {
   )
 }
 
-/** Y-676: the words of the probes that failed, one press away. A probe that passed has nothing to say. */
+/** Y-676: the words of the probes that failed, one press away. A probe that passed has nothing to say.
+ *  An older agent's versions are in its row, and its heartbeat never came over ssh (Y-713). */
 function ProbeSaid(props: { checks: Check[] }) {
-  const said = props.checks.filter((one) => one.state !== 'present' && one.detail && !optionalAbsent(one))
+  const said = props.checks.filter((one) => one.state !== 'present' && one.detail && !optionalAbsent(one) && !olderAgent(one))
   if (said.length === 0) return null
   return (
     <Disclosure summary="What ssh said">

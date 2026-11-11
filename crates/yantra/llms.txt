@@ -3,7 +3,7 @@
 > The command-line client, and the daemon's first client. It renders and chooses exit codes; every
 > decision about what is true belongs to `yantra-core` (ADR-0005). It calls that crate in-process
 > today and becomes an HTTP client of `yantrad` later — a change of *where* the work is called from,
-> not *what* it does. `src/main.rs`, and `src/mcp.rs`, `src/why.rs` and `src/dash.rs` for the ten verbs that call the daemon.
+> not *what* it does. `src/main.rs`, and `src/mcp.rs`, `src/why.rs` and `src/dash.rs` for the ten verbs that call the daemon. Each command that names a daemon first asks its `/api/about`, and writes one stderr line when this CLI is older (`src/behind.rs`, Y-713).
 
 ## Commands
 
@@ -65,6 +65,7 @@
 - [src/main.rs](src/main.rs): the crate. Clap definitions at the top, one `async fn` per command, then the `render_*` and `describe` helpers, then tests.
 - [src/mcp.rs](src/mcp.rs): `yantra mcp` — the JSON-RPC loop, the seven task tools and their schemas, the four room tools it forwards, `resume`, `post_message`, `create`, `list`, `show`, `edit`, `remove`, and the HTTP calls to `yantrad` over `ureq`. Its tests answer from a loopback axum daemon.
 - [src/why.rs](src/why.rs): `yantra why` — the `GET /api/machines` call over `ureq`, a serde struct that reads only the fields the scorer needs, `placement::ask` when a target is given, and `render`, which is pure. Its tests answer from a loopback axum daemon too.
+- [src/behind.rs](src/behind.rs): the one stderr line when this CLI is older than the daemon it names (Y-713). It reads `version` from `GET /api/about` with a 2 s timeout, and says nothing when the daemon does not answer or its version cannot be read. On a Mac under a nightly daemon it compares with the stable release that nightly builds on. Its tests answer from a loopback axum daemon.
 - [src/dash.rs](src/dash.rs): `yantra dash` — the five reads over `ureq`, the pure `board`, `on_key` and `render`, and the loop that spawns `ssh` to attach. Its tests draw through ratatui's `TestBackend` and answer from a loopback axum daemon.
 
 ## Conventions that are contracts

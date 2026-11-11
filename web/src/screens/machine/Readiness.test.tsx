@@ -538,16 +538,29 @@ describe('the Readiness card', () => {
     expect(writeText).toHaveBeenCalledWith('tmux -L yantra new-session -d')
   })
 
-  /** Y-713: an agent older than the daemon gets the command that updates it, and a session. */
-  it('gives an older agent the command that updates it, with Copy', async () => {
+  /** Y-713: an agent older than the daemon is titled with both versions, never as missing, and gets the command that updates it. */
+  it('names both versions of an older agent and gives the command that updates it, with Copy', async () => {
     daemon()
-    const command = 'curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash'
-    const said = { heartbeat: `yantra-agent here is v0.3.2, older than this daemon's v0.11.0. Update it on pi: \`${command}\`` }
+    const command = 'curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_VERSION=0.11.0 bash'
+    const said = { heartbeat: `yantra-agent here is v0.3.2 and yantrad is v0.11.0. Update it on pi: \`${command}\`` }
     await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
+    expect(card().getByRole('heading', { name: 'yantra-agent on pi is v0.3.2; yantrad is v0.11.0' })).toBeTruthy()
+    expect(card().getByText('older · v0.3.2')).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing/)
+    expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
     expect(card().getByText('Run this on pi:')).toBeTruthy()
     expect(card().getByText(command)).toBeTruthy()
     expect(card().getByRole('button', { name: 'Copy the command that fixes usage reports' })).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
+  })
+
+  /** Y-713: an agent that sends no version predates the field, so it is older too. */
+  it('says an agent with no version is older than the daemon', async () => {
+    daemon()
+    const said = { heartbeat: 'yantra-agent here sends no version, so it predates yantrad v0.11.0. Update it on pi: `curl x | bash`' }
+    await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
+    expect(card().getByRole('heading', { name: 'yantra-agent on pi is older than yantrad v0.11.0' })).toBeTruthy()
+    expect(card().getByText('older · no version')).toBeTruthy()
   })
 
   /** Y-591: a warning with the fix and its cost, and never a block on a session. */

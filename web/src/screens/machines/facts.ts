@@ -7,7 +7,7 @@ import type {
   Session,
   Workspace,
 } from '@/api'
-import { sessionNeeds } from '@/lib/checks'
+import { olderAgent, sessionNeeds } from '@/lib/checks'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** The four a machine card draws; the machine page draws all ten. */
@@ -56,7 +56,13 @@ export const toFix = (check: Check): boolean =>
 export const rowMark = (check: Check): MarkState =>
   optionalAbsent(check) ? 'idle' : toFix(check) ? 'needs' : check.state === 'present' ? 'done' : 'unknown'
 
-export const rowWord = (check: Check): string => (optionalAbsent(check) ? 'optional' : wordOf(check.state))
+export function rowWord(check: Check): string {
+  if (optionalAbsent(check)) return 'optional'
+  // Y-713: the agent reports, so *missing* would be false.
+  const older = olderAgent(check)
+  if (older) return older.agent ? `older · v${older.agent}` : 'older · no version'
+  return wordOf(check.state)
+}
 
 /** The count the card and the Readiness card both print. */
 export const counted = (one: Tally) => `${one.present} of ${one.total}`

@@ -18,7 +18,7 @@ pub async fn warning(daemon: &str) -> Option<String> {
     })
     .await
     .ok()??;
-    line(about::VERSION, &theirs, &base)
+    line(about::VERSION, &theirs, &base, cfg!(target_os = "macos"))
 }
 
 fn version_of(base: &str) -> Option<String> {
@@ -42,8 +42,11 @@ fn version_of(base: &str) -> Option<String> {
         .map(|about| about.version)
 }
 
-fn line(ours: &str, theirs: &str, daemon: &str) -> Option<String> {
-    about::older(ours, theirs).then(|| {
+/// A Mac installs stable releases only, so under a nightly daemon it is behind
+/// only when it is older than the release that nightly builds on.
+fn line(ours: &str, theirs: &str, daemon: &str, stable_only: bool) -> Option<String> {
+    let wanted = about::stable_below(theirs).filter(|_| stable_only);
+    about::older(ours, wanted.as_deref().unwrap_or(theirs)).then(|| {
         format!(
             "yantra: this CLI is v{ours} and yantrad at {daemon} is v{theirs}. Update this CLI the \
              way you installed it."
@@ -61,7 +64,7 @@ mod tests {
     #[test]
     fn an_older_cli_names_both_versions_and_the_daemon() {
         assert_eq!(
-            line("0.3.2", "0.11.0", "http://box:7717").as_deref(),
+            line("0.3.2", "0.11.0", "http://box:7717", false).as_deref(),
             Some(
                 "yantra: this CLI is v0.3.2 and yantrad at http://box:7717 is v0.11.0. Update this \
                  CLI the way you installed it."
@@ -71,9 +74,17 @@ mod tests {
 
     #[test]
     fn an_equal_newer_or_unreadable_daemon_says_nothing() {
-        assert_eq!(line("0.11.0", "0.11.0", "d"), None);
-        assert_eq!(line("0.12.0", "0.11.0", "d"), None);
-        assert_eq!(line("0.11.0", "not a version", "d"), None);
+        assert_eq!(line("0.11.0", "0.11.0", "d", false), None);
+        assert_eq!(line("0.12.0", "0.11.0", "d", false), None);
+        assert_eq!(line("0.11.0", "not a version", "d", false), None);
+    }
+
+    #[test]
+    fn a_mac_under_a_nightly_daemon_is_held_to_its_stable_release() {
+        const NIGHTLY: &str = "0.11.1-nightly.20261111000000.abc1234";
+        assert_eq!(line("0.11.0", NIGHTLY, "d", true), None);
+        assert!(line("0.10.2", NIGHTLY, "d", true).is_some());
+        assert!(line("0.11.0", NIGHTLY, "d", false).is_some());
     }
 
     /// `/api/about` as the daemon answers it, fields this does not read included.

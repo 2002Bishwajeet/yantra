@@ -1,6 +1,6 @@
 import type { Check, CheckState, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
-import { answerFailure, INSTALLABLE, nameOf, noLoginServer, reachableFailure } from '@/lib/checks'
+import { answerFailure, INSTALLABLE, nameOf, noLoginServer, olderAgent, reachableFailure } from '@/lib/checks'
 import { blocking, isReady, missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
@@ -117,6 +117,12 @@ function missingTitle(check: Check, name: string): string {
   if (check.check === 'folder-access') return 'macOS blocks Desktop, Documents and Downloads'
   if (check.check === 'hooks') return 'a hook cannot run'
   if (check.check === 'no-sudo') return 'The joined account can use sudo'
+  const older = olderAgent(check)
+  if (older) {
+    return older.agent
+      ? `yantra-agent on ${name} is v${older.agent}; yantrad is v${older.daemon}`
+      : `yantra-agent on ${name} is older than yantrad v${older.daemon}`
+  }
   return `${nameOf(check.check)} is missing`
 }
 

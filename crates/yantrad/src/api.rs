@@ -599,39 +599,58 @@ fn heard_from(
                 .to_owned(),
         );
     };
-    let here = match reading.value().version.as_deref() {
-        None => "sends no version".to_owned(),
-        Some(version) if about::older(version, about::VERSION) => format!("is v{version}"),
-        Some(_) => {
-            return says(
-                doctor::State::Present,
-                format!("last report {}s ago", reading.age().as_secs()),
-            );
-        }
+    match behind(
+        reading.value().version.as_deref(),
+        about::VERSION,
+        &node.os,
+        machine,
+    ) {
+        Some(detail) => says(doctor::State::Absent, detail),
+        None => says(
+            doctor::State::Present,
+            format!("last report {}s ago", reading.age().as_secs()),
+        ),
+    }
+}
+
+/// What readiness says of an agent that runs behind `daemon`, or `None` when
+/// it does not. A Mac installs stable releases only, so under a nightly daemon
+/// it is behind only when it is older than the release that nightly builds on.
+fn behind(agent: Option<&str>, daemon: &str, os: &Os, machine: &str) -> Option<String> {
+    let nightly = about::stable_below(daemon);
+    let wanted = match (os, &nightly) {
+        (Os::MacOs, Some(stable)) => stable.as_str(),
+        _ => daemon,
     };
-    let update = match update_command(&node.os) {
+    let here = match agent {
+        None => format!("sends no version, so it predates yantrad v{daemon}"),
+        Some(version) if about::older(version, wanted) => {
+            format!("is v{version} and yantrad is v{daemon}")
+        }
+        Some(_) => return None,
+    };
+    let update = match update_command(os, wanted, nightly.is_some()) {
         Some(command) => format!(": `{command}`"),
         None => ".".to_owned(),
     };
-    says(
-        doctor::State::Absent,
-        format!(
-            "yantra-agent here {here}, older than this daemon's v{}. Update it on {machine}{update}",
-            about::VERSION
-        ),
-    )
+    Some(format!(
+        "yantra-agent here {here}. Update it on {machine}{update}"
+    ))
 }
 
-/// What updates the agent on a machine. Linux takes `--agent`, because a bare
-/// `install.sh` there installs the whole appliance.
-fn update_command(os: &Os) -> Option<&'static str> {
+/// What updates the agent on a machine to `version`, pinned so it never
+/// passes the daemon (ADR-0013: the daemon goes first). Linux takes `--agent`,
+/// because a bare `install.sh` there installs the whole appliance. A nightly
+/// has no tag of its own to pin, so Linux follows the nightly channel there.
+fn update_command(os: &Os, version: &str, nightly: bool) -> Option<String> {
+    const SCRIPT: &str =
+        "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh |";
     match os {
-        Os::MacOs => Some(
-            "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash",
-        ),
-        Os::Linux => Some(
-            "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --agent",
-        ),
+        Os::MacOs => Some(format!("{SCRIPT} YANTRA_VERSION={version} bash")),
+        Os::Linux if nightly => Some(format!("{SCRIPT} bash -s -- --agent --channel nightly")),
+        Os::Linux => Some(format!(
+            "{SCRIPT} YANTRA_VERSION={version} bash -s -- --agent"
+        )),
         _ => None,
     }
 }
@@ -1897,16 +1916,19 @@ pub(crate) mod tests {
         report.checks[1].clone()
     }
 
+    const SCRIPT: &str =
+        "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh |";
+
     #[test]
-    fn an_older_mac_agent_is_absent_with_the_mac_install_command() {
+    fn an_older_mac_agent_is_absent_with_the_command_pinned_to_this_daemon() {
         let check = heartbeat_of(Os::MacOs, Some("0.0.1"));
         assert_eq!(check.state, doctor::State::Absent);
         assert_eq!(
             check.detail,
             format!(
-                "yantra-agent here is v0.0.1, older than this daemon's v{}. Update it on laptop: \
-                 `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash`",
-                about::VERSION
+                "yantra-agent here is v0.0.1 and yantrad is v{v}. Update it on laptop: \
+                 `{SCRIPT} YANTRA_VERSION={v} bash`",
+                v = about::VERSION
             )
         );
     }
@@ -1916,7 +1938,10 @@ pub(crate) mod tests {
         let check = heartbeat_of(Os::Linux, Some("0.0.1"));
         assert_eq!(check.state, doctor::State::Absent);
         assert!(
-            check.detail.ends_with("install.sh | bash -s -- --agent`"),
+            check.detail.ends_with(&format!(
+                "`{SCRIPT} YANTRA_VERSION={} bash -s -- --agent`",
+                about::VERSION
+            )),
             "{}",
             check.detail
         );
@@ -1927,9 +1952,10 @@ pub(crate) mod tests {
         let check = heartbeat_of(Os::Linux, None);
         assert_eq!(check.state, doctor::State::Absent);
         assert!(
-            check
-                .detail
-                .starts_with("yantra-agent here sends no version, older than this daemon's v"),
+            check.detail.starts_with(&format!(
+                "yantra-agent here sends no version, so it predates yantrad v{}. Update it on laptop: `",
+                about::VERSION
+            )),
             "{}",
             check.detail
         );
@@ -1944,6 +1970,35 @@ pub(crate) mod tests {
             "{}",
             check.detail
         );
+    }
+
+    /// A nightly has no macOS archive and no tag to pin. A Mac is held to the
+    /// release the nightly builds on, and Linux follows the nightly channel.
+    #[test]
+    fn a_nightly_daemon_holds_a_mac_to_its_stable_release_and_linux_to_nightly() {
+        const NIGHTLY: &str = "0.11.1-nightly.20261111000000.abc1234";
+        assert_eq!(behind(Some("0.11.0"), NIGHTLY, &Os::MacOs, "mac"), None);
+        assert_eq!(
+            behind(Some("0.10.2"), NIGHTLY, &Os::MacOs, "mac").as_deref(),
+            Some(
+                format!(
+                    "yantra-agent here is v0.10.2 and yantrad is v{NIGHTLY}. Update it on mac: \
+                     `{SCRIPT} YANTRA_VERSION=0.11.0 bash`"
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(
+            behind(Some("0.11.0"), NIGHTLY, &Os::Linux, "box").as_deref(),
+            Some(
+                format!(
+                    "yantra-agent here is v0.11.0 and yantrad is v{NIGHTLY}. Update it on box: \
+                     `{SCRIPT} bash -s -- --agent --channel nightly`"
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(behind(Some(NIGHTLY), NIGHTLY, &Os::Linux, "box"), None);
     }
 
     #[test]

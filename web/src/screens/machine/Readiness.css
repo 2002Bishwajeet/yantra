@@ -16,6 +16,8 @@
 .readiness__title {
   margin: 0;
   text-wrap: balance;
+  /* A nightly's version has no break in it and outruns 390 px (Y-713). */
+  overflow-wrap: anywhere;
 }
 
 .readiness__count {

@@ -96,13 +96,19 @@ export const LOGIN_SERVER_COMMAND = 'tmux -L yantra new-session -d'
  *  `login-session` and `provider-auth`), up.rs, clone.rs and commit.rs. */
 export const noLoginServer = (detail: string) => /no tmux server/.test(detail)
 
-/** api.rs `heard_from` (Y-713): an agent older than the daemon, and the command that updates it. */
-const OLDER_AGENT = /older than this daemon.*`([^`]+)`/
+/** api.rs `behind` (Y-713): an agent older than the daemon. `agent` is null when it sends no version. */
+const OLDER_AGENT = /^yantra-agent here (?:is v(\S+) and yantrad is|sends no version, so it predates yantrad) v(\S+?)\.(?:\s|$)/
+const UPDATE = /`([^`]+)`/
+
+export function olderAgent(check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'>>): { agent: string | null; daemon: string } | null {
+  const said = check.check === 'heartbeat' ? OLDER_AGENT.exec(check.detail ?? '') : null
+  return said ? { agent: said[1] ?? null, daemon: said[2]! } : null
+}
 
 /** A check with no detail gets the fix its id names. */
 export function fixOf(check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'>>, machine: string): Fix | null {
   if (noLoginServer(check.detail ?? '')) return { by: 'command', command: LOGIN_SERVER_COMMAND, where: 'terminal' }
-  const update = check.check === 'heartbeat' ? OLDER_AGENT.exec(check.detail ?? '') : null
+  const update = olderAgent(check) ? UPDATE.exec(check.detail ?? '') : null
   if (update) return { by: 'command', command: update[1]!, where: 'machine' }
   return CHECKS[check.check]?.fix(machine) ?? null
 }
