@@ -118,6 +118,7 @@ describe('the repair page', () => {
     open()
 
     expect(await screen.findByText('That file loads, so there is nothing to repair.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }))
     expect(screen.getByText('workspace `site` at … loads')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Open site' }).getAttribute('href')).toBe('/w/site')
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()

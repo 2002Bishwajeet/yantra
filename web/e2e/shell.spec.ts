@@ -101,6 +101,17 @@ test('draws no FAB while yantrad cannot be reached', async ({ page }) => {
   await expect(fab(page)).toHaveCount(0)
 })
 
+// Y-721: the daemon answered and every read failed, so New session has nowhere to go.
+for (const path of ['/', '/fleet']) {
+  test(`draws no New session while nothing on ${path} can be read`, async ({ page }) => {
+    await scenario(page, 'unreachable')
+    await page.goto(path)
+    await expect(page.getByRole('heading', { name: 'The daemon could not read the fleet' })).toBeVisible()
+    await expect(fab(page)).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /^(New session|New)$/ })).toHaveCount(0)
+  })
+}
+
 test.describe('the shell on busy', () => {
   test.beforeEach(async ({ page }) => {
     await scenario(page, 'busy')

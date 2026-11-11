@@ -59,6 +59,7 @@ describe('the home chat route', () => {
     })
     const title = await screen.findByText('The machines could not be read')
     const alert = title.closest('[role="alert"]') as HTMLElement
+    fireEvent.click(within(alert).getByRole('button', { name: 'Details' }))
     expect(within(alert).getByText('tailscale did not answer')).toBeTruthy()
   })
 })

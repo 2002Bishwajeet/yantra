@@ -613,6 +613,12 @@
   inset: min(0px, calc((100% - var(--md-sys-hit-area)) / 2));
 }
 
+.m3-hit:focus-visible {
+  outline: var(--md-sys-focus-ring-width) solid var(--md-sys-focus-ring-color);
+  outline-offset: var(--md-sys-focus-ring-offset);
+  border-radius: var(--md-sys-shape-corner-extra-small);
+}
+
 @media (hover: hover) and (pointer: fine) {
   .m3-interactive:hover::before {
     opacity: var(--md-sys-state-hover-state-layer-opacity);

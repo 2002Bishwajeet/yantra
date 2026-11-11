@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { keys } from '@/api/keys'
 import { renderInApp } from '@/test/inApp'
@@ -470,6 +470,7 @@ describe('what `/w/{name}` draws when there is no session behind it', () => {
 
     const said = await screen.findByRole('alert')
     expect(said.textContent).toContain('The workspaces could not be read')
+    fireEvent.click(within(said).getByRole('button', { name: 'Details' }))
     expect(said.textContent).toContain('connection refused')
   })
 })
