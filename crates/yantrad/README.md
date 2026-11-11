@@ -91,7 +91,8 @@ blaming them would be a lie about which thing broke.
 on a Unix socket, `/run/yantra/yantrad.sock`, and `tailscale serve` proxies to it. On TCP the peer is
 the caller and `X-Forwarded-For` is never read; a peer that is this machine's own address is a
 **`403`** that names the socket. On the socket the kernel names the account. Root is the `serve` hop,
-and its one forwarded address is the caller. The daemon's own account, or a member of the `yantra`
+and its one forwarded address is the caller. The account `YANTRA_PROXY_ACCOUNT` names, such as `caddy`, is a
+proxy with the same rules. The daemon's own account, or a member of the `yantra`
 group, is this machine. Any other account may only join itself. A forwarded value that is not
 exactly one address is a **`503`** — nothing was decided, and the caller did not write it.
 

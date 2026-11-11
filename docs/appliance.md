@@ -119,6 +119,43 @@ already logged in, the only question is HTTPS. A no there still starts both unit
 key, the AI agents and GitHub ([walk-through](plans/m15-qa-walkthrough.md) §1.5). The script does
 not install `gh`, and `provision.sh` is gone: its fleet half belongs to the dashboard.
 
+### Behind Caddy on a name you own
+
+`tailscale serve` gives the box a `*.ts.net` name. To serve Yantra on a name you own, put Caddy in
+front of the same socket. On the socket the kernel names the account that connected, and `yantrad`
+trusts only root as a proxy until you name one more account
+([ADR-0042](adr/0042-the-proxy-hop-is-proved-by-the-kernel.md), amended 2026-11-11). The Debian
+package runs Caddy as `caddy`. On the box,
+[`box/domain-setup.sh`](../box/domain-setup.sh) does all four steps.
+
+1. Add one line to `/etc/yantra/daemon.env` with `sudoedit`. The file stays `0600` and owned by
+   `yantra`, and `yantra relay` and `yantra github` keep lines that they do not own:
+
+   ```bash
+   YANTRA_PROXY_ACCOUNT=caddy
+   ```
+
+2. Restart the daemon: `sudo systemctl restart yantrad`. The journal names the account and its uid,
+   or says that no proxy account is set. A name that does not resolve is a warning, and the daemon
+   then trusts no account but root.
+3. Point the site block at the socket, and keep `bind` on the box's tailnet address:
+
+   ```caddyfile
+   yantra.example.com {
+       bind 100.x.x.x
+       reverse_proxy unix//run/yantra/yantrad.sock {
+           header_up X-Forwarded-For {remote_host}
+       }
+   }
+   ```
+
+4. Reload Caddy: `sudo systemctl reload caddy`.
+
+**The cost: any process that runs as `caddy` can name a caller.** It writes the one address that the
+daemon judges. A local process that reaches Caddy is still refused, because Caddy then forwards
+this box's own address. Caddy's `X-Forwarded-For` must hold one address, as the line in step 3
+makes it.
+
 ### Run it again to update
 
 **A second run is the updater.** It asks nothing it already has an answer to, except whether to
