@@ -37,7 +37,7 @@ export function Transcript(props: TranscriptProps) {
       <footer className="transcript__foot">
         <Text render={<p />} scale="body-small" tone="variant">
           read from the transcript on{' '}
-          <Link params={{ machine: workspace.machine }} to="/m/$machine">
+          <Link className="m3-hit" params={{ machine: workspace.machine }} to="/m/$machine">
             {workspace.machine}
           </Link>{' '}
           over ssh

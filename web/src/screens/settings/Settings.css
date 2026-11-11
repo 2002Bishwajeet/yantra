@@ -490,6 +490,13 @@
   align-items: center;
 }
 
+.push-setup a {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  min-height: var(--md-sys-hit-area);
+}
+
 .push-setup__topic {
   display: flex;
   flex-direction: column;

@@ -159,7 +159,7 @@ export function NotificationsList(props: { onOpen?: () => void }) {
               : 'Push to your phone is off'
             : 'Push to your phone is unknown'}
         </span>
-        <Link params={{ category: 'notifications' }} to="/settings/$category">
+        <Link className="m3-hit" params={{ category: 'notifications' }} to="/settings/$category">
           Settings
         </Link>
       </p>

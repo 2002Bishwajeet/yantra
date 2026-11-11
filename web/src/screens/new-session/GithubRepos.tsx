@@ -44,7 +44,7 @@ function SignedIn(props: { login: string | null; asked: boolean }) {
         github.com · {props.login ?? 'signed in'} · signed in to Yantra ·{' '}
         {props.asked ? 'private repositories included' : 'GitHub not asked yet'}
       </Text>
-      <Link className="ns__link" params={{ category: 'providers' }} to="/settings/$category">
+      <Link className="ns__link m3-hit" params={{ category: 'providers' }} to="/settings/$category">
         Use another account
       </Link>
     </p>
@@ -62,7 +62,7 @@ function Hidden(props: { clientId: string | null }) {
           {hiddenNote(hidden.data)}
         </Text>
       ) : null}
-      <a className="ns__link ns__grant" href={grantPage(props.clientId)} rel="noreferrer" target="_blank">
+      <a className="ns__link ns__grant m3-hit" href={grantPage(props.clientId)} rel="noreferrer" target="_blank">
         Grant access on GitHub
       </a>
     </div>

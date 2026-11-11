@@ -149,7 +149,7 @@ function Tailscale(props: { platform: Exclude<Platform, 'windows'> }) {
   return (
     <Note>
       Install Tailscale from {store}, then log in with the account the appliance uses ·{' '}
-      <a className="add-device__link" href={page} rel="noreferrer" target="_blank">
+      <a className="add-device__link m3-hit" href={page} rel="noreferrer" target="_blank">
         {page.replace('https://', '')}
       </a>
     </Note>

@@ -175,7 +175,7 @@ function Strip(props: {
             <span aria-hidden="true" className="dash__dot">
               ·
             </span>
-            <Link className="dash__fix" params={{ machine: one.name }} to="/m/$machine">
+            <Link className="dash__fix m3-hit" params={{ machine: one.name }} to="/m/$machine">
               Open<span className="dash__long"> →</span>
             </Link>
           </span>
@@ -349,7 +349,7 @@ function Hero(props: {
                 <GithubRow item={item} key={item.url} kind="issue" now={now} />
               ))}
               {attention.data.notifications > 0 ? (
-                <a className="dash__unread" href="https://github.com/notifications" rel="noreferrer" target="_blank">
+                <a className="dash__unread m3-hit" href="https://github.com/notifications" rel="noreferrer" target="_blank">
                   {plural(attention.data.notifications, 'unread notification')} on GitHub →
                 </a>
               ) : null}

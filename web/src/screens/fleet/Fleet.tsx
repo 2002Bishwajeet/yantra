@@ -161,7 +161,7 @@ export function Fleet() {
           empty={
             listed.looked === 'ok' && listed.data.length === 0 ? (
               <EmptyState title="No workspaces yet">
-                <Link to="/new">New session</Link> makes one.
+                <Link className="m3-hit" to="/new">New session</Link> makes one.
               </EmptyState>
             ) : null
           }
@@ -297,7 +297,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
           {listing ? 'not listed' : 'unreachable'}
         </State>
         <span className="fleet__meta">
-          <Link className="fleet__name" params={{ machine: row.machine }} to="/m/$machine">
+          <Link className="fleet__name m3-hit" params={{ machine: row.machine }} to="/m/$machine">
             {row.machine}
           </Link>
           <span className="fleet__machine">
@@ -345,10 +345,10 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
         {word}
       </State>
       <span className="fleet__meta">
-        <Link className="fleet__name" params={{ name: workspace.name }} to="/w/$name">
+        <Link className="fleet__name m3-hit" params={{ name: workspace.name }} to="/w/$name">
           {workspace.name}
         </Link>
-        <Link className="fleet__machine" params={{ machine: workspace.machine }} to="/m/$machine">
+        <Link className="fleet__machine m3-hit" params={{ machine: workspace.machine }} to="/m/$machine">
           {workspace.machine}
         </Link>
         {session ? <Since at={session.created_at} className="fleet__age" /> : null}

@@ -266,7 +266,7 @@ export function Terminal(props: TerminalProps) {
       ) : once ? (
         <p className="terminal__over">
           The terminal on{' '}
-          <Link params={{ machine: target.machine }} to="/m/$machine">
+          <Link className="m3-hit" params={{ machine: target.machine }} to="/m/$machine">
             {target.machine}
           </Link>{' '}
           closed before the command said how it went. Nothing reopens it, because that would run the command
@@ -275,7 +275,7 @@ export function Terminal(props: TerminalProps) {
       ) : (
         <p className="terminal__over">
           The terminal on{' '}
-          <Link params={{ machine: target.machine }} to="/m/$machine">
+          <Link className="m3-hit" params={{ machine: target.machine }} to="/m/$machine">
             {target.machine}
           </Link>{' '}
           ended, and {ATTEMPTS} attempts to reopen it all failed. Whether you are off the tailnet or the

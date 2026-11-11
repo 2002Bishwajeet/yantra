@@ -61,7 +61,7 @@ function Unanswered(props: { machine: string; error: string }) {
       </Text>
       <Text render={<p />} scale="body-small" tone="variant">
         {next}{' '}
-        <Link params={{ machine }} to="/m/$machine">
+        <Link className="m3-hit" params={{ machine }} to="/m/$machine">
           {machine}’s page
         </Link>{' '}
         has {joinFixes(kind) ? 'the join command and the checks' : 'the checks'}.
@@ -154,7 +154,7 @@ export function Header(props: HeaderProps) {
             <>
               {' '}
               ·{' '}
-              <a href={workspace.repo} rel="noreferrer" target="_blank">
+              <a className="m3-hit" href={workspace.repo} rel="noreferrer" target="_blank">
                 {workspace.repo.replace(URL, '')}
               </a>
             </>

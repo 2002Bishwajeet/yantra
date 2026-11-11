@@ -243,7 +243,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
             {factor === 'phone' ? (
               <Text render={<p />} className="session__banner" scale="body-small" tone="variant">
                 The terminal is the fallback;{' '}
-                <Link params={{ name }} replace search={{ view: 'chat' }} to="/w/$name">
+                <Link className="m3-hit" params={{ name }} replace search={{ view: 'chat' }} to="/w/$name">
                   Chat
                 </Link>{' '}
                 is the session.
