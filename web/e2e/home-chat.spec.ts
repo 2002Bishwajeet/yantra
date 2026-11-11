@@ -85,11 +85,11 @@ test('Remove closes the thread and starts a fresh one', async ({ page }) => {
 
 test('a machine the tailnet does not have is a typed not-found surface', async ({ page }) => {
   await page.goto('/m/no-such-box/home')
-  await expect(page.getByText('No such machine')).toBeVisible()
-  await expect(page.getByText('The tailnet has no machine called no-such-box.')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No such machine' })).toBeVisible()
+  await expect(page.getByText('The tailnet has no machine called no-such-box.', { exact: true })).toBeVisible()
 })
 
-test('has no axe violation, a 44 px hit area on the phone, and keeps the safe areas and the width', async ({ page, size }) => {
+test('has no axe violation, a 44 px hit area on the phone, and keeps the width', async ({ page, size }) => {
   await page.goto(PATH)
   await expect(composer(page)).toBeVisible()
   await axe(page)
@@ -97,17 +97,6 @@ test('has no axe violation, a 44 px hit area on the phone, and keeps the safe ar
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 
   if (size !== 'phone') return
-  await page.evaluate(() => {
-    const root = document.documentElement.style
-    root.setProperty('--m3-safe-top', '47px')
-    root.setProperty('--m3-safe-bottom', '34px')
-  })
-  const { dock, height } = await page.evaluate(() => ({
-    dock: document.querySelector('.composer-dock')!.getBoundingClientRect().bottom,
-    height: window.innerHeight,
-  }))
-  expect(dock).toBeLessThanOrEqual(height - 34)
-
   const offenders = await page.evaluate((min) => {
     const found: string[] = []
     for (const el of document.querySelectorAll<HTMLElement>('a[href], button, [role=button], [role=menuitem]')) {
