@@ -120,7 +120,7 @@ describe('the Dashboard on a busy fleet', () => {
     held.sessions.push({ name: '0', windows: 1, attached: 0, created: 'Fri Sep  4 18:40:55 2026', created_at: 1788547255 })
     mount('desktop', '/', state)
     await drawn()
-    const item = (name: string) => screen.getByText(name, { selector: '.dash__name' }).closest('li')!
+    const item = (name: string) => screen.getByText(name, { selector: '.m3-row__headline' }).closest('li')!
     expect(within(item('0')).getByRole('link', { name: 'Attach' })).toBeTruthy()
     expect(within(item('0')).queryByRole('button', { name: 'Kill' })).toBeNull()
     await waitFor(() => expect(within(item('scratch')).getByRole('button', { name: 'Kill' })).toBeTruthy())
@@ -180,7 +180,7 @@ describe('the Dashboard in Compact', () => {
     expect(reads('Recent')).toContain('last 3 session events')
     expect(reads('Recent')).toContain('asked for trust · cachyos-g14')
     expect(region('Recent').queryByText(/relay test/)).toBeNull()
-    expect(idle.queryByRole('link', { name: 'New →' })).toBeNull()
+    expect(idle.queryByRole('link', { name: 'New session' })).toBeNull()
   })
 })
 
@@ -200,6 +200,49 @@ describe('the Dashboard on a phone', () => {
     await drawn()
     const stamp = screen.getByText(/^as of /)
     expect(stamp.closest('.m3-page-header__stamp')).toBeTruthy()
+  })
+})
+
+describe('the Dashboard keeps one style per kind of action', () => {
+  it('draws Worth a look as a region with a heading, a list and a row per unclaimed session', async () => {
+    mount('desktop', '/')
+    await drawn()
+    const worth = region('Worth a look')
+    expect(worth.getByRole('heading', { level: 2, name: 'Worth a look' })).toBeTruthy()
+    const list = worth.getByRole('list')
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getByText('scratch').closest('.m3-row')).toBeTruthy()
+  })
+
+  it('answers tonally, goes to a thing as text, and destroys in the error tone', async () => {
+    mount('desktop', '/')
+    await drawn()
+    await waitFor(() => expect(region('Worth a look').getAllByRole('button', { name: 'Kill' })[0]!.hasAttribute('disabled')).toBe(false))
+    const hero = region('Needs you')
+    expect(hero.getByRole('link', { name: 'Answer' }).getAttribute('data-variant')).toBe('tonal')
+    for (const one of hero.getAllByRole('link', { name: 'Review' })) expect(one.getAttribute('data-variant')).toBe('tonal')
+    const goes = [
+      ...screen.getAllByRole('link', { name: 'Open' }),
+      ...screen.getAllByRole('link', { name: 'Attach' }),
+    ].filter((one) => one.classList.contains('m3-button'))
+    expect(goes.length).toBeGreaterThan(4)
+    for (const one of goes) expect(one.getAttribute('data-variant')).toBe('text')
+    for (const one of screen.getAllByRole('button', { name: 'Kill' })) expect(one.getAttribute('data-tone')).toBe('error')
+  })
+
+  it('keeps every age, elapsed time and since value on one line', async () => {
+    mount('desktop', '/')
+    await drawn()
+    const when = (text: RegExp | string, within_: HTMLElement = document.body) =>
+      within(within_).getAllByText(text).filter((one) => one.classList.contains('dash__when'))
+    expect(when('39m', screen.getByRole('region', { name: 'Running' })).length).toBeGreaterThan(0)
+    expect(when('4h 11m', screen.getByRole('region', { name: 'Running' })).length).toBeGreaterThan(0)
+    expect(when(/^4m ago$/, screen.getByRole('region', { name: 'Needs you' })).length).toBe(1)
+    const worth = screen.getByRole('region', { name: 'Worth a look' })
+    expect(worth.querySelectorAll('.dash__when')).toHaveLength(2)
+    for (const one of screen.getByRole('region', { name: 'Needs you' }).querySelectorAll('.m3-mono')) {
+      expect(one.classList.contains('dash__when')).toBe(true)
+    }
   })
 })
 
@@ -241,7 +284,7 @@ describe('the Dashboard on an empty fleet', () => {
     await drawn()
     const idle = region('Idle')
     expect(idle.getByText('No workspaces yet')).toBeTruthy()
-    expect(idle.getByRole('link', { name: 'New →' }).getAttribute('href')).toBe('/new')
+    expect(idle.getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
   })
 })
 
