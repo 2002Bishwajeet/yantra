@@ -184,7 +184,7 @@ test.describe('usage behind a proxy that hides who is calling', () => {
     await scenario(page, 'ownaddress')
     await page.goto('/usage')
     await page.getByRole('button', { name: 'Read spend' }).click()
-    const sentence = page.getByText("The proxy in front of Yantra sends from this machine's own address", { exact: false })
+    const sentence = page.locator('.m3-error__sentence', { hasText: "The proxy in front of Yantra sends from this machine's own address" })
     await expect(sentence).toHaveCount(1)
     await expect(page.getByRole('heading', { name: 'The proxy hides who is calling' })).toBeVisible()
     await expect(page.getByText(/not on a node/)).toHaveCount(0)
