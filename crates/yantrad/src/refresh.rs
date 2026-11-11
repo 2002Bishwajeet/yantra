@@ -48,6 +48,11 @@ const PULLS: Duration = Duration::from_secs(120);
 /// request path. One call an hour fits even GitHub's anonymous sixty.
 const RELEASE: Duration = Duration::from_secs(3600);
 
+/// Y-731: the first read after boot can run before DNS answers. An unreachable
+/// GitHub is read again this soon, doubling each time up to the class's own
+/// interval. Any answer, a refusal included, waits the full interval.
+const RETRY: Duration = Duration::from_secs(5);
+
 pub type Model = Arc<RwLock<Snapshot>>;
 
 /// One task per class. A fleet-wide session query costs a full `ConnectTimeout`
@@ -125,9 +130,10 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     let attention = model.clone();
     let forge = grant.clone();
     tokio::spawn(async move {
+        let mut backoff = Backoff::new(ATTENTION);
         loop {
-            look_at_attention(&attention, &forge).await;
-            tick_or_change(&forge).await;
+            let unreachable = look_at_attention(&attention, &forge).await;
+            tick_or_change(&forge, backoff.next(unreachable)).await;
         }
     });
 
@@ -135,9 +141,11 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     let checked = grant.clone();
     tokio::spawn(async move {
         let mut last = None;
+        let mut backoff = Backoff::new(ATTENTION);
         loop {
-            look_at_github(&github, &checked, &Github::default(), &mut last).await;
-            tick_or_change(&checked).await;
+            let unreachable =
+                look_at_github(&github, &checked, &Github::default(), &mut last).await;
+            tick_or_change(&checked, backoff.next(unreachable)).await;
         }
     });
 
@@ -146,10 +154,12 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     let channel = fleet.facts.channel.clone();
     let switched = fleet.look_at_release.clone();
     tokio::spawn(async move {
+        let mut backoff = Backoff::new(RELEASE);
         loop {
-            look_at_release(&release, &reader, &Github::default(), &channel).await;
+            let unreachable =
+                look_at_release(&release, &reader, &Github::default(), &channel).await;
             tokio::select! {
-                () = tokio::time::sleep(RELEASE) => {}
+                () = tokio::time::sleep(backoff.next(unreachable)) => {}
                 () = switched.notified() => {}
             }
         }
@@ -175,27 +185,60 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     tokio::spawn(async move {
         let github = Github::default();
         let mut rebuilt = false;
+        let mut backoff = Backoff::new(ATTENTION);
         loop {
             let token = finding.token().await;
-            rebuilt |= watch::discover(&found, &github, token, !rebuilt).await;
-            tick_or_change(&finding).await;
+            let pass = watch::discover(&found, &github, token, !rebuilt).await;
+            rebuilt |= pass.ran;
+            tick_or_change(&finding, backoff.next(pass.unreachable)).await;
         }
     });
 
     let repos = model.clone();
     tokio::spawn(async move {
+        let mut backoff = Backoff::new(ATTENTION);
         loop {
-            look_at_repos(&repos, &grant).await;
-            tick_or_change(&grant).await;
+            let unreachable = look_at_repos(&repos, &grant).await;
+            tick_or_change(&grant, backoff.next(unreachable)).await;
         }
     });
 }
 
-async fn tick_or_change(grant: &Grant) {
+async fn tick_or_change(grant: &Grant, wait: Duration) {
     tokio::select! {
-        () = tokio::time::sleep(ATTENTION) => {}
+        () = tokio::time::sleep(wait) => {}
         () = grant.changed() => {}
     }
+}
+
+/// How long a GitHub loop waits after a look (see [`RETRY`]).
+struct Backoff {
+    cap: Duration,
+    current: Duration,
+}
+
+impl Backoff {
+    fn new(cap: Duration) -> Self {
+        Self {
+            cap,
+            current: RETRY,
+        }
+    }
+
+    fn next(&mut self, unreachable: bool) -> Duration {
+        if !unreachable {
+            self.current = RETRY;
+            return self.cap;
+        }
+        let wait = self.current;
+        self.current = (wait * 2).min(self.cap);
+        wait
+    }
+}
+
+/// Only a GitHub that could not be asked is retried soon; a 4xx is an answer.
+fn is_unreachable<T>(result: &Result<T, github::Error>) -> bool {
+    matches!(result, Err(github::Error::Unreachable { .. }))
 }
 
 /// A verb's wake costs two looks: one now, and one [`SETTLE`] later.
@@ -315,9 +358,11 @@ pub(crate) fn settle(snapshot: &mut Snapshot, reading: Readiness) {
 /// a browser polls whether or not anyone is looking. No grant is a failed
 /// reading carrying why, never an empty inbox — nothing waiting and nothing
 /// asked are the two answers this daemon must never fold together (R-23).
-async fn look_at_attention<F: Forge>(model: &Model, forge: &F) {
-    let reading = Reading::new(forge.attention().await);
-    model.write().await.attention = Some(Arc::new(reading));
+async fn look_at_attention<F: Forge>(model: &Model, forge: &F) -> bool {
+    let attention = forge.attention().await;
+    let unreachable = is_unreachable(&attention);
+    model.write().await.attention = Some(Arc::new(Reading::new(attention)));
+    unreachable
 }
 
 /// The one look that touches no machine in the fleet: whether the grant this
@@ -325,11 +370,17 @@ async fn look_at_attention<F: Forge>(model: &Model, forge: &F) {
 /// ask. Its own task because a local answer must not queue behind a
 /// `ConnectTimeout` per asleep machine. A grant from the environment learns
 /// its account here; one the daemon made already knows it.
-async fn look_at_github(model: &Model, grant: &Grant, github: &Github, last: &mut Option<Verdict>) {
+async fn look_at_github(
+    model: &Model,
+    grant: &Grant,
+    github: &Github,
+    last: &mut Option<Verdict>,
+) -> bool {
     let asked = match grant.token().await {
         None => None,
         Some(token) => Some(github.account(&token).await),
     };
+    let unreachable = asked.as_ref().is_some_and(is_unreachable);
     if let Some(Ok(account)) = &asked {
         grant.learned(account.clone()).await;
     }
@@ -356,6 +407,7 @@ async fn look_at_github(model: &Model, grant: &Grant, github: &Github, last: &mu
     let asked = asked.map(|asked| asked.map(|account| account.login));
     let reading = Reading::new(doctor::github(asked.as_ref()));
     model.write().await.github = Some(Arc::new(reading));
+    unreachable
 }
 
 /// GitHub's last answer about the grant. An unreachable GitHub is not one.
@@ -369,7 +421,7 @@ enum Verdict {
 /// browser**: a typed box polls, and a read handler never awaits the network.
 /// The organisations that own none of them are read with the same token, and
 /// only when the list itself was read.
-async fn look_at_repos(model: &Model, grant: &Grant) {
+async fn look_at_repos(model: &Model, grant: &Grant) -> bool {
     let github = Github::default();
     let (repos, hidden) = match grant.token().await {
         None => (Err(github::Error::NoGrant), None),
@@ -387,20 +439,24 @@ async fn look_at_repos(model: &Model, grant: &Grant) {
             (repos, hidden)
         }
     };
+    let unreachable = is_unreachable(&repos) || hidden.as_ref().is_some_and(is_unreachable);
     let mut snapshot = model.write().await;
     snapshot.repos = Some(Arc::new(Reading::new(repos)));
     snapshot.hidden = hidden.map(|hidden| Arc::new(Reading::new(hidden)));
+    unreachable
 }
 
 /// The newest published release on the box's channel, with the grant when
 /// there is one and anonymously when there is not (ADR-0027 §4, Y-662). A
 /// channel file that names no channel is looked at as stable, and About shows
 /// it as unknown.
-async fn look_at_release(model: &Model, grant: &Grant, github: &Github, channel: &Path) {
+async fn look_at_release(model: &Model, grant: &Grant, github: &Github, channel: &Path) -> bool {
     let channel = read_channel(channel).await.unwrap_or_default();
     let token = grant.token().await;
     let release = github.latest_release(channel, token.as_ref()).await;
+    let unreachable = is_unreachable(&release);
     model.write().await.release = Some(Arc::new(Reading::new(release)));
+    unreachable
 }
 
 /// The channel file, read off the worker (I-13). `None` when it names no
@@ -972,6 +1028,92 @@ mod tests {
             matches!(failure, github::Error::Unreachable { .. }),
             "{failure}"
         );
+    }
+
+    /// Y-731: an unreachable GitHub is asked again soon, and later each
+    /// time it answers, up to the class's own interval.
+    #[test]
+    fn an_unreachable_read_backs_off_from_five_seconds_to_the_interval() {
+        let mut backoff = Backoff::new(ATTENTION);
+        let waits: Vec<u64> = (0..8).map(|_| backoff.next(true).as_secs()).collect();
+        assert_eq!(waits, [5, 10, 20, 40, 80, 160, 300, 300]);
+    }
+
+    #[test]
+    fn any_answer_waits_the_full_interval_and_resets_the_backoff() {
+        let mut backoff = Backoff::new(RELEASE);
+        backoff.next(true);
+        backoff.next(true);
+        assert_eq!(backoff.next(false), RELEASE);
+        assert_eq!(backoff.next(true), Duration::from_secs(5));
+    }
+
+    /// Answers in order, then fails the test if asked again.
+    struct Answers(
+        std::sync::Mutex<std::collections::VecDeque<Result<Attention, attention::Error>>>,
+    );
+
+    impl Answers {
+        fn new(answers: impl IntoIterator<Item = Result<Attention, attention::Error>>) -> Self {
+            Self(std::sync::Mutex::new(answers.into_iter().collect()))
+        }
+    }
+
+    impl Forge for Answers {
+        async fn attention(&self) -> Result<Attention, attention::Error> {
+            self.0
+                .lock()
+                .expect("the answers")
+                .pop_front()
+                .expect("asked no more than it was given")
+        }
+    }
+
+    /// The loop's own steps, without its `loop`: look, then wait.
+    async fn look_and_wait<F: Forge>(model: &Model, forge: &F, backoff: &mut Backoff) {
+        let unreachable = look_at_attention(model, forge).await;
+        tick_or_change(&Grant::default(), backoff.next(unreachable)).await;
+    }
+
+    /// Y-731's done condition: the read at boot runs before DNS answers, and
+    /// the next one lands seconds later rather than five minutes later.
+    #[tokio::test(start_paused = true)]
+    async fn a_read_at_boot_that_found_no_network_is_read_again_within_seconds() {
+        let model = Model::default();
+        let forge = Answers::new([
+            Err(attention::Error::Unreachable {
+                reason: "failed to lookup address information".into(),
+            }),
+            Ok(Attention::default()),
+        ]);
+        let mut backoff = Backoff::new(ATTENTION);
+        let start = tokio::time::Instant::now();
+
+        look_and_wait(&model, &forge, &mut backoff).await;
+        let failed = model.read().await.attention.clone().expect("looked");
+        assert!(failed.value().is_err());
+
+        look_at_attention(&model, &forge).await;
+        let read = model.read().await.attention.clone().expect("looked");
+        assert!(read.value().is_ok());
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    /// A refused grant is an answer: asking faster spends the owner's quota
+    /// and changes nothing.
+    #[tokio::test(start_paused = true)]
+    async fn a_refused_grant_waits_the_full_interval() {
+        let model = Model::default();
+        let forge = Answers::new([Err(attention::Error::Refused)]);
+        let mut backoff = Backoff::new(ATTENTION);
+        let start = tokio::time::Instant::now();
+
+        look_and_wait(&model, &forge, &mut backoff).await;
+        assert!(start.elapsed() >= ATTENTION, "{:?}", start.elapsed());
     }
 
     #[test]

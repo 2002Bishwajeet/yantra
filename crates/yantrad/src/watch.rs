@@ -291,21 +291,30 @@ pub async fn poll(
     teller.tell_pulls(&notes, watched, events).await;
 }
 
+/// What a [`discover`] pass did.
+#[derive(Debug, Default)]
+pub struct Discovered {
+    pub ran: bool,
+    /// GitHub could not be asked for some workspace's PRs (Y-731).
+    pub unreachable: bool,
+}
+
 /// Adds the open PRs of every workspace's threads. It removes nothing: a
 /// machine asleep or a look that failed tells nobody anything. `baseline`
-/// marks the start-up rebuild; it answers whether the pass ran.
+/// marks the start-up rebuild.
 pub async fn discover(
     pulls: &Pulls,
     github: &Github,
     token: Option<Token>,
     baseline: bool,
-) -> bool {
+) -> Discovered {
     let Some(token) = token else {
-        return false;
+        return Discovered::default();
     };
     let Ok(listing) = workspace::list() else {
-        return false;
+        return Discovered::default();
     };
+    let mut unreachable = false;
     for workspace in listing.workspaces {
         match thread::open_pulls(&workspace.name, github, &token).await {
             Ok(found) => {
@@ -313,10 +322,19 @@ pub async fn discover(
                     track(pulls, watched, baseline).await;
                 }
             }
-            Err(error) => tracing::debug!("no PRs read for {}: {error}", workspace.name),
+            Err(error) => {
+                unreachable |= matches!(
+                    error,
+                    thread::Failed::Github(github::Error::Unreachable { .. })
+                );
+                tracing::debug!("no PRs read for {}: {error}", workspace.name);
+            }
         }
     }
-    true
+    Discovered {
+        ran: true,
+        unreachable,
+    }
 }
 
 /// Starts watching a PR, and leaves one already watched as it is.
