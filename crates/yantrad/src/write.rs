@@ -630,7 +630,7 @@ async fn passes<I: Inventory>(
     headers: &HeaderMap,
     peer: Option<Peer>,
 ) -> Result<(), Refused> {
-    if unchecked(method, path) {
+    if unchecked(method, path) || (join_code(headers).is_some() && readiness(method, path)) {
         return Ok(());
     }
     let who = identify(
@@ -690,6 +690,22 @@ fn unchecked(method: &axum::http::Method, path: &str) -> bool {
         ),
         _ => false,
     }
+}
+
+/// The join script's code on its login test, which [`recheck`] checks.
+const JOIN_CODE: &str = "x-yantra-join-code";
+
+fn join_code(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(JOIN_CODE)?
+        .to_str()
+        .ok()
+        .filter(|code| !code.is_empty())
+}
+
+fn readiness(method: &axum::http::Method, path: &str) -> bool {
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    *method == axum::http::Method::POST && matches!(parts.as_slice(), ["machines", _, "readiness"])
 }
 
 /// ADR-0044 decision 12: the room and task tools, and nothing else. The task
@@ -1383,7 +1399,19 @@ async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Answer<Checked>>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    // The join script tests the login of the machine its code joined, and no other.
+    let caller = match join_code(&headers) {
+        Some(code) => {
+            let caller = joining(&state.authoriser, &from, &headers, None).await?;
+            if !state.authoriser.passkeys.joined(code, &caller.node)
+                || caller_machine(&state.authoriser, &caller).await? != name
+            {
+                return Err(Refused::JoinCode);
+            }
+            caller
+        }
+        None => allowed(&state.authoriser, &from, &headers).await?,
+    };
     tracing::info!("doctor {name} for {}", caller.node);
 
     let report = doctor::machine(&name, term()).await;
@@ -7799,6 +7827,62 @@ mod tests {
         );
         let body = format!(r#"{{"user":"biswa","code":"{code}"}}"#);
         (router::<Fake, ()>(authoriser, fleet.clone()), body)
+    }
+
+    /// The join script's login test carries its code, so the `/api` gate
+    /// lets it through, and the code tests only the machine it joined.
+    #[tokio::test]
+    async fn a_join_code_lets_the_login_test_through_for_its_own_machine_only() {
+        let passkeys = Passkeys::memory();
+        let code = passkeys.join_code();
+        assert!(passkeys.take_join(&code, JOINING));
+        let authoriser = Authoriser::new(
+            joining_tailnet(),
+            &[],
+            std::path::Path::new("yantrad.sock"),
+            passkeys,
+        );
+        let gate = Gate {
+            authoriser: authoriser.clone(),
+            fleet: Fleet::default(),
+        };
+        let (post, own) = (axum::http::Method::POST, "/machines/joining-box/readiness");
+        let mut coded = HeaderMap::new();
+        coded.insert(JOIN_CODE, code.parse().expect("ASCII"));
+        let from = Some(tcp(address(7)));
+
+        assert!(passes(&gate, &post, own, &coded, from).await.is_ok());
+        let refused = passes(&gate, &post, own, &HeaderMap::new(), from)
+            .await
+            .expect_err("no code and no cookie");
+        assert!(matches!(refused, Refused::SignIn), "{refused:?}");
+        let refused = passes(&gate, &post, "/workspaces", &coded, from)
+            .await
+            .expect_err("the code opens no other route");
+        assert!(matches!(refused, Refused::SignIn), "{refused:?}");
+
+        let dir = join_scratch("readiness-coded");
+        let app = router::<Fake, ()>(authoriser, join_fleet(&dir));
+        for (path, given) in [
+            ("/machines/other-box/readiness", code.as_str()),
+            (own, "NOT-THE-CODE"),
+        ] {
+            use tower::ServiceExt as _;
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(JOIN_CODE, given)
+                .extension(ConnectInfo(tcp(address(7))))
+                .body(axum::body::Body::empty())
+                .expect("a request");
+            let response = app.clone().oneshot(request).await.expect("infallible");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{path} {given}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// ADR-0044 decision 13: a join from another machine needs a live code,

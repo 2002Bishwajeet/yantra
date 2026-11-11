@@ -406,7 +406,8 @@ report() {
 # 0: a browser is needed. 1: it is not. 2: yantrad did not test the login.
 browser_needed() {
     say "testing a real login from the appliance, which can take a minute."
-    reply=$(daemon_curl -sS --max-time 120 -w '\n%{http_code}' -X POST "http://$DAEMON/api/machines/$machine/readiness") || return 2
+    reply=$(daemon_curl -sS --max-time 120 -w '\n%{http_code}' -X POST -H "X-Yantra-Join-Code: $CODE" \
+        "http://$DAEMON/api/machines/$machine/readiness") || return 2
     code=$(printf '%s\n' "$reply" | tail -n 1)
     reply=$(printf '%s\n' "$reply" | sed '$d')
     if [ "$code" != 200 ]; then

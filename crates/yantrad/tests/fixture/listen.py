@@ -9,7 +9,10 @@ A file named by the second argument, when present, holds the account the
 "kept" block logs in as — the owner's re-join case. A readiness check answers
 the failure Tailscale prints while the fake `tailscale` still has SSH on and
 `/srv/check-mode` exists. Each readiness check and each forgotten host key is
-appended to `/srv/asked`, with whether Tailscale SSH was off at the time.
+appended to `/srv/asked`, with whether Tailscale SSH was off at the time. Both
+need the join code, as the real `/api` gate does: a readiness check in its
+`X-Yantra-Join-Code` header, a forgotten host key in its body. Without it they
+are answered 401 and not recorded.
 Anything else posted here (the agent's heartbeat) is answered 404 and not
 recorded.
 """
@@ -26,6 +29,17 @@ class Join(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         ssh_off = os.path.exists("/srv/ssh-off")
+        if self.path.endswith("/readiness"):
+            coded = bool(self.headers.get("X-Yantra-Join-Code", "").strip())
+        elif self.path == "/api/join/forget-host-key":
+            coded = bool(json.loads(body or b"{}").get("code"))
+        else:
+            coded = True
+        if not coded:
+            self.send_response(401)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if self.path.endswith("/readiness") or self.path == "/api/join/forget-host-key":
             with open("/srv/asked", "a") as asked:
                 asked.write(f"{self.path.rsplit('/', 1)[-1]} ssh-off={ssh_off}\n")

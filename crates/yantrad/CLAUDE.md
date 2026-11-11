@@ -433,7 +433,9 @@ both run `ssh-keygen` on one path. **`POST /api/join/forget-host-key` is `yantra
 for the caller** (Y-621). It names the machine as `/api/join` does, so a machine forgets only its own
 line, and it answers `{machine, removed}`. `join.sh` calls it after `tailscale set --ssh=false`,
 because sshd's host key is not Tailscale SSH's. It holds `Fleet::joins` too, and it adds no field to
-`/api/join`'s body. **`GET /join` sits beside
+`/api/join`'s body. **The script's login test sends the code too**, in `X-Yantra-Join-Code` on
+`POST /api/machines/{machine}/readiness`: the `/api` gate lets that request through, and the
+handler accepts the code only for the machine it joined (ADR-0044 decision 13). **`GET /join` sits beside
 `/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
 `yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
 owner ruled that generation is Yantra's and happens on first use. **On the socket another account
