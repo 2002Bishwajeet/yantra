@@ -634,13 +634,13 @@ test.describe('the palette on a phone finds a thread', () => {
 
     const row = dialog.getByRole('option', { name: /Keep a thread store/ })
     await expect(row).toBeVisible()
-    await expect(row).toContainText('site · bishwajeets-macbook-pro · offline')
+    await expect(row).toContainText('cargo-zig · thinkpad · offline')
     await expect(dialog.getByText('Finds a place or a thread by its title, or runs a step of the coding loop.')).toBeVisible()
     const fits = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
     expect(fits).toBe(true)
     await axe(page)
 
     await row.tap()
-    await expect(page).toHaveURL(/\/w\/site\?view=chat&thread=1a2b3c4d$/)
+    await expect(page).toHaveURL(/\/w\/cargo-zig\?view=chat&thread=1a2b3c4d$/)
   })
 })
