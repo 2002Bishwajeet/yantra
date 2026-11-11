@@ -31,6 +31,11 @@ for (const one of ROUTES) {
     for (const words of ['yantrad was not reached: HTTP 502', 'retrying every 5 s']) {
       await expect(board.getByText(words)).toHaveCount(0)
     }
+    // Walk before any click: a click moves the tab start point past the last stop.
+    if (one.id === 'dashboard') {
+      await keyboardWalk(page, 6)
+      await screenshot(page, 'daemon-unreachable', 'down', size)
+    }
     await board.getByRole('button', { name: 'Details' }).click()
     for (const words of ['yantrad was not reached: HTTP 502', 'retrying every 5 s']) {
       await expect(board.getByText(words).first()).toBeVisible()
@@ -50,9 +55,5 @@ for (const one of ROUTES) {
     }
 
     await axe(page)
-    if (one.id === 'dashboard') {
-      await keyboardWalk(page, 6)
-      await screenshot(page, 'daemon-unreachable', 'down', size)
-    }
   })
 }
