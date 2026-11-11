@@ -284,7 +284,7 @@ describe('the Dashboard on an empty fleet', () => {
     await drawn()
     const idle = region('Idle')
     expect(idle.getByText('No workspaces yet')).toBeTruthy()
-    expect(idle.getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
+    expect(idle.getByRole('link', { name: 'New →' }).getAttribute('href')).toBe('/new')
   })
 })
 

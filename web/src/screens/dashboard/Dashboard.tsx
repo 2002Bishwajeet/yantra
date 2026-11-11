@@ -602,8 +602,8 @@ function Idle(props: {
     <EmptyState
       action={
         fleetEmpty ? (
-          <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant="text">
-            New session
+          <Button render={<Link to="/new" />} role="link" variant="text">
+            New →
           </Button>
         ) : undefined
       }
