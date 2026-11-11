@@ -369,9 +369,10 @@ async fn a_session_starts_on_the_mac_after_tmux_kill_server() -> anyhow::Result<
     Ok(())
 }
 
-/// **Y-640's done condition**: after `up` starts a fresh server through the
-/// LaunchAgent, that server's `PATH` holds the login shell's node directory,
-/// `doctor` reports `hooks` present, and `node` and `claude-mem` resolve in it.
+/// **Y-640's done condition, less the hook run**: after `up` starts a fresh
+/// server through the LaunchAgent, that server's `PATH` holds the login shell's
+/// node directory, `doctor` reports `hooks` present, and `node` and `claude-mem`
+/// resolve in it. [`a_claude_sessions_hooks_run_on_the_mac`] proves the hook runs.
 /// Needs the owner logged in at the Mac's screen.
 ///
 /// **It boots out the LaunchAgent and kills Yantra's `-L yantra` server, so
