@@ -41,6 +41,7 @@ mod layout;
 mod mcp;
 mod mic;
 mod notify;
+mod passkey;
 mod placement;
 mod refresh;
 mod room;
