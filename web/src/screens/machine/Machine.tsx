@@ -32,7 +32,7 @@ import { stateOf } from '@/screens/fleet/verbs'
 import { gb, machineState } from '@/screens/machines/facts'
 import { useFormFactor } from '@/shell/formFactor'
 import { useTick } from '@/useTick'
-import { unreachable } from '@/work'
+import { daemonCouldNotRead, unreachable } from '@/work'
 import { ReadinessCard } from './Readiness'
 import { useVerdict } from './useVerdict'
 import { Sessions } from './Sessions'
@@ -197,11 +197,10 @@ export function Machine() {
       <Page>
         <PageHeader title={name} />
         <ErrorSurface.Page
-          error={fromReading(machines)!}
+          error={daemonCouldNotRead(nothing)}
           eyebrow="Machine"
           reset={() => void client.invalidateQueries()}
-          title="Nothing here can be reached"
-          unknowns={['off the tailnet', 'yantrad down']}
+          title="The daemon could not read the fleet"
         />
       </Page>
     )

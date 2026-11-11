@@ -1,8 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { fromReading } from '@/api/client'
 import { on } from '@/lib/time'
 import { loaded, useWorkspaces } from '@/api/hooks'
+import { daemonCouldNotRead } from '@/work'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
@@ -227,11 +227,10 @@ export function Usage() {
       <Page>
         <PageHeader title="Usage" />
         <ErrorSurface.Page
-          error={fromReading(listed)!}
+          error={daemonCouldNotRead(listed.error)}
           eyebrow="Workspaces read"
           reset={() => void client.invalidateQueries()}
-          title="Nothing here can be reached"
-          unknowns={['off the tailnet', 'yantrad down']}
+          title="The daemon could not read the fleet"
         />
       </Page>
     )

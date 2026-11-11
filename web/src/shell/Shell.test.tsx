@@ -250,8 +250,17 @@ describe('the FAB', () => {
   it('draws none on the dashboard when nothing it reads can be reached', async () => {
     const failed = { body: { looked: 'failed', age_seconds: 0, error: 'tailscale did not answer' } }
     mount('tablet', '/', { overrides: { '/api/machines': failed, '/api/workspaces': failed, '/api/sessions': failed } })
-    expect(await screen.findByText('Nothing here can be reached')).toBeTruthy()
+    expect(await screen.findByText('The daemon could not read the fleet')).toBeTruthy()
     expect(fab()).toBeNull()
+    expect(screen.queryByRole('link', { name: /new session/i })).toBeNull()
+  })
+
+  it('draws no New button on the desktop rail when nothing it reads can be reached', async () => {
+    const failed = { body: { looked: 'failed', age_seconds: 0, error: 'tailscale did not answer' } }
+    mount('desktop', '/', { overrides: { '/api/machines': failed, '/api/workspaces': failed, '/api/sessions': failed } })
+    expect(await screen.findByText('The daemon could not read the fleet')).toBeTruthy()
+    const rail = within(screen.getByRole('complementary', { name: 'Sessions' }))
+    expect(rail.queryByRole('link', { name: 'New' })).toBeNull()
   })
 
   describe('while the checklist is the page', () => {

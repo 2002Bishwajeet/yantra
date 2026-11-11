@@ -81,7 +81,7 @@ export function CloneFolder(props: {
   const [changing, setChanging] = useState(false)
   return (
     <div className="ns__clonefolder">
-      <p className="ns__clone">
+      <div className="ns__clone">
         <Text scale="body-medium" tone="variant">
           Clone folder:
         </Text>
@@ -89,7 +89,7 @@ export function CloneFolder(props: {
         <Button aria-expanded={changing} onClick={() => setChanging(!changing)} type="button" variant="text">
           Change
         </Button>
-      </p>
+      </div>
       {changing ? (
         <Picker
           machine={machine}

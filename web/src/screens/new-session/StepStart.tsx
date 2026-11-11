@@ -1,18 +1,13 @@
 import type { ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Bot, Terminal } from 'lucide-react'
-import { dirsQuery } from '@/api/queries'
 import { Card } from '@/m3/card/Card'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
-import { Tile } from '@/m3/tile/Tile'
-import { useFormFactor } from '@/shell/formFactor'
-import { happenings, tilde, type Values } from './form'
+import { next, type Values } from './form'
 import type { SessionForm } from './useSessionForm'
 
 function Option(props: {
   icon: ReactNode
-  eyebrow: string
   title: string
   note: string
   pressed: boolean
@@ -20,7 +15,7 @@ function Option(props: {
   onPress: () => void
   children?: ReactNode
 }) {
-  const { icon, eyebrow, title, note, pressed, disabled, onPress, children } = props
+  const { icon, title, note, pressed, disabled, onPress, children } = props
   return (
     <div className="ns__option" data-pressed={pressed ? '' : undefined}>
       <button
@@ -34,7 +29,6 @@ function Option(props: {
           {icon}
         </span>
         <span className="ns__choice-text">
-          <Eyebrow>{eyebrow}</Eyebrow>
           <Text emphasized scale="title-medium">
             {title}
           </Text>
@@ -48,94 +42,46 @@ function Option(props: {
   )
 }
 
-function Recap(props: { values: Values; home: string | null }) {
-  const { values, home } = props
-  const { source } = values
-  return (
-    <Card className="ns__card" surface="low">
-      <Eyebrow render={<h2 />}>So far</Eyebrow>
-      <dl className="ns__recap-list">
-        <div>
-          <dt>Name</dt>
-          <dd>
-            <Tile name={values.name} size="small" /> {values.name}
-          </dd>
-        </div>
-        <div>
-          <dt>Machine</dt>
-          <dd>{values.machine}</dd>
-        </div>
-        <div>
-          <dt>Source</dt>
-          <dd>
-            {source?.kind === 'github' ? source.repo.full_name : source ? tilde(source.path, home) : '—'}
-            {source?.kind === 'github' ? (
-              <Mono className="ns__place">
-                {source.here === 'no' ? `clone into ${tilde(source.path, home)}` : `already at ${tilde(source.path, home)}`}
-              </Mono>
-            ) : null}
-          </dd>
-        </div>
-      </dl>
-    </Card>
-  )
-}
-
-/** Step 3: what opens in the session, and what will happen (NewSessionStart). */
+/** Step 3: what opens in the session (NewSessionStart). */
 export function StepStart(props: { form: SessionForm; values: Values }) {
   const { form, values } = props
-  const factor = useFormFactor()
-  const home = useQuery({ ...dirsQuery(values.machine, null), enabled: true })
-  const root = home.data?.path ?? null
+  const first = next(values)
   return (
-    <>
-      {factor === 'phone' ? <Recap home={root} values={values} /> : null}
-      <Card className="ns__card">
-        <Eyebrow render={<h2 />}>What opens in the session</Eyebrow>
-        <div aria-label="What opens in the session" className="ns__choices" role="group">
-          <Option
-            eyebrow="agent"
-            icon={<Bot />}
-            note="Claude Code starts in this folder. It asks you to trust the folder before it runs anything."
-            onPress={() => form.setFieldValue('opens', 'claude')}
-            pressed={values.opens === 'claude'}
-            title="Claude"
-          />
-          <Option
-            eyebrow="command"
-            icon={<Terminal />}
-            note="Runs one command in this folder, such as just dev."
-            onPress={() => form.setFieldValue('opens', 'command')}
-            pressed={values.opens === 'command'}
-            title="Your command"
-          >
-            <form.Field name="command">
-              {(field) => (
-                <TextField
-                  autoComplete="off"
-                  label="Command"
-                  onValueChange={field.handleChange}
-                  supporting="a shell command; a secret stays a reference the shell resolves, and Yantra never holds the value"
-                  value={field.state.value}
-                />
-              )}
-            </form.Field>
-          </Option>
-        </div>
-      </Card>
-      <Card className="ns__card" surface="low">
-        <Eyebrow render={<h2 />}>When you press Create and open</Eyebrow>
-        <ol className="ns__happen">
-          {happenings(values, root).map(({ line, detail }) => (
-            <li key={line}>
-              {line}
-              {detail ? (
-                <Mono className="ns__detail">{detail}</Mono>
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      </Card>
-    </>
-  )
+    <Card className="ns__card">
+      <Eyebrow render={<h2 />}>What opens in the session</Eyebrow>
+      <div aria-label="What opens in the session" className="ns__choices" role="group">
+        <Option
+          icon={<Bot />}
+          note="Claude Code starts in this folder."
+          onPress={() => form.setFieldValue('opens', 'claude')}
+          pressed={values.opens === 'claude'}
+          title="Claude"
+        />
+        <Option
+          icon={<Terminal />}
+          note="Runs one command here, such as just dev."
+          onPress={() => form.setFieldValue('opens', 'command')}
+          pressed={values.opens === 'command'}
+          title="Your command"
+        >
+          <form.Field name="command">
+            {(field) => (
+              <TextField
+                autoComplete="off"
+                label="Command"
+                onValueChange={field.handleChange}
+                supporting="A secret stays a reference; Yantra never holds it."
+                value={field.state.value}
+              />
+            )}
+          </form.Field>
+        </Option>
+      </div>
+      {first ? (
+        <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
+          {first}
+        </Text>
+      ) : null}
+    </Card>
+)
 }

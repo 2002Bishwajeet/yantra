@@ -80,12 +80,8 @@ describe('grantPage', () => {
 })
 
 describe('hiddenNote', () => {
-  it('names every organisation in one sentence, and never claims the list is complete', () => {
-    expect(hiddenNote(['a', 'b'])).toBe(
-      'Yantra sees no repository from a, b. An organisation that restricts OAuth apps hides them. If your membership in one is private, it is not in this list.',
-    )
-    expect(hiddenNote([])).toBe(
-      'An organisation that restricts OAuth apps hides its repositories from Yantra. If your membership there is private, Yantra cannot name it.',
-    )
+  it('says a private membership is not listed, and names the organisations it sees none from', () => {
+    expect(hiddenNote(['a', 'b'])).toBe('A private membership is not listed. No repository from a, b.')
+    expect(hiddenNote([])).toBe('A private membership is not listed.')
   })
 })

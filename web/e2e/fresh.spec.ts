@@ -113,7 +113,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     // Y-627: the only ready machine is the hub, which gets no chip until an account on it joins,
     // so nothing is preselected and Continue waits for a pick.
     Continue: disabled,
-    'Copy the join command': text('Copied'),
+    'Set it up': url('/m/yantra-box'),
     Open: url('/m/yantra-box'),
   },
   settings: SETTINGS_NAV,
@@ -150,9 +150,9 @@ async function open(page: Page, name: Scenario, destination: Destination) {
   await page.goto(destination.path)
   await expect(page.locator('h1, h2').filter({ hasText: destination.heading }).first()).toBeAttached()
   await expect(page.locator('[data-slot="reading"], [aria-busy="true"]')).toHaveCount(0)
-  // Y-627: the hub's join command arrives with /api/about, after the rest of the page.
+  // Y-627: the hub's note arrives with /api/about, after the rest of the page.
   if (destination.id === 'new' && name === 'fresh') {
-    await expect(page.getByRole('button', { name: 'Copy the join command' })).toBeVisible()
+    await expect(page.getByRole('note').filter({ hasText: 'karigar account' })).toBeVisible()
   }
 }
 
@@ -249,7 +249,9 @@ function clipped(page: Page) {
       const own = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim())
       const box = el.getBoundingClientRect()
       if (!own || box.width <= 1 || getComputedStyle(el).visibility === 'hidden') continue
-      const cut = el.scrollWidth > el.clientWidth + 1 && !/auto|scroll/.test(getComputedStyle(el).overflowX)
+      // Y-719: New session's one-line notes end in an ellipsis on purpose; the step's own spec holds them to one line.
+      const cut =
+        el.scrollWidth > el.clientWidth + 1 && !/auto|scroll/.test(getComputedStyle(el).overflowX) && !el.matches('.ns__one')
       const past = box.right > innerWidth + 1 && !scrolls(el)
       if (cut || past) {
         out.push(`${cut ? 'cut' : 'past the edge'}: ${el.className} — ${el.textContent?.trim().slice(0, 60)}`)

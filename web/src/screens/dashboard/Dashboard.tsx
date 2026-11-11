@@ -45,7 +45,7 @@ import { asEvents } from '@/shell/notifications'
 import { phrase } from '@/shell/phrase'
 import { usePrefs } from '@/shell/prefs'
 import { useTick } from '@/useTick'
-import { openedByHand, unclaimed, unreachable, waiting, work, type WorkRow } from '@/work'
+import { daemonCouldNotRead, openedByHand, unclaimed, unreachable, waiting, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
@@ -55,10 +55,6 @@ import { PrimaryAction } from '@/shell/PrimaryAction'
 import { useFab } from '@/shell/primary'
 import { FinishSetup } from './FinishSetup'
 import './Dashboard.css'
-
-const UNREACHABLE =
-  'Every read failed the same way, so this is the connection to yantrad rather than the fleet. ' +
-  'Whether you are off the tailnet or the daemon is down is not something this page can tell.'
 
 /** The confirm carries Base UI's dialog and bottom sheet, 30 KiB the first
  *  paint never draws (Y-352's budget). It loads beside the page rather than
@@ -753,17 +749,11 @@ export function Dashboard() {
         <PageHeader title="Dashboard" />
         <PrimaryAction action={null} />
         <ErrorSurface.Page
-          action={
-            <Button render={<a href="https://login.tailscale.com/admin/machines" rel="noreferrer" target="_blank" />} role="link" variant="text">
-              Open Tailscale
-            </Button>
-          }
-          error={new ApiError('network', nothing, { sentence: UNREACHABLE })}
+          error={daemonCouldNotRead(nothing)}
           eyebrow="Fleet read"
           meta={good === null ? undefined : `last good read ${ago((now - good.at) / 1000, now).text} ago`}
           reset={retry}
-          title="Nothing here can be reached"
-          unknowns={['off the tailnet', 'yantrad down']}
+          title="The daemon could not read the fleet"
         />
       </Page>
     )

@@ -76,7 +76,6 @@ export function Home(props: { machine: string; thread?: string; onThread: (threa
           eyebrow="Home chat"
           reset={() => void client.invalidateQueries()}
           title="The machines could not be read"
-          unknowns={['off the tailnet', 'yantrad down']}
         />
       </Page>
     )

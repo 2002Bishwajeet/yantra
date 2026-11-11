@@ -4,10 +4,10 @@ import {
   cloneInto,
   complete,
   expand,
-  happenings,
   hubJoined,
   knownWorkspace,
   nameError,
+  next,
   offered,
   pickMachine,
   plan,
@@ -119,42 +119,26 @@ describe('the plan the starting screen runs', () => {
   })
 })
 
-describe('what will happen', () => {
+describe('the one line step 3 adds', () => {
   const local = (checked: 'yes' | 'unknown') =>
     values({ source: { kind: 'local', path: '/home/biswa/Github/x', origin: null, checked } })
-  const lines = (v: Values) => happenings(v, '/home/biswa').map((h) => h.line)
 
-  it('names the clone, the session and what runs in it', () => {
-    const out = happenings({ ...cloned('no'), opens: 'command', command: 'just dev' }, '/home/biswa')
-    expect(out[0]).toEqual({
-      line: 'Yantra saves the workspace as quiet-otter.',
-      detail: '~/.config/yantra/workspaces/quiet-otter.toml',
-    })
-    expect(out[1]?.line).toBe(
-      'It clones 2002Bishwajeet/homelab-k8s into ~/Github/homelab-k8s on cachyos-g14, then opens a session there.',
-    )
-    expect(out[2]?.line).toBe('just dev runs there, and you see it in this window.')
+  it('names the repository it clones first', () => {
+    expect(next(cloned('no'))).toBe('Clones 2002Bishwajeet/homelab-k8s first.')
   })
 
-  it('opens a session in a folder that is there', () => {
-    expect(lines(cloned('yes'))).toEqual([
-      'Yantra saves the workspace as quiet-otter.',
-      'It opens a session in ~/Github/homelab-k8s on cachyos-g14.',
-      'Claude starts there, and you see it in this window.',
-    ])
-    expect(lines(local('yes'))[1]).toBe('It opens a session in ~/Github/x on cachyos-g14.')
+  it('says nothing about a folder that is there', () => {
+    expect(next(cloned('yes'))).toBeNull()
+    expect(next(local('yes'))).toBeNull()
   })
 
   it('says Yantra checks a folder it has not checked', () => {
-    const checks = ' Yantra checks the folder then.'
-    expect(lines(cloned('unknown'))[1]).toBe(`It opens a session in ~/Github/homelab-k8s on cachyos-g14.${checks}`)
-    expect(lines(local('unknown'))[1]).toBe(`It opens a session in ~/Github/x on cachyos-g14.${checks}`)
+    expect(next(cloned('unknown'))).toBe('Yantra checks the folder first.')
+    expect(next(local('unknown'))).toBe('Yantra checks the folder first.')
   })
 
-  it('leaves out the words the owner dropped', () => {
-    for (const v of [cloned('no'), cloned('yes'), cloned('unknown'), local('yes'), local('unknown')]) {
-      expect(lines(v).join(' ')).not.toMatch(/tmux|attach|pane|already there/)
-    }
+  it('says nothing before a source is chosen', () => {
+    expect(next(values())).toBeNull()
   })
 })
 
