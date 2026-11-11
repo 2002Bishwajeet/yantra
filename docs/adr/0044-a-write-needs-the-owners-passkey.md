@@ -278,3 +278,14 @@ Accessed 2026-11-09.
 - Yantra code read on `main` at `9ddd342a`: `crates/yantrad/src/write.rs` (`allowed`, `Join`),
   the route table across `crates/yantrad/src/`, `crates/yantra-core/src/claude.rs`
   (`--mcp-config`, `X-Yantra-Thread`), `deny.toml`.
+
+> **2026-11-12 ([Y-687](../../tracker.md)): the dashboard's name can be the owner's own.** On
+> 2026-11-11 the owner kept the box's custom name, `yantra.cloudx.run`, served by Caddy
+> ([ADR-0042](0042-the-proxy-hop-is-proved-by-the-kernel.md), amended the same day). On 2026-11-12
+> the owner asked for that name everywhere. Decisions 1 and 5 change in one way: **the daemon's
+> configuration can name the dashboard's origin**, for example `https://yantra.cloudx.run`. When it
+> does, the relying party id is that origin's host, and a write whose `Origin` is not that origin is
+> refused. When it does not, both stay the MagicDNS name and `:8443`, as decision 1 wrote them. One
+> origin is allowed, never a list. A passkey belongs to its relying party id, so a passkey made on one
+> name does not work on the other, and changing the name later costs every passkey, as the
+> *Cost: the relying party id is a name* consequence already says.
