@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { at, axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
 import { scrollHeight, scrollTo } from './lib/scroller'
@@ -375,6 +376,27 @@ test.describe('a long repository name on a phone', () => {
   })
 })
 
+const fits = async (page: Page, action: 'Continue' | 'Create and open') => {
+  const tall = await page.locator('.ns p').evaluateAll((nodes) =>
+    nodes
+      .filter((node) => node.getBoundingClientRect().height > 0)
+      .filter((node) => node.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(node).lineHeight))
+      .map((node) => node.textContent),
+  )
+  expect(tall).toEqual([])
+  await expect(page.getByRole('button', { name: action })).toBeVisible()
+  // The foot sticks to the screen, so it is always in view. The step fits when its last card
+  // ends above the foot with the scroller at the top.
+  await scrollTo(page, 0)
+  const fit = await page.evaluate(() => {
+    const cards = document.querySelectorAll('.ns__card')
+    const foot = document.querySelector('.ns__foot')!.getBoundingClientRect()
+    return { content: cards[cards.length - 1].getBoundingClientRect().bottom, foot: foot.top }
+  })
+  expect(fit.content).toBeLessThanOrEqual(fit.foot + 1)
+  expect(fit.content).toBeLessThanOrEqual(844)
+}
+
 test.describe('the steps fit a phone (Y-719)', () => {
   test.use(at('phone'))
 
@@ -383,37 +405,28 @@ test.describe('the steps fit a phone (Y-719)', () => {
     await page.goto(PATH)
     await expect(heading(page, 'New session')).toBeVisible()
 
-    const check = async (action: 'Continue' | 'Create and open') => {
-      const tall = await page.locator('.ns p').evaluateAll((nodes) =>
-        nodes
-          .filter((node) => node.getBoundingClientRect().height > 0)
-          .filter((node) => node.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(node).lineHeight))
-          .map((node) => node.textContent),
-      )
-      expect(tall).toEqual([])
-      await expect(page.getByRole('button', { name: action })).toBeVisible()
-      // The foot sticks to the screen, so it is always in view. The step fits when its last card
-      // ends above the foot with the scroller at the top.
-      await scrollTo(page, 0)
-      const fit = await page.evaluate(() => {
-        const cards = document.querySelectorAll('.ns__card')
-        const foot = document.querySelector('.ns__foot')!.getBoundingClientRect()
-        return { content: cards[cards.length - 1].getBoundingClientRect().bottom, foot: foot.top }
-      })
-      expect(fit.content).toBeLessThanOrEqual(fit.foot + 1)
-      expect(fit.content).toBeLessThanOrEqual(844)
-    }
-
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
-    await check('Continue')
+    await fits(page, 'Continue')
     await page.getByRole('button', { name: 'Continue' }).click()
     await expect(page.getByText('On this machine')).toBeVisible()
-    await check('Continue')
+    await fits(page, 'Continue')
     await page.getByRole('button', { name: /2002Bishwajeet\/yantra/ }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
     await expect(page.getByText('What opens in the session')).toBeVisible()
-    await check('Create and open')
+    await fits(page, 'Create and open')
+  })
+
+  test('step 1 stays one line when the hub is unjoined and no machine can be suggested', async ({ page }) => {
+    await scenario(page, 'hub')
+    await page.route('**/api/placement', (route) =>
+      route.fulfill({ status: 500, contentType: 'text/plain', body: 'placement is down' }),
+    )
+    await page.goto(PATH)
+    await expect(heading(page, 'New session')).toBeVisible()
+    await expect(page.getByRole('alert').filter({ hasText: 'No suggestion' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Ask again' })).toBeVisible()
+    await fits(page, 'Continue')
   })
 })
 

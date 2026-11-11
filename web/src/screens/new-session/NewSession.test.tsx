@@ -1015,8 +1015,8 @@ describe('the suggested machine (Y-517)', () => {
       },
     })
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('No machine could be suggested')
-    expect(alert.textContent).toContain('Choose a machine from the chips.')
+    expect(alert.textContent).toContain('No suggestion')
+    expect(alert.textContent).toContain('Pick a machine.')
     expect(alert.textContent).not.toContain('yantrad has not looked')
     press('cachyos-g14')
     expect(pressed()).toEqual(['cachyos-g14'])

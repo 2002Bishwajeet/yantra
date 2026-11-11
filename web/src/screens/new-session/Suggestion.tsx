@@ -69,10 +69,10 @@ export function SuggestMachine(props: { form: SessionForm; values: Values; machi
           : ''}
       </Text>
       <Failed
-        brief="Choose a machine from the chips."
+        brief="Pick a machine."
         error={placement.error}
         retry={() => mutate({})}
-        title="No machine could be suggested"
+        title="No suggestion"
       />
     </>
   )
