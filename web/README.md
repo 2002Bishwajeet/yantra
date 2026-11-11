@@ -14,7 +14,8 @@ component gallery and has a chunk behind it in dev builds only.
 mutation in [`src/api/`](src/api/README.md).
 
 `⌘K` opens the palette ([`shell/Palette.tsx`](src/shell/Palette.tsx)): seven
-pages, the workspaces that loaded, and the machines, then the coding loop's verbs
+pages, the workspaces that loaded, and the machines, then a Threads group that searches the
+daemon's store, then the coding loop's verbs
 (D3 §3.2, amended in Y-499): Diff, Commit, Push, Open PR and Merge while a chat is
 on screen, and Start from issue everywhere. A verb opens its own dialog, so
 Merge stays two steps from any key. Each verb has a chord, bound once by the
