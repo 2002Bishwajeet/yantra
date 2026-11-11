@@ -163,7 +163,7 @@ export function StepName(props: { form: SessionForm; values: Values; preset: str
                   field.handleChange(value)
                   form.setFieldValue('named', true)
                 }}
-                supporting="Optional. The tile follows the name."
+                supporting="Optional."
                 trailing={
                   <IconButton
                     label="Another name"

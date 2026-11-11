@@ -59,7 +59,7 @@ export function SuggestMachine(props: { form: SessionForm; values: Values; machi
 
   return (
     <>
-      <Text aria-live="polite" render={<p role="status" />} className="ns__note" scale="body-medium" tone="variant">
+      <Text aria-live="polite" render={<p role="status" />} className="ns__note ns__note--line" scale="body-medium" tone="variant">
         {placement.data
           ? top
             ? `Suggested: ${top.machine}, because ${top.reason}${caveat}`
