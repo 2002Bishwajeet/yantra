@@ -270,13 +270,15 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     })?;
     tracing::info!("keeping threads in {}", threads.display());
     let ips: Vec<IpAddr> = addresses.iter().map(SocketAddr::ip).collect();
-    let base = match (&origin, inventory.machines().await) {
-        (Some(origin), _) => Some(origin.clone()),
-        (None, Ok(machines)) => api::https_of(&machines, &addresses),
-        (None, Err(error)) => {
-            tracing::warn!("a chat push carries no link: {error}");
-            None
-        }
+    let base = match &origin {
+        Some(origin) => Some(origin.clone()),
+        None => match inventory.machines().await {
+            Ok(machines) => api::https_of(&machines, &addresses),
+            Err(error) => {
+                tracing::warn!("a chat push carries no link: {error}");
+                None
+            }
+        },
     };
     let chats = chats(
         yantra_core::join::daemon_address(&ips).ok(),

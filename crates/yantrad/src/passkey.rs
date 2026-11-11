@@ -843,13 +843,17 @@ impl<I: Inventory> Signing<I> {
         self.authoriser.passkeys()
     }
 
-    /// The relying party for [`crate::write::dashboard_origin`].
-    async fn relying(&self) -> Result<Arc<Relying>, Refused> {
-        let origin = crate::write::dashboard_origin(&self.authoriser, &self.fleet)
+    async fn origin(&self) -> Result<String, Refused> {
+        crate::write::dashboard_origin(&self.authoriser, &self.fleet)
             .await
             .ok_or_else(|| {
                 Refused::Unlooked("the hub does not know its MagicDNS name yet".to_owned())
-            })?;
+            })
+    }
+
+    /// The relying party for [`crate::write::dashboard_origin`].
+    async fn relying(&self) -> Result<Arc<Relying>, Refused> {
+        let origin = self.origin().await?;
         self.passkeys().relying(&origin).map_err(refused)
     }
 }
@@ -902,11 +906,7 @@ async fn join_code<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
 ) -> Result<Json<JoinCode>, Refused> {
     allowed(&state.authoriser, &from, &headers).await?;
-    let origin = crate::write::dashboard_origin(&state.authoriser, &state.fleet)
-        .await
-        .ok_or_else(|| {
-            Refused::Unlooked("the hub does not know its MagicDNS name yet".to_owned())
-        })?;
+    let origin = state.origin().await?;
     let code = state.passkeys().join_code();
     Ok(Json(JoinCode {
         command: format!("curl -fsSL '{origin}/join?code={code}' | sh"),
