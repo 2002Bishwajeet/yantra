@@ -163,12 +163,7 @@ export function StepName(props: { form: SessionForm; values: Values; preset: str
                   field.handleChange(value)
                   form.setFieldValue('named', true)
                 }}
-                supporting={
-                  <>
-                    Optional. Leave it and the session is called {values.name || 'what you type'};
-                    the letter and colour are how you tell sessions apart at a glance.
-                  </>
-                }
+                supporting="Optional. The tile follows the name."
                 trailing={
                   <IconButton
                     label="Another name"
@@ -190,7 +185,7 @@ export function StepName(props: { form: SessionForm; values: Values; preset: str
       <Eyebrow render={<h2 />}>Machine</Eyebrow>
       <Machines form={form} preset={preset} values={values} />
       <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-        The session runs here. Yantra looks for the repository on this machine in the next step.
+        The session runs on this machine.
       </Text>
     </Card>
   )

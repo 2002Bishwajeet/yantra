@@ -6,11 +6,13 @@ import type { Repo } from '@/api'
 import { asApiError } from '@/api/errors'
 import { useGithub, useGithubReadiness, useHiddenOrgs, useRepos } from '@/api/hooks'
 import { dirsQuery } from '@/api/queries'
-import { grant, grantPage, hiddenNote, REFUSED } from '@/lib/github'
+import { grant, grantPage, REFUSED } from '@/lib/github'
 import { derive } from '@/lib/name'
 import { at } from '@/lib/time'
+import { Chevron, Control, Icon, Label } from '@/composer/Control'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { Menu, MenuLinkItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
@@ -37,35 +39,42 @@ const notSignedIn = {
   describe: () => 'Nothing is signed in to Yantra, so no repository can be listed.',
 }
 
-function SignedIn(props: { login: string | null; asked: boolean }) {
-  return (
-    <p className="ns__signed">
-      <Text scale="body-medium" tone="variant">
-        github.com · {props.login ?? 'signed in'} · signed in to Yantra ·{' '}
-        {props.asked ? 'private repositories included' : 'GitHub not asked yet'}
-      </Text>
-      <Link className="ns__link m3-hit" params={{ category: 'providers' }} to="/settings/$category">
-        Use another account
-      </Link>
-    </p>
-  )
-}
-
-/** The grant link always shows, because GitHub cannot name every organisation that hides. A read
- *  that did not answer draws no note: the list above it still works. */
-function Hidden(props: { clientId: string | null }) {
+/** The one place the account shows: the chip names the login, the menu holds what it can do.
+ *  The grant link always shows, because GitHub cannot name every organisation that hides. A
+ *  hidden-org read that did not answer draws no line: the list below it still works. */
+function Account(props: { login: string | null; asked: boolean; clientId: string | null }) {
   const hidden = useHiddenOrgs()
+  const login = props.login ?? 'signed in'
+  const named = hidden.looked === 'ok' && hidden.data.length > 0 ? hidden.data : null
   return (
-    <div className="ns__hidden">
-      {hidden.looked === 'ok' ? (
-        <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-          {hiddenNote(hidden.data)}
+    <Menu>
+      <MenuTrigger render={<Control aria-label={`GitHub account: ${login}`} className="ns__account" />}>
+        <Icon icon={GitBranch} />
+        <Label>{login}</Label>
+        <Chevron />
+      </MenuTrigger>
+      <MenuPopup align="start" aria-label="GitHub account">
+        <Text className="ns__status" render={<p />} scale="body-medium" tone="variant">
+          {props.asked ? 'Private repositories included' : 'GitHub not asked yet'}
         </Text>
-      ) : null}
-      <a className="ns__link ns__grant m3-hit" href={grantPage(props.clientId)} rel="noreferrer" target="_blank">
-        Grant access on GitHub
-      </a>
-    </div>
+        <MenuLinkItem
+          aria-describedby={named ? 'ns-hidden-orgs' : undefined}
+          href={grantPage(props.clientId)}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Grant access on GitHub
+        </MenuLinkItem>
+        {named ? (
+          <Text className="ns__status" id="ns-hidden-orgs" render={<p />} scale="body-small" tone="variant">
+            No repository from {named.join(', ')}
+          </Text>
+        ) : null}
+        <MenuLinkItem render={<Link params={{ category: 'providers' }} to="/settings/$category" />}>
+          Use another account
+        </MenuLinkItem>
+      </MenuPopup>
+    </Menu>
   )
 }
 
@@ -163,7 +172,7 @@ function Rows(props: { form: SessionForm; values: Values; repos: Repo[]; query: 
   )
 }
 
-/** The GitHub half of step 2: the signed-in line, the search, and the rows. */
+/** The GitHub half of step 2: the account chip, the search, and the rows. */
 export function GithubRepos(props: { form: SessionForm; values: Values }) {
   const { form, values } = props
   const github = useGithub()
@@ -219,8 +228,7 @@ export function GithubRepos(props: { form: SessionForm; values: Values }) {
 
   return (
     <div className="ns__github">
-      <SignedIn asked={held.kind === 'accepted'} login={github.data?.login ?? null} />
-      <Hidden clientId={github.data?.client_id ?? null} />
+      <Account asked={held.kind === 'accepted'} clientId={github.data?.client_id ?? null} login={github.data?.login ?? null} />
       <TextField
         autoComplete="off"
         label="Search your repositories"

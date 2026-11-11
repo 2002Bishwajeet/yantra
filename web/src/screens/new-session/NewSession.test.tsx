@@ -18,6 +18,14 @@ const type = (label: string | RegExp, value: string) =>
 
 const press = (name: string | RegExp) => fireEvent.click(screen.getByRole('button', { name }))
 
+const chooseLocal = () => fireEvent.click(screen.getByRole('radio', { name: /Local directory/ }))
+
+/** The account chip holds the grant status and both links; nothing in it shows until it opens. */
+const openAccount = async () => {
+  fireEvent.click(screen.getByRole('button', { name: /^GitHub account/ }))
+  return screen.findByRole('menu')
+}
+
 /** Steps 1 and 2 of the walk: a machine, GitHub, and the repository that is
  *  already on it. */
 async function toStepThree(answers: Answers = {}) {
@@ -213,7 +221,7 @@ describe('step 2, where the code comes from', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
   })
 
-  it('sends nobody to GitHub without a grant, and draws GitLab as later', async () => {
+  it('sends nobody to GitHub without a grant, and draws no GitLab control', async () => {
     mountNew('desktop', '/new', { 'GET /api/github': [200, contract.disconnected] })
     await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
@@ -222,7 +230,8 @@ describe('step 2, where the code comes from', () => {
     expect(screen.getByRole('link', { name: 'Sign in in Settings' }).getAttribute('href')).toBe(
       '/settings/providers',
     )
-    expect(screen.getByRole('button', { name: /GitLab/ })).toHaveProperty('disabled', true)
+    expect(screen.queryByText(/GitLab/)).toBeNull()
+    expect(screen.getAllByRole('radio').map((one) => one.textContent)).toEqual(['GitHub', 'Local directory'])
     expect(screen.getByRole('status').textContent).toBe('')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
@@ -250,8 +259,9 @@ describe('step 2, where the code comes from', () => {
     press('cachyos-g14')
     press('Continue')
     expect(await screen.findByRole('list', { name: 'Repositories' })).toBeTruthy()
-    expect(screen.getByText(/GitHub not asked yet/)).toBeTruthy()
-    expect(screen.queryByText(/private repositories included/)).toBeNull()
+    const menu = await openAccount()
+    expect(within(menu).getByText('GitHub not asked yet')).toBeTruthy()
+    expect(screen.queryByText(/private repositories included/i)).toBeNull()
   })
 
   it('still says private repositories are included for an accepted grant', async () => {
@@ -259,7 +269,24 @@ describe('step 2, where the code comes from', () => {
     await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
-    expect(await screen.findByText(/private repositories included/)).toBeTruthy()
+    await screen.findByRole('list', { name: 'Repositories' })
+    const menu = await openAccount()
+    expect(within(menu).getByText('Private repositories included')).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Grant access on GitHub' })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Use another account' }).getAttribute('href')).toBe(
+      '/settings/providers',
+    )
+  })
+
+  it('shows the login once, on the chip, and no separate signed-in line', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    await screen.findByRole('list', { name: 'Repositories' })
+    expect(screen.getAllByText(contract.github.login as string)).toHaveLength(1)
+    expect(screen.queryByText(/signed in to Yantra/)).toBeNull()
+    expect(screen.queryByText(/Use another account/)).toBeNull()
   })
 
   it('does not tell anyone to choose from a list that failed to load', async () => {
@@ -289,12 +316,12 @@ describe('step 2, where the code comes from', () => {
       'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.abc123' }],
       'GET /api/repos/hidden': [200, { ...contract.hiddenOrgs, data: ['acme-corp', 'utopia-php'] }],
     })
-    expect(
-      await screen.findByText(
-        'Yantra sees no repository from acme-corp, utopia-php. An organisation that restricts OAuth apps hides them. If your membership in one is private, it is not in this list.',
-      ),
-    ).toBeTruthy()
-    const link = screen.getByRole('link', { name: 'Grant access on GitHub' })
+    const menu = await openAccount()
+    const link = within(menu).getByRole('menuitem', { name: 'Grant access on GitHub' })
+    expect(within(menu).getByText('No repository from acme-corp, utopia-php')).toBeTruthy()
+    expect(link.getAttribute('aria-describedby')).toBe(
+      within(menu).getByText('No repository from acme-corp, utopia-php').id,
+    )
     expect(link.getAttribute('href')).toBe('https://github.com/settings/connections/applications/Iv1.abc123')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noreferrer')
@@ -305,15 +332,17 @@ describe('step 2, where the code comes from', () => {
       'GET /api/github': [200, { ...contract.github, client_id: null }],
       'GET /api/repos/hidden': [200, contract.hiddenOrgs],
     })
-    expect((await screen.findByRole('link', { name: 'Grant access on GitHub' })).getAttribute('href')).toBe(
+    const menu = await openAccount()
+    expect(within(menu).getByRole('menuitem', { name: 'Grant access on GitHub' }).getAttribute('href')).toBe(
       'https://github.com/settings/applications',
     )
   })
 
-  it('still links the grant page when it can name no organisation', async () => {
+  it('still links the grant page, with no organisation line, when it can name none', async () => {
     await toRepos({ 'GET /api/repos/hidden': [200, { ...contract.hiddenOrgs, data: [] }] })
-    expect(await screen.findByText(/If your membership there is private, Yantra cannot name it\./)).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Grant access on GitHub' })).toBeTruthy()
+    const menu = await openAccount()
+    expect(within(menu).getByRole('menuitem', { name: 'Grant access on GitHub' })).toBeTruthy()
+    expect(within(menu).queryByText(/No repository from/)).toBeNull()
     expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
   })
 
@@ -321,20 +350,16 @@ describe('step 2, where the code comes from', () => {
     ['failed', [200, { looked: 'failed', age_seconds: 0, error: 'GitHub answered 502 to /user/orgs' }]],
     ['never', [200, { looked: 'never' }]],
     ['refused', [500, 'boom']],
-  ])('keeps the rows and the grant link, with no note, when the hidden read is %s', async (_, reply) => {
+  ])('keeps the rows and the grant link, with no organisation line, when the hidden read is %s', async (_, reply) => {
     await toRepos({
       'GET /api/github': [200, { ...contract.github, client_id: 'Iv1.abc123' }],
       'GET /api/repos/hidden': reply,
     })
     expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
-    // The answer has arrived; give it the frame it needs to draw anything.
-    await new Promise((done) => setTimeout(done, 50))
-    expect(screen.queryByText(/restricts OAuth apps/)).toBeNull()
-    expect(screen.queryByText(/private, Yantra cannot name it|it is not in this list/)).toBeNull()
-    const link = await screen.findByRole('link', { name: 'Grant access on GitHub' })
-    await waitFor(() =>
-      expect(link.getAttribute('href')).toBe('https://github.com/settings/connections/applications/Iv1.abc123'),
-    )
+    const menu = await openAccount()
+    expect(within(menu).queryByText(/No repository from/)).toBeNull()
+    const link = within(menu).getByRole('menuitem', { name: 'Grant access on GitHub' })
+    expect(link.getAttribute('href')).toBe('https://github.com/settings/connections/applications/Iv1.abc123')
   })
 
   it('browses the machine, and makes a folder where there is none', async () => {
@@ -346,8 +371,8 @@ describe('step 2, where the code comes from', () => {
     await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
-    await screen.findByRole('button', { name: /Local directory/ })
-    press(/Local directory/)
+    await screen.findByRole('radio', { name: /Local directory/ })
+    chooseLocal()
 
     const folders = within(await screen.findByRole('list', { name: 'Folders' }))
     fireEvent.click(folders.getByRole('button', { name: /^Github/ }))
@@ -378,8 +403,8 @@ describe('step 2, the local browser', () => {
     await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
-    await screen.findByRole('button', { name: /Local directory/ })
-    press(/Local directory/)
+    await screen.findByRole('radio', { name: /Local directory/ })
+    chooseLocal()
     // Not awaited: a refused listing draws no list.
     const folders = within(document.body)
     return { asked, sent, folders }
@@ -504,17 +529,44 @@ describe('step 2, the local browser', () => {
 })
 
 describe('step 3, what opens in the session', () => {
-  it('starts Claude unless a command is typed, and says what will happen', async () => {
+  it('starts Claude unless a command is typed, and adds no list of what will happen', async () => {
     await toStepThree()
-    expect(screen.getByRole('heading', { name: 'When you press Create and open' })).toBeTruthy()
-    expect(screen.getByText(/^It opens a session in/)).toBeTruthy()
-    expect(screen.getByText(/Claude starts there/)).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: /Create and open/ })).toBeNull()
+    expect(screen.queryByText(/saves the workspace|\.toml/)).toBeNull()
+    expect(screen.getByText('Claude Code starts in this folder.')).toBeTruthy()
+    // The chosen repository is already on the machine, so there is nothing to add.
+    expect(screen.queryByText(/first\.$/)).toBeNull()
 
     press(/Your command/)
+    expect(screen.getByText('A secret stays a reference; Yantra never holds it.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Create and open' })).toHaveProperty('disabled', true)
     type('Command', 'just dev')
-    await waitFor(() => expect(screen.getByText(/^just dev runs there/)).toBeTruthy())
     expect(screen.getByRole('button', { name: 'Create and open' })).toHaveProperty('disabled', false)
+  })
+
+  it('says it clones first when the repository is not on the machine', async () => {
+    mountNew('desktop', '/new')
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    const rows = within(await screen.findByRole('list', { name: 'Repositories' }))
+    fireEvent.click(await rows.findByRole('button', { name: /2002Bishwajeet\/scratch/ }))
+    press('Continue')
+    expect(await screen.findByText('Clones 2002Bishwajeet/scratch first.')).toBeTruthy()
+  })
+
+  it('does not repeat the name or draw a "So far" card on the phone Start step', async () => {
+    mountNew('phone', '/new')
+    expect(await screen.findAllByRole('heading', { level: 1, name: 'New session' })).not.toHaveLength(0)
+    type('Name', 'quiet-otter')
+    press('cachyos-g14')
+    press('Continue')
+    await screen.findByText('On this machine')
+    press(/2002Bishwajeet\/yantra/)
+    press('Continue')
+    await screen.findByText('What opens in the session')
+    expect(screen.queryByRole('heading', { name: 'So far' })).toBeNull()
+    expect(screen.getAllByText('quiet-otter')).toHaveLength(1)
   })
 
   it('heads the dialog with the machine and the folder as the list draws it', async () => {

@@ -28,13 +28,6 @@ export const grantPage = (clientId: string | null) =>
     ? `https://github.com/settings/connections/applications/${encodeURIComponent(clientId)}`
     : 'https://github.com/settings/applications'
 
-/** The note never claims a full list: GitHub cannot name a private membership in an organisation
- *  that restricts the app, and an organisation with no repository is named too. */
-export const hiddenNote = (orgs: string[]) =>
-  orgs.length === 0
-    ? 'An organisation that restricts OAuth apps hides its repositories from Yantra. If your membership there is private, Yantra cannot name it.'
-    : `Yantra sees no repository from ${orgs.join(', ')}. An organisation that restricts OAuth apps hides them. If your membership in one is private, it is not in this list.`
-
 export const REFUSED = 'GitHub refused the grant'
 
 /** Why a sign-in ended with no grant: the OAuth App opted in to token expiry. */

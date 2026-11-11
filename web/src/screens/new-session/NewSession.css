@@ -234,47 +234,11 @@ span.ns__toggle {
   gap: 8px;
 }
 
-.ns__place {
-  flex: none;
-  max-width: 45%;
-  text-align: right;
-  white-space: normal;
-  color: var(--md-sys-color-on-surface-variant);
-}
-
 .ns__github,
 .ns__local {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.ns__signed {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 0;
-}
-
-.ns__link {
-  font: var(--md-sys-typescale-label-large);
-  letter-spacing: var(--md-sys-typescale-label-large-tracking);
-  color: var(--md-sys-color-primary);
-}
-
-.ns__hidden {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-/* A touch target of 44 px, not the line box of the label. */
-.ns__grant {
-  display: inline-flex;
-  align-items: center;
-  min-block-size: 44px;
 }
 
 .ns__crumbs ol {
@@ -370,46 +334,6 @@ span.ns__crumb {
 .ns__because {
   white-space: pre-wrap;
   color: var(--md-sys-color-on-surface-variant);
-}
-
-/* Step 3. */
-
-.ns__happen {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding-left: 22px;
-}
-
-.ns__recap-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-}
-
-.ns__recap-list > div {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.ns__recap-list dt {
-  flex: none;
-  width: 72px;
-  font: var(--md-sys-typescale-label-medium);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.ns__recap-list dd {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
 }
 
 /* The starting screen. */
@@ -513,11 +437,6 @@ span.ns__crumb {
   background: var(--md-sys-color-surface);
 }
 
-[data-shell="phone"] .ns__place {
-  max-width: none;
-  text-align: left;
-}
-
 [data-shell="phone"] .ns__list > li > .m3-row,
 [data-shell="phone"] .ns__node > .m3-row {
   flex-wrap: wrap;
@@ -561,12 +480,6 @@ span.ns__crumb {
   white-space: nowrap;
 }
 
-.ns__repo .m3-row__headline,
-.ns__repo .m3-row__supporting {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
 .ns__foot {
   flex-wrap: wrap;
   align-items: center;
@@ -583,12 +496,6 @@ span.ns__crumb {
   flex-basis: 100%;
 }
 
-.ns__detail {
-  display: block;
-  font-size: var(--md-sys-typescale-body-small-size, 0.75rem);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
 .ns__known {
   flex: 1 1 100%;
   display: flex;
@@ -597,4 +504,42 @@ span.ns__crumb {
   gap: 8px 12px;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.ns__source {
+  width: 100%;
+}
+
+.ns__source .m3-segment {
+  height: 48px;
+}
+
+/* The chip is the one touch target for the account: 48 px, the login clipped. */
+.ns__account {
+  align-self: flex-start;
+  max-width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.ns__account .composer-control__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ns__status {
+  margin: 0;
+  padding: 8px 16px;
+}
+
+/* A suggestion is one line; the full text stays in the DOM for a reader. */
+.ns__suggest .ns__note {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
