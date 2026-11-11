@@ -211,6 +211,7 @@ has no field for a machine or a repo, so widening what a public relay is told is
 destination is a `Relay`, whose `Debug` is hand-written because both halves of it are secrets — the
 token by §B4 and Q5, and the topic because on ntfy.sh the topic *is* the password. No error below it
 carries either, which is why a failure that could quote the URL back is reported by kind instead.
+A chat push names its thread by the store's title, never by its id, and its `Click` header links to the thread (Y-669).
 
 **Q16 was answered wider than it was asked** (Y-147): the relay is a general publish channel and this
 notifier is only its first caller, so a body is whatever the caller passed and Yantra composes

@@ -190,6 +190,7 @@ impl PrNote {
             body: self.said(),
             title: Some(self.phase.headline().to_owned()),
             priority: None,
+            click: None,
         }
     }
 }

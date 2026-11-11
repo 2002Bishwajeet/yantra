@@ -22,6 +22,8 @@ export type Entry = {
   commands?: string[]
   /** A GitHub item opens on GitHub. */
   href?: string
+  /** How many `unreachable` events for one machine this row folds (Y-669). */
+  count?: number
 }
 
 /** `notificationsQuery` types the body as a bare list while api.ts says
@@ -123,6 +125,43 @@ function ofEvent(event: Event, index: number): Entry {
   }
 }
 
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/** `14:05`, with the day in front when it is not `newest`'s day. */
+function since(first: number, newest: number): string {
+  const at = new Date(first * 1000)
+  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  if (at.toDateString() === new Date(newest * 1000).toDateString()) return clock
+  return `${at.getDate()} ${at.toLocaleDateString(undefined, { month: 'short' })}, ${clock}`
+}
+
+/** A machine that drops off the tailnet again and again is one row, not eighty:
+ *  the newest event, counted. `events` arrive in any order. */
+function folded(events: Event[]): Entry[] {
+  const gone = new Map<string, { newest: Event; first: number; count: number }>()
+  const rest: Event[] = []
+  for (const event of events) {
+    if (event.kind !== 'unreachable' || !event.machine) {
+      rest.push(event)
+      continue
+    }
+    const seen = gone.get(event.machine)
+    gone.set(event.machine, {
+      newest: seen && seen.newest.at >= event.at ? seen.newest : event,
+      first: Math.min(seen?.first ?? event.at, event.at),
+      count: (seen?.count ?? 0) + 1,
+    })
+  }
+  const rows = rest.map(ofEvent)
+  for (const [machine, { newest, first, count }] of gone) {
+    const entry = { ...ofEvent(newest, 0), id: `unreachable-${machine}-${newest.at}`, count }
+    rows.push(
+      count === 1 ? entry : { ...entry, supporting: `${count} times since ${since(first, newest.at)} · ${newest.said}` },
+    )
+  }
+  return rows
+}
+
 export function merge(events: Event[], attention: Attention | null): Entry[] {
   const github = attention
     ? [
@@ -148,7 +187,7 @@ export function merge(events: Event[], attention: Attention | null): Entry[] {
         ),
       ]
     : []
-  return [...events.map(ofEvent), ...github].toSorted((a, b) => b.at - a.at)
+  return [...folded(events), ...github].toSorted((a, b) => b.at - a.at)
 }
 
 export const unseen = (entries: Entry[], seenAt: number | null) =>

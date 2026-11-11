@@ -536,6 +536,7 @@ fn paused(name: &str) -> notify::Message {
         ),
         title: Some("A room waits for you".to_owned()),
         priority: None,
+        click: None,
     }
 }
 
