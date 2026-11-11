@@ -116,6 +116,10 @@ pub enum Error {
     #[error("{} names no channel: it must hold stable or nightly", path.display())]
     NotAChannel { path: PathBuf },
 
+    /// A box installed before Y-662 has no file, and only root may create one in `/etc/yantra`.
+    #[error("{} is not there, and only root can create it. Run this once on the box: sudo yantra update --channel {channel}", path.display())]
+    ChannelMissing { path: PathBuf, channel: Channel },
+
     #[error("could not write {}", path.display())]
     ChannelUnwritable {
         path: PathBuf,
@@ -150,7 +154,16 @@ pub fn set_channel(path: &Path, channel: Channel) -> Result<(), Error> {
         .mode(0o644)
         .open(path)
         .and_then(|mut file| writeln!(file, "{channel}"))
-        .map_err(unwritable)
+        .map_err(|source| {
+            if source.kind() == std::io::ErrorKind::PermissionDenied && !path.exists() {
+                Error::ChannelMissing {
+                    path: path.to_owned(),
+                    channel,
+                }
+            } else {
+                unwritable(source)
+            }
+        })
 }
 
 /// The daemon's half: an empty file the path unit watches. The paths are
@@ -314,6 +327,29 @@ mod tests {
         assert!(
             matches!(refused, Err(Error::ChannelUnwritable { .. })),
             "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn a_missing_channel_in_a_directory_only_root_writes_names_the_command() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("channel-root");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).expect("chmod");
+        let refused = set_channel(&dir.join("channel"), Channel::Nightly);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        if refused.is_ok() {
+            return; // root ignores the mode, so this proves nothing as root.
+        }
+        let refused = refused.expect_err("refused");
+        assert!(
+            matches!(refused, Error::ChannelMissing { .. }),
+            "{refused:?}"
+        );
+        assert!(
+            refused
+                .to_string()
+                .contains("sudo yantra update --channel nightly"),
+            "{refused}"
         );
     }
 

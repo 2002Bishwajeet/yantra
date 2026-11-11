@@ -2061,7 +2061,9 @@ fn update_next(err: &update::Error) -> &'static str {
         update::Error::ChannelUnwritable { .. } | update::Error::NotAChannel { .. } => {
             "  as root it can be written: sudo yantra update --channel stable\n"
         }
-        update::Error::NotInstalled { .. }
+        // Its sentence already names the command.
+        update::Error::ChannelMissing { .. }
+        | update::Error::NotInstalled { .. }
         | update::Error::Io(_)
         | update::Error::Unreadable { .. }
         | update::Error::UnknownStep { .. }

@@ -1394,9 +1394,9 @@ async fn rechannel<I: Inventory + Clone + Send + Sync + 'static>(
 
 fn from_update(error: &update::Error) -> StatusCode {
     match error {
-        update::Error::NotInstalled { .. } | update::Error::ChannelUnwritable { .. } => {
-            StatusCode::CONFLICT
-        }
+        update::Error::NotInstalled { .. }
+        | update::Error::ChannelMissing { .. }
+        | update::Error::ChannelUnwritable { .. } => StatusCode::CONFLICT,
         update::Error::NoPrivilege { .. }
         | update::Error::Failed { .. }
         | update::Error::Io(_)
