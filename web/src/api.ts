@@ -571,6 +571,17 @@ export type ThreadState = {
   since: number | null
 }
 
+/** One hit of `GET /api/threads?q=` (Y-689): the daemon's store, so a thread of an offline
+ *  machine is found. `status` is the store's word; `seen` is unix milliseconds. */
+export type ThreadFound = {
+  workspace: string
+  machine: string
+  id: string
+  title: string | null
+  status: 'running' | 'waiting' | 'idle' | 'ended' | 'gone'
+  seen: number | null
+}
+
 /** One entry of `POST /api/workspaces/{name}/threads`. `issue` is
  *  `owner/repo#n` for a thread opened from an issue. `title` is the first line
  *  of the first prompt, or `#n` and the issue's title; `from` is the repository

@@ -43,6 +43,7 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/commands` | **None**: a terminal cannot mean it. Claude's slash commands for the Chat composer's `/`, for `{harness, thread?}`; an ACP harness gets `[]`, since its list comes on the chat socket (Y-563, a `POST` for ADR-0019's reason) |
 | `POST /api/workspaces/{name}/threads` | `yantra chat ls` (a `POST` because it asks the machine and GitHub, ADR-0019). Each thread answers `id`, `branch`, `worktree`, `issue`, `title`, `from`, `state`, `since` and `pr` |
 | `GET /api/workspaces/{name}/threads` | The thread menu's live state: `[{id, state, since}]` for the threads the daemon holds, from memory with no ssh (Y-649) |
+| `GET /api/threads?q=` | **None**: a terminal cannot mean it. The palette's thread search: `[{workspace, machine, id, title, status, seen}]`, the 20 newest whose title holds `q`, from the thread store with no ssh, so a thread of an offline machine is found. Home threads are left out until `/w/$name` opens them (Y-689, Y-699). `503` when the daemon keeps no store |
 | `POST /api/workspaces/{name}/threads/new` | `yantra chat new --issue` |
 | `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |
 | `POST /api/workspaces/{name}/threads/{thread}/commit` | `yantra commit [-m MSG]` |

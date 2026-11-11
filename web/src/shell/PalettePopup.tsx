@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
-import { Cpu, FileText, Play, Search } from 'lucide-react'
+import { Cpu, FileText, MessageSquare, Play, Search } from 'lucide-react'
 import type { Item } from '@/api'
+import { useThreadSearch } from '@/api/queries'
 import { loaded, useAgents, useAttention, useMachines, useWorkspaces, type Reading } from '@/api/hooks'
 import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
 import { Kbd } from '@/m3/kbd/Kbd'
@@ -12,7 +13,9 @@ import { Eyebrow } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { IconTile, Tile } from '@/m3/tile/Tile'
 import { StartSession } from '@/screens/fleet/StartSession'
+import { useTick } from '@/useTick'
 import { keyOf, type LoopId } from '@/screens/session/keys'
+import { elapsed } from '@/screens/session/threads'
 import { KeyboardHelp } from './KeyboardHelp'
 import { useLoopCommands } from './loopCommands'
 import { phrase } from './phrase'
@@ -96,6 +99,14 @@ export function PalettePopup(props: {
   const agents = useAgents(workspaces)
   const machines = useMachines()
   const attention = useAttention()
+  // Y-689: the store is asked once a person pauses on some text, and only while the palette is open.
+  const [asked, setAsked] = useState('')
+  useEffect(() => {
+    const timer = setTimeout(() => setAsked(query), 150)
+    return () => clearTimeout(timer)
+  }, [query])
+  const now = useTick(open)
+  const threads = useThreadSearch(asked.trim(), open && asked.trim() !== '')
   const loop = useLoopCommands()
   const [starting, setStarting] = useState<Item | null>(null)
   // A verb waits for the palette to finish closing, so its dialog is not opened under the focus the palette hands back.
@@ -192,6 +203,33 @@ export function PalettePopup(props: {
           : [],
     },
     {
+      label: 'Threads',
+      entries: (query.trim() === '' ? [] : (threads.data ?? [])).map((one) => {
+        const machine = machines.looked === 'ok' ? machines.data.find((m) => m.name === one.machine) : undefined
+        const away =
+          one.status === 'gone'
+            ? 'gone'
+            : machine && !machine.online
+              ? one.seen === null
+                ? 'offline'
+                : `offline · seen ${elapsed(one.seen, now)} ago`
+              : null
+        const where = `${one.workspace} · ${one.machine}`
+        return {
+          key: `t:${one.workspace}:${one.id}`,
+          label: one.title ?? 'Untitled thread',
+          supporting: away ? `${where} · ${away}` : where,
+          terms: where,
+          go: () =>
+            void navigate({
+              to: '/w/$name',
+              params: { name: one.workspace },
+              search: { view: 'chat', thread: one.id },
+            }),
+        }
+      }),
+    },
+    {
       label: 'Machines',
       entries:
         machines.looked === 'ok'
@@ -240,9 +278,11 @@ export function PalettePopup(props: {
 
   const flat = groups.flatMap((group) => group.entries)
   const current = Math.min(active, Math.max(flat.length - 1, 0))
-  const notes = [unread('Workspaces', workspaces), unread('Machines', machines)].filter(
-    (one) => one !== null,
-  )
+  const notes = [
+    unread('Workspaces', workspaces),
+    unread('Machines', machines),
+    threads.isError ? 'Threads could not be read.' : null,
+  ].filter((one) => one !== null)
 
   // 2.4.7: the list is 50vh and scrolls, so the arrow keys have to bring the
   // option they moved to with them. Optional because jsdom has no such method.
@@ -315,7 +355,15 @@ export function PalettePopup(props: {
                         <Tile name={entry.label} />
                       ) : (
                         <IconTile>
-                          {entry.key.startsWith('m:') ? <Cpu /> : entry.key.startsWith('c:') ? <Play /> : <FileText />}
+                          {entry.key.startsWith('m:') ? (
+                            <Cpu />
+                          ) : entry.key.startsWith('t:') ? (
+                            <MessageSquare />
+                          ) : entry.key.startsWith('c:') ? (
+                            <Play />
+                          ) : (
+                            <FileText />
+                          )}
                         </IconTile>
                       )}
                       <RowText
@@ -343,7 +391,7 @@ export function PalettePopup(props: {
           </div>
           <div className="palette__foot">
             <span>
-              {notes.length ? notes.join(' ') : 'Finds a place, or runs a step of the coding loop.'}
+              {notes.length ? notes.join(' ') : 'Finds a place or a thread by its title, or runs a step of the coding loop.'}
             </span>
             <span className="palette__legend" id={legendId}>
               <Kbd aria-hidden="true">↑↓</Kbd>

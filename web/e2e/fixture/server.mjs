@@ -549,13 +549,27 @@ const routes = [
           )]
         : [404, notFound(name)],
   ],
+  // Y-689: the palette's thread search, from the store. The first hit is the chat's thread, on thinkpad, which is offline.
+  [
+    'GET',
+    /^\/api\/threads$/,
+    (_s, _params, _sent, _request, url) => {
+      const q = (url.searchParams.get('q') ?? '').toLowerCase()
+      return [
+        200,
+        contract.threadsFound
+          .filter((one) => (one.title ?? '').toLowerCase().includes(q))
+          .map((one, at) => (at === 0 ? { ...one, id: THREAD, workspace: 'cargo-zig', machine: 'thinkpad' } : one)),
+      ]
+    },
+  ],
   // Y-649: what each thread is doing, which the thread menu polls while it is open.
   [
     'GET',
     /^\/api\/workspaces\/([^/]+)\/threads$/,
     (s, [name]) =>
       findWorkspace(s, name)
-        ? [200, contract.threadStates.map((one, at) => (at === 0 ? { ...one, id: THREAD } : one))]
+        ? [200, contract.threadStates.map((one, at) => (at === 0 ? { ...one, id: THREAD, workspace: 'cargo-zig', machine: 'thinkpad' } : one))]
         : [404, notFound(name)],
   ],
   // Y-493: Y-492's and Y-449's git routes. The scenario `gitfails` refuses each as the daemon does.

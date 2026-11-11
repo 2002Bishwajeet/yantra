@@ -44,8 +44,9 @@
 .palette__foot {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 12px;
+  gap: 4px 12px;
   padding: 8px 12px 0;
   border-top: 1px solid var(--md-sys-color-outline-variant);
   font: var(--md-sys-typescale-body-small);
