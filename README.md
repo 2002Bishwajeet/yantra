@@ -72,7 +72,8 @@ reads which release is current, and it verifies what it fetched against `SHA256S
 it asks before it installs Tailscale and turns on HTTPS. Then it starts the units and prints the
 dashboard's address ([docs/appliance.md](docs/appliance.md)). `install.sh --uninstall` reverses it.
 On a Mac, the same script installs `yantra-agent` alone, as a LaunchAgent that needs no root
-([docs/appliance.md](docs/appliance.md#on-a-mac)).
+([docs/appliance.md](docs/appliance.md#on-a-mac)). On a joined Linux machine, `install.sh --agent`
+updates `yantra-agent` alone ([docs/appliance.md](docs/appliance.md#update-an-agent)).
 A browser that opens the plain address on `:7717` moves to the HTTPS address on `:8443`, where the
 microphone works.
 

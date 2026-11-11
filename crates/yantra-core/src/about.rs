@@ -20,6 +20,15 @@ pub fn newer(published: &crate::github::Release) -> bool {
     newer_than(published, VERSION)
 }
 
+/// Whether `version` orders below `than`. Either one unparsable is not older,
+/// so a caller warns only on versions it can read (Y-713).
+pub fn older(version: &str, than: &str) -> bool {
+    use crate::github::Release;
+    Release::parse(version)
+        .zip(Release::parse(than))
+        .is_some_and(|(version, than)| than.is_newer_than(&version))
+}
+
 fn newer_than(published: &crate::github::Release, running: &str) -> bool {
     // An unparsable running version orders below every release, so a check
     // says *newer* rather than *current* when it cannot tell.
@@ -52,6 +61,17 @@ mod tests {
             !newer_than(&release("0.10.3"), nightly),
             "stable below a nightly"
         );
+    }
+
+    #[test]
+    fn older_orders_nightlies_and_ignores_what_it_cannot_read() {
+        assert!(older("0.3.2", "0.11.0"));
+        assert!(!older("0.11.0", "0.11.0"));
+        assert!(!older("0.12.0", "0.11.0"));
+        assert!(older("0.11.0", "0.11.1-nightly.20261111000000.abc1234"));
+        assert!(!older("0.11.1-nightly.20261111000000.abc1234", "0.11.0"));
+        assert!(!older("garbage", "0.11.0"));
+        assert!(!older("0.3.2", "garbage"));
     }
 
     #[test]

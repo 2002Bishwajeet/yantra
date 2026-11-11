@@ -40,6 +40,7 @@ use yantra_core::up;
 use yantra_core::update;
 use yantra_core::workspace::{self, Listing};
 
+mod behind;
 mod dash;
 mod jobs;
 mod mcp;
@@ -346,6 +347,31 @@ enum Command {
     },
 }
 
+impl Command {
+    /// The yantrad a command names, which is the one its version is checked against.
+    fn daemon(&self) -> Option<&str> {
+        match self {
+            Self::Mcp { daemon }
+            | Self::Why { daemon, .. }
+            | Self::Dash { daemon, .. }
+            | Self::Room {
+                action:
+                    RoomAction::New { daemon, .. }
+                    | RoomAction::Ls { daemon }
+                    | RoomAction::Show { daemon, .. }
+                    | RoomAction::Edit { daemon, .. }
+                    | RoomAction::Rm { daemon, .. }
+                    | RoomAction::Resume { daemon, .. }
+                    | RoomAction::Post { daemon, .. },
+            } => Some(daemon),
+            Self::Chat {
+                action: ChatAction::New { daemon, .. } | ChatAction::Rm { daemon, .. },
+            } => daemon.as_deref(),
+            _ => None,
+        }
+    }
+}
+
 /// Spelled out rather than a bare bool so that adding a second agent is a new
 /// variant, not a new flag — even though the guardrail says that day is far off.
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -599,7 +625,13 @@ enum LsTarget {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    match Cli::parse().command {
+    let command = Cli::parse().command;
+    if let Some(daemon) = command.as_ref().and_then(Command::daemon)
+        && let Some(line) = behind::warning(daemon).await
+    {
+        eprintln!("{line}");
+    }
+    match command {
         Some(Command::Up { workspace, agent }) => up(&workspace, agent).await,
         Some(Command::New {
             workspace,
@@ -3624,6 +3656,40 @@ mod tests {
             Some(Command::ForgetHostKey { machine }) if machine == "pi"
         ));
         assert!(Cli::try_parse_from(["yantra", "forget-host-key"]).is_err());
+    }
+
+    /// Y-713: these are the commands whose version is checked against yantrad.
+    #[test]
+    fn a_command_that_names_a_daemon_says_which() {
+        let daemon = |args: &[&str]| {
+            let parsed = Cli::try_parse_from(args).expect("the command parses");
+            parsed
+                .command
+                .as_ref()
+                .and_then(Command::daemon)
+                .map(str::to_owned)
+        };
+        let at = Some("http://x:7717".to_owned());
+        assert_eq!(daemon(&["yantra", "mcp", "--daemon", "http://x:7717"]), at);
+        assert_eq!(daemon(&["yantra", "dash", "--daemon", "http://x:7717"]), at);
+        assert_eq!(
+            daemon(&["yantra", "room", "ls", "--daemon", "http://x:7717"]),
+            at
+        );
+        assert_eq!(
+            daemon(&[
+                "yantra",
+                "room",
+                "post",
+                "r",
+                "hi",
+                "--daemon",
+                "http://x:7717"
+            ]),
+            at
+        );
+        assert_eq!(daemon(&["yantra", "about"]), None);
+        assert_eq!(daemon(&["yantra", "chat", "rm", "w", "t"]), None);
     }
 
     #[test]

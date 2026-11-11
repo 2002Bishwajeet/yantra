@@ -85,6 +85,16 @@ describe('the check name table', () => {
     expect(sessionNeeds('no-sudo')).toBe(false)
   })
 
+  /** Y-713: api.rs `heard_from`'s sentence for an older agent, word for word. */
+  it('gives an older agent the command in its detail, and an absent one the join text', () => {
+    const LINUX = 'curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --agent'
+    const older = `yantra-agent here is v0.3.2, older than this daemon's v0.11.0. Update it on laptop: \`${LINUX}\``
+    expect(fixOf({ check: 'heartbeat', detail: older }, 'laptop')).toEqual({ by: 'command', command: LINUX, where: 'machine' })
+    const elsewhere = "yantra-agent here sends no version, older than this daemon's v0.11.0. Update it on winbox."
+    expect(fixOf({ check: 'heartbeat', detail: elsewhere }, 'winbox')?.by).toBe('hand')
+    expect(fixOf({ check: 'heartbeat', detail: 'no report since Yantra started' }, 'pi')?.by).toBe('hand')
+  })
+
   /** Y-619: on a Mac with no login tmux server, both keychain checks are
    *  fixed in Terminal there, and neither is a sign-in. */
   it('gives a Mac with no login tmux server the Terminal command, not a sign-in', () => {

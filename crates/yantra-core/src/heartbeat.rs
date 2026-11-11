@@ -1,4 +1,5 @@
-//! The heartbeat payload — seven fields, every 10 s, from each machine to `yantrad`.
+//! The heartbeat payload — seven fields and an optional `version`, every 10 s, from each machine
+//! to `yantrad`.
 //!
 //! ```json
 //! { "sent_at": "2026-07-31T18:30:00Z", "arch": "x86_64", "labels": ["gpu", "cuda", "docker"],
@@ -12,10 +13,14 @@
 //!
 //! `deny_unknown_fields`, like [`workspace`](crate::workspace) and unlike
 //! [`inventory`](crate::inventory): Tailscale's format is someone else's and is
-//! tolerated, this one is Yantra's on both ends. There is no version field and
-//! no negotiation, so an unknown key is a version mismatch, and the ADR chooses
+//! tolerated, this one is Yantra's on both ends. There is no negotiation, so an
+//! unknown key is a version mismatch, and the ADR chooses
 //! to pay for that loudly rather than to ignore a field the daemon does not
 //! understand — an ignored field looks collected and influences nothing.
+//!
+//! `version` is display only (the ADR's 2026-11-11 amendment): readiness shows
+//! an agent older than the daemon, and placement never reads it. An agent that
+//! predates the field omits it, and the daemon still accepts the beat.
 //!
 //! [ADR-0013]: ../../../docs/adr/0013-the-heartbeat-carries-only-what-placement-scores.md
 
@@ -37,6 +42,8 @@ pub struct Heartbeat {
     pub free_disk_mb: u64,
     pub cpu_busy_pct: u8,
     pub power: Power,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// Two variants, so **unknown power is unrepresentable** (ADR-0013 §2, I-9).
@@ -75,6 +82,7 @@ mod tests {
             free_disk_mb: 214003,
             cpu_busy_pct: 15,
             power,
+            version: None,
         }
     }
 
@@ -88,6 +96,17 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&parsed).expect("a heartbeat serialises"),
             ADR_EXAMPLE
+        );
+    }
+
+    #[test]
+    fn a_version_round_trips_and_follows_the_seven_fields() {
+        let body = ADR_EXAMPLE.replace(r#""power":"ac""#, r#""power":"ac","version":"0.12.0""#);
+        let parsed: Heartbeat = serde_json::from_str(&body).expect("version is a field");
+        assert_eq!(parsed.version.as_deref(), Some("0.12.0"));
+        assert_eq!(
+            serde_json::to_string(&parsed).expect("a heartbeat serialises"),
+            body
         );
     }
 

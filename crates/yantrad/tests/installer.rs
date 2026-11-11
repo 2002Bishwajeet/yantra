@@ -711,6 +711,97 @@ fn a_corrupted_archive_is_refused_and_nothing_is_installed() -> Result<()> {
     fixture.nothing_is_installed("the archive did not verify")
 }
 
+/// Y-713: `--agent` updates the agent on a machine that joined a box. It
+/// replaces the binary and its unit, keeps agent.env, restarts the agent and
+/// installs no yantrad. With no agent.env there is no agent, so it refuses.
+#[test]
+fn agent_only_replaces_the_agent_and_nothing_else() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    fixture.publish(VERSION, "agent")?;
+    let agent_only = || {
+        fixture.systemd.exec_as(
+            UNPRIVILEGED,
+            &["bash", "-c", "cat /fixture/install.sh | bash -s -- --agent"],
+        )
+    };
+
+    let refused = agent_only()?;
+    assert!(!refused.status.success(), "--agent ran with no agent here");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("join command"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    fixture.nothing_is_installed("there was no agent to update")?;
+
+    // What join.sh leaves: an agent.env, the unit, and an older agent running.
+    fixture.sh(&format!(
+        "install -d /etc/yantra && echo '{EDITED_ENV}' > /etc/yantra/agent.env \
+         && cp /bin/sleep /usr/local/bin/yantra-agent \
+         && cp /srv/units/yantra-agent.service /etc/systemd/system/ \
+         && mkdir -p /etc/systemd/system/yantra-agent.service.d \
+         && printf '[Service]\\nExecStart=\\nExecStart=/usr/local/bin/yantra-agent infinity\\n' \
+            > /etc/systemd/system/yantra-agent.service.d/keep-running.conf \
+         && systemctl daemon-reload && systemctl enable --now yantra-agent.service"
+    ))?;
+    let before = fixture
+        .systemd
+        .property("yantra-agent.service", "MainPID")?;
+    assert_ne!(before, "0", "the older agent did not start");
+
+    let out = agent_only()?;
+    assert!(
+        out.status.success(),
+        "--agent failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        fixture.sha("/usr/local/bin/yantra-agent")?,
+        fixture.sha("/srv/staging/yantra-*/yantra-agent")?,
+        "yantra-agent is not the one the archive carried"
+    );
+    assert_eq!(
+        fixture.sha("/etc/systemd/system/yantra-agent.service")?,
+        fixture.sha("/srv/staging/yantra-*/yantra-agent.service")?,
+        "the unit is not the one the archive carried"
+    );
+    assert_eq!(
+        fixture.sh("cat /etc/yantra/agent.env")?.trim(),
+        EDITED_ENV,
+        "--agent rewrote agent.env"
+    );
+    let after = fixture
+        .systemd
+        .property("yantra-agent.service", "MainPID")?;
+    assert!(
+        after != "0" && after != before,
+        "the agent was not restarted: {before} then {after}"
+    );
+    for path in [
+        "/usr/local/bin/yantrad",
+        "/usr/local/bin/yantra",
+        "/etc/systemd/system/yantrad.service",
+        "/etc/yantra/daemon.env",
+        "/etc/yantra/channel",
+    ] {
+        assert!(
+            !fixture
+                .systemd
+                .exec(&["test", "-e", path])?
+                .status
+                .success(),
+            "--agent wrote {path}"
+        );
+    }
+    assert!(
+        !fixture.systemd.exec(&["id", "yantra"])?.status.success(),
+        "--agent made the yantra account"
+    );
+    Ok(())
+}
+
 /// Every release up to v0.1.0 carries no units in its archive, and `install.sh`
 /// now takes them from there. A version that predates them says so, ahead of
 /// the first privileged step, rather than failing on a missing file.
