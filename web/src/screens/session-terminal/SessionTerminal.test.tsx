@@ -62,3 +62,12 @@ describe('the Kill verb', () => {
     expect(document.querySelector('.m3-page-header__actions')).toBeNull()
   })
 })
+
+describe('the terminal status', () => {
+  it('sits in the title row beside the line about the session', async () => {
+    mount('phone', '/m/cachyos-g14/s/scratch')
+    const status = await screen.findByRole('status')
+    expect(status.closest('.session-terminal__row')).toBeTruthy()
+    expect(status.textContent).not.toContain('scratch')
+  })
+})

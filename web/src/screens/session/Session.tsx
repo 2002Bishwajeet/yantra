@@ -159,6 +159,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
   if (view === 'chat' && chatFor !== name) setChatFor(name)
   const chatOpened = chatFor === name
   const [slot, setSlot] = useState<HTMLElement | null>(null)
+  const [termSlot, setTermSlot] = useState<HTMLElement | null>(null)
   // A chat reads its thread only when its socket opens, so a thread picked from the list
   // remounts it. A thread the chat itself named is already attached and does not.
   const [named, setNamed] = useState(thread)
@@ -213,6 +214,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
           </PillGroup>
         </nav>
         {view === 'chat' ? <div className="session__chatbar" ref={setSlot} /> : null}
+        {view === 'terminal' ? <div className="session__termbar" ref={setTermSlot} /> : null}
         {readAt ? (
           <Mono className="session__read">
             read{' '}
@@ -241,15 +243,6 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
         ) : null}
         {view === 'terminal' ? (
           <div className="session__terminal">
-            {factor === 'phone' ? (
-              <Text render={<p />} className="session__banner" scale="body-small" tone="variant">
-                The terminal is the fallback;{' '}
-                <Link className="m3-hit" params={{ name }} replace search={{ view: 'chat' }} to="/w/$name">
-                  Chat
-                </Link>{' '}
-                is the session.
-              </Text>
-            ) : null}
             {/* Y-639: every Stop ends here, so it is a note and not a refused attach. */}
             {state?.state === 'no_session' ? (
               <Text render={<p />} className="session__banner" scale="body-medium">
@@ -262,6 +255,7 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
                 height={factor === 'phone' ? '50vh' : '60vh'}
                 key={name}
                 label={`${name} on ${workspace.machine}`}
+                statusIn={termSlot}
                 target={{ workspace: name, machine: workspace.machine }}
               >
                 {factor === 'phone' ? <KeyRow /> : null}

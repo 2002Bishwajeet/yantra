@@ -36,24 +36,47 @@ const TERM = 'xterm-256color'
 
 // What Claude prints when it wants a decision — the box SessionTerminal.dc.html
 // draws, sent as terminal bytes the moment a socket is sized.
-const TRUST_PROMPT = [
-  '● Bash(cargo test -p yantra-core)',
-  '  ⎿  Waiting…',
-  '',
-  '╭──────────────────────────────────────────────────────────────────────────────╮',
-  '│ Bash command                                                                 │',
-  '│                                                                              │',
-  '│   cargo test -p yantra-core                                                  │',
-  '│   Run the core crate\'s tests, including the container fixture                │',
-  '│                                                                              │',
-  '│ Do you want to proceed?                                                      │',
-  '│ > 1. Yes                                                                     │',
-  '│   2. Yes, and don\'t ask again for cargo test commands in ~/Github/yantra     │',
-  '│   3. No, and tell Claude what to do differently (esc)                        │',
-  '╰──────────────────────────────────────────────────────────────────────────────╯',
-  '',
-  '> ',
-].join('\r\n')
+const wrap = (text, width) => {
+  const indent = text.length - text.trimStart().length
+  const lines = []
+  let line = ''
+  for (const word of text.trimStart().split(' ')) {
+    if (line && line.length + 1 + word.length > width - indent) {
+      lines.push(line)
+      line = word
+    } else line = line ? `${line} ${word}` : word
+  }
+  return [...lines, line].map((each) => ' '.repeat(indent) + each)
+}
+
+// tmux and Claude redraw at the client's width, so the box is drawn at the
+// size the socket opened with rather than always at 80 columns.
+const trustPrompt = (cols) => {
+  const width = Math.min(80, cols)
+  const inner = width - 4
+  const row = (text) => `│ ${text.padEnd(inner)} │`
+  const body = [
+    'Bash command',
+    '',
+    '  cargo test -p yantra-core',
+    "  Run the core crate's tests, including the container fixture",
+    '',
+    'Do you want to proceed?',
+    '> 1. Yes',
+    "  2. Yes, and don't ask again for cargo test commands in ~/Github/yantra",
+    '  3. No, and tell Claude what to do differently (esc)',
+  ].flatMap((text) => wrap(text, inner))
+  return [
+    '● Bash(cargo test -p yantra-core)',
+    '  ⎿  Waiting…',
+    '',
+    `╭${'─'.repeat(width - 2)}╮`,
+    ...body.map(row),
+    `╰${'─'.repeat(width - 2)}╯`,
+    '',
+    '> ',
+  ].join('\r\n')
+}
 
 // `git clone --progress` down a pane: one line rewritten with \r, which is
 // what the starting screen draws as its detail (Y-349).
@@ -1280,7 +1303,7 @@ server.on('upgrade', (request, socket, head) => {
           return
         }
         const name = session ? decodeURIComponent(session[2]) : ''
-        const shown = name.startsWith('clone-') ? CLONE_PROGRESS : name.startsWith('yantra-term-') ? SHELL : TRUST_PROMPT
+        const shown = name.startsWith('clone-') ? CLONE_PROGRESS : name.startsWith('yantra-term-') ? SHELL : trustPrompt(size.cols)
         ws.send(Buffer.from(shown), {
           binary: true,
         })

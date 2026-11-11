@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { FitAddon } from '@xterm/addon-fit'
 import { Terminal as Xterm } from '@xterm/xterm'
@@ -8,7 +9,7 @@ import { ATTEMPTS, attachTerminal, type Link as Wire, type Target, terminalAddre
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Mark } from '@/m3/mark/Mark'
-import { Mono } from '@/m3/text/Text'
+import { Mono, Text } from '@/m3/text/Text'
 import { type Keys, KeysContext } from './keysContext'
 import './Terminal.css'
 
@@ -122,6 +123,9 @@ export type TerminalProps = {
   onExit?: (exit: number | null) => void
   /** A one-off terminal ended with no status: refused, or dropped mid-command. */
   onEnd?: () => void
+  /** Where the status line goes when the page has a header to hold it. It then
+   *  drops the label, because the page title already names the session. */
+  statusIn?: HTMLElement | null
   /** Drawn under the pane, inside `KeysContext`: the phone's key row. */
   children?: ReactNode
 }
@@ -134,7 +138,7 @@ export type TerminalProps = {
  *  install left, ends when the command does, and is never reopened, because
  *  reopening would run the command again. */
 export function Terminal(props: TerminalProps) {
-  const { target, height, label, onExit, onEnd, children } = props
+  const { target, height, label, onExit, onEnd, statusIn, children } = props
   const host = useRef<HTMLDivElement>(null)
   const wired = useRef<ReturnType<typeof attach> | null>(null)
   const told = useRef(onExit)
@@ -143,7 +147,7 @@ export function Terminal(props: TerminalProps) {
   const [link, setLink] = useState<Wire>({ up: false, attempt: 0 })
   const [size, setSize] = useState<Size | null>(null)
   const [opened, reopen] = useState(0)
-  const status = useRef<HTMLParagraphElement>(null)
+  const escape = useRef<HTMLParagraphElement>(null)
   const hint = useId()
   const url = terminalAddress(target)
   const once = 'step' in target
@@ -185,7 +189,7 @@ export function Terminal(props: TerminalProps) {
         setLink,
         setSize,
         hint,
-        () => status.current?.focus(),
+        () => escape.current?.focus(),
         once
           ? {
               attempts: 0,
@@ -211,29 +215,42 @@ export function Terminal(props: TerminalProps) {
     reopen((n) => n + 1)
   }
 
-  return (
-    <div className="terminal">
-      <div className="terminal__pane" ref={host} style={{ height: height ?? '60vh' }} />
-      {/* The end is the one thing this line has to carry, so it is mounted for
-          the whole life of the pane rather than replaced by what ended it. It
-          is also where Escape-then-Tab puts focus: the first stop past it. */}
-      <p className="terminal__status" ref={status} role="status" tabIndex={-1}>
-        <Mark
-          size="small"
-          state={
-            end.ended === 'exited'
-              ? end.exit === 0
-                ? 'done'
-                : 'failed'
-              : end.ended === 'no'
-                ? link.up
-                  ? 'running'
-                  : 'unknown'
-                : refused
-                  ? 'failed'
-                  : 'idle'
-          }
-        />
+  // The end is the one thing this line has to carry, so it is mounted for the
+  // whole life of the pane rather than replaced by what ended it.
+  const short = statusIn != null
+  const line = (
+    <p className={short ? 'terminal__status terminal__status--short' : 'terminal__status'} role="status">
+      <Mark
+        size="small"
+        state={
+          end.ended === 'exited'
+            ? end.exit === 0
+              ? 'done'
+              : 'failed'
+            : end.ended === 'no'
+              ? link.up
+                ? 'running'
+                : 'unknown'
+              : refused
+                ? 'failed'
+                : 'idle'
+        }
+      />
+      {short ? (
+        <Text clip scale="body-small">
+          {end.ended === 'exited'
+            ? `Exited ${end.exit ?? 'with no status'}`
+            : end.ended === 'yes'
+              ? refused
+                ? 'Refused'
+                : 'Ended'
+              : link.up
+                ? `Attached${size ? ` · ${size.cols}×${size.rows}` : ''}`
+                : link.attempt === 0
+                  ? 'Connecting'
+                  : `Reconnecting · ${link.attempt} of ${ATTEMPTS}`}
+        </Text>
+      ) : (
         <Mono clip>
           {end.ended === 'exited'
             ? `exited ${end.exit ?? 'with no status'} · ${label}`
@@ -245,8 +262,17 @@ export function Terminal(props: TerminalProps) {
                   ? `connecting · ${label}`
                   : `reconnecting · attempt ${link.attempt} of ${ATTEMPTS} · ${label}`}
         </Mono>
-      </p>
-      <p className="terminal__escape" id={hint}>
+      )}
+    </p>
+  )
+
+  return (
+    <div className="terminal">
+      <div className="terminal__pane" ref={host} style={{ height: height ?? '60vh' }} />
+      {statusIn ? createPortal(line, statusIn) : line}
+      {/* Escape then Tab puts focus here: the first stop past the pane, whether
+          or not the status line sits after it. */}
+      <p className="terminal__escape" id={hint} ref={escape} tabIndex={-1}>
         Esc then Tab leaves the pane. Tab on its own goes to the shell in it.
       </p>
       {end.ended === 'no' || end.ended === 'exited' ? null : refused ? (

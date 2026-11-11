@@ -234,15 +234,16 @@ test.describe('the session screen, the other two views', () => {
     await expect(page.getByRole('heading', { level: 1, name: NAME }).first()).toBeVisible()
   })
 
-  test('the Terminal view attaches a pane and says so under it', async ({ page, size }) => {
+  test('the Terminal view attaches a pane and says so in the bar', async ({ page, size }) => {
     await open(page, 'Terminal')
 
     await expect(page.locator('.xterm-rows')).toContainText('Do you want to proceed?')
-    await expect(page.getByRole('status')).toContainText(`attached · ${NAME} on cachyos-g14`)
+    await expect(page.getByRole('status')).toContainText('Attached · ')
+    await expect(page.locator('.session__bar').getByRole('status')).toBeVisible()
     if (size === 'phone') {
       // PhoneSessionTerminal: the keys a soft keyboard has no row for.
       await expect(page.getByRole('toolbar', { name: 'Keys' })).toBeVisible()
-      await expect(page.getByText('The terminal is the fallback;')).toBeVisible()
+      await expect(page.getByText('The terminal is the fallback;')).toHaveCount(0)
     }
     await axe(page)
     await paneSettled(page)
@@ -253,10 +254,17 @@ test.describe('the session screen, the other two views', () => {
    *  the shell — `Keys.tsx` ships a Tab button because of it — so the pane needs
    *  an exit that is not Tab. Escape then Tab is it, and the line under the pane
    *  is where a keyboard reads that. */
-  test('lets a keyboard leave the pane, and still sends Tab to the shell', async ({ page }) => {
+  test('lets a keyboard leave the pane, and still sends Tab to the shell', async ({ page, size }) => {
     await open(page, 'Terminal')
     await expect(page.locator('.xterm-rows')).toContainText('Do you want to proceed?')
-    await expect(page.getByText('Esc then Tab leaves the pane')).toBeVisible()
+    const hint = page.locator('.terminal__escape')
+    await expect(hint).toHaveText(/Esc then Tab leaves the pane/)
+    if (size === 'phone') {
+      // Clipped to a pixel for a screen reader, which is not "visible" to a person.
+      expect((await hint.boundingBox())!.width).toBeLessThanOrEqual(1)
+    } else {
+      await expect(hint).toBeVisible()
+    }
 
     const pane = page.locator('.xterm-helper-textarea')
     await pane.focus()
@@ -269,7 +277,7 @@ test.describe('the session screen, the other two views', () => {
     await page.keyboard.press('Escape')
     await page.keyboard.press('Tab')
     await expect(pane).not.toBeFocused()
-    await expect(page.locator('.terminal__status')).toBeFocused()
+    await expect(page.locator('.terminal__escape')).toBeFocused()
   })
 
   /** **4.1.2, finding 108.** The key row calls itself a toolbar, so it owes a
@@ -361,7 +369,7 @@ test.describe('the terminal for a session no workspace claims', () => {
 
     await expect(page.getByRole('heading', { level: 1, name: 'scratch' }).first()).toBeVisible()
     await expect(page.locator('.xterm-rows')).toContainText('Do you want to proceed?')
-    await expect(page.getByRole('status')).toContainText('attached · tmux scratch on cachyos-g14')
+    await expect(page.getByRole('status')).toContainText('Attached · ')
     await expect(page.getByRole('button', { name: 'Kill' })).toBeVisible()
     await axe(page)
     await paneSettled(page)
@@ -381,6 +389,47 @@ test.describe('the terminal for a session no workspace claims', () => {
     await expect(alert).toContainText("can't find session: =gone")
     // 4.1.3: the line that speaks while the pane is live is the one that has to
     // carry the end, so it stays rather than going with what ended it.
-    await expect(page.getByRole('status')).toContainText('refused · tmux gone on cachyos-g14')
+    await expect(page.getByRole('status')).toContainText('Refused')
+  })
+})
+
+/** Y-720: on a phone the pane runs edge to edge and the status rides above it, so
+ *  the box the fixture draws at the pane's own width is not wrapped. */
+test.describe('the terminal fits the phone', () => {
+  const fits = async (page: Page, bar: string) => {
+    const rows = page.locator('.xterm-rows')
+    await expect(rows).toContainText('Do you want to proceed?')
+    await paneSettled(page)
+
+    const pane = (await page.locator('.terminal__pane').boundingBox())!
+    const width = page.viewportSize()!.width
+    expect(pane.x).toBeLessThanOrEqual(0.5)
+    expect(pane.x + pane.width).toBeGreaterThanOrEqual(width - 0.5)
+
+    const status = page.locator(`${bar} [role="status"]`)
+    await expect(status).toBeVisible()
+    const above = (await status.boundingBox())!
+    expect(above.y + above.height).toBeLessThanOrEqual(pane.y)
+    expect(await status.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+
+    // The question's row still ends on the box border, so nothing wrapped.
+    const row = (await rows.locator('> div', { hasText: 'Do you want to proceed?' }).first().textContent())!
+    expect(row.trimEnd().endsWith('│')).toBe(true)
+
+    expect((await page.locator('.terminal__escape').boundingBox())!.width).toBeLessThanOrEqual(1)
+  }
+
+  test('on the workspace terminal', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the edge-to-edge pane is the phone board')
+    await scenario(page, 'busy')
+    await page.goto(`${PATH}?view=terminal`)
+    await fits(page, '.session__bar')
+  })
+
+  test('on the unclaimed session', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the edge-to-edge pane is the phone board')
+    await scenario(page, 'busy')
+    await page.goto(route('session-terminal').path)
+    await fits(page, '.session-terminal__row')
   })
 })
