@@ -418,12 +418,14 @@ test.describe('the steps fit a phone (Y-719)', () => {
   })
 
   test('step 1 stays one line when the hub is unjoined and no machine can be suggested', async ({ page }) => {
-    await scenario(page, 'hub')
+    // `fresh` has an unjoined hub; in `hub` the box has joined, so the note never renders.
+    await scenario(page, 'fresh')
     await page.route('**/api/placement', (route) =>
       route.fulfill({ status: 500, contentType: 'text/plain', body: 'placement is down' }),
     )
     await page.goto(PATH)
     await expect(heading(page, 'New session')).toBeVisible()
+    await expect(page.getByRole('note').filter({ hasText: 'karigar account' })).toBeVisible()
     await expect(page.getByRole('alert').filter({ hasText: 'No suggestion' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Ask again' })).toBeVisible()
     await fits(page, 'Continue')
