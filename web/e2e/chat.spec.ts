@@ -29,9 +29,10 @@ const turnSettings = (page: Page) => page.getByRole('button', { name: /^Turn set
 async function fullAccess(page: Page) {
   await turnSettings(page).click()
   await page.getByRole('radiogroup', { name: 'Permissions' }).getByRole('radio', { name: 'Full access' }).click()
-  await expect(turnSettings(page)).toHaveAccessibleName(/Full access/)
   await page.keyboard.press('Escape')
   await expect(page.getByRole('radiogroup', { name: 'Permissions' })).toBeHidden()
+  // The sheet on a phone is modal, so the chip is out of the tree until it closes.
+  await expect(turnSettings(page)).toHaveAccessibleName(/Full access/)
 }
 
 test.describe('the chat, across views, tabs and reloads', () => {
@@ -415,7 +416,10 @@ test.describe('the composer', () => {
     const tops = await page.locator('.composer__footer').evaluate((footer) =>
       [...footer.querySelectorAll<HTMLElement>('button')]
         .filter((one) => one.getBoundingClientRect().width > 0)
-        .map((one) => one.getBoundingClientRect().top),
+        .map((one) => {
+          const box = one.getBoundingClientRect()
+          return box.top + box.height / 2
+        }),
     )
     expect(tops.length).toBeGreaterThanOrEqual(5)
     expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(2)
