@@ -361,6 +361,20 @@ impl Store {
         .await
     }
 
+    /// Every row of `machine`, home threads among them, the newest first
+    /// (ADR-0046 decision 1.7).
+    pub async fn list_machine(&self, machine: &str) -> Result<Vec<Row>, Error> {
+        let machine = machine.to_owned();
+        self.call(move |db| {
+            db.prepare(&format!(
+                "SELECT {COLUMNS} FROM threads WHERE machine = ?1 ORDER BY created DESC, id"
+            ))?
+            .query_map(params![machine], row)?
+            .collect()
+        })
+        .await
+    }
+
     /// Threads of any workspace whose title holds `text`, newest activity first,
     /// at most [`FOUND`]. Home rows are left out until `/w/$name` can open them (Y-699).
     pub async fn search(&self, text: &str) -> Result<Vec<Row>, Error> {
@@ -376,6 +390,20 @@ impl Store {
             ))?
             .query_map(params![like], row)?
             .collect()
+        })
+        .await
+    }
+
+    /// Thread `id` of `workspace`, when the store has it.
+    pub async fn get(&self, workspace: &str, id: &str) -> Result<Option<Row>, Error> {
+        let (workspace, id) = (workspace.to_owned(), id.to_owned());
+        self.call(move |db| {
+            db.query_row(
+                &format!("SELECT {COLUMNS} FROM threads WHERE workspace = ?1 AND id = ?2"),
+                params![workspace, id],
+                row,
+            )
+            .optional()
         })
         .await
     }
@@ -604,6 +632,64 @@ pub(crate) mod tests {
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("word word"), "the title is there");
         assert!(!text.contains("SECRET-PAST-THE-CUT"));
+    }
+
+    /// ADR-0046 decision 1.4: a home row has no workspace, branch or worktree.
+    fn home(id: &str, machine: &str, created: i64) -> Row {
+        Row {
+            workspace: String::new(),
+            branch: String::new(),
+            worktree: String::new(),
+            machine: machine.to_owned(),
+            created,
+            ..live(id, Some("hello"), None)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_machines_rows_list_newest_first_with_its_home_threads() {
+        let (store, _) = scratch();
+        let mut elsewhere = live("c", None, None);
+        elsewhere.machine = "mac".to_owned();
+        store
+            .adopt(vec![
+                live("a", None, None),
+                home("h", "m", 2),
+                elsewhere,
+                home("x", "mac", 3),
+            ])
+            .await
+            .expect("adopted");
+
+        let rows = store.list_machine("m").await.expect("rows");
+
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.workspace.as_str(), row.id.as_str()))
+                .collect::<Vec<_>>(),
+            [("", "h"), ("web", "a")]
+        );
+        assert!(
+            store
+                .list("web")
+                .await
+                .expect("rows")
+                .iter()
+                .all(|row| row.id != "h")
+        );
+    }
+
+    #[tokio::test]
+    async fn get_reads_one_row_by_its_key() {
+        let (store, _) = scratch();
+        store.adopt(vec![home("h", "m", 1)]).await.expect("adopted");
+
+        let row = store.get("", "h").await.expect("a read").expect("the row");
+        assert_eq!(
+            (row.machine.as_str(), row.title.as_deref()),
+            ("m", Some("hello"))
+        );
+        assert_eq!(store.get("web", "h").await.expect("a read"), None);
     }
 
     #[tokio::test]

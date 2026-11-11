@@ -29,6 +29,10 @@ use crate::tmux::{self, Opened, Tmux, sq};
 /// Every keeper session's name starts with this, and no workspace's may.
 pub const PREFIX: &str = "yantra-keep-";
 
+/// The workspace slot of a home thread's keeper, which no workspace may take
+/// (ADR-0046 decision 1.5).
+pub const HOME: &str = "yantra-home";
+
 pub(crate) const SCRIPT: &str = include_str!("keep.sh");
 
 /// What the far reader says on stderr once the keeper's pane is dead.
@@ -373,6 +377,17 @@ pub async fn pane<E: Exec>(
 /// Kills the keeper's session. A session that is already gone is success (I-30).
 pub async fn kill<E: Exec>(exec: &E, tmux: &Tmux, keeper: &Keeper) -> Result<(), Error> {
     Ok(tmux.kill(exec, &keeper.session()).await?)
+}
+
+/// Kills the keeper and deletes its journals and images, for a home thread,
+/// which has no worktree to remove with them (ADR-0046 decision 1.7).
+pub async fn forget<E: Exec>(exec: &E, tmux: &Tmux, keeper: &Keeper) -> Result<(), Error> {
+    kill(exec, tmux, keeper).await?;
+    let out = exec.exec(&keeper.removal()).await?;
+    if !out.success() {
+        return Err(failed("removed", &out));
+    }
+    Ok(())
 }
 
 /// Closes the agent's stdin by killing the `tail` that feeds it, when the
@@ -867,6 +882,14 @@ mod tests {
             base: "0".to_owned(),
         };
         assert_eq!(Keeper::of(&place), Some(keeper));
+
+        let home = Keeper::new(HOME, "1a2b3c4d");
+        assert_eq!(home.session(), "yantra-keep-yantra-home-1a2b3c4d");
+        assert_eq!(Keeper::parse(&home.session()), Some(home.clone()));
+        assert_eq!(
+            home.removal(),
+            "rm -rf \"$HOME\"/.yantra/keep/'yantra-home'/'1a2b3c4d'"
+        );
     }
 
     #[test]

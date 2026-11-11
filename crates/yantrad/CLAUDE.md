@@ -721,15 +721,24 @@ thread keeps it. A Claude turn is a [`claude::Turn`](../yantra-core/src/claude.r
 worktree. Any other harness is one [`acp::Agent`](../yantra-core/src/acp.rs), and
 `thread::remember` keeps its name and session id in the repository's git config. Without
 `?thread=` the first turn calls `thread::open` and says `thread.started{thread, harness}`; with it,
-the route finds the thread, says `thread.started` too, and replays it. **There is no
-session-addressed form**: a thread is a worktree of a workspace's repository, and a bare session
-names none.
+the route finds the thread, says `thread.started` too, and replays it.
+
+**`GET /api/machines/{machine}/chat?thread=<id>&after=<cursor>` is a home thread**
+([ADR-0046](../../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md) decision 1, Y-699),
+ADR-0026 decision 3's session-addressed form. It runs `claude` in the joined account's `$HOME`,
+which the far shell expands, with no workspace, worktree or checkpoint. `chat::Home` is a second
+`Machine`, not a second bridge: `tracked()` is false, so a turn keeps no checkpoint and sends no
+diff, and `revert` and `diff` get `badFrame`. The thread store holds it, with an empty workspace,
+branch and worktree. A home thread never resumes the newest transcript, because every home thread
+shares one project directory; a new one starts fresh. The route answers `400` before the upgrade
+for a machine name that is not an ssh destination (I-63), and a daemon with no store refuses it.
 
 **A turn outlives its socket, its ssh pipe and this daemon**
 ([ADR-0035](../../docs/adr/0035-a-chat-turn-outlives-its-ssh-pipe.md), Y-447). Each agent runs in
 a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux session
 `yantra-keep-<ws>-<thread>`, which journals the agent's stdin and stdout under
-`~/.yantra/keep/<ws>/<thread>`. The session is also the thread's lock.
+`~/.yantra/keep/<ws>/<thread>`. A home thread's keeper takes `keep::HOME`, `yantra-home`, in the
+`<ws>` slot. The session is also the thread's lock.
 
 - **`chat::Registry` owns the turns, and a socket owns nothing.** It sits in `Fleet::chats`. Each
   live keeper has one task that reads it, reconnects the reader when ssh drops, answers what the
@@ -761,10 +770,11 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   replaced by the next start, and an adoption kills it: its pane never got the script, or its
   agent waits on an empty `in` (`keep::stale`, Y-541).
 - **`refresh.rs` adopts what a restart left.** The sessions sweep lists `yantra-keep-` sessions,
-  and each one the registry does not hold is adopted. A keeper whose workspace is gone is warned
+  and each one the registry does not hold is adopted, on the machine that listed it. A
+  `yantra-home` keeper is a home thread's, and its row in the store finds it. A keeper whose workspace is gone is warned
   about once and looked at again on each pass (Y-542). A keeper whose thread is gone is killed
   once its agent has ended. The session
-  listing hides them, and `validate_name` refuses the prefix to a workspace.
+  listing hides them, and `validate_name` refuses the prefix and `yantra-home` to a workspace.
 - **A request nobody is attached to see sends one notification** (Y-451), titled with
   `Phase::WaitingForApproval`'s headline. A Claude turn that ends with nobody attached, a wake
   included, sends one in `Phase::Completed` (ADR-0041 decision 3). The body names the workspace

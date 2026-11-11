@@ -242,14 +242,17 @@ async fn look_at_workspaces(model: &Model) {
 async fn look_at_sessions(model: &Model, chats: &crate::chat::Registry) {
     let reading = Reading::new(sessions::list().await);
     if let Ok(machines) = reading.value() {
-        for session in machines.iter().flat_map(|machine| &machine.keepers) {
-            if !chats.holds(session)
-                && let Some(keeper) = yantra_core::keep::Keeper::parse(session)
-            {
-                let chats = chats.clone();
-                tokio::spawn(async move {
-                    crate::chat::adopt(&chats, keeper.workspace(), keeper.thread()).await;
-                });
+        for machine in machines {
+            for session in &machine.keepers {
+                if !chats.holds(session)
+                    && let Some(keeper) = yantra_core::keep::Keeper::parse(session)
+                {
+                    let (chats, machine) = (chats.clone(), machine.machine.clone());
+                    tokio::spawn(async move {
+                        crate::chat::adopt(&chats, &machine, keeper.workspace(), keeper.thread())
+                            .await;
+                    });
+                }
             }
         }
     }

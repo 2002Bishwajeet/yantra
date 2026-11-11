@@ -374,13 +374,26 @@ enum GithubAction {
 
 #[derive(Debug, Subcommand)]
 enum ChatAction {
-    /// Open a thread from a GitHub issue, and print the issue as a draft prompt
+    /// Open a thread from a GitHub issue, and print the issue as a draft
+    /// prompt. With --home, start Claude in a machine's home folder instead
     New {
         /// Workspace name, without the `.toml`
-        workspace: String,
+        #[arg(required_unless_present = "home")]
+        workspace: Option<String>,
         /// The issue, as owner/repo#number
-        #[arg(long)]
-        issue: github::IssueRef,
+        #[arg(long, required_unless_present = "home", conflicts_with = "home")]
+        issue: Option<github::IssueRef>,
+        /// Chat in this machine's home folder, with no workspace, worktree or
+        /// checkpoint
+        #[arg(long, conflicts_with = "workspace", requires_all = ["daemon", "prompt"])]
+        home: Option<String>,
+        /// yantrad's address, such as http://appliance:7717. Only the daemon
+        /// keeps a home thread
+        #[arg(long, requires = "home")]
+        daemon: Option<String>,
+        /// The home thread's first prompt
+        #[arg(long, requires = "home")]
+        prompt: Option<String>,
     },
     /// List the workspace's threads with each one's issue and PR
     Ls {
@@ -676,8 +689,24 @@ async fn main() -> ExitCode {
             action: GithubAction::ClientId { id, clear },
         }) => github_client_id(id.as_deref(), clear),
         Some(Command::Chat {
-            action: ChatAction::New { workspace, issue },
-        }) => chat_new(&workspace, &issue).await,
+            action:
+                ChatAction::New {
+                    workspace,
+                    issue,
+                    home,
+                    daemon,
+                    prompt,
+                },
+        }) => match (workspace, issue, home, daemon, prompt) {
+            (_, _, Some(machine), Some(daemon), Some(prompt)) => {
+                chat_new_home(daemon, machine, prompt).await
+            }
+            (Some(workspace), Some(issue), ..) => chat_new(&workspace, &issue).await,
+            _ => {
+                eprintln!("yantra: chat new takes a workspace and --issue, or --home");
+                ExitCode::FAILURE
+            }
+        },
         Some(Command::Chat {
             action: ChatAction::Ls { workspace },
         }) => chat_ls(&workspace).await,
@@ -2632,6 +2661,27 @@ async fn chat_new(workspace: &str, issue: &github::IssueRef) -> ExitCode {
         }
         Err(err) => {
             report_error(&err);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Through the daemon, because only it keeps the thread store (ADR-0046
+/// decision 1.4).
+async fn chat_new_home(daemon: String, machine: String, prompt: String) -> ExitCode {
+    let opened =
+        tokio::task::spawn_blocking(move || mcp::new_home(&daemon, &machine, &prompt)).await;
+    match opened {
+        Ok(Ok(opened)) => {
+            print!("thread:  {}\nmachine: {}\n", opened.thread, opened.machine);
+            ExitCode::SUCCESS
+        }
+        Ok(Err(said)) => {
+            eprintln!("yantra: {said}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("yantra: chat new did not finish: {error}");
             ExitCode::FAILURE
         }
     }
@@ -5563,7 +5613,7 @@ mod tests {
             matches!(
                 &parsed.command,
                 Some(Command::Chat {
-                    action: ChatAction::New { workspace, issue },
+                    action: ChatAction::New { workspace: Some(workspace), issue: Some(issue), home: None, .. },
                 }) if workspace == "site" && issue.to_string() == "o/r#7"
             ),
             "{parsed:?}"
@@ -5578,6 +5628,53 @@ mod tests {
             ls.command,
             Some(Command::Chat { action: ChatAction::Ls { workspace } }) if workspace == "site"
         ));
+    }
+
+    /// ADR-0046 decision 1.1: `--home` takes a machine, the daemon and a
+    /// prompt, and no workspace and no issue.
+    #[test]
+    fn chat_new_home_takes_a_machine_a_daemon_and_a_prompt() {
+        let home = [
+            "yantra",
+            "chat",
+            "new",
+            "--home",
+            "box",
+            "--daemon",
+            "http://hub:7717",
+        ];
+        let parsed = Cli::try_parse_from(home.iter().chain(&["--prompt", "hi"])).expect("parses");
+        assert!(
+            matches!(
+                &parsed.command,
+                Some(Command::Chat {
+                    action: ChatAction::New { workspace: None, issue: None, home: Some(machine), daemon: Some(daemon), prompt: Some(prompt) },
+                }) if machine == "box" && daemon == "http://hub:7717" && prompt == "hi"
+            ),
+            "{parsed:?}"
+        );
+        for refused in [
+            &["site", "--prompt", "hi"][..],
+            &["--issue", "o/r#7", "--prompt", "hi"],
+            &[],
+        ] {
+            assert!(
+                Cli::try_parse_from(home.iter().chain(refused)).is_err(),
+                "{refused:?}"
+            );
+        }
+        assert!(
+            Cli::try_parse_from(["yantra", "chat", "new", "--home", "box", "--prompt", "hi"])
+                .is_err(),
+            "no daemon"
+        );
+        assert!(
+            Cli::try_parse_from([
+                "yantra", "chat", "new", "site", "--issue", "o/r#7", "--prompt", "hi"
+            ])
+            .is_err(),
+            "a prompt is for --home"
+        );
     }
 
     /// Y-496: `chat rm` is the CLI verb behind the daemon's `DELETE …/threads/{thread}`.

@@ -379,7 +379,9 @@ impl Session {
 /// `--add-dir` names the thread's images directory, made here, so Claude reads
 /// an image pasted in any later turn without a prompt or a new process
 /// (Y-424, ADR-0041 decision 5). `--resume` names `session`, and a thread
-/// older than its id resumes the newest transcript in the worktree.
+/// older than its id resumes the newest transcript in the worktree. A home
+/// thread never does: every home thread shares one transcript directory
+/// (ADR-0046 decision 1.8), so it starts fresh.
 /// `Auto` and `AutoAcceptEdits` run in Claude's own mode (Y-453); see [`answers`].
 /// The other two name `default`, so a machine's `permissions.defaultMode`
 /// cannot turn approval off. `Plan` is Claude's own `plan` whatever the mode
@@ -401,6 +403,7 @@ pub fn command(
 ) -> String {
     let resume = match session {
         Some(session) => format!("set -- --resume {}\n", sq(session)),
+        None if keeper.workspace() == keep::HOME => String::new(),
         None => format!(
             "{}[ -n \"$f\" ] && set -- --resume \"$(basename \"$f\" .jsonl)\"\n",
             logs::newest(worktree)
@@ -2424,6 +2427,34 @@ mod tests {
             hostile.contains(r"set -- --resume 'x'\''; touch /tmp/pwned; '\'''"),
             "{hostile}"
         );
+    }
+
+    /// ADR-0046 decision 1.8: home threads share one transcript directory, so
+    /// a new one starts fresh, and a kept one resumes its own session.
+    #[test]
+    fn a_home_thread_cds_into_home_and_never_resumes_the_newest_transcript() {
+        let home = |session| {
+            command(
+                "/home/u",
+                &Keeper::new(keep::HOME, "11111111"),
+                PermissionMode::Supervised,
+                Interaction::Build,
+                None,
+                None,
+                None,
+                None,
+                session,
+            )
+        };
+        let fresh = home(None);
+        assert!(fresh.starts_with("cd '/home/u' || exit 1\n"), "{fresh}");
+        assert!(!fresh.contains("ls -t"), "{fresh}");
+        assert!(!fresh.contains("--resume"), "{fresh}");
+        assert!(
+            fresh.contains("\"$HOME\"/.yantra/keep/'yantra-home'/'11111111'/images"),
+            "{fresh}"
+        );
+        assert!(home(Some("S")).contains("\nset -- --resume 'S'\nexec "));
     }
 
     /// Y-424, ADR-0041 decision 5: every session may read the thread's images
