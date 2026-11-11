@@ -99,7 +99,7 @@ function Stamp(props: { reads: Parameters<typeof stamp>[0]; now: number; classNa
 function CardHead(props: { id: string; title: string; words: ReactNode }) {
   return (
     <div className="dash__head">
-      <Text render={<h2 />} emphasized id={props.id} scale="title-large">
+      <Text className="dash__title" render={<h2 />} emphasized id={props.id} scale="title-large">
         {props.title}
       </Text>
       <Text scale="body-medium" tone="variant">
@@ -523,13 +523,6 @@ function Worth(props: {
                 <Row tone="lowest">
                   <Tile name={session.name} />
                   <RowText headline={session.name} supporting={supporting} />
-                  <Button
-                    render={<Link params={{ machine, session: session.name }} to="/m/$machine/s/$session" />}
-                    role="link"
-                    variant="text"
-                  >
-                    Attach
-                  </Button>
                   {openedByHand(session.name) ? null : (
                     <Suspense fallback={kill(false)}>
                       <KillSession
@@ -547,6 +540,13 @@ function Worth(props: {
                       />
                     </Suspense>
                   )}
+                  <Button
+                    render={<Link params={{ machine, session: session.name }} to="/m/$machine/s/$session" />}
+                    role="link"
+                    variant="text"
+                  >
+                    Attach
+                  </Button>
                 </Row>
               </li>
             )

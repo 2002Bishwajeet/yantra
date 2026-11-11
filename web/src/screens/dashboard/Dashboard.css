@@ -1,7 +1,12 @@
 .dash__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
-  gap: 10px;
+  gap: 2px 10px;
+}
+
+.dash__title {
+  white-space: nowrap;
 }
 
 /* The status strip. */

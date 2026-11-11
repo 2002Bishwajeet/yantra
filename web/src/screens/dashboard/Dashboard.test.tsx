@@ -123,6 +123,10 @@ describe('the Dashboard on a busy fleet', () => {
     const item = (name: string) => screen.getByText(name, { selector: '.m3-row__headline' }).closest('li')!
     expect(within(item('0')).getByRole('link', { name: 'Attach' })).toBeTruthy()
     expect(within(item('0')).queryByRole('button', { name: 'Kill' })).toBeNull()
+    // Attach is the last control in every row, so the buttons share one column.
+    const last = (name: string) => item(name).querySelector('.m3-row')!.lastElementChild!
+    expect(last('0').textContent).toBe('Attach')
+    await waitFor(() => expect(last('scratch').textContent).toBe('Attach'))
     await waitFor(() => expect(within(item('scratch')).getByRole('button', { name: 'Kill' })).toBeTruthy())
   })
 
