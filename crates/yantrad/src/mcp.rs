@@ -13,8 +13,8 @@
 //! keeps no list of the ids.
 //!
 //! **Every request passes [`allowed`] or [`identify`] first**, so only the
-//! owner, or an agent token on its own workspace's rooms (ADR-0044 decision
-//! 12), reaches a room. The label comes from identity and never
+//! owner, or an agent token, reaches a room. An agent token never reaches a
+//! room another workspace defines (ADR-0044 decision 12, [`may_call`]). The label comes from identity and never
 //! from the body: the caller's machine is `whois` joined to the tailnet list on
 //! the stable id, as `/api/join` does. `X-Yantra-Thread` only routes, and only
 //! when the workspace it names is on the caller's machine: the workspace's ssh
@@ -196,8 +196,7 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
             match room::call(name, arguments) {
                 Err(why) => error(id, INVALID_PARAMS, &why),
                 Ok(call) => {
-                    // Send would make a room it does not find, in no workspace.
-                    may_reach(&who, &state.rooms, room_named(&call))?;
+                    may_call(&who, &state.rooms, room_named(&call))?;
                     match machine_of(&state.authoriser, &caller.node).await {
                         Err(said) => result(id, outcome(Err(said))),
                         Ok(machine) => {
@@ -334,6 +333,26 @@ fn may_reach(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
         Ok(())
     } else {
         Err(Refused::AgentScope)
+    }
+}
+
+/// An agent token's room tools reach its own workspace's rooms and the rooms
+/// no workspace defines, which agents make and share (ADR-0038 decision 2), and
+/// never a room another workspace defines (ADR-0044 decision 12).
+fn may_call(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
+    let Who::Agent { workspace, .. } = who else {
+        return Ok(());
+    };
+    match rooms.view(name) {
+        Ok((summary, _))
+            if summary
+                .workspace
+                .as_deref()
+                .is_some_and(|home| home != workspace) =>
+        {
+            Err(Refused::AgentScope)
+        }
+        _ => Ok(()),
     }
 }
 
@@ -1168,7 +1187,8 @@ mod tests {
     }
 
     /// ADR-0044 decision 12: with no `X-Yantra-Thread`, an agent token still
-    /// reaches only its own workspace's rooms, and makes none.
+    /// never reaches a room another workspace defines. A room no workspace
+    /// defines is the agents' to make and share (ADR-0038 decision 2).
     #[tokio::test]
     async fn an_agent_token_calls_tools_only_on_its_own_workspaces_rooms() {
         let passkeys = crate::passkey::Passkeys::memory();
@@ -1207,20 +1227,17 @@ mod tests {
             let status = call(tool, "away").await.expect("infallible").status();
             assert_eq!(status, StatusCode::FORBIDDEN, "{tool} on another workspace");
         }
-        let status = call("room_send", "made")
-            .await
-            .expect("infallible")
-            .status();
-        assert_eq!(status, StatusCode::NOT_FOUND, "a room it does not find");
-        assert!(rooms.view("made").is_err(), "the agent made no room");
-
-        let response = call("room_send", "home").await.expect("infallible");
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
-            .await
-            .expect("in memory");
-        let answer: Value = serde_json::from_slice(&body).expect("JSON");
-        assert_eq!(answer["result"]["isError"], false, "{answer}");
+        for room in ["home", "made"] {
+            let response = call("room_send", room).await.expect("infallible");
+            assert_eq!(response.status(), StatusCode::OK, "{room}");
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .expect("in memory");
+            let answer: Value = serde_json::from_slice(&body).expect("JSON");
+            assert_eq!(answer["result"]["isError"], false, "{room}: {answer}");
+        }
+        let made = rooms.view("made").expect("the agent made it").0;
+        assert_eq!(made.workspace, None, "a room no workspace defines");
     }
 
     #[tokio::test]

@@ -618,6 +618,34 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     .await?;
     assert_eq!(status, 403, "{body}");
 
+    // 1c. ADR-0044 decision 12: a token reaches no owner route, and, with no
+    //     thread header, no room another workspace defines.
+    for (method, path) in [
+        ("GET", "/api/workspaces"),
+        ("GET", "/api/repos"),
+        ("GET", "/api/passkey"),
+        ("POST", "/api/passkey/code"),
+        ("POST", "/api/workspaces/wa/up"),
+        ("GET", "/api/rooms"),
+    ] {
+        let (status, body) = http(ALPHA, Some(a_token), method, path, None, None).await?;
+        assert_eq!(status, 403, "{method} {path}: {body}");
+    }
+    let defined = json!({"name": "wb-only", "workspace": "wb"});
+    let (status, body) = exchange(
+        UnixStream::connect(daemon_socket()).await?,
+        "POST",
+        "/api/rooms",
+        "",
+        Some(&defined),
+    )
+    .await?;
+    assert_eq!(status, 201, "{body}");
+    let read = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                      "params": {"name": "room_read", "arguments": {"room": "wb-only"}}});
+    let (status, body) = http(ALPHA, Some(a_token), "POST", "/api/mcp", None, Some(&read)).await?;
+    assert_eq!(status, 403, "{body}");
+
     // 2. Beta speaks MCP, and thread B joins r1.
     let initialize = json!({"jsonrpc": "2.0", "id": 0, "method": "initialize",
                             "params": {"protocolVersion": "2025-06-18", "capabilities": {},

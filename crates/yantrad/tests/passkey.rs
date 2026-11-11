@@ -4,11 +4,10 @@
 //! container sends, and its requests reach the daemon the way the `serve` hop
 //! does, as root on the socket with `X-Forwarded-For`.
 //!
-//! Two cases are proved elsewhere. A revoked session's open WebSocket closing
-//! is `mic::tests::a_revoked_session_closes_its_open_mic`, because no socket
-//! here stays open without a machine to reach. Decision 12's agent token is
-//! `rooms.rs` and `main.rs`'s `an_agent_token_gets_403_on_every_owner_route`, because only a Chat
-//! turn mints one.
+//! A home chat socket with no thread stays open without reaching a machine,
+//! so it is the open WebSocket a revoked session closes. Only a Chat turn
+//! mints decision 12's agent token, so its 403 on every owner route is step 1c
+//! of `rooms.rs`, which runs real turns against a real daemon in podman.
 
 mod common;
 
@@ -27,6 +26,65 @@ const SOCKET: &str = "/run/yantra/yantrad.sock";
 const FILE: &str = "/home/yantra/.config/yantra/passkeys.toml";
 const PHONE: &str = "100.64.0.9";
 const COOKIE: &str = "__Host-yantra_session";
+
+/// A WebSocket on the socket as the `serve` hop's root, from the owner's phone
+/// with the cookie in argv[1]. It writes the upgrade's status line to
+/// /tmp/socket, and then `closed` when the daemon closes or drops it.
+const SOCKET_CLIENT: &str = r#"
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.connect("/run/yantra/yantrad.sock")
+s.sendall((
+    "GET /api/machines/box/chat HTTP/1.1\r\nHost: yantra\r\nConnection: Upgrade\r\n"
+    "Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n"
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+    "X-Forwarded-For: 100.64.0.9\r\nCookie: __Host-yantra_session=" + sys.argv[1] + "\r\n\r\n"
+).encode())
+head = b""
+while b"\r\n\r\n" not in head:
+    more = s.recv(1)
+    if not more:
+        break
+    head += more
+open("/tmp/socket", "w").write(head.split(b"\r\n")[0].decode() + "\n")
+s.settimeout(60)
+def exactly(n):
+    got = b""
+    while len(got) < n:
+        more = s.recv(n - len(got))
+        if not more:
+            return None
+        got += more
+    return got
+while True:
+    try:
+        frame = exactly(2)
+    except socket.timeout:
+        break
+    # A close frame, or the stream ending, is the daemon closing it; any other frame is read past.
+    if frame is None or frame[0] & 0x0F == 0x8:
+        open("/tmp/socket", "a").write("closed\n")
+        break
+    length = frame[1] & 0x7F
+    if length >= 126:
+        length = int.from_bytes(exactly(2 if length == 126 else 8) or b"", "big")
+    exactly(length)
+"#;
+
+/// Waits up to `seconds` for `/tmp/socket` to hold `line`.
+fn socket_said(hub: &Hub, line: &str, seconds: u32) -> Result<bool> {
+    for _ in 0..seconds * 5 {
+        if hub
+            .sh("cat /tmp/socket 2>/dev/null || true")?
+            .lines()
+            .any(|said| said == line)
+        {
+            return Ok(true);
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Ok(false)
+}
 
 const TAILSCALE_STUB: &str = r#"#!/bin/sh
 case "$1" in
@@ -411,6 +469,19 @@ fn a_write_needs_the_owners_passkey() -> Result<()> {
         .and_then(|session| session["id"].as_str())
         .context("the Mac's session")?
         .to_owned();
+    hub.sh(&format!(
+        "rm -f /tmp/socket && cat > /tmp/socket.py <<'PY'\n{SOCKET_CLIENT}\nPY\n\
+         setsid python3 /tmp/socket.py {token} >/dev/null 2>&1 < /dev/null &"
+    ))?;
+    assert!(
+        socket_said(&hub, "HTTP/1.1 101 Switching Protocols", 10)?,
+        "the socket did not open: {}",
+        hub.sh("cat /tmp/socket 2>/dev/null || true")?
+    );
+    assert!(
+        !socket_said(&hub, "closed", 2)?,
+        "the socket closed before the revoke"
+    );
     let revoked = hub.curl(
         "yantra",
         "DELETE",
@@ -419,6 +490,11 @@ fn a_write_needs_the_owners_passkey() -> Result<()> {
         None,
     )?;
     assert!(revoked.status < 300, "{}", revoked.body);
+    assert!(
+        socket_said(&hub, "closed", 10)?,
+        "the revoked session's socket stayed open\n{}",
+        hub.systemd.journal("yantrad.service")
+    );
     assert_eq!(
         hub.phone("GET", "/api/sessions", Some(&token), None)?
             .status,
