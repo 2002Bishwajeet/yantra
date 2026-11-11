@@ -67,7 +67,7 @@ pub enum Error {
     Unknown,
     #[error("the browser's answer did not verify")]
     Webauthn(#[source] WebauthnError),
-    #[error("the hub's name {0} cannot be a relying party")]
+    #[error("the dashboard's origin {0} cannot be a relying party")]
     Relying(String),
     #[error("could not write {}", .0.display())]
     Unwritable(PathBuf, #[source] std::io::Error),
@@ -178,9 +178,10 @@ struct Held {
     ended: HashMap<String, watch::Sender<bool>>,
 }
 
-/// The relying party: the hub's MagicDNS name and its dashboard origin.
+/// The relying party: the dashboard's origin and its host, which is the id.
 pub struct Relying {
     pub id: String,
+    origin: String,
     webauthn: Webauthn,
 }
 
@@ -193,17 +194,34 @@ impl std::fmt::Debug for Relying {
 }
 
 impl Relying {
-    fn new(name: &str) -> Result<Self, Error> {
-        let origin = format!("https://{name}:{}", crate::api::HTTPS_PORT);
-        let url = Url::parse(&origin).map_err(|_| Error::Relying(name.to_owned()))?;
-        let webauthn = WebauthnBuilder::new(name, &url)
+    fn new(origin: &str) -> Result<Self, Error> {
+        let unusable = || Error::Relying(origin.to_owned());
+        let url = Url::parse(origin).map_err(|_| unusable())?;
+        let id = url.host_str().ok_or_else(unusable)?.to_owned();
+        let webauthn = WebauthnBuilder::new(&id, &url)
             .and_then(|builder| builder.rp_name("Yantra").build())
-            .map_err(|_| Error::Relying(name.to_owned()))?;
+            .map_err(|_| unusable())?;
         Ok(Self {
-            id: name.to_owned(),
+            id,
+            origin: origin.to_owned(),
             webauthn,
         })
     }
+}
+
+/// `YANTRA_ORIGIN`'s value as one https origin with a host and no path, or
+/// `None` (the 2026-11-12 amendment to ADR-0044).
+pub fn configured_origin(value: &str) -> Option<String> {
+    let url = Url::parse(value).ok().filter(|url| {
+        url.scheme() == "https"
+            && url.host_str().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.path() == "/"
+            && url.query().is_none()
+            && url.fragment().is_none()
+    })?;
+    (!value.contains(',')).then(|| url.origin().ascii_serialization())
 }
 
 /// A token minted for one agent session or Chat turn. Dropping it ends it.
@@ -317,17 +335,17 @@ impl Passkeys {
         self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The relying party for the hub named `name`, built once per name.
-    pub fn relying(&self, name: &str) -> Result<Arc<Relying>, Error> {
+    /// The relying party for the dashboard at `origin`, built once per origin.
+    pub fn relying(&self, origin: &str) -> Result<Arc<Relying>, Error> {
         let mut held = self
             .0
             .relying
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if let Some(relying) = held.as_ref().filter(|relying| relying.id == name) {
+        if let Some(relying) = held.as_ref().filter(|relying| relying.origin == origin) {
             return Ok(Arc::clone(relying));
         }
-        let relying = Arc::new(Relying::new(name)?);
+        let relying = Arc::new(Relying::new(origin)?);
         *held = Some(Arc::clone(&relying));
         Ok(relying)
     }
@@ -825,16 +843,14 @@ impl<I: Inventory> Signing<I> {
         self.authoriser.passkeys()
     }
 
-    /// The relying party for the hub's MagicDNS name, from the last tailnet look.
+    /// The relying party for [`crate::write::dashboard_origin`].
     async fn relying(&self) -> Result<Arc<Relying>, Refused> {
-        let name = {
-            let model = self.fleet.model.read().await;
-            crate::api::this_node_name(&model, &self.fleet.facts.listening_on).map(str::to_owned)
-        };
-        let name = name.ok_or_else(|| {
-            Refused::Unlooked("the hub does not know its MagicDNS name yet".to_owned())
-        })?;
-        self.passkeys().relying(&name).map_err(refused)
+        let origin = crate::write::dashboard_origin(&self.authoriser, &self.fleet)
+            .await
+            .ok_or_else(|| {
+                Refused::Unlooked("the hub does not know its MagicDNS name yet".to_owned())
+            })?;
+        self.passkeys().relying(&origin).map_err(refused)
     }
 }
 
@@ -886,7 +902,7 @@ async fn join_code<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
 ) -> Result<Json<JoinCode>, Refused> {
     allowed(&state.authoriser, &from, &headers).await?;
-    let origin = crate::write::dashboard_origin(&state.fleet)
+    let origin = crate::write::dashboard_origin(&state.authoriser, &state.fleet)
         .await
         .ok_or_else(|| {
             Refused::Unlooked("the hub does not know its MagicDNS name yet".to_owned())
@@ -1120,7 +1136,7 @@ pub(crate) mod tests {
 
     /// Enrols one soft passkey named `name` and returns its token.
     pub(crate) fn enrolled(passkeys: &Passkeys, name: &str) -> (SoftPasskey, String, Session) {
-        let relying = passkeys.relying(HUB).expect("a usable name");
+        let relying = passkeys.relying(origin().as_str()).expect("a usable name");
         let code = passkeys.enrol_code();
         let (id, challenge) = passkeys
             .enrol_start(&relying, &code, name)
@@ -1168,7 +1184,7 @@ pub(crate) mod tests {
     fn a_sign_in_with_the_enrolled_passkey_makes_a_second_session() {
         let passkeys = Passkeys::memory();
         let (mut soft, first, _) = enrolled(&passkeys, "iPhone");
-        let relying = passkeys.relying(HUB).expect("a usable name");
+        let relying = passkeys.relying(origin().as_str()).expect("a usable name");
 
         let (id, challenge) = passkeys
             .sign_in_start(&relying, Some("Mac"))
@@ -1187,6 +1203,66 @@ pub(crate) mod tests {
             passkeys.sign_in_finish(&relying, &id, &answer).is_err(),
             "a ceremony is used once"
         );
+    }
+
+    /// The amendment: a configured origin's host is the rp id, and a passkey
+    /// made and used on that origin verifies.
+    #[test]
+    fn a_configured_origin_is_the_relying_party() {
+        let passkeys = Passkeys::memory();
+        let own = "https://yantra.cloudx.run";
+        let relying = passkeys.relying(own).expect("a usable origin");
+        assert_eq!(relying.id, "yantra.cloudx.run");
+
+        let code = passkeys.enrol_code();
+        let (id, challenge) = passkeys
+            .enrol_start(&relying, &code, "iPhone")
+            .expect("an open code");
+        let mut soft = SoftPasskey::new(true);
+        let url = Url::parse(own).expect("an origin");
+        let credential = soft
+            .do_registration(url.clone(), challenge)
+            .expect("the soft authenticator registers");
+        passkeys
+            .enrol_finish(&relying, &id, &credential)
+            .expect("the passkey verifies");
+
+        let (id, challenge) = passkeys
+            .sign_in_start(&relying, Some("Mac"))
+            .expect("a passkey is enrolled");
+        let answer = soft
+            .do_authentication(url, challenge)
+            .expect("the soft authenticator signs");
+        passkeys
+            .sign_in_finish(&relying, &id, &answer)
+            .expect("the assertion verifies");
+    }
+
+    #[test]
+    fn yantra_origin_is_one_https_origin_and_nothing_else() {
+        assert_eq!(
+            configured_origin("https://yantra.cloudx.run").as_deref(),
+            Some("https://yantra.cloudx.run")
+        );
+        assert_eq!(
+            configured_origin("https://Yantra.cloudx.run/").as_deref(),
+            Some("https://yantra.cloudx.run")
+        );
+        assert_eq!(
+            configured_origin("https://yantra.cloudx.run:8443").as_deref(),
+            Some("https://yantra.cloudx.run:8443")
+        );
+        for bad in [
+            "yantra.cloudx.run",
+            "not a url",
+            "https://yantra.cloudx.run/dashboard",
+            "https://yantra.cloudx.run/?a=b",
+            "http://yantra.cloudx.run",
+            "https://yantra.cloudx.run,https://hub.example.ts.net:8443",
+            "https://owner@yantra.cloudx.run",
+        ] {
+            assert_eq!(configured_origin(bad), None, "{bad}");
+        }
     }
 
     #[test]
@@ -1244,7 +1320,7 @@ pub(crate) mod tests {
     #[test]
     fn a_wrong_code_cannot_start_an_enrolment() {
         let passkeys = Passkeys::memory();
-        let relying = passkeys.relying(HUB).expect("a usable name");
+        let relying = passkeys.relying(origin().as_str()).expect("a usable name");
 
         assert!(matches!(
             passkeys.enrol_start(&relying, "AAAAAAAA", "iPhone"),
@@ -1268,7 +1344,7 @@ pub(crate) mod tests {
     fn sign_out_everywhere_else_keeps_this_session() {
         let passkeys = Passkeys::memory();
         let (mut soft, here, kept) = enrolled(&passkeys, "iPhone");
-        let relying = passkeys.relying(HUB).expect("name");
+        let relying = passkeys.relying(origin().as_str()).expect("name");
         let (id, challenge) = passkeys.sign_in_start(&relying, None).expect("enrolled");
         let answer = soft.do_authentication(origin(), challenge).expect("signs");
         let (there, _) = passkeys.sign_in_finish(&relying, &id, &answer).expect("ok");

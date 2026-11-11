@@ -57,6 +57,7 @@ It uses [Zellij](https://github.com/zellij-org/zellij), [WTF](https://github.com
 ## A custom name
 
 `domain-setup.sh` serves the dashboard on your own domain to tailnet devices only.
-Caddy proxies to the daemon's socket, and the script names `caddy` as the proxy account in
-`/etc/yantra/daemon.env` ([behind Caddy](../docs/appliance.md#behind-caddy-on-a-name-you-own)).
-A second run does not add the line again, and it restarts `yantrad` only when it adds it.
+Caddy proxies to the daemon's socket. The script names `caddy` as the proxy account and
+`https://$DOMAIN` as `YANTRA_ORIGIN` in `/etc/yantra/daemon.env`
+([behind Caddy](../docs/appliance.md#behind-caddy-on-a-name-you-own)). A second run does not add the
+lines again, and it restarts `yantrad` only when it changes one. A new `DOMAIN` costs every passkey.

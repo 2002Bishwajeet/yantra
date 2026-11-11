@@ -128,16 +128,22 @@ trusts only root as a proxy until you name one more account
 package runs Caddy as `caddy`. On the box,
 [`box/domain-setup.sh`](../box/domain-setup.sh) does all four steps.
 
-1. Add one line to `/etc/yantra/daemon.env` with `sudoedit`. The file stays `0600` and owned by
+1. Add two lines to `/etc/yantra/daemon.env` with `sudoedit`. The file stays `0600` and owned by
    `yantra`, and `yantra relay` and `yantra github` keep lines that they do not own:
 
    ```bash
    YANTRA_PROXY_ACCOUNT=caddy
+   YANTRA_ORIGIN=https://yantra.example.com
    ```
+
+   `YANTRA_ORIGIN` is the name the passkey belongs to, and the only `Origin` a write may send
+   ([ADR-0044](adr/0044-a-write-needs-the-owners-passkey.md), amended 2026-11-12). It holds one
+   https origin with no path. **Changing it costs every passkey**: each device enrols again.
 
 2. Restart the daemon: `sudo systemctl restart yantrad`. The journal names the account and its uid,
    or says that no proxy account is set. A name that does not resolve is a warning, and the daemon
-   then trusts no account but root.
+   then trusts no account but root. A bad `YANTRA_ORIGIN` stops the daemon, and the journal names
+   the variable.
 3. Point the site block at the socket, and keep `bind` on the box's tailnet address:
 
    ```caddyfile

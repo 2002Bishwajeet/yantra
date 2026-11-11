@@ -117,6 +117,8 @@ pub struct Authoriser<I> {
     bound: Arc<[IpAddr]>,
     me: u32,
     proxy: Option<u32>,
+    /// `YANTRA_ORIGIN`, when the dashboard is served under the owner's own name.
+    origin: Option<Arc<str>>,
     socket: Arc<std::path::Path>,
     passkeys: Passkeys,
 }
@@ -158,6 +160,7 @@ impl<I: Inventory> Authoriser<I> {
             bound: bound.iter().map(SocketAddr::ip).collect(),
             me: nix::unistd::geteuid().as_raw(),
             proxy: None,
+            origin: None,
             socket: socket.into(),
             passkeys,
         }
@@ -167,6 +170,15 @@ impl<I: Inventory> Authoriser<I> {
     #[must_use]
     pub fn proxied_by(self, uid: Option<u32>) -> Self {
         Self { proxy: uid, ..self }
+    }
+
+    /// Serve the dashboard at `origin` rather than the MagicDNS name.
+    #[must_use]
+    pub fn served_at(self, origin: Option<String>) -> Self {
+        Self {
+            origin: origin.map(Into::into),
+            ..self
+        }
     }
 
     /// The peer is a proxy, so its caller is another machine.
@@ -631,7 +643,11 @@ async fn passes<I: Inventory>(
         || headers.contains_key(axum::http::header::UPGRADE);
     if writes && let Some(origin) = headers.get(axum::http::header::ORIGIN) {
         let origin = origin.to_str().unwrap_or("an unreadable origin");
-        if Some(origin) != dashboard_origin(&gate.fleet).await.as_deref() {
+        if Some(origin)
+            != dashboard_origin(&gate.authoriser, &gate.fleet)
+                .await
+                .as_deref()
+        {
             return Err(Refused::Origin(origin.to_owned()));
         }
     }
@@ -641,8 +657,15 @@ async fn passes<I: Inventory>(
     }
 }
 
-/// `https://<MagicDNS>:8443`, from the last tailnet look.
-pub(crate) async fn dashboard_origin(fleet: &Fleet) -> Option<String> {
+/// `YANTRA_ORIGIN` when it is set, and otherwise `https://<MagicDNS>:8443`
+/// from the last tailnet look.
+pub(crate) async fn dashboard_origin<I>(
+    authoriser: &Authoriser<I>,
+    fleet: &Fleet,
+) -> Option<String> {
+    if let Some(origin) = &authoriser.origin {
+        return Some(origin.to_string());
+    }
     let model = fleet.model.read().await;
     let machines = model.machines.as_deref()?.value().as_ref().ok()?;
     crate::api::https_of(machines, &fleet.facts.listening_on)
@@ -4711,6 +4734,88 @@ mod tests {
             .await
             .expect_err("no cookie");
         assert!(matches!(refused, Refused::SignIn), "{refused:?}");
+    }
+
+    /// The proxy account `YANTRA_PROXY_ACCOUNT` names passes the same gate as `serve`.
+    #[tokio::test]
+    async fn the_proxy_account_needs_a_cookie_as_serve_does() {
+        let fake = tailnet(vec![(address(2), caller(ME, &[]))]);
+        let (authoriser, mut cookie) = signed_in(fake, &[SocketAddr::new(address(1), 7717)]);
+        let authoriser = authoriser.proxied_by(Some(4242));
+        let proxy = Peer::Unix(Some(4242));
+        cookie.insert(FORWARDED_FOR, "100.64.0.2".parse().expect("ASCII"));
+
+        assert!(allowed(&authoriser, &proxy, &cookie).await.is_ok());
+
+        let refused = allowed(&authoriser, &proxy, &forwarded(&["100.64.0.2"]))
+            .await
+            .expect_err("no cookie");
+        assert!(matches!(refused, Refused::SignIn), "{refused:?}");
+    }
+
+    /// This machine is `hub` on the tailnet, at [`address(1)`].
+    fn hub_fleet() -> Fleet {
+        Fleet {
+            facts: join_fleet(std::path::Path::new("")).facts,
+            ..on_the_tailnet(&[(CALLER_NODE, "hub", &[address(1)])])
+        }
+    }
+
+    async fn write_from(gate: &Gate<Fake>, origin: &str) -> Result<(), Refused> {
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::ORIGIN, origin.parse().expect("ASCII"));
+        let method = axum::http::Method::POST;
+        passes(
+            gate,
+            &method,
+            "/workspaces",
+            &headers,
+            Some(daemon_account()),
+        )
+        .await
+    }
+
+    const MAGIC: &str = "https://hub.tail.ts.net:8443";
+
+    /// With no `YANTRA_ORIGIN`, the dashboard's origin is the MagicDNS one.
+    #[tokio::test]
+    async fn with_no_origin_set_the_magicdns_origin_is_the_dashboard() {
+        let gate = Gate {
+            authoriser: on_this_machine(mine(1)),
+            fleet: hub_fleet(),
+        };
+
+        assert_eq!(
+            dashboard_origin(&gate.authoriser, &gate.fleet)
+                .await
+                .as_deref(),
+            Some(MAGIC)
+        );
+        assert!(write_from(&gate, MAGIC).await.is_ok());
+        let refused = write_from(&gate, "https://yantra.cloudx.run")
+            .await
+            .expect_err("not the dashboard");
+        assert!(matches!(refused, Refused::Origin(_)), "{refused:?}");
+    }
+
+    /// The 2026-11-12 amendment: a configured origin is the only one a write may name.
+    #[tokio::test]
+    async fn a_configured_origin_refuses_a_write_from_the_magicdns_origin() {
+        let own = "https://yantra.cloudx.run";
+        let gate = Gate {
+            authoriser: on_this_machine(mine(1)).served_at(Some(own.to_owned())),
+            fleet: hub_fleet(),
+        };
+
+        assert_eq!(
+            dashboard_origin(&gate.authoriser, &gate.fleet)
+                .await
+                .as_deref(),
+            Some(own)
+        );
+        assert!(write_from(&gate, own).await.is_ok());
+        let refused = write_from(&gate, MAGIC).await.expect_err("one origin");
+        assert!(matches!(refused, Refused::Origin(_)), "{refused:?}");
     }
 
     /// Decision 10: the socket's owner needs no cookie, and another account

@@ -58,6 +58,8 @@ const RUNTIME: &str = "/run/yantra";
 const SOCKET: &str = "yantrad.sock";
 /// systemd loads it from `/etc/yantra/daemon.env`, which `write_relay` leaves alone.
 const PROXY_ACCOUNT: &str = "YANTRA_PROXY_ACCOUNT";
+/// The dashboard's own origin, from the same file (the 2026-11-12 amendment to ADR-0044).
+const ORIGIN: &str = "YANTRA_ORIGIN";
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -83,6 +85,9 @@ enum Error {
 
     #[error("the server stopped unexpectedly")]
     Serve(#[source] std::io::Error),
+
+    #[error("{ORIGIN} must be one https origin, such as https://yantra.cloudx.run")]
+    Origin,
 
     #[error("could not serve the dashboard")]
     Dashboard(#[source] web::NoIndex),
@@ -221,6 +226,12 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
+    let origin = match std::env::var(ORIGIN) {
+        Ok(value) if !value.is_empty() => {
+            Some(passkey::configured_origin(&value).ok_or(Error::Origin)?)
+        }
+        _ => None,
+    };
     let addresses = listen_on(inventory).await?;
     let socket =
         Path::new(&std::env::var_os("RUNTIME_DIRECTORY").unwrap_or_else(|| RUNTIME.into()))
@@ -240,8 +251,9 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         }
     };
     let proxy = write::proxy_account(std::env::var(PROXY_ACCOUNT).ok().as_deref());
-    let authoriser =
-        write::Authoriser::new(inventory.clone(), &addresses, &socket, passkeys).proxied_by(proxy);
+    let authoriser = write::Authoriser::new(inventory.clone(), &addresses, &socket, passkeys)
+        .proxied_by(proxy)
+        .served_at(origin.clone());
     let ssh_dir = yantra_core::identity::dir().unwrap_or_else(|error| {
         tracing::warn!("no ssh identity can be served: {error}");
         PathBuf::new()
@@ -258,9 +270,10 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     })?;
     tracing::info!("keeping threads in {}", threads.display());
     let ips: Vec<IpAddr> = addresses.iter().map(SocketAddr::ip).collect();
-    let base = match inventory.machines().await {
-        Ok(machines) => api::https_of(&machines, &addresses),
-        Err(error) => {
+    let base = match (&origin, inventory.machines().await) {
+        (Some(origin), _) => Some(origin.clone()),
+        (None, Ok(machines)) => api::https_of(&machines, &addresses),
+        (None, Err(error)) => {
             tracing::warn!("a chat push carries no link: {error}");
             None
         }

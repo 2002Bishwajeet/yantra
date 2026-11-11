@@ -203,6 +203,11 @@ device and every `/api` request then carries a session cookie; with none it gets
 hub, `yantra passkey code` makes the code that enrols a device, and `yantra passkey list`,
 `yantra passkey remove` and `yantra session revoke` manage them over the socket.
 
+The passkey belongs to the dashboard's name, `https://<MagicDNS>:8443` by default. To serve it on
+a name you own, set `YANTRA_ORIGIN=https://yantra.example.com` in `/etc/yantra/daemon.env`. It holds
+one https origin with no path, and a bad value stops the daemon at start. **Changing it costs every
+passkey**: each device enrols again on the new name.
+
 `YANTRA_WEB` points it at a directory of built assets. Unset it and the API serves alone and `/`
 says how; point it at a directory with no `index.html` and it refuses to start rather than answering
 404 to everything, which reads as a broken dashboard instead of a typo in one variable. **A

@@ -113,6 +113,18 @@ impl Hub {
         )
     }
 
+    /// Restarts the unit with `YANTRA_ORIGIN` set to `origin`, as
+    /// `/etc/yantra/daemon.env` would set it.
+    fn serve_at(&mut self, origin: &str) -> Result<()> {
+        self.sh(&format!(
+            "mkdir -p /etc/systemd/system/yantrad.service.d && \
+             printf '[Service]\\nEnvironment=YANTRA_ORIGIN={origin}\\n' \
+               > /etc/systemd/system/yantrad.service.d/origin.conf"
+        ))?;
+        self.origin = Url::parse(origin)?;
+        self.restart()
+    }
+
     fn sh(&self, script: &str) -> Result<String> {
         self.systemd.run(&["bash", "-c", script])
     }
@@ -420,5 +432,38 @@ fn a_write_needs_the_owners_passkey() -> Result<()> {
     std::thread::sleep(Duration::from_secs(2));
     let late = hub.enrol(&mut SoftPasskey::new(true), &code, "Late")?;
     assert_eq!(late.status, 401, "an expired code: {}", late.body);
+    Ok(())
+}
+
+/// The 2026-11-12 amendment: with `YANTRA_ORIGIN` set, a passkey is made and
+/// used for that origin, and a write names it rather than the MagicDNS one.
+#[test]
+fn a_configured_origin_is_the_one_a_passkey_and_a_write_use() -> Result<()> {
+    let Some(mut hub) = Hub::start()? else {
+        return Ok(());
+    };
+    let magic = hub.origin.as_str().trim_end_matches('/').to_owned();
+    let own = "https://yantra.cloudx.run";
+    hub.serve_at(own)?;
+
+    let code = hub.code("yantra")?.json()?["code"]
+        .as_str()
+        .context("a code")?
+        .to_owned();
+    let mut phone = SoftPasskey::new(true);
+    let enrolled = hub.enrol(&mut phone, &code, "iPhone")?;
+    assert_eq!(enrolled.status, 200, "{}", enrolled.body);
+    let signed = hub.sign_in(&mut phone)?;
+    assert_eq!(signed.status, 200, "{}", signed.body);
+    let (token, _) = signed.cookie()?;
+
+    let listed = hub
+        .curl("yantra", "GET", "/api/passkey", &[], None)?
+        .json()?;
+    assert_eq!(listed["relying_party"], "yantra.cloudx.run", "{listed}");
+    let wrote = hub.write(Some(&token), Some(own))?;
+    assert_eq!(wrote.status, 200, "{}", wrote.body);
+    let refused = hub.write(Some(&token), Some(&magic))?;
+    assert_eq!(refused.status, 403, "{}", refused.body);
     Ok(())
 }

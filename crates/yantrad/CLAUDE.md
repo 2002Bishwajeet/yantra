@@ -35,6 +35,13 @@ short list that answers with neither, and a new route belongs on it only if a si
 must reach it. `passkey.rs` keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and
 never a token.
 
+**The dashboard's origin is `https://<MagicDNS>:8443` unless `YANTRA_ORIGIN` names one** (ADR-0044,
+amended 2026-11-12). `main.rs` reads it from `/etc/yantra/daemon.env` once at start, and
+`passkey::configured_origin` accepts exactly one https origin with no path; anything else stops the
+daemon. `write::dashboard_origin` is the one place both are chosen: the relying party id is its host,
+the `Origin` check and the join command use it. **Changing it costs every passkey**, because a
+passkey belongs to its relying party id.
+
 **Do not add a `--bind` flag, a `--port` flag, or a config file for either.** A flag that can expose
 the API is a flag someone eventually passes. The port is a constant with a test asserting it is one.
 
