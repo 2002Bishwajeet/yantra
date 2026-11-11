@@ -309,7 +309,7 @@ const shown = (w) =>
     ? `\nThe walk ran the branch on the real fleet. Read each screenshot and each text file with the Read tool and judge them against the row's outcome in tracker.md: ${w.shots.join(', ')}. Check the copy word by word in the text files, never only in an image: an eye reading a screenshot corrects a misspelt word. A wrong or misspelt word, a layout broken at 390 px, an error or an empty screen where the row expects content is blocking. Load the m3-expressive skill and judge the design too: raw text dumps, monospace walls, unstyled lists, weak hierarchy, cramped or uneven spacing, or detail the owner does not need shown before what needs the owner is blocking. The walker saw: ${w.seen || 'nothing noted'}.${w.mac === 'pass' ? ' `just test-mac` passed on the real Mac.' : ''}`
     : ''
 
-async function runRow(row) {
+async function runRow(row, built = () => {}) {
   const branch = branchOf(row)
   const wt = `${WT_ROOT}/${branch}`
   const park = (reason) => ({ id: row.id, title: row.title, status: 'parked', reason, branch, gateMachine: gateMachine[row.id] || 'none' })
@@ -336,6 +336,8 @@ Write a short plan and the checks that prove the row's done condition. Set park=
 Write the tests that prove the done condition first, then the code. Run the fast checks yourself. Before you commit, load the simplify skill and apply it to git diff origin/main...HEAD, so the reviewer reads the final code. Commit.${RULES(wt)}`,
     { label: `build:${row.id}`, phase: 'Build', model: b.model, effort: b.effort },
   )
+  // Y-723: CI, the walk, review and ship wait in the background; the slot goes to the next build.
+  built()
   if (!(await verifyUntilGreen(row, wt, plan, 3))) return park('the gate stayed red after 3 rounds')
   let w = await walkUntilGreen(row, wt, plan)
   if (typeof w === 'string') return park(w)
@@ -408,23 +410,30 @@ const t = await agent(triagePrompt([]), { label: 'triage', phase: 'Triage', sche
 if (t) for (const s of t.skipped) skipped.set(s.id, s.reason)
 // A pool, not batches: a row starts as soon as a slot frees, so one slow row no longer holds the next two.
 const pool = t ? rank(t.rows.filter((r) => !only || only.includes(r.id))) : []
+// Y-723 (owner, 2026-11-11): PARALLEL caps the rows that plan and build. A row that waits on CI holds no slot.
 const running = new Map()
+const building = new Set()
 for (;;) {
-  while (running.size < PARALLEL && results.length + running.size < MAX_ROWS) {
+  while (building.size < PARALLEL && results.length + running.size < MAX_ROWS) {
     const r = pool.find((x) => !attempted.has(x.id) && ![...running.values()].some((y) => clash(x, y.row)))
     if (!r) break
     attempted.add(r.id)
     log(`Start: ${r.id} (p${r.priority}, ${r.kind})`)
-    const done = runRow(r)
+    building.add(r.id)
+    let wake
+    const freed = new Promise((res) => (wake = res))
+    const built = () => (building.delete(r.id), wake())
+    const done = runRow(r, built)
       .catch(() => null)
       .then((o) => {
         results.push(o || { id: r.id, title: r.title, status: 'parked', reason: 'the row agent died' })
         running.delete(r.id)
+        built()
       })
-    running.set(r.id, { row: r, done })
+    running.set(r.id, { row: r, done, freed })
   }
   if (!running.size) break
-  await Promise.race([...running.values()].map((x) => x.done))
+  await Promise.race([...running.entries()].flatMap(([id, x]) => (building.has(id) ? [x.done, x.freed] : [x.done])))
 }
 if (pool.some((r) => !attempted.has(r.id))) log(`Stopped at maxRows=${MAX_ROWS}; ${pool.filter((r) => !attempted.has(r.id)).map((r) => r.id).join(', ')} not started.`)
 
