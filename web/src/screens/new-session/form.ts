@@ -12,7 +12,7 @@ export type Source =
   | { kind: 'github'; repo: Repo; path: string; here: Checked; because?: string }
   | { kind: 'local'; path: string; origin: string | null; checked: Checked; because?: string }
 
-export type Provider = 'github' | 'gitlab' | 'local'
+export type Provider = 'github' | 'local'
 
 export type Values = {
   name: string
@@ -142,29 +142,12 @@ export function plan(values: Values): Plan | null {
   }
 }
 
-/** The list under "When you press Create and open", derived from the choices. */
-export function happenings(values: Values, home: string | null): { line: string; detail?: string }[] {
+/** The one line step 3 adds to what the header already says; `null` when the folder is already there. */
+export function next(values: Values): string | null {
   const { source } = values
-  const where = source ? tilde(source.path, home) : '…'
-  const { machine } = values
-  const clone = source?.kind === 'github' && source.here === 'no'
+  if (source?.kind === 'github' && source.here === 'no') return `Clones ${source.repo.full_name} first.`
   const unchecked = source?.kind === 'github' ? source.here === 'unknown' : source?.checked === 'unknown'
-  const second = clone
-    ? `It clones ${source.repo.full_name} into ${where} on ${machine}, then opens a session there.`
-    : `It opens a session in ${where} on ${machine}.${unchecked ? ' Yantra checks the folder then.' : ''}`
-  return [
-    {
-      line: `Yantra saves the workspace as ${values.name}.`,
-      detail: `~/.config/yantra/workspaces/${values.name}.toml`,
-    },
-    { line: second },
-    {
-      line:
-        values.opens === 'command'
-          ? `${values.command.trim() || '…'} runs there, and you see it in this window.`
-          : 'Claude starts there, and you see it in this window.',
-    },
-  ]
+  return unchecked ? 'Yantra checks the folder first.' : null
 }
 
 /** The line under step 2 that says why Continue is off, or what it will do. */

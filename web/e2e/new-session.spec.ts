@@ -1,6 +1,7 @@
+import type { Page } from '@playwright/test'
 import { at, axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
-import { scrollHeight } from './lib/scroller'
+import { scrollHeight, scrollTo } from './lib/scroller'
 
 /** `/new` (Y-349): the four steps of NewSession, NewSessionSource,
  *  NewSessionLocal, NewSessionStart and NewSessionCloning. The fixture's
@@ -27,10 +28,10 @@ test.describe('the four steps', () => {
     const chips = page.getByRole('group', { name: 'Machine' })
     await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toBeEnabled()
     await expect(chips.getByRole('button', { name: 'thinkpad · unreachable' })).toBeDisabled()
-    // Y-517: the daemon's top machine is preselected, with the reason.
+    // Y-517: the daemon's top machine is preselected, with the reason, cut to one line.
     await expect(chips.getByRole('button', { name: 'cachyos-g14' })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByRole('status').filter({ hasText: 'Suggested' })).toHaveText(
-      'Suggested: cachyos-g14, because it is idle and it has RAM to spare',
+      /^Suggested: cachyos-g14, because .+/,
     )
     await expect(page.getByRole('button', { name: 'Continue' })).toBeEnabled()
   })
@@ -47,7 +48,7 @@ test.describe('the four steps', () => {
     await page.getByRole('button', { name: 'Use hetzner-1' }).click()
     await expect(page.getByRole('button', { name: 'Use hetzner-1' })).toHaveCount(0)
     await page.getByRole('button', { name: 'Continue' }).click()
-    await expect(page.getByText('It opens a session in ~/Github/scratch on hetzner-1', { exact: false })).toBeVisible()
+    await expect(page.getByText('on hetzner-1 · ~/Github/scratch', { exact: false }).first()).toBeVisible()
   })
 
   test('passes axe on each step', async ({ page }) => {
@@ -95,11 +96,14 @@ test.describe('the four steps', () => {
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
 
-    await expect(page.getByText('github.com · 2002Bishwajeet · signed in to Yantra', { exact: false })).toBeVisible()
+    const account = page.getByRole('button', { name: 'GitHub account: 2002Bishwajeet' })
+    await expect(account).toBeVisible()
+    expect((await account.boundingBox())!.height).toBeGreaterThanOrEqual(48)
     const rows = page.getByRole('list', { name: 'Repositories' })
     await expect(rows.getByText('On this machine')).toBeVisible()
     await expect(rows.getByText('Will clone')).toBeVisible()
-    await expect(page.getByRole('button', { name: /GitLab/ })).toBeDisabled()
+    await expect(page.getByRole('radio', { name: /GitLab/ })).toHaveCount(0)
+    await expect(page.getByRole('radio')).toHaveText(['GitHub', 'Local directory'])
     await screenshot(page, 'new-session-source', 'busy', size, { overlay: size !== 'phone' })
 
     await page.getByLabel('Search your repositories').fill('scratch')
@@ -113,7 +117,7 @@ test.describe('the four steps', () => {
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
-    await page.getByRole('button', { name: /Local directory/ }).click()
+    await page.getByRole('radio', { name: /Local directory/ }).click()
 
     const folders = page.getByRole('list', { name: 'Folders' })
     // Y-643: opening the step chooses nothing; a walk does.
@@ -153,7 +157,7 @@ test.describe('the four steps', () => {
       await page.getByLabel('Name').fill(name)
       await page.getByRole('button', { name: 'cachyos-g14' }).click()
       await page.getByRole('button', { name: 'Continue' }).click()
-      await page.getByRole('button', { name: /Local directory/ }).click()
+      await page.getByRole('radio', { name: /Local directory/ }).click()
     }
     const crumb = page.getByRole('navigation', { name: 'Where you are' }).locator('[aria-current="location"]')
     const folders = page.getByRole('list', { name: 'Folders' })
@@ -225,7 +229,7 @@ test.describe('the four steps', () => {
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
-    await page.getByRole('button', { name: /Local directory/ }).click()
+    await page.getByRole('radio', { name: /Local directory/ }).click()
 
     await expect(page.locator('.ns__chosen')).toHaveCount(0)
     const filter = page.getByLabel('Filter, or type a path')
@@ -241,7 +245,7 @@ test.describe('the four steps', () => {
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
-    await page.getByRole('button', { name: /Local directory/ }).click()
+    await page.getByRole('radio', { name: /Local directory/ }).click()
     await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
     await page.getByRole('button', { name: 'Use ~', exact: true }).click()
     await expect(page.locator('.ns__chosen')).toBeVisible()
@@ -288,7 +292,7 @@ test.describe('all four steps, to a workspace that is running', () => {
     await page.getByRole('button', { name: 'Continue' }).click()
 
     await expect(page.getByText('What opens in the session')).toBeVisible()
-    await expect(page.getByText('It opens a session in ~/Github/yantra on cachyos-g14', { exact: false })).toBeVisible()
+    await expect(page.getByText('on cachyos-g14 · ~/Github/yantra', { exact: false }).first()).toBeVisible()
     await screenshot(page, 'new-session-start', 'busy', size, { overlay: size !== 'phone' })
     await page.getByRole('button', { name: 'Create and open' }).click()
 
@@ -312,9 +316,7 @@ test.describe('all four steps, to a workspace that is running', () => {
     await page.getByRole('button', { name: /2002Bishwajeet\/scratch/ }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
 
-    await expect(
-      page.getByText('It clones 2002Bishwajeet/scratch into ~/Github/scratch on cachyos-g14', { exact: false }),
-    ).toBeVisible()
+    await expect(page.getByText('Clones 2002Bishwajeet/scratch first.')).toBeVisible()
     await page.getByRole('button', { name: 'Create and open' }).click()
 
     const stages = page.getByRole('list', { name: 'Stages' })
@@ -326,7 +328,7 @@ test.describe('all four steps, to a workspace that is running', () => {
 })
 
 test.describe('a long repository name on a phone', () => {
-  test('wraps, shows one state, and keeps the hint in view', async ({ page, size }) => {
+  test('clips to one line, shows one state, and keeps the hint in view', async ({ page, size }) => {
     test.skip(size !== 'phone', 'the clipping was seen at 390 px')
     await scenario(page, 'longrepo')
     await page.goto(PATH)
@@ -342,10 +344,21 @@ test.describe('a long repository name on a phone', () => {
     await expect(page.getByRole('status')).toHaveText('Choose a repository to continue.')
     await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled()
 
-    const clipped = await rows.locator('.ns__repo .m3-row__headline, .ns__repo .m3-row__supporting').evaluateAll(
-      (nodes) => nodes.filter((node) => node.scrollWidth > node.clientWidth).length,
-    )
-    expect(clipped).toBe(0)
+    const headline = long.locator('.m3-row__headline')
+    const read = await headline.evaluate((node) => {
+      const css = getComputedStyle(node)
+      return {
+        height: node.getBoundingClientRect().height,
+        line: parseFloat(css.lineHeight),
+        overflow: css.textOverflow,
+        wrap: css.overflowWrap,
+        clipped: node.scrollWidth > node.clientWidth,
+      }
+    })
+    expect(read.height).toBeLessThanOrEqual(read.line + 1)
+    expect(read.overflow).toBe('ellipsis')
+    expect(read.wrap).not.toBe('anywhere')
+    expect(read.clipped).toBe(true)
     const box = await long.boundingBox()
     expect(box).not.toBeNull()
     expect(box!.x + box!.width).toBeLessThanOrEqual(390)
@@ -363,6 +376,62 @@ test.describe('a long repository name on a phone', () => {
   })
 })
 
+const fits = async (page: Page, action: 'Continue' | 'Create and open') => {
+  const tall = await page.locator('.ns p').evaluateAll((nodes) =>
+    nodes
+      .filter((node) => node.getBoundingClientRect().height > 0)
+      .filter((node) => node.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(node).lineHeight))
+      .map((node) => node.textContent),
+  )
+  expect(tall).toEqual([])
+  await expect(page.getByRole('button', { name: action })).toBeVisible()
+  // The foot sticks to the screen, so it is always in view. The step fits when its last card
+  // ends above the foot with the scroller at the top.
+  await scrollTo(page, 0)
+  const fit = await page.evaluate(() => {
+    const cards = document.querySelectorAll('.ns__card')
+    const foot = document.querySelector('.ns__foot')!.getBoundingClientRect()
+    return { content: cards[cards.length - 1].getBoundingClientRect().bottom, foot: foot.top }
+  })
+  expect(fit.content).toBeLessThanOrEqual(fit.foot + 1)
+  expect(fit.content).toBeLessThanOrEqual(844)
+}
+
+test.describe('the steps fit a phone (Y-719)', () => {
+  test.use(at('phone'))
+
+  test('steps 1, 2 and 3 hold no paragraph over one line, and Continue is in view', async ({ page }) => {
+    await scenario(page, 'busy')
+    await page.goto(PATH)
+    await expect(heading(page, 'New session')).toBeVisible()
+
+    await page.getByLabel('Name').fill('quiet-otter')
+    await page.getByRole('button', { name: 'cachyos-g14' }).click()
+    await fits(page, 'Continue')
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('On this machine')).toBeVisible()
+    await fits(page, 'Continue')
+    await page.getByRole('button', { name: /2002Bishwajeet\/yantra/ }).click()
+    await page.getByRole('button', { name: 'Continue' }).click()
+    await expect(page.getByText('What opens in the session')).toBeVisible()
+    await fits(page, 'Create and open')
+  })
+
+  test('step 1 stays one line when the hub is unjoined and no machine can be suggested', async ({ page }) => {
+    // `fresh` has an unjoined hub; in `hub` the box has joined, so the note never renders.
+    await scenario(page, 'fresh')
+    await page.route('**/api/placement', (route) =>
+      route.fulfill({ status: 500, contentType: 'text/plain', body: 'placement is down' }),
+    )
+    await page.goto(PATH)
+    await expect(heading(page, 'New session')).toBeVisible()
+    await expect(page.getByRole('note').filter({ hasText: 'karigar account' })).toBeVisible()
+    await expect(page.getByRole('alert').filter({ hasText: 'No suggestion' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Ask again' })).toBeVisible()
+    await fits(page, 'Continue')
+  })
+})
+
 test.describe('the local step on a phone (Y-643)', () => {
   test.use(at('phone'))
 
@@ -373,7 +442,7 @@ test.describe('the local step on a phone (Y-643)', () => {
     await page.getByLabel('Name').fill('quiet-otter')
     await page.getByRole('button', { name: 'cachyos-g14' }).click()
     await page.getByRole('button', { name: 'Continue' }).click()
-    await page.getByRole('button', { name: /Local directory/ }).click()
+    await page.getByRole('radio', { name: /Local directory/ }).click()
 
     const folders = page.getByRole('list', { name: 'Folders' })
     await expect(folders).not.toHaveAttribute('aria-describedby')
