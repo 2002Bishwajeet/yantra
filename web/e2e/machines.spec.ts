@@ -26,7 +26,7 @@ test.describe('the machines on a busy fleet', () => {
     const short = card(page, 'pi-5')
     // The check name table, never a raw id (D7 §3.5).
     await expect(short.getByText('claude', { exact: true })).toBeVisible()
-    await expect(short.getByText('no `claude` on PATH there')).toBeVisible()
+    await expect(short.getByText('no claude on PATH there')).toBeVisible()
     await expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeVisible()
     // `git` is not in pi-5's report at all, so it counts as missing too.
     await expect(short.getByText('2 missing')).toBeVisible()
