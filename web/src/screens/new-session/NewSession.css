@@ -536,8 +536,7 @@ span.ns__crumb {
 }
 
 /* A suggestion is one line; the full text stays in the DOM for a reader. */
-.ns__suggest .ns__note,
-.ns__note--line {
+.ns__suggest .ns__note {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;

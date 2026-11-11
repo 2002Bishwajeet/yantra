@@ -917,7 +917,7 @@ describe('the suggested machine (Y-517)', () => {
   it('preselects the top machine and says why, and Continue enables with a name', async () => {
     mountNew('desktop', '/new', ranked(placed('pi', 45, 'it is idle and it has RAM to spare'), placed('cachyos-g14', 20, 'x')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle and it has RAM to spare')
+    expect(screen.getByRole('status').textContent).toBe('Suggested: pi')
     type('Name', 'quiet-otter')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
   })
@@ -928,7 +928,7 @@ describe('the suggested machine (Y-517)', () => {
       'GET /api/readiness': [200, { looked: 'ok', age_seconds: 0, data: [] }],
     })
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle · not checked yet'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi · not checked yet'))
   })
 
   it('says the top machine is not ready yet when its report is not ready', async () => {
@@ -936,7 +936,7 @@ describe('the suggested machine (Y-517)', () => {
       ...ranked(placed('pi', 45, 'it is idle')),
       'GET /api/readiness': [200, { looked: 'ok', age_seconds: 0, data: [readyReport('pi', false)] }],
     })
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle · not ready yet'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi · not ready yet'))
   })
 
   it('keeps the plain words while the sweep has not been read', async () => {
@@ -944,7 +944,7 @@ describe('the suggested machine (Y-517)', () => {
       ...ranked(placed('pi', 45, 'it is idle')),
       'GET /api/readiness': [200, { looked: 'failed', age_seconds: 0, error: 'ssh: nothing' }],
     })
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it is idle'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Suggested: pi'))
   })
 
   it('takes the first of a tie, which the daemon sorts by name', async () => {
@@ -954,7 +954,7 @@ describe('the suggested machine (Y-517)', () => {
 
   it('does not preselect a machine whose chip cannot be pressed', async () => {
     mountNew('desktop', '/new', ranked(placed('bishwajeets-macbook-pro', 45, 'it is idle')))
-    expect(await screen.findByText('Suggested: bishwajeets-macbook-pro, because it is idle')).toBeTruthy()
+    expect(await screen.findByText('Suggested: bishwajeets-macbook-pro')).toBeTruthy()
     expect(pressed()).toEqual([])
   })
 
@@ -972,14 +972,14 @@ describe('the suggested machine (Y-517)', () => {
   it('yields to ?machine= and to a default machine', async () => {
     mountNew('desktop', '/new?machine=pi', ranked(placed('cachyos-g14', 45, 'it is idle')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(await screen.findByText('Suggested: cachyos-g14, because it is idle')).toBeTruthy()
+    expect(await screen.findByText('Suggested: cachyos-g14')).toBeTruthy()
     expect(pressed()).toEqual(['pi'])
     cleanup()
     unmountNew()
 
     writePrefs({ general: { defaultMachine: 'pi' } })
     mountNew('desktop', '/new', ranked(placed('cachyos-g14', 45, 'it is idle')))
-    await screen.findByText('Suggested: cachyos-g14, because it is idle')
+    await screen.findByText('Suggested: cachyos-g14')
     await waitFor(() => expect(pressed()).toEqual(['pi']))
   })
 
@@ -992,14 +992,14 @@ describe('the suggested machine (Y-517)', () => {
   it('skips a top machine whose chip cannot be pressed, and names the one it picks', async () => {
     mountNew('desktop', '/new', ranked(placed('bishwajeets-macbook-pro', 60, 'it is idle'), placed('pi', 45, 'it has RAM to spare')))
     await waitFor(() => expect(pressed()).toEqual(['pi']))
-    expect(screen.getByRole('status').textContent).toBe('Suggested: pi, because it has RAM to spare')
+    expect(screen.getByRole('status').textContent).toBe('Suggested: pi')
   })
 
   it('never overwrites a pick made by hand', async () => {
     mountNew('desktop', '/new', ranked(placed('cachyos-g14', 45, 'it is idle')))
     await screen.findByRole('group', { name: 'Machine' })
     press('pi')
-    await screen.findByText('Suggested: cachyos-g14, because it is idle')
+    await screen.findByText('Suggested: cachyos-g14')
     expect(pressed()).toEqual(['pi'])
   })
 
