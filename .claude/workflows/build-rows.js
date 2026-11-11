@@ -168,7 +168,10 @@ For each eligible row give its kind (rust-transport for ssh, tmux or socket code
 
 const rank = (rows) => [...rows].sort((a, b) => a.priority - b.priority || Number(a.id.slice(2)) - Number(b.id.slice(2)))
 // Rows that edit the same file never run at once; ship rebases one row at a time, so other overlaps resolve there.
-const clash = (a, b) => a.paths.some((p) => b.paths.some((q) => p.startsWith(q) || q.startsWith(p)))
+// A folder claims only new files in it (the schema says so), so only two claims on one file clash.
+// On 2026-11-11 Y-687 claimed crates/yantrad/src/ and web/e2e/ and held four rows for its whole build.
+const files = (r) => r.paths.filter((p) => !p.endsWith('/'))
+const clash = (a, b) => files(a).some((p) => files(b).includes(p))
 
 // The owner's own services run in podman on this box: a blanket `podman rm -f` took the chat agent down three times on 2026-11-03.
 const CLEANUP = `Afterwards remove only the test containers: those with label yantra-fixture (podman ps -aq --filter label=yantra-fixture) and those named yantra-e2e-*. Never stop or remove any other container.`
@@ -176,9 +179,11 @@ const CLEANUP = `Afterwards remove only the test containers: those with label ya
 // Every agent pays a ~50k-token start-up cost (2026-11-02 run), so the stages below share agents where the model rule allows.
 // Y-493 parked because the agent read the log tail while the gate still ran, so the run must end in a sentinel line.
 // Y-704: a subagent's turn ends before a Monitor fires, so 18 wait agents on 2026-11-10 returned at once and waited for nothing.
-const BLOCK = (log, line) => `Wait with a blocking Bash call, not Monitor: \`timeout 570 bash -c "until grep -q '^${line}=' ${log}; do sleep 20; done"\` with the Bash timeout set to 600000. Exit 124 means the line is not there yet: run the same call again, up to 5 times.`
+// On 2026-11-11 Y-687's gate shell died with the agent that started it; four wait agents then waited 2.5 h on a log that could never end.
+const DETACH = (log, line, cmd) => `Write this one line to ${log}.sh: \`( ${cmd} ) > ${log} 2>&1; echo "${line}=$?" >> ${log}\`. Then start it so it outlives your turn: \`setsid nohup bash ${log}.sh </dev/null >/dev/null 2>&1 & echo $! > ${log}.pid\`.`
+const BLOCK = (log, line) => `Wait with a blocking Bash call, not Monitor: \`p=$(cat ${log}.pid); timeout 570 bash -c "until grep -q '^${line}=' ${log}; do kill -0 $p 2>/dev/null || grep -q '^${line}=' ${log} || echo '${line}=1 (the background job died)' >> ${log}; sleep 20; done"\` with the Bash timeout set to 600000. Exit 124 means the line is not there yet: run the same call again, up to 5 times.`
 const WAIT = (gateLog) => `${BLOCK(gateLog, 'GATE_EXIT')} Judge pass from GATE_EXIT and the failing tests, never from a partial tail. Return finished=false only after 5 calls end in 124: the run then sends another agent to wait.`
-const GATE_HOW = (wt, gateLog) => `CI can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then run the Then commands and the merge guard in a background shell: \`( bash ${GATE_SH} run ${wt} '<the Then commands, joined by &&>' && bash ${MERGE_GUARD} <pr number> ) > ${gateLog} 2>&1; echo "GATE_EXIT=$?" >> ${gateLog}\`. Leave out the gate.sh part when Then says nothing more. gate.sh sends the commands to an idle machine on the tailnet, or runs them here when none is idle, and its first line names the machine. ${WAIT(gateLog)}`
+const GATE_HOW = (wt, gateLog) => `CI can take longer than a 10-minute Bash call. Run \`mkdir -p ${GATE_LOGS} && rm -f ${gateLog}\`, then run the Then commands and the merge guard in the background. ${DETACH(gateLog, 'GATE_EXIT', `bash ${GATE_SH} run ${wt} '<the Then commands, joined by &&>' && bash ${MERGE_GUARD} <pr number>`)} Leave out the gate.sh part when Then says nothing more. gate.sh sends the commands to an idle machine on the tailnet, or runs them here when none is idle, and its first line names the machine. ${WAIT(gateLog)}`
 
 // A counter, not the clock, names the log: a prompt that changes on every run defeats the resume cache.
 const gateRuns = {}
@@ -279,11 +284,11 @@ async function walk(row, wt) {
     agent(
       `Walk ${row.id} in ${wt} on the real product. Do not change any tracked file.
 1. Run \`bash ${WALK} needs ${wt}\`. Return its lines as needs. If it prints nothing, return needs=[], shots=[], mac=not-needed and stop.
-2. Run \`bash ${WALK} up ${wt}\`. It builds the branch's yantrad and dashboard and serves them against the real fleet on a spare port. A cold build takes longer than a Bash call, so run \`mkdir -p ${wt}/.walk && rm -f ${wt}/.walk/up.log\`, then in a background shell \`( bash ${WALK} up ${wt} ) > ${wt}/.walk/up.log 2>&1; echo "WALK_EXIT=$?" >> ${wt}/.walk/up.log\`. ${WALK_WAIT(`${wt}/.walk/up.log`)} Go on only when WALK_EXIT=0.
+2. Run \`bash ${WALK} up ${wt}\`. It builds the branch's yantrad and dashboard and serves them against the real fleet on a spare port. A cold build takes longer than a Bash call, so run \`mkdir -p ${wt}/.walk && rm -f ${wt}/.walk/up.log\`. ${DETACH(`${wt}/.walk/up.log`, 'WALK_EXIT', `bash ${WALK} up ${wt}`)} ${WALK_WAIT(`${wt}/.walk/up.log`)} Go on only when WALK_EXIT=0.
 3. Read \`git diff origin/main...HEAD\` and web/src/router.ts, and choose the routes that show what the row changed. For a machine row, choose the screens that show that path: the fleet, the machine's page, or the Chat. Run \`bash ${WALK} shoot ${wt} <route>...\`. Only open pages; never press a control that writes, because the machines are real.
 4. Read every PNG and TXT file it lists with the Read tool, and read ${wt}/.walk/shots/errors.txt. Describe each screen in seen.
 5. Always run \`bash ${WALK} down ${wt}\`, also after a failure.
-6. If needs has machine, run \`( bash ${WALK} mac ${wt} ) > ${wt}/.walk/mac.log 2>&1; echo "WALK_EXIT=$?" >> ${wt}/.walk/mac.log\` in a background shell. ${WALK_WAIT(`${wt}/.walk/mac.log`)} WALK_EXIT=0 is pass, WALK_EXIT=2 is unreachable, any other value is fail. Put the tail of ${wt}/.walk/test-mac.log in failures. Else mac=not-needed.
+6. If needs has machine, run it in the background: \`rm -f ${wt}/.walk/mac.log\`. ${DETACH(`${wt}/.walk/mac.log`, 'WALK_EXIT', `bash ${WALK} mac ${wt}`)} ${WALK_WAIT(`${wt}/.walk/mac.log`)} WALK_EXIT=0 is pass, WALK_EXIT=2 is unreachable, any other value is fail. Put the tail of ${wt}/.walk/test-mac.log in failures. Else mac=not-needed.
 ${CLEANUP}`,
       { label: `walk:${row.id}`, phase: 'Build', schema: WALK_SCHEMA, model: 'sonnet', effort: 'low' },
     ),
