@@ -140,7 +140,11 @@ export function About() {
             </Lead>
           }
           render={<a href="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2" rel="noreferrer" target="_blank" />}
-          supporting="Parakeet-TDT-0.6B-v2 by NVIDIA · CC-BY-4.0"
+          supporting={
+            <>
+              Parakeet-TDT-0.6B-v2 by NVIDIA · <span className="settings__licence">CC-BY-4.0</span>
+            </>
+          }
           trailing={<ListChevron />}
         />
       </Group>
