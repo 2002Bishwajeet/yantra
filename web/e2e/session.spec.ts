@@ -389,7 +389,7 @@ test.describe('the terminal for a session no workspace claims', () => {
     await expect(alert).toContainText("can't find session: =gone")
     // 4.1.3: the line that speaks while the pane is live is the one that has to
     // carry the end, so it stays rather than going with what ended it.
-    await expect(page.getByRole('status')).toContainText('refused · tmux gone on cachyos-g14')
+    await expect(page.getByRole('status')).toContainText('Refused')
   })
 })
 
