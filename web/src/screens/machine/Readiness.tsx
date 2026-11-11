@@ -77,7 +77,7 @@ function Checks(props: { checks: Check[]; machine: string; fix?: boolean }) {
 
 /** Y-676: the words of the probes that failed, one press away. A probe that passed has nothing to say. */
 function ProbeSaid(props: { checks: Check[] }) {
-  const said = props.checks.filter((one) => one.state !== 'present' && one.detail)
+  const said = props.checks.filter((one) => one.state !== 'present' && one.detail && !optionalAbsent(one))
   if (said.length === 0) return null
   return (
     <Disclosure summary="What ssh said">
@@ -90,10 +90,10 @@ function ProbeSaid(props: { checks: Check[] }) {
   )
 }
 
-/** ADR-0031 §9: the microphone is optional, so it waits behind a closed row. A Mac never offers it. */
+/** ADR-0031 §9: the microphone is optional, so it waits behind a closed row. A Mac never offers it, so it gets no row. */
 function Optional(props: { checks: Check[]; machine: string; fix: boolean; action: ReactNode }) {
   const optional = props.checks.filter(optionalAbsent)
-  if (optional.length === 0) return null
+  if (optional.length === 0 || !props.fix) return null
   return (
     <Disclosure summary="Optional: microphone">
       <Checks checks={optional} fix={props.fix} machine={props.machine} />

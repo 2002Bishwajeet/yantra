@@ -648,10 +648,9 @@ describe('the checks on a phone-sized card', () => {
 
   it('shows only the absent probe line when present checks carry details too', async () => {
     daemon()
-    const list = [...checks([], { git: 'git 2.45' }), { check: 'mic', state: 'absent', detail: 'not installed' } as Check]
-    await draw(report(list))
+    await draw(report(checks(['tmux'], { tmux: 'gone', git: 'git 2.45' })))
     openSaid()
-    expect(card().getByText(/microphone: not installed/)).toBeTruthy()
+    expect(card().getByText(/tmux: gone/)).toBeTruthy()
     expect(card().queryByText(/git: git 2\.45/)).toBeNull()
   })
 
@@ -697,9 +696,17 @@ describe('a ready machine', () => {
   it('leaves the microphone fix out on a Mac, where Install never offers it', async () => {
     daemon()
     await draw(report(withMic), [earlier], { machine: machine({ os: 'macOS' }) })
-    fireEvent.click(card().getByRole('button', { name: /^Show Optional: microphone/ }))
-    expect(card().getByText('optional')).toBeTruthy()
+    expect(card().queryByRole('button', { name: /Optional: microphone/ })).toBeNull()
+    expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
     expect(card().queryByText(/Run Install with Microphone ticked/)).toBeNull()
+    expect(filled()).toHaveLength(1)
+    expect(filled()[0]!.textContent).toBe('New session')
+  })
+
+  it('keeps an optional absent microphone out of What ssh said on Linux', async () => {
+    daemon()
+    await draw(report(withMic))
+    expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
   })
 })
 
