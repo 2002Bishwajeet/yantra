@@ -32,12 +32,14 @@ export function UpdateNotice() {
           A newer yantrad is out on the {channel ?? 'release'} channel
         </Text>
       </div>
-      <Button role="link" render={<Link params={{ category: 'about' }} to="/settings/$category" />} variant="tonal">
-        Update
-      </Button>
-      <IconButton label="Dismiss" onClick={() => writePrefs({ updateDismissed: version })}>
-        <X />
-      </IconButton>
+      <div className="update-notice__actions">
+        <Button role="link" render={<Link params={{ category: 'about' }} to="/settings/$category" />} variant="tonal">
+          Update
+        </Button>
+        <IconButton label="Dismiss" onClick={() => writePrefs({ updateDismissed: version })}>
+          <X />
+        </IconButton>
+      </div>
     </section>
   )
 }
