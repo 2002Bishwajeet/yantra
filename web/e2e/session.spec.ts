@@ -189,15 +189,24 @@ test.describe('the session screen, chat first', () => {
     await expect(page.locator('.composer__status')).toHaveText('')
   })
 
+  /** Y-717: one tonal verb and one menu; the other verb and Delete wait in the menu. */
+  test('keeps one tonal or filled button and one menu in the page header', async ({ page }) => {
+    const header = page.locator('.m3-page-header')
+    await expect(header.locator('[data-variant="tonal"], [data-variant="filled"]')).toHaveCount(1)
+    await expect(header.locator('[aria-haspopup="menu"]')).toHaveCount(1)
+  })
+
   /** **Finding 120.** `yantra-web` is waiting for trust, so Resume is off and
    *  Send is off until something is typed. Neither may go quiet about it. */
   test('says why Send and Resume are off', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription(
       'Type a message to send it.',
     )
-    await expect(page.getByRole('button', { name: 'Resume' })).toHaveAccessibleDescription(
+    await page.getByRole('button', { name: 'More actions' }).click()
+    await expect(page.getByRole('menuitem', { name: /^Resume/ })).toContainText(
       `Resume needs an agent that has ended, and ${NAME} is waiting for trust.`,
     )
+    await page.keyboard.press('Escape')
 
     await composer(page).fill('run the whole crate')
     await expect(page.getByRole('button', { name: 'Send' })).toHaveAccessibleDescription('')

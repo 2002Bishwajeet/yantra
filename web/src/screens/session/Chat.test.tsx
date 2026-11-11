@@ -76,6 +76,28 @@ const render = (ui: ReactElement) =>
 
 const settled = <T,>(check: () => T) => waitFor(check, { timeout: 10_000 })
 
+/** Y-717: the four turn settings sit in one chip; this opens it, picks the radio in the named group, and shuts it. */
+async function setting(group: 'Permissions' | 'Model' | 'Effort' | 'Context', label: string) {
+  fireEvent.click(screen.getByRole('button', { name: /^Turn settings/ }))
+  const picked = await settled(() => within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name: label }))
+  fireEvent.click(picked)
+  await settled(() => expect(picked.getAttribute('aria-checked')).toBe('true'))
+  fireEvent.keyDown(screen.getByRole('radiogroup', { name: group }), { key: 'Escape' })
+  await settled(() => expect(screen.queryByRole('radiogroup', { name: group })).toBeNull())
+}
+
+/** The chip's label names only what is not the default; its aria-label names every value. */
+const chip = () => screen.getByRole('button', { name: /^Turn settings/ })
+const has = (...parts: string[]) =>
+  screen.getByRole('button', {
+    name: (name) => name.startsWith('Turn settings: ') && parts.every((part) => name.slice(15).split(', ').includes(part)),
+  })
+
+const refreshDiff = async () => {
+  fireEvent.click(screen.getByRole('button', { name: 'Git actions' }))
+  fireEvent.click(await settled(() => screen.getByRole('menuitem', { name: 'Refresh the diff' })))
+}
+
 let server: Awaited<ReturnType<typeof daemon>>
 let onThread: ReturnType<typeof vi.fn<(thread: string) => void>>
 
@@ -209,17 +231,11 @@ describe('the harness picker', () => {
 describe('permission modes', () => {
   beforeEach(() => localStorage.clear())
 
-  async function pick(label: string) {
-    fireEvent.click(screen.getByRole('button', { name: /^Permissions: / }))
-    const options = await settled(() => screen.getAllByRole('menuitemradio'))
-    fireEvent.click(options.find((one) => one.getAttribute('aria-label') === label)!)
-    await settled(() => expect(screen.getByRole('button', { name: `Permissions: ${label}` })).toBeTruthy())
-    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
-  }
+  const pick = (label: string) => setting('Permissions', label)
 
   it('starts a new thread supervised, and sends the mode picked on the turn', async () => {
     await open()
-    expect(screen.getByRole('button', { name: 'Permissions: Supervised' })).toBeTruthy()
+    expect(has('Supervised')).toBeTruthy()
     await pick('Full access')
     type('run the tests')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
@@ -256,11 +272,11 @@ describe('permission modes', () => {
     cleanup()
 
     render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
-    await settled(() => expect(screen.getByRole('button', { name: 'Permissions: Auto' })).toBeTruthy())
+    await settled(() => expect(has('Auto')).toBeTruthy())
     cleanup()
 
     render(<Chat onThread={onThread} thread="ffffffff" target={onWeb} workspace={web} />)
-    await settled(() => expect(screen.getByRole('button', { name: 'Permissions: Supervised' })).toBeTruthy())
+    await settled(() => expect(has('Supervised')).toBeTruthy())
   })
 
   it('falls back to Supervised when the browser refuses site data, and still sends', async () => {
@@ -274,7 +290,7 @@ describe('permission modes', () => {
       render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
       // The picker waits for the socket to open.
       await settled(() =>
-        expect(screen.getByRole('button', { name: 'Permissions: Supervised' })).toHaveProperty('disabled', false),
+        expect(has('Supervised')).toHaveProperty('disabled', false),
       )
       say(started())
       await pick('Full access')
@@ -284,6 +300,26 @@ describe('permission modes', () => {
     } finally {
       vi.restoreAllMocks()
     }
+  })
+
+  it('names only what is not the default on the chip, and shows the icon alone when all are', async () => {
+    await open()
+    const label = () => chip().querySelector('.composer-control__label')?.textContent ?? null
+    expect(label()).toBeNull()
+    expect(chip().getAttribute('aria-label')).toBe('Turn settings: Supervised, model Default, effort Default, context Default')
+    await pick('Auto')
+    await setting('Model', 'Opus')
+    await setting('Effort', 'High')
+    expect(label()).toBe('Auto · Opus · High')
+    await pick('Supervised')
+    expect(label()).toBe('Opus · High')
+  })
+
+  it('draws Full access in the warning tone', async () => {
+    await open()
+    expect(chip().getAttribute('data-tone')).toBeNull()
+    await pick('Full access')
+    expect(chip().getAttribute('data-tone')).toBe('warning')
   })
 
   it('draws the bad frame a daemon sends for a mode it cannot read', async () => {
@@ -296,7 +332,7 @@ describe('permission modes', () => {
     expect(alert.textContent).toContain('The daemon could not read what the dashboard sent.')
     expect(alert.textContent).toContain('unknown variant `auto`')
     // A bad frame ends nothing: the picker still answers.
-    expect(screen.getByRole('button', { name: 'Permissions: Auto' })).toHaveProperty('disabled', false)
+    expect(has('Auto')).toHaveProperty('disabled', false)
   })
 })
 
@@ -370,18 +406,12 @@ describe('plan mode', () => {
 })
 
 describe("Claude's model and effort", () => {
-  async function pick(control: 'Model' | 'Effort', label: string) {
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${control}: `) }))
-    const options = await settled(() => screen.getAllByRole('menuitemradio'))
-    fireEvent.click(options.find((one) => one.getAttribute('aria-label') === label)!)
-    await settled(() => expect(screen.getByRole('button', { name: `${control}: ${label}` })).toBeTruthy())
-    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
-  }
+  const pick = (control: 'Model' | 'Effort', label: string) => setting(control, label)
 
   it('sends no model and no effort until they are picked, and then sends both on the turn', async () => {
     await open()
-    expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Effort: Default' })).toBeTruthy()
+    expect(has('model Default')).toBeTruthy()
+    expect(has('effort Default')).toBeTruthy()
     type('first')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     say(started())
@@ -406,8 +436,7 @@ describe("Claude's model and effort", () => {
     const options = await settled(() => screen.getAllByRole('menuitemradio'))
     fireEvent.click(options[4])
     await settled(() => expect(screen.getByRole('button', { name: 'Harness: opencode' })).toBeTruthy())
-    expect(screen.queryByRole('button', { name: /^Model: / })).toBeNull()
-    expect(screen.queryByRole('button', { name: /^Effort: / })).toBeNull()
+    expect(chip().getAttribute('aria-label')).not.toMatch(/model|effort/)
     fireEvent.change(screen.getByLabelText('Message opencode in yantra-web'), { target: { value: 'list the files' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await settled(() =>
@@ -426,14 +455,14 @@ describe("Claude's model and effort", () => {
     render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(2))
     say(started())
-    await settled(() => expect(screen.getByRole('button', { name: 'Model: Haiku' })).toBeTruthy())
-    expect(screen.getByRole('button', { name: 'Effort: Low' })).toBeTruthy()
+    await settled(() => expect(has('model Haiku')).toBeTruthy())
+    expect(has('effort Low')).toBeTruthy()
     cleanup()
 
     render(<Chat onThread={onThread} thread="ffffffff" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(3))
     say(started())
-    await settled(() => expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy())
+    await settled(() => expect(has('model Default')).toBeTruthy())
   })
 
   it('falls back to the default for a stored value it does not know', async () => {
@@ -442,24 +471,25 @@ describe("Claude's model and effort", () => {
     render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(1))
     say(started())
-    await settled(() => expect(screen.getByRole('button', { name: 'Model: Default' })).toBeTruthy())
-    expect(screen.getByRole('button', { name: 'Effort: Default' })).toBeTruthy()
+    await settled(() => expect(has('model Default')).toBeTruthy())
+    expect(has('effort Default')).toBeTruthy()
   })
 })
 
 describe("the thread's context length", () => {
   async function pick(control: 'Model' | 'Context' | 'Harness', label: string) {
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${control}: `) }))
+    if (control !== 'Harness') return setting(control, label)
+    fireEvent.click(screen.getByRole('button', { name: /^Harness: / }))
     const options = await settled(() => screen.getAllByRole('menuitemradio'))
     // The harness menu names each item by its text alone.
     fireEvent.click(options.find((one) => (one.getAttribute('aria-label') ?? one.textContent) === label)!)
-    await settled(() => expect(screen.getByRole('button', { name: `${control}: ${label}` })).toBeTruthy())
+    await settled(() => expect(screen.getByRole('button', { name: `Harness: ${label}` })).toBeTruthy())
     await settled(() => expect(screen.queryByRole('menu')).toBeNull())
   }
 
   it('sends none until one is picked, and then sends it on the turn', async () => {
     await open()
-    expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy()
+    expect(has('context Default')).toBeTruthy()
     type('first')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     say(started())
@@ -481,14 +511,14 @@ describe("the thread's context length", () => {
     await open()
     await pick('Context', '1M')
     await pick('Model', 'Haiku')
-    expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Context: Default' }))
-    const options = await settled(() => screen.getAllByRole('menuitemradio'))
-    expect(options.map((one) => one.getAttribute('aria-label'))).toEqual(['Default'])
-    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
-    await settled(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(has('context Default')).toBeTruthy()
+    fireEvent.click(chip())
+    const group = await settled(() => screen.getByRole('radiogroup', { name: 'Context' }))
+    expect(within(group).getAllByRole('radio').map((one) => one.getAttribute('aria-label'))).toEqual(['Default'])
+    fireEvent.keyDown(group, { key: 'Escape' })
+    await settled(() => expect(screen.queryByRole('radiogroup', { name: 'Context' })).toBeNull())
     await pick('Model', 'Opus')
-    expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy()
+    expect(has('context Default')).toBeTruthy()
     type('short')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await settled(() =>
@@ -508,13 +538,16 @@ describe("the thread's context length", () => {
       ]),
     )
     say(started('codex'))
-    await settled(() => expect(screen.getByRole('button', { name: 'Context: 400K' })).toHaveProperty('disabled', true))
+    await settled(() => expect(has('context 400K')).toBeTruthy())
+    fireEvent.click(chip())
+    const radios = await settled(() => within(screen.getByRole('radiogroup', { name: 'Context' })).getAllByRole('radio'))
+    expect(radios.every((one) => one.hasAttribute('data-disabled'))).toBe(true)
   })
 
   it('is not offered by a harness that takes no length', async () => {
     await open()
     await pick('Harness', 'opencode')
-    expect(screen.queryByRole('button', { name: /^Context: / })).toBeNull()
+    expect(chip().getAttribute('aria-label')).not.toContain('context')
   })
 
   it('is kept for each thread', async () => {
@@ -527,13 +560,13 @@ describe("the thread's context length", () => {
     render(<Chat onThread={onThread} thread="1a2b3c4d" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(2))
     say(started())
-    await settled(() => expect(screen.getByRole('button', { name: 'Context: 1M' })).toBeTruthy())
+    await settled(() => expect(has('context 1M')).toBeTruthy())
     cleanup()
 
     render(<Chat onThread={onThread} thread="ffffffff" target={onWeb} workspace={web} />)
     await settled(() => expect(server.asked).toHaveLength(3))
     say(started())
-    await settled(() => expect(screen.getByRole('button', { name: 'Context: Default' })).toBeTruthy())
+    await settled(() => expect(has('context Default')).toBeTruthy())
   })
 
   it('draws the bad frame a daemon sends for a length it refuses, and the picker stays usable', async () => {
@@ -545,7 +578,7 @@ describe("the thread's context length", () => {
     const alert = await settled(() => screen.getByRole('alert'))
     expect(alert.textContent).toContain('The daemon could not read what the dashboard sent.')
     expect(alert.textContent).toContain('is not a context length of 100k to 1M tokens')
-    expect(screen.getByRole('button', { name: 'Context: 256K' })).toHaveProperty('disabled', false)
+    expect(has('context 256K')).toHaveProperty('disabled', false)
   })
 })
 
@@ -607,9 +640,11 @@ describe('the chat', () => {
       const log = await settled(() => screen.getByText('cargo test').closest('article')!)
       expect(row().getAttribute('aria-expanded')).toBe('true')
       expect(within(log).getByText('Command')).toBeTruthy()
-      expect(within(log).getByText('running')).toBeTruthy()
+      // One call: the row shows the state, so the call does not draw it again.
+      expect(within(log).queryByText('running')).toBeNull()
 
       say(of('item.completed'))
+      // The call is done while the turn still runs, so the two states differ and the call says so.
       await settled(() => expect(within(log).getByText('done')).toBeTruthy())
 
       ended({ state: 'completed', stopReason: 'end_turn', durationMs: 4000 })
@@ -677,11 +712,17 @@ describe('the chat', () => {
       const panel = screen.getByRole('region', { name: 'Waiting for your answer' })
       expect(panel.closest('form.composer')).toBeTruthy()
       expect(screen.getByRole('status').textContent).toBe('Claude is waiting for your answer.')
-      // The placeholder says it on screen, so the line is read out and not drawn twice.
+      // The card, the placeholder and Stop show the state, so the line is read out and never drawn.
       expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(true)
       type('look')
-      expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(false)
+      expect(screen.getByRole('status').classList.contains('m3-sr-only')).toBe(true)
       type('')
+      // The command sits on a code surface, apart from the heading.
+      const code = panel.querySelector('.pending__command')
+      expect(code?.contains(screen.getByText('cargo test'))).toBe(true)
+      expect(code?.textContent).not.toContain('Run the unit tests')
+      // One surface holds the command: no second box inside it.
+      expect(code?.querySelector('.chat__code')).toBeNull()
 
       await approve(decision)
       await settled(() => expect(frames()).toEqual([{ type: 'answer', requestId: 'r1', decision }]))
@@ -1437,7 +1478,7 @@ describe('the branch diff', () => {
     fireEvent.click(diffButton())
     say(chatBranchDiff)
     await settled(() => screen.getByTestId('viewer'))
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh the diff' }))
+    await refreshDiff()
     await settled(() => expect(frames()).toEqual([{ type: 'diff' }, { type: 'diff' }]))
   })
 
@@ -1503,7 +1544,7 @@ describe('the branch diff', () => {
     expect(alert.textContent).toContain('The diff waits for the revert')
     expect(screen.queryByText('Reading the diff')).toBeNull()
     expect(screen.getAllByRole('alert')).toHaveLength(1)
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh the diff' }))
+    await refreshDiff()
     await settled(() => expect(frames().filter((frame) => frame.type === 'diff')).toHaveLength(2))
   })
 
@@ -1529,9 +1570,7 @@ describe('the branch diff', () => {
 
   it('leaves Refresh on while the panel waits', async () => {
     await asked()
-    const refresh = screen.getByRole('button', { name: 'Refresh the diff' })
-    expect(refresh.hasAttribute('disabled')).toBe(false)
-    fireEvent.click(refresh)
+    await refreshDiff()
     await settled(() => expect(frames()).toEqual([{ type: 'diff' }, { type: 'diff' }]))
   })
 

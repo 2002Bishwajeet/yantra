@@ -334,7 +334,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 4px var(--m3-row-padding) var(--m3-row-padding);
+  padding: 4px 12px 10px;
 }
 
 .chat__work-body[hidden] {
@@ -359,6 +359,28 @@
 .chat__tool-title,
 .pending__head h3 {
   overflow-wrap: anywhere;
+}
+
+/* Y-717: a command sits on its own surface, as code does. */
+.chat__code {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: var(--md-sys-shape-corner-small);
+  background: var(--md-sys-color-surface-container-highest);
+  font-family: var(--md-ref-typeface-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pending__command .m3-copyable__text {
+  background: var(--md-sys-color-surface-container-highest);
+  border-radius: var(--md-sys-shape-corner-small);
+  font-family: var(--md-ref-typeface-mono);
+  font-size: var(--md-sys-typescale-body-medium-size);
+  line-height: var(--md-sys-typescale-body-medium-line-height);
+  white-space: pre-wrap;
 }
 
 .chat__tool-output summary,
@@ -394,25 +416,6 @@
   padding: 0;
   list-style: none;
   overflow-wrap: anywhere;
-}
-
-/* A mode's description sits under its name, so the menu reads as T3 Code's. */
-.chat__mode {
-  align-items: flex-start;
-  max-width: var(--m3-menu-width);
-}
-
-.chat__mode-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.chat__mode-description {
-  color: var(--md-sys-color-on-surface-variant);
-  font-size: 0.8125rem;
-  line-height: 1.25rem;
-  white-space: normal;
 }
 
 /* Transcript */
@@ -607,19 +610,6 @@
 }
 
 /* Phone: the app bar carries the name. */
-
-/* A verb that cannot run is not drawn, so the state, the verb and Delete fit one
-   358 px row. It stays in the accessibility tree with its reason. */
-[data-shell="phone"] .session__verb[data-idle] {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  min-height: 0;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
 
 /* Four tabs fit in 390 px: the group takes the row and the pills share it. */
 [data-shell="phone"] .session__bar nav {

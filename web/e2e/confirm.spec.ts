@@ -54,7 +54,8 @@ test.describe('Delete a workspace', () => {
     await scenario(page, 'busy')
     await page.goto(DELETE)
     await expect(page.getByRole('heading', { level: 1, name: 'landing' }).first()).toBeVisible()
-    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await page.getByRole('button', { name: 'More actions' }).click()
+    await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
   })
 
   test('names the file it removes, and what it leaves', async ({ page }) => {

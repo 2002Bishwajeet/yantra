@@ -9,7 +9,7 @@ import { useId, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { ItemType } from '@/api/thread'
 import { State, type MarkState } from '@/m3/mark/Mark'
-import { Eyebrow, Mono } from '@/m3/text/Text'
+import { Mono, Text } from '@/m3/text/Text'
 import type { Message, Tool } from './timeline'
 import type { Row } from './workLog.logic'
 
@@ -26,18 +26,22 @@ const STATUS: Record<Tool['status'], { state: MarkState; word: string }> = {
   failed: { state: 'failed', word: 'failed' },
 }
 
-function Call(props: { tool: Tool }) {
-  const { tool } = props
+function Call(props: { tool: Tool; alone: boolean; turn: MarkState }) {
+  const { tool, alone, turn } = props
   const status = STATUS[tool.status]
   return (
     <article className="chat__call">
       <div className="chat__tool-head">
-        <Eyebrow>{KIND[tool.itemType]}</Eyebrow>
-        <State size="small" state={status.state}>
-          {status.word}
-        </State>
+        <Text scale="label-large" tone="variant">
+          {KIND[tool.itemType]}
+        </Text>
+        {alone && status.state === turn ? null : (
+          <State size="small" state={status.state}>
+            {status.word}
+          </State>
+        )}
       </div>
-      {tool.title ? <Mono className="chat__tool-title">{tool.title}</Mono> : null}
+      {tool.title ? <Mono className="chat__tool-title chat__code">{tool.title}</Mono> : null}
       {tool.output ? (
         <details className="chat__tool-output">
           <summary>Output</summary>
@@ -72,7 +76,7 @@ export function WorkLog(props: { work: Work; said: (message: Message) => ReactNo
       </button>
       <div className="chat__work-body" hidden={!open} id={body}>
         {work.items.map((item) =>
-          item.kind === 'tool' ? <Call key={item.id} tool={item} /> : <div key={item.id}>{said(item)}</div>,
+          item.kind === 'tool' ? <Call alone={work.calls === 1} key={item.id} tool={item} turn={work.state} /> : <div key={item.id}>{said(item)}</div>,
         )}
       </div>
     </section>

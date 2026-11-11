@@ -307,7 +307,7 @@ describe('the thread menu', () => {
 })
 
 describe('the right side', () => {
-  it('draws Diff pressed, and Refresh only while the diff is open', async () => {
+  it('draws Diff as an icon toggle, and Refresh in the git menu only while the diff is open', async () => {
     daemon([200, contract.threads])
     const toggle = vi.fn()
     const refresh = vi.fn()
@@ -315,15 +315,35 @@ describe('the right side', () => {
     const { unmount } = await show({ diff })
     const button = await screen.findByRole('button', { name: 'Diff' })
     expect(button.getAttribute('aria-pressed')).toBe('false')
-    expect(screen.queryByRole('button', { name: 'Refresh the diff' })).toBeNull()
+    expect(button.getAttribute('data-variant')).toBe('standard')
+    fireEvent.click(screen.getByRole('button', { name: 'Git actions' }))
+    await screen.findByRole('menu')
+    expect(screen.queryByRole('menuitem', { name: 'Refresh the diff' })).toBeNull()
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
     fireEvent.click(button)
     expect(toggle).toHaveBeenCalled()
     unmount()
 
     await show({ diff: { ...diff, open: true } })
     expect((await screen.findByRole('button', { name: 'Diff' })).getAttribute('aria-pressed')).toBe('true')
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh the diff' }))
+    expect(screen.queryByRole('button', { name: 'Refresh the diff' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Git actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Refresh the diff' }))
     expect(refresh).toHaveBeenCalled()
+  })
+
+  it('keeps one action menu and one labelled tonal button beside the breadcrumb', async () => {
+    daemon([200, contract.threads])
+    await show({ diff: { open: true, onToggle: () => {}, onRefresh: () => {} } })
+    await screen.findByRole('button', { name: 'Diff' })
+    const bar = document.querySelector('.chat__header') as HTMLElement
+    // The thread menu is the breadcrumb; the git menu is the one action menu.
+    expect([...bar.querySelectorAll('[aria-haspopup="menu"]')].map((one) => one.getAttribute('aria-label') ?? one.textContent)).toEqual([
+      expect.stringContaining('Threads'),
+      'Git actions',
+    ])
+    const labelled = [...bar.querySelectorAll('.m3-button[data-variant="tonal"]')]
+    expect(labelled.length).toBeLessThanOrEqual(1)
   })
 
   it('holds Terminal until the first turn makes a thread, and says why', async () => {

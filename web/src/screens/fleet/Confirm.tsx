@@ -18,7 +18,8 @@ import './Confirm.css'
 type Question = {
   /** The trigger's word, and the default trigger's label. */
   label: string
-  trigger?: ReactElement
+  /** `null` draws no opener, for a question a menu item opens. */
+  trigger?: ReactElement | null
   title: string
   body: ReactNode
   /** The Fleet row, repeated word for word under the question. */
@@ -41,7 +42,9 @@ function Confirm(props: Question) {
   if (factor === 'phone') {
     return (
       <BottomSheet onOpenChange={onOpenChange} open={open}>
-        <BottomSheetTrigger render={opener}>{trigger ? undefined : label}</BottomSheetTrigger>
+        {trigger === null ? null : (
+          <BottomSheetTrigger render={opener}>{trigger ? undefined : label}</BottomSheetTrigger>
+        )}
         <BottomSheetPopup actions={actions} className="confirm" description={body} title={title}>
           <div className="confirm__row">{row}</div>
           {said}
@@ -52,7 +55,7 @@ function Confirm(props: Question) {
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogTrigger render={opener}>{trigger ? undefined : label}</DialogTrigger>
+      {trigger === null ? null : <DialogTrigger render={opener}>{trigger ? undefined : label}</DialogTrigger>}
       <DialogPopup actions={actions} className="confirm" description={body} title={title}>
         <div className="confirm__row">{row}</div>
         {said}
@@ -145,7 +148,10 @@ export type DeleteWorkspaceProps = {
   row?: ReactNode
   /** Skip the daemon's refusal to strand a live session from the first ask. */
   force?: boolean
-  trigger?: ReactElement
+  /** `null` draws no opener; the caller then owns `open`. */
+  trigger?: ReactElement | null
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   onDone?: () => void
 }
 
@@ -154,7 +160,12 @@ export type DeleteWorkspaceProps = {
  *  sends `?force=true` — a person meant it, twice. */
 export function DeleteWorkspace(props: DeleteWorkspaceProps) {
   const { name, row, force, trigger, onDone } = props
-  const [open, setOpen] = useState(false)
+  const [own, setOwn] = useState(false)
+  const open = props.open ?? own
+  const setOpen = (next: boolean) => {
+    setOwn(next)
+    props.onOpenChange?.(next)
+  }
   const remove = useDeleteWorkspace()
   const confirm = (forced: boolean) =>
     remove.mutate(

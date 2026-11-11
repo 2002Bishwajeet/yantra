@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ChevronDown, GitCommitHorizontal, GitMerge, GitPullRequest, Trash2, Upload } from 'lucide-react'
+import { ChevronDown, GitCommitHorizontal, GitMerge, GitPullRequest, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { useCommit, useDraftMessage, useMergePr, useOpenPr, usePush, useRemoveThread } from '@/api/mutations'
 import type { ThreadPr } from '@/api'
 import { Button } from '@/m3/button/Button'
@@ -47,8 +47,10 @@ export function GitActions(props: {
   readOnly?: string | null
   /** The machine no longer has the worktree: Forget drops the daemon's row (ADR-0045). */
   gone?: boolean
+  /** The open diff's refresh, which lives in this menu so the header keeps one action menu (Y-717). */
+  refreshDiff?: () => void
 }) {
-  const { workspace, thread, busy, diffs, listed, refresh, onRemoved, readOnly, gone } = props
+  const { workspace, thread, busy, diffs, listed, refresh, onRemoved, readOnly, gone, refreshDiff } = props
   const whyId = useId()
   const menuWhyId = useId()
   const [note, setNote] = useState('')
@@ -352,6 +354,11 @@ export function GitActions(props: {
                 </MenuItem>
               ),
             )}
+            {refreshDiff ? (
+              <MenuItem icon={<RefreshCw />} onClick={refreshDiff}>
+                Refresh the diff
+              </MenuItem>
+            ) : null}
             {off ? (
               <span className="m3-sr-only" id={menuWhyId}>
                 {off}

@@ -12,7 +12,8 @@ import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Copyable } from '@/m3/copyable/Copyable'
+import { Text } from '@/m3/text/Text'
 import { useAnswer } from './useAnswer'
 
 const ASKS: Record<RequestType, string> = {
@@ -37,10 +38,16 @@ export function PendingApproval(props: {
   return (
     <section aria-label="Waiting for your answer" className="pending">
       <div className="pending__head">
-        <Eyebrow>{`${agent} ${ASKS[request.requestType]}`}</Eyebrow>
-        <Text render={<h3 />} scale="title-medium">
-          {request.title ? <Mono>{request.title}</Mono> : (request.detail ?? 'a tool')}
-        </Text>
+        <Text render={<h3 />} scale="title-small">{`${agent} ${ASKS[request.requestType]}`}</Text>
+        {request.title ? (
+          <div className="pending__command">
+            <Copyable text={request.title} what="the command" />
+          </div>
+        ) : (
+          <Text render={<p />} scale="body-large">
+            {request.detail ?? 'a tool'}
+          </Text>
+        )}
         {request.title && request.detail ? (
           <Text render={<p />} scale="body-medium">
             {request.detail}

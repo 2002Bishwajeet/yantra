@@ -1,5 +1,6 @@
-import { useId, type ReactElement } from 'react'
+import { useId, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { Ellipsis } from 'lucide-react'
 import type { MachineSessions, Workspace, WorkspaceStatus } from '@/api'
 import { useDown, useResume } from '@/api/mutations'
 import type { Reading } from '@/api/hooks'
@@ -7,6 +8,8 @@ import { answerFailure, joinFixes, reachWords } from '@/lib/checks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { IconButton } from '@/m3/icon-button/IconButton'
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
 import { State } from '@/m3/mark/Mark'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Row, RowText } from '@/m3/row/Row'
@@ -21,15 +24,22 @@ import { startedAt, verbs, whyNot } from './verbs'
 
 const URL = /^https?:\/\//
 
-/** The Fleet row, repeated word for word under the question (BRIEF.md). */
-export function Delete(props: { workspace: Workspace; status: WorkspaceStatus | null; trigger: ReactElement }) {
-  const { workspace, status, trigger } = props
+/** The Fleet row, repeated word for word under the question (BRIEF.md). A menu item opens it. */
+export function Delete(props: {
+  workspace: Workspace
+  status: WorkspaceStatus | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { workspace, status, open, onOpenChange } = props
   const navigate = useNavigate()
   const { mark, words } = phrase(status)
   return (
     <DeleteWorkspace
       name={workspace.name}
       onDone={() => void navigate({ to: '/fleet' })}
+      onOpenChange={onOpenChange}
+      open={open}
       row={
         <Row tone="lowest">
           <Tile name={workspace.name} />
@@ -43,7 +53,7 @@ export function Delete(props: { workspace: Workspace; status: WorkspaceStatus | 
           />
         </Row>
       }
-      trigger={trigger}
+      trigger={null}
     />
   )
 }
@@ -90,6 +100,14 @@ export function Header(props: HeaderProps) {
   const stop = useDown()
   const resume = useResume()
   const failed = stop.error ?? resume.error
+  const [deleting, setDeleting] = useState(false)
+  const more = useRef<HTMLButtonElement>(null)
+  // One tonal verb: Stop while the session runs, Resume otherwise.
+  const verb = {
+    stop: { word: 'Stop', busy: 'Stopping…', enabled: live.stop, why: why.stop, pending: stop.isPending, run: () => stop.mutate(workspace.name) },
+    resume: { word: 'Resume', busy: 'Resuming…', enabled: live.resume, why: why.resume, pending: resume.isPending, run: () => resume.mutate(workspace.name) },
+  }
+  const [primary, other] = live.stop ? [verb.stop, verb.resume] : [verb.resume, verb.stop]
 
   return (
     <>
@@ -99,42 +117,44 @@ export function Header(props: HeaderProps) {
             {/* A disabled verb reads as broken unless it says why, and the boards
                 draw no line for the reason, so the reason is the description. */}
             <Button
-              aria-describedby={live.stop ? undefined : `${said}-stop`}
-              className="session__verb"
-              data-idle={live.stop || stop.isPending ? undefined : ''}
-              disabled={!live.stop || stop.isPending}
-              onClick={() => stop.mutate(workspace.name)}
+              aria-describedby={primary.enabled ? undefined : `${said}-verb`}
+              disabled={!primary.enabled || primary.pending}
+              onClick={primary.run}
               variant="tonal"
             >
-              {stop.isPending ? 'Stopping…' : 'Stop'}
+              {primary.pending ? primary.busy : primary.word}
             </Button>
-            <Button
-              aria-describedby={live.resume ? undefined : `${said}-resume`}
-              className="session__verb"
-              data-idle={live.resume || resume.isPending ? undefined : ''}
-              disabled={!live.resume || resume.isPending}
-              onClick={() => resume.mutate(workspace.name)}
-              variant="tonal"
-            >
-              {resume.isPending ? 'Resuming…' : 'Resume'}
-            </Button>
-            {live.stop ? null : (
-              <span className="m3-sr-only" id={`${said}-stop`}>
-                {why.stop}
+            {primary.enabled ? null : (
+              <span className="m3-sr-only" id={`${said}-verb`}>
+                {primary.why}
               </span>
             )}
-            {live.resume ? null : (
-              <span className="m3-sr-only" id={`${said}-resume`}>
-                {why.resume}
-              </span>
-            )}
-            <Delete
-              status={status}
-              trigger={
-                <Button tone="error" variant="text">
+            <Menu>
+              <MenuTrigger render={<IconButton label="More actions" ref={more} />}>
+                <Ellipsis />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                <MenuItem disabled={!other.enabled || other.pending} onClick={other.run}>
+                  {other.pending ? other.busy : other.word}
+                  {other.enabled ? null : (
+                    <Text scale="body-small" tone="variant">
+                      {' '}
+                      · {other.why}
+                    </Text>
+                  )}
+                </MenuItem>
+                <MenuItem onClick={() => setDeleting(true)} tone="error">
                   Delete
-                </Button>
-              }
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+            <Delete
+              onOpenChange={(next) => {
+                setDeleting(next)
+                if (!next) requestAnimationFrame(() => more.current?.focus())
+              }}
+              open={deleting}
+              status={status}
               workspace={workspace}
             />
           </>

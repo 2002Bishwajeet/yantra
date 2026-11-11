@@ -24,10 +24,15 @@ async function turn(page: Page) {
   await expect(asking(page)).toBeVisible()
 }
 
+const turnSettings = (page: Page) => page.getByRole('button', { name: /^Turn settings/ })
+
 async function fullAccess(page: Page) {
-  await page.getByRole('button', { name: /^Permissions: / }).click()
-  await page.getByRole('menuitemradio', { name: 'Full access' }).click()
-  await expect(page.getByRole('button', { name: 'Permissions: Full access' })).toBeVisible()
+  await turnSettings(page).click()
+  await page.getByRole('radiogroup', { name: 'Permissions' }).getByRole('radio', { name: 'Full access' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('radiogroup', { name: 'Permissions' })).toBeHidden()
+  // The sheet on a phone is modal, so the chip is out of the tree until it closes.
+  await expect(turnSettings(page)).toHaveAccessibleName(/Full access/)
 }
 
 test.describe('the chat, across views, tabs and reloads', () => {
@@ -142,7 +147,7 @@ test.describe('the chat, across views, tabs and reloads', () => {
     await expect(page).toHaveURL(new RegExp(`thread=${THREAD}`))
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
     await page.reload()
-    await expect(page.getByRole('button', { name: 'Permissions: Full access' })).toBeVisible()
+    await expect(turnSettings(page)).toHaveAccessibleName(/Full access/)
   })
 })
 
@@ -212,8 +217,8 @@ test.describe('the composer', () => {
     await page.mouse.click(box.x + box.width - 6, box.y + box.height / 2)
     await expect(composer(page)).toBeFocused()
     await composer(page).blur()
-    await page.getByRole('button', { name: /^Permissions: / }).click()
-    await expect(page.getByRole('menu')).toBeVisible()
+    await turnSettings(page).click()
+    await expect(page.getByRole('radiogroup', { name: 'Permissions' })).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(composer(page)).not.toBeFocused()
   })
@@ -364,7 +369,7 @@ test.describe('the composer', () => {
     expect(send?.width ?? 0).toBeGreaterThanOrEqual(48)
     // A 32 px control reaches 48 px by its hit area, so a point 23 px above and below its middle still lands on it.
     // The box and the hits are read in one step, because the card settles a frame after the focus.
-    for (const label of ['Attach an image', /^Harness: /, /^Permissions: /]) {
+    for (const label of ['Attach an image', /^Harness: /, /^Turn settings/]) {
       const name = await page.getByRole('button', { name: label }).getAttribute('aria-label')
       await expect
         .poll(() =>
@@ -403,13 +408,35 @@ test.describe('the composer', () => {
       .toEqual([])
   })
 
-  // Y-564, Y-663: seven controls do not fit a phone's row, and a hidden scroll would hide the last ones.
-  test('shows every control, wrapping rather than scrolling', async ({ page }) => {
+  // Y-717: the four pickers are one chip, so Attach, Harness, Build/Plan, the chip, the ring and Send share one row.
+  test('holds every footer control in one row at 390 px', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the phone is the width that wrapped')
     await composer(page).focus()
-    await expect(page.getByRole('button', { name: /^Effort: / })).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Context: / })).toBeVisible()
+    await expect(turnSettings(page)).toBeVisible()
+    const tops = await page.locator('.composer__footer').evaluate((footer) =>
+      [...footer.querySelectorAll<HTMLElement>('button')]
+        .filter((one) => one.getBoundingClientRect().width > 0)
+        .map((one) => {
+          const box = one.getBoundingClientRect()
+          return box.top + box.height / 2
+        }),
+    )
+    expect(tops.length).toBeGreaterThanOrEqual(5)
+    expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(2)
     const row = page.locator('.composer__controls')
     expect(await row.evaluate((one) => one.scrollWidth <= one.clientWidth)).toBe(true)
+  })
+
+  test('sits the last turn against the composer on a desktop', async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'the gap shows on a wide, tall page')
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await turn(page)
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
+    const turns = page.locator('.chat__turns > *').last()
+    const last = (await turns.boundingBox())!
+    const dock = (await page.locator('.composer-dock').boundingBox())!
+    expect(dock.y - (last.y + last.height)).toBeLessThanOrEqual(24)
   })
 
   test('rides at the foot of the screen while the page scrolls', async ({ page }) => {

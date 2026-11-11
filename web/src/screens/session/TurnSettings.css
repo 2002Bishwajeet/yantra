@@ -1,0 +1,72 @@
+.turn-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 4px 4px;
+}
+
+.turn-settings__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.turn-settings__group > :first-child {
+  padding: 0 12px;
+}
+
+.turn-settings__options {
+  display: flex;
+  flex-direction: column;
+}
+
+.turn-settings__option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-medium);
+  font: var(--md-sys-typescale-body-large);
+  text-align: start;
+  color: var(--md-sys-color-on-surface);
+  background: transparent;
+}
+
+.turn-settings__option[data-checked] {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+.turn-settings__option[data-disabled] {
+  opacity: 0.38;
+}
+
+.turn-settings__check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.turn-settings__check svg {
+  width: 20px;
+  height: 20px;
+}
+
+.turn-settings__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.turn-settings__description {
+  font: var(--md-sys-typescale-body-small);
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: normal;
+}
+
+.turn-settings__sheet .turn-settings {
+  overflow-y: auto;
+}
