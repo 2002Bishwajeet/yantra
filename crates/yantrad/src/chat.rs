@@ -125,6 +125,7 @@ use yantra_core::thread::{self, Place};
 use yantra_core::tmux::Tmux;
 use yantra_core::workspace::{self, Workspace};
 
+use crate::passkey::AgentToken;
 use crate::store::Store;
 use crate::terminal::{MISSES, PING_EVERY};
 use crate::write::{Authoriser, Refused, allowed_socket, chain, checked, until_revoked};
@@ -613,6 +614,8 @@ struct KeptClaude {
     events: Events,
     run: String,
     resumed: Option<String>,
+    /// Ends with the keeper's task, so the token ends with the turn.
+    token: Option<AgentToken>,
 }
 
 /// An ACP agent in a new keeper, and the run its cursors carry.
@@ -803,14 +806,16 @@ impl Fleet {
             .map_err(|error| chain(&error))
     }
 
-    /// Starts Claude in the thread's keeper. `mcp` adds the room tools.
+    /// Starts Claude in the thread's keeper. `mcp` adds the room tools, with
+    /// `token` as the first line of the agent's stdin.
     async fn start_claude(
         &self,
         place: &Place,
         first: &claude::Prompt<'_>,
         resumed: Option<&str>,
-        mcp: Option<&claude::Mcp>,
+        mcp: Option<(&claude::Mcp, AgentToken)>,
     ) -> Result<Started<KeptClaude>, String> {
+        let (mcp, token) = mcp.map_or((None, None), |(mcp, token)| (Some(mcp), Some(token)));
         let keeper = keeper_of(place)?;
         let tmux = self.tmux().await?;
         let run = keep::run_id().map_err(|error| chain(&error))?;
@@ -838,7 +843,16 @@ impl Fleet {
             return Err(chain(&error));
         }
         let reader = keep::follow(self.ssh.clone(), tmux.clone(), keeper.clone(), pane, 0);
-        let writer = keep::feed(self.ssh.clone(), tmux.clone(), keeper.clone(), &run, 0);
+        let mut writer = keep::feed(self.ssh.clone(), tmux.clone(), keeper.clone(), &run, 0);
+        if let Some(token) = &token {
+            // Queued in the feed before the first prompt, so it is line one.
+            tokio::io::AsyncWriteExt::write_all(
+                &mut writer,
+                format!("{}\n", token.token).as_bytes(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        }
         let said = self.said(&keeper);
         let (session, events) =
             Session::kept(reader, writer, thread::name(place), &run, first, said);
@@ -847,6 +861,7 @@ impl Fleet {
             events,
             run,
             resumed: resumed.map(str::to_owned),
+            token,
         }))
     }
 
@@ -927,11 +942,24 @@ impl Machine for Fleet {
         first: &claude::Prompt<'_>,
         resumed: Option<&str>,
     ) -> Result<Started<KeptClaude>, String> {
-        let mcp = self.registry.daemon.map(|daemon| claude::Mcp {
-            url: format!("http://{daemon}/api/mcp"),
-            thread: format!("{}/{}", self.workspace.name, thread::name(place)),
-        });
-        self.start_claude(place, first, resumed, mcp.as_ref()).await
+        let mcp = self
+            .registry
+            .daemon
+            .zip(self.registry.passkeys.as_ref())
+            .map(|(daemon, passkeys)| {
+                let mcp = claude::Mcp {
+                    url: format!("http://{daemon}/api/mcp"),
+                    thread: format!("{}/{}", self.workspace.name, thread::name(place)),
+                };
+                (mcp, passkeys.mint_agent(&self.workspace.name))
+            });
+        match mcp {
+            Some((mcp, token)) => {
+                self.start_claude(place, first, resumed, Some((&mcp, token)))
+                    .await
+            }
+            None => self.start_claude(place, first, resumed, None).await,
+        }
     }
 
     async fn put(&self, images: &mut Images, bytes: &[u8]) -> Result<String, image::Error> {
@@ -1564,6 +1592,8 @@ pub struct Registry {
     changed: watch::Sender<u64>,
     /// The thread store (ADR-0045), which wins over git config for a session.
     store: Option<Store>,
+    /// Mints each Claude turn's agent token (ADR-0044 decision 12).
+    passkeys: Option<crate::passkey::Passkeys>,
 }
 
 #[derive(Default)]
@@ -1633,6 +1663,7 @@ impl Registry {
             daemon: None,
             changed: watch::Sender::default(),
             store: None,
+            passkeys: None,
         }
     }
 
@@ -1643,10 +1674,12 @@ impl Registry {
         self
     }
 
-    /// This registry, whose Claude turns reach the room tools at `daemon`.
+    /// This registry, whose Claude turns reach the room tools at `daemon`
+    /// with a token `passkeys` mints for each.
     #[must_use]
-    pub fn reaching(mut self, daemon: SocketAddr) -> Self {
+    pub fn reaching(mut self, daemon: SocketAddr, passkeys: crate::passkey::Passkeys) -> Self {
         self.daemon = Some(daemon);
+        self.passkeys = Some(passkeys);
         self
     }
 
@@ -3485,6 +3518,7 @@ async fn claude_turn<M: Machine>(
         events,
         run,
         resumed,
+        token,
     } = match started {
         Ok(Started::Running(kept)) => kept,
         Ok(Started::Busy) => {
@@ -3526,6 +3560,7 @@ async fn claude_turn<M: Machine>(
             events: Some(events),
             mode: turn.mode,
             remembered: resumed,
+            _token: token,
         },
     ));
     Ok(Turned::Started(receiver.map(Follow::New)))
@@ -3782,6 +3817,8 @@ struct ClaudeKeeper {
     mode: PermissionMode,
     /// The session id the thread's git config keeps.
     remembered: Option<String>,
+    /// The turn's agent token, dropped with this keeper's task.
+    _token: Option<AgentToken>,
 }
 
 /// What a Claude keeper's task heard next.
@@ -4906,6 +4943,8 @@ async fn adopt_claimed<M: Machine>(
                     events: Some(events),
                     mode,
                     remembered: None,
+                    // A token is in memory only, so an adopted turn has none.
+                    _token: None,
                 },
             ));
         }
@@ -5714,6 +5753,7 @@ mod tests {
                 events,
                 run,
                 resumed: resumed.map(str::to_owned),
+                token: None,
             }))
         }
 

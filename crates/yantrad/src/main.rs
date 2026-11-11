@@ -265,7 +265,12 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             None
         }
     };
-    let chats = chats(yantra_core::join::daemon_address(&ips).ok(), &store, base);
+    let chats = chats(
+        yantra_core::join::daemon_address(&ips).ok(),
+        &store,
+        base,
+        authoriser.passkeys().clone(),
+    );
     let fleet = heartbeat::Fleet {
         facts: std::sync::Arc::new(heartbeat::Facts {
             started: std::time::Instant::now(),
@@ -408,9 +413,14 @@ async fn listen_on<I: Inventory>(inventory: &I) -> Result<Vec<SocketAddr>, Error
 
 /// The chat registry, whose waits go to the relay when there is one, each
 /// linked to its thread under `base`, and whose Claude turns reach the room
-/// tools at `daemon`. The relay is read again because a `Relay` is not
+/// tools at `daemon` with a token from `passkeys`. The relay is read again because a `Relay` is not
 /// `Clone`, by design.
-fn chats(daemon: Option<SocketAddr>, store: &store::Store, base: Option<String>) -> chat::Registry {
+fn chats(
+    daemon: Option<SocketAddr>,
+    store: &store::Store,
+    base: Option<String>,
+    passkeys: passkey::Passkeys,
+) -> chat::Registry {
     let registry = match yantra_core::notify::from_env() {
         Some(relay) => {
             let (waits, heard) = tokio::sync::mpsc::unbounded_channel();
@@ -421,7 +431,7 @@ fn chats(daemon: Option<SocketAddr>, store: &store::Store, base: Option<String>)
     }
     .storing(store.clone());
     match daemon {
-        Some(daemon) => registry.reaching(daemon),
+        Some(daemon) => registry.reaching(daemon, passkeys),
         None => registry,
     }
 }

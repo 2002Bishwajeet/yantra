@@ -193,13 +193,19 @@ impl OwnBox {
         let deadline = Instant::now() + TWO_SWEEPS;
         let mut last = String::new();
         while Instant::now() < deadline {
-            let said = self.systemd.exec(&[
-                "curl",
-                "-fsS",
-                "--max-time",
-                "5",
-                "http://127.0.0.1:7717/api/sessions",
-            ])?;
+            // On the socket as the daemon's account, which needs no passkey (ADR-0044).
+            let said = self.systemd.exec_as(
+                "yantra",
+                &[
+                    "curl",
+                    "-fsS",
+                    "--max-time",
+                    "5",
+                    "--unix-socket",
+                    "/run/yantra/yantrad.sock",
+                    "http://yantra/api/sessions",
+                ],
+            )?;
             last = String::from_utf8_lossy(&said.stdout).into_owned();
             if lists_session(&last) {
                 return Ok(());

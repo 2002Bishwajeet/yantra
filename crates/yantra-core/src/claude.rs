@@ -415,14 +415,15 @@ pub fn command(
          ls /lib/ld-musl-* >/dev/null 2>&1 && export USE_BUILTIN_RIPGREP=0\n\
          export CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n\
          mkdir -p -m 700 {images} || exit 1\n\
-         {resume}\
+         {prelude}{resume}\
          exec \"$c\" --add-dir {images} {rooms}--permission-mode {mode} {model}{effort}{context}-p --input-format stream-json --output-format stream-json --verbose \
          --include-partial-messages --permission-prompt-tool stdio \"$@\"\n",
         worktree = sq(worktree),
         images = keeper.images(),
-        rooms = mcp.map_or_else(String::new, |mcp| format!(
+        prelude = mcp.map_or_else(String::new, |mcp| mcp.prelude(keeper)),
+        rooms = mcp.map_or_else(String::new, |_| format!(
             "--mcp-config {} --allowedTools {ROOM_TOOLS} ",
-            sq(&mcp.config())
+            keeper.mcp_config()
         )),
         mode = flag(mode, interaction),
         model = model.map_or_else(String::new, |model| format!(
@@ -478,14 +479,40 @@ pub struct Mcp {
     pub thread: String,
 }
 
+/// Stands for the agent token in [`Mcp::config`], which the script splits on.
+const TOKEN_MARK: &str = "@@YANTRA_AGENT_TOKEN@@";
+
 impl Mcp {
     fn config(&self) -> String {
         json!({"mcpServers": {ROOM_SERVER: {
             "type": "http",
             "url": self.url,
-            "headers": {"X-Yantra-Thread": self.thread},
+            "headers": {
+                "X-Yantra-Thread": self.thread,
+                "Authorization": format!("Bearer {TOKEN_MARK}"),
+            },
         }}})
         .to_string()
+    }
+
+    /// The script's first lines: the agent token is the first line of stdin
+    /// (ADR-0044 decision 12), so it is in no argv and in no script text. A
+    /// token is URL-safe base64, so it needs no quoting in JSON or in sh.
+    /// It goes in a `0600` config beside the journals, because the docs do not
+    /// promise `${VAR}` expansion in a `--mcp-config` (read 2026-11-11).
+    fn prelude(&self, keeper: &Keeper) -> String {
+        let config = self.config();
+        let (before, after) = config.split_once(TOKEN_MARK).unwrap_or((&config, ""));
+        format!(
+            "IFS= read -r t || exit 1
+             case $t in ('' | *[!A-Za-z0-9_-]*) echo 'yantra: no agent token arrived on stdin' >&2; exit 1 ;; esac
+             export YANTRA_AGENT_TOKEN=\"$t\"
+             (umask 077 && printf '%s%s%s' {before} \"$t\" {after} >{file}) || exit 1
+",
+            before = sq(before),
+            after = sq(after),
+            file = keeper.mcp_config(),
+        )
     }
 }
 
@@ -2657,14 +2684,21 @@ mod tests {
             Some(&mcp),
             None,
         );
+        let config = keeper().mcp_config();
         assert!(
             script.contains(&format!(
-                "exec \"$c\" --add-dir {IMAGES} --mcp-config '{{\"mcpServers\":{{\"yantra-room\":\
-                 {{\"headers\":{{\"X-Yantra-Thread\":\"web/1a2b3c4d\"}},\"type\":\"http\",\
-                 \"url\":\"http://100.64.0.1:7717/api/mcp\"}}}}}}' \
+                "exec \"$c\" --add-dir {IMAGES} --mcp-config {config} \
                  --allowedTools mcp__yantra-room__room_send,mcp__yantra-room__room_read,\
                  mcp__yantra-room__room_info,mcp__yantra-room__room_status \
                  --permission-mode default -p"
+            )),
+            "{script}"
+        );
+        assert!(
+            script.contains(&format!(
+                "printf '%s%s%s' '{{\"mcpServers\":{{\"yantra-room\":{{\"headers\":\
+                 {{\"Authorization\":\"Bearer ' \"$t\" '\",\"X-Yantra-Thread\":\"web/1a2b3c4d\"}},\
+                 \"type\":\"http\",\"url\":\"http://100.64.0.1:7717/api/mcp\"}}}}}}' >{config}"
             )),
             "{script}"
         );
@@ -2685,12 +2719,107 @@ mod tests {
             None,
         );
         assert!(
-            script.contains(
-                r#"--mcp-config '{"mcpServers":{"yantra-room":{"headers":{"X-Yantra-Thread":"web/x'\''; touch /tmp/pwned; '\''\""},"#
-            ),
+            script.contains(r#""X-Yantra-Thread":"web/x'\''; touch /tmp/pwned; '\''\""},"#),
             "the quote ends nothing and the JSON stays one string: {script}"
         );
         assert_eq!(script.matches("--mcp-config").count(), 1, "{script}");
+    }
+
+    /// ADR-0044 decision 12: the token comes in on stdin, so neither the
+    /// script, which is the pane's argv, nor the config's text holds it.
+    #[test]
+    fn the_agent_token_is_read_from_stdin_and_is_in_no_argument() {
+        let mcp = Mcp {
+            url: "http://100.64.0.1:7717/api/mcp".to_owned(),
+            thread: "web/1a2b3c4d".to_owned(),
+        };
+        let script = command(
+            "/w",
+            &keeper(),
+            PermissionMode::Auto,
+            Interaction::Build,
+            None,
+            None,
+            None,
+            Some(&mcp),
+            None,
+        );
+        let read = script.find("IFS= read -r t").expect("the token is read");
+        assert!(
+            read < script.find("exec \"$c\"").expect("claude"),
+            "before claude: {script}"
+        );
+        assert!(!script.contains(TOKEN_MARK), "{script}");
+        assert!(
+            !script.contains("Bearer \"$t"),
+            "the token is not in an argument: {script}"
+        );
+
+        let plain = command(
+            "/w",
+            &keeper(),
+            PermissionMode::Auto,
+            Interaction::Build,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(
+            !plain.contains("read -r t"),
+            "no room tools, no token: {plain}"
+        );
+    }
+
+    /// The prelude in a real `sh`: it takes one line from a pipe, writes the
+    /// config, and leaves the next line for the agent.
+    #[test]
+    fn the_prelude_takes_one_line_and_leaves_the_rest_for_claude() {
+        let dir = std::env::temp_dir().join(format!("yantra-prelude-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a scratch dir");
+        let mcp = Mcp {
+            url: "http://h/api/mcp".to_owned(),
+            thread: "web/t1".to_owned(),
+        };
+        let prelude = mcp.prelude(&keeper()).replace(
+            &keeper().mcp_config(),
+            &dir.join("mcp.json").display().to_string(),
+        );
+        let script = format!("{prelude}cat; echo \"[$YANTRA_AGENT_TOKEN]\"");
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", &script])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("sh");
+        use std::io::Write as _;
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(b"tok_EN-1\n{\"type\":\"user\"}\n")
+            .expect("written");
+        let out = child.wait_with_output().expect("ran");
+
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            "{\"type\":\"user\"}\n[tok_EN-1]\n"
+        );
+        let config = std::fs::read_to_string(dir.join("mcp.json")).expect("written");
+        let parsed: Value = serde_json::from_str(&config).expect("JSON");
+        assert_eq!(
+            parsed["mcpServers"]["yantra-room"]["headers"]["Authorization"],
+            "Bearer tok_EN-1"
+        );
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(dir.join("mcp.json"))
+            .expect("there")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A woken turn runs in a capped mode, so a room tool left off the list

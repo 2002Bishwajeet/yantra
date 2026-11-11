@@ -152,7 +152,7 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
     // The appliance's half, made the way `GET /join` makes it.
     let appliance = scratch("appliance")?;
     let prepared = identity::prepare_in(&appliance, &[])?;
-    let script = join::script(DAEMON.parse()?, &prepared.public_key, None)?;
+    let script = join::script(DAEMON.parse()?, &prepared.public_key, None, None)?;
     let rendered = appliance.join("join.sh");
     std::fs::write(&rendered, script)?;
 

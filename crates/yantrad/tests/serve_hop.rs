@@ -1,5 +1,7 @@
 //! ADR-0042's done test, against the real `yantrad` under its own unit in a
-//! disposable podman container with several accounts (§B3, Y-680).
+//! disposable podman container with several accounts (§B3, Y-680). Since
+//! ADR-0044 the `serve` hop also needs a passkey session, which
+//! `passkey.rs` signs in with; here every network request has none.
 //!
 //! Nothing here holds a `tailscaled`, so the `serve` hop is root on the socket
 //! writing `X-Forwarded-For`, which is the hop's shape and nothing more. The
@@ -117,7 +119,10 @@ impl Hub {
 
     /// The layout as it is now, which is a body `PUT /api/layout` accepts.
     fn layout(&self) -> Result<String> {
-        let (status, body) = self.curl("root", &["http://127.0.0.1:7717/api/layout"])?;
+        let (status, body) = self.curl(
+            "yantra",
+            &["--unix-socket", SOCKET, "http://yantra/api/layout"],
+        )?;
         if status != 200 {
             bail!("GET /api/layout answered {status}: {body}");
         }
@@ -194,18 +199,20 @@ fn the_kernel_proves_the_serve_hop() -> Result<()> {
     assert_eq!(status, 403, "{body}");
     assert!(body.contains(UNPRIVILEGED), "{body}");
 
-    // (c) The serve hop forwarding this machine, and forwarding nothing.
-    for forwarded in [Some("127.0.0.1"), None] {
+    // (c) The serve hop forwarding this machine, forwarding nothing, and
+    //     forwarding the owner's phone: none carries a passkey session, so
+    //     each is 401 (ADR-0044 decision 5).
+    for forwarded in [Some("127.0.0.1"), None, Some(PHONE)] {
         let (status, body) = hub.put_layout("root", true, forwarded)?;
-        assert_eq!(status, 403, "{forwarded:?}: {body}");
+        assert_eq!(status, 401, "{forwarded:?}: {body}");
     }
     let exists = hub.systemd.exec(&["test", "-e", LAYOUT])?;
     assert!(!exists.status.success(), "a refused write wrote the layout");
 
-    // (d) The request through serve that still writes.
-    let (status, body) = hub.put_layout("root", true, Some(PHONE))?;
+    // (d) The daemon's own account on the socket writes with no session.
+    let (status, body) = hub.put_layout("yantra", true, None)?;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(hub.rev()?, 1, "dashboard.json holds the phone's write");
+    assert_eq!(hub.rev()?, 1, "dashboard.json holds the owner's write");
 
     // (e) An account joins itself on the socket, and nobody else.
     let (status, body) = hub.join(UNPRIVILEGED, UNPRIVILEGED)?;

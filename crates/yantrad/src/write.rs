@@ -238,6 +238,10 @@ impl<I: Inventory> Authoriser<I> {
             Hop::Owner => Ok(Presented::Socket),
             Hop::Other(name) => Err(Refused::Account(Some(name.clone()))),
             Hop::Unknown => Err(Refused::Account(None)),
+            // Refused whatever it carries, so it names the socket first.
+            Hop::Tcp(from) if self.bound.contains(from) => {
+                Err(Refused::OwnAddress(self.socket.clone()))
+            }
             Hop::Tcp(_) | Hop::Serve => {
                 if let Some(token) = passkey::bearer(headers) {
                     return self
@@ -1894,10 +1898,12 @@ async fn forget_host_key<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
-    joined: Option<Json<Joining>>,
+    body: axum::body::Bytes,
 ) -> Result<Json<Forgotten>, Refused> {
-    let code = joined
-        .and_then(|Json(joined)| joined.code)
+    // An empty body is the owner's own call, which carries no code.
+    let code = serde_json::from_slice::<Joining>(&body)
+        .ok()
+        .and_then(|joined| joined.code)
         .filter(|code| !code.is_empty());
     let caller = match code {
         Some(code) => {

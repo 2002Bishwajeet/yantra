@@ -184,6 +184,14 @@ pub struct Relying {
     webauthn: Webauthn,
 }
 
+impl std::fmt::Debug for Relying {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Relying")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Relying {
     fn new(name: &str) -> Result<Self, Error> {
         let origin = format!("https://{name}:{}", crate::api::HTTPS_PORT);
@@ -199,11 +207,17 @@ impl Relying {
 }
 
 /// A token minted for one agent session or Chat turn. Dropping it ends it.
-#[derive(Debug)]
 pub struct AgentToken {
     pub token: String,
     hash: String,
     passkeys: Passkeys,
+}
+
+/// Never prints the token.
+impl std::fmt::Debug for AgentToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AgentToken")
+    }
 }
 
 impl Drop for AgentToken {
