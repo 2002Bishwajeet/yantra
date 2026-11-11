@@ -10,7 +10,7 @@ const PATH = `/w/${NAME}`
 const LISTENING = 'Listening. Let go to write it in.'
 const WRITING = 'Writing down what you said…'
 const FAILED = 'The speech service failed, so nothing was written.'
-const UNREACHABLE = 'Dictation is off: yantra-box does not answer.'
+const UNREACHABLE = 'Dictation is off: yantra-box does not answer. Press to ask again.'
 
 const composer = (page: Page) => page.getByLabel(`Message Claude in ${NAME}`, { exact: true })
 const dictate = (page: Page) => page.getByRole('button', { name: 'Hold to dictate' })
@@ -19,8 +19,8 @@ const line = (page: Page, words: string) => page.getByRole('status').filter({ ha
 /** The daemon's side: /api/dictate/health answers `state`, and the socket takes
  *  the frames and `end` and answers only when the test says so. */
 async function daemon(page: Page, state: 'ready' | 'unreachable') {
-  const health = { asked: 0 }
-  await page.route('**/api/dictate/health', (route) => route.fulfill({ json: { state } }))
+  const health = { asked: 0, state }
+  await page.route('**/api/dictate/health', (route) => route.fulfill({ json: { state: health.state } }))
   // Counted as requests, not as routed ones: Playwright's WebKit lets the ask made inside the socket's
   // message handler past the route, to the fixture's 404, and the page keeps the last answer.
   page.on('request', (request) => {
@@ -158,9 +158,17 @@ test.describe('hold to dictate', () => {
     await expect(dictate(page)).toBeEnabled()
     await screenshot(page, 'dictate-error', 'busy', size, { overlay: size === 'phone' })
   })
+})
 
-  test('a box that does not answer disables the button and says why', async ({ page, size }) => {
-    await daemon(page, 'unreachable')
+// WebKit sends a service worker's fetch past page.route to the fixture, so the ask again would read its 404.
+test.describe('hold to dictate while the box is away', () => {
+  test.use({ serviceWorkers: 'block' })
+
+  test('a box that does not answer disables the button and says why, and a press asks again', async ({
+    page,
+    size,
+  }) => {
+    const fake = await daemon(page, 'unreachable')
     await open(page)
     await expect(dictate(page)).toBeDisabled()
     const reason = line(page, UNREACHABLE)
@@ -168,6 +176,14 @@ test.describe('hold to dictate', () => {
     await expect(reason).toHaveAttribute('data-tone', 'error')
     await expect(dictate(page)).toHaveAttribute('aria-describedby', (await reason.getAttribute('id'))!)
     await screenshot(page, 'dictate-unreachable', 'busy', size, { overlay: size === 'phone' })
+
+    fake.health.state = 'ready'
+    const asked = fake.health.asked
+    await dictate(page).focus()
+    await page.keyboard.press('Enter')
+    await expect.poll(() => fake.health.asked).toBe(asked + 1)
+    await expect(dictate(page)).toBeEnabled()
+    await expect(reason).toHaveCount(0)
   })
 })
 

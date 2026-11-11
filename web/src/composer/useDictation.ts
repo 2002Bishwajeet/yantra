@@ -12,6 +12,10 @@ export type Dictation = {
   shown: boolean
   /** Why the button cannot be held, when it cannot. */
   blocked: ApiError | null
+  /** The box did not answer: the button looks disabled, and a press asks it again. */
+  askAgain: boolean
+  /** The health read a press asked for is on its way. */
+  checking: boolean
   state: MicState | 'idle'
   /** How the last utterance ended, when it gave no text. */
   error: ApiError | null
@@ -45,9 +49,15 @@ export function useDictation({
       : window.isSecureContext
         ? null
         : micError('insecure', location.origin)
+  const askAgain = service === 'unreachable'
+  const checking = askAgain && health.isFetching
   const { refetch } = health
 
   const start = () => {
+    if (askAgain) {
+      if (!checking) void refetch()
+      return
+    }
     if (mic.current || blocked || state === 'transcribing') return
     setError(null)
     let ended = false
@@ -69,13 +79,14 @@ export function useDictation({
   // Leaving the page is a release.
   useEffect(() => () => mic.current?.close(), [])
 
-  return { shown: service === 'ready' || service === 'unreachable', blocked, state, error, start, stop }
+  return { shown: service === 'ready' || askAgain, blocked, askAgain, checking, state, error, start, stop }
 }
 
 /** The status line's words: the reason first, then what the press is doing. */
 export function dictationStatus(dictation: Dictation): string {
+  if (dictation.checking) return 'Asking yantra-box again…'
   const said = dictation.error ?? dictation.blocked
-  if (said) return said.describe()
+  if (said) return dictation.askAgain ? `${said.describe()} Press to ask again.` : said.describe()
   if (dictation.state === 'listening') return 'Listening. Let go to write it in.'
   if (dictation.state === 'transcribing') return 'Writing down what you said…'
   return ''

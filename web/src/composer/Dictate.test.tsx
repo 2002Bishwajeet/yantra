@@ -65,8 +65,10 @@ describe('where the button is drawn', () => {
   it('is disabled and says why while the box does not answer', async () => {
     browser()
     draw({ state: 'unreachable' })
-    expect((await button()).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByRole('status').textContent).toContain('Dictation is off: yantra-box does not answer.')
+    expect((await button()).getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('status').textContent).toBe(
+      'Dictation is off: yantra-box does not answer. Press to ask again.',
+    )
   })
 
   it('is disabled on a page that is not a secure context', async () => {
@@ -135,5 +137,60 @@ describe('one hold', () => {
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain(sentence))
     expect(onText).not.toHaveBeenCalled()
     await waitFor(() => expect(asked).toHaveBeenCalledTimes(again ? 2 : 1))
+  })
+})
+
+describe('when the box comes back', () => {
+  function healths(...states: string[]) {
+    const asked = vi.fn((_path: string) => Promise.resolve(answer(200, { state: states.shift() ?? 'ready' })))
+    vi.stubGlobal('fetch', asked)
+    return asked
+  }
+  const mount = (client: QueryClient) =>
+    render(
+      <QueryClientProvider client={client}>
+        <Harness onText={vi.fn()} />
+      </QueryClientProvider>,
+    )
+
+  it('asks again on a press, and the button can then be held', async () => {
+    const fake = browser()
+    const asked = healths('unreachable', 'ready')
+    mount(new QueryClient())
+    const held = await button()
+    expect(held.getAttribute('aria-disabled')).toBe('true')
+
+    fireEvent.pointerDown(held, { button: 0, pointerId: 1 })
+    fireEvent.pointerUp(held, { pointerId: 1 })
+    expect(fake.socket()).toBeUndefined()
+    await waitFor(() => expect(held.hasAttribute('aria-disabled')).toBe(false))
+    expect(asked).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('status').textContent).toBe('')
+
+    fireEvent.pointerDown(held, { button: 0, pointerId: 2 })
+    expect(fake.socket().url).toMatch(/\/api\/dictate\?workspace=site&thread=t1$/)
+  })
+
+  it('asks again by key too', async () => {
+    browser()
+    const asked = healths('unreachable', 'ready')
+    mount(new QueryClient())
+    const held = await button()
+    fireEvent.keyDown(held, { key: 'Enter' })
+    await waitFor(() => expect(held.hasAttribute('aria-disabled')).toBe(false))
+    expect(asked).toHaveBeenCalledTimes(2)
+  })
+
+  it('asks again each time the Chat opens, so a cached unreachable does not stick', async () => {
+    browser()
+    const asked = healths('unreachable', 'ready')
+    const client = new QueryClient()
+    const first = mount(client)
+    expect((await button()).getAttribute('aria-disabled')).toBe('true')
+    first.unmount()
+
+    mount(client)
+    await waitFor(() => expect(asked).toHaveBeenCalledTimes(2))
+    await waitFor(async () => expect((await button()).hasAttribute('aria-disabled')).toBe(false))
   })
 })

@@ -9,7 +9,7 @@ const HOLD_KEYS = new Set([' ', 'Enter'])
 export function DictateButton(props: { dictation: Dictation; disabled?: boolean; describedBy?: string }) {
   const { dictation, disabled, describedBy } = props
   if (!dictation.shown) return null
-  const { state, start, stop } = dictation
+  const { state, start, stop, askAgain, checking } = dictation
 
   const down = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return
@@ -29,13 +29,15 @@ export function DictateButton(props: { dictation: Dictation; disabled?: boolean;
 
   return (
     <Control
-      aria-busy={state === 'transcribing'}
+      aria-busy={state === 'transcribing' || checking}
       aria-describedby={describedBy}
+      // §6 says disabled; a press still asks the box again, so it stays focusable and pressable.
+      aria-disabled={askAgain || undefined}
       aria-label="Hold to dictate"
       aria-pressed={state === 'opening' || state === 'listening'}
       className="composer-dictate"
       data-state={state}
-      disabled={disabled || dictation.blocked !== null || state === 'transcribing'}
+      disabled={disabled || (dictation.blocked !== null && !askAgain) || state === 'transcribing'}
       onBlur={stop}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={keyDown}

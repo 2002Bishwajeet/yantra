@@ -151,12 +151,11 @@ fn name_of(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// §5: no symbol the model would spray, and nothing the service's C string
-/// could not hold.
+/// §5: no symbol the model would spray. A leading `_` or bracket sprays as
+/// badly as a dash, so a word starts with a letter or a digit.
 fn usable(word: &str) -> bool {
-    !word.is_empty()
-        && !word.contains(['-', '/', '.', '\0'])
-        && !word.chars().any(char::is_whitespace)
+    word.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// The crate's own name, then every dependency it names, sorted by `toml`.
@@ -365,6 +364,46 @@ mod tests {
             "a flag loses its dashes: {found:?}"
         );
         assert!(found.contains(&"stt".to_owned()), "{found:?}");
+    }
+
+    #[test]
+    fn a_word_that_starts_with_a_symbol_is_never_a_hotword() {
+        let found = hotwords(
+            &listing(
+                &[
+                    "web/e2e/__screenshots__/a.png",
+                    "src/routes/[slug]/(group)/page.tsx",
+                    "_private",
+                ],
+                &[],
+            ),
+            &[entry("`__init__` and `spawn_blocking` `a__b` `foo_`")],
+        );
+        for word in [
+            "__screenshots__",
+            "[slug]",
+            "(group)",
+            "_private",
+            "__init__",
+        ] {
+            assert!(!found.contains(&word.to_owned()), "{word} in {found:?}");
+        }
+        for word in &found {
+            assert!(
+                word.starts_with(|c: char| c.is_ascii_alphanumeric())
+                    && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                "{word} in {found:?}"
+            );
+        }
+        for word in ["spawn_blocking", "a__b", "foo_", "web", "e2e"] {
+            assert!(
+                found.contains(&word.to_owned()),
+                "{word} missing from {found:?}"
+            );
+        }
+        for word in ["$HOME", "#x", "@x", "{a}", "a\0b", "a b", "é"] {
+            assert!(!usable(word), "{word}");
+        }
     }
 
     #[test]
