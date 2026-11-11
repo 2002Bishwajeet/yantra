@@ -164,9 +164,10 @@ test.describe('hold to dictate', () => {
 test.describe('hold to dictate while the box is away', () => {
   test.use({ serviceWorkers: 'block' })
 
-  test('a box that does not answer disables the button and says why, and a press asks again', async ({
+  test('a box that does not answer disables the button and says why, and a tap asks again', async ({
     page,
     size,
+    hasTouch,
   }) => {
     const fake = await daemon(page, 'unreachable')
     await open(page)
@@ -177,13 +178,37 @@ test.describe('hold to dictate while the box is away', () => {
     await expect(dictate(page)).toHaveAttribute('aria-describedby', (await reason.getAttribute('id'))!)
     await screenshot(page, 'dictate-unreachable', 'busy', size, { overlay: size === 'phone' })
 
+    // Raw input at the centre: a locator's tap waits for an enabled target, and the m3 kit's
+    // aria-disabled rule would let the touch fall through to whatever lies under the button.
+    const box = (await dictate(page).boundingBox())!
+    const x = box.x + box.width / 2
+    const y = box.y + box.height / 2
+    const hit = await page.evaluate(
+      ([px, py]) => document.elementFromPoint(px, py)?.closest('button')?.getAttribute('aria-label'),
+      [x, y],
+    )
+    expect(hit).toBe('Hold to dictate')
+
+    fake.health.state = 'ready'
+    const asked = fake.health.asked
+    if (hasTouch) await page.touchscreen.tap(x, y)
+    else await page.mouse.click(x, y)
+    await expect.poll(() => fake.health.asked).toBe(asked + 1)
+    await expect(dictate(page)).toBeEnabled()
+    await expect(reason).toHaveCount(0)
+  })
+
+  test('Enter asks again from the keyboard', async ({ page }) => {
+    const fake = await daemon(page, 'unreachable')
+    await open(page)
+    await expect(line(page, UNREACHABLE)).toHaveText(UNREACHABLE)
+
     fake.health.state = 'ready'
     const asked = fake.health.asked
     await dictate(page).focus()
     await page.keyboard.press('Enter')
     await expect.poll(() => fake.health.asked).toBe(asked + 1)
     await expect(dictate(page)).toBeEnabled()
-    await expect(reason).toHaveCount(0)
   })
 })
 

@@ -31,7 +31,7 @@ export function DictateButton(props: { dictation: Dictation; disabled?: boolean;
     <Control
       aria-busy={state === 'transcribing' || checking}
       aria-describedby={describedBy}
-      // §6 says disabled; a press still asks the box again, so it stays focusable and pressable.
+      // §6 says disabled; a press still asks the box again, so it stays focusable, and Composer.css keeps it tappable.
       aria-disabled={askAgain || undefined}
       aria-label="Hold to dictate"
       aria-pressed={state === 'opening' || state === 'listening'}

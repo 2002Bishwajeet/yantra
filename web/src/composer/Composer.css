@@ -206,6 +206,13 @@
     color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
 }
 
+/* The m3 kit's aria-disabled look drops pointer events, but this press asks the box again,
+   so a tap must still reach it. Three classes outrank `.m3-interactive[aria-disabled]`. */
+.composer-control.composer-dictate[aria-disabled="true"] {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
 /* Recording is the one state that must catch the eye: primary, not the pressed tonal fill.
    Two classes so it outranks `.composer-control[aria-pressed]`, which comes later. */
 .composer-control.composer-dictate[data-state="listening"] {
