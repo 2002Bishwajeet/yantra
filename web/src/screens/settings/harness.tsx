@@ -21,6 +21,9 @@ vi.mock('@/screens/dashboard/Dashboard', () => ({ Dashboard: () => null }))
 
 const WIDTH: Record<FormFactor, number> = { phone: 390, tablet: 834, desktop: 1440 }
 
+/** The command `POST /api/join/code` answers, which every join line draws. */
+export const JOIN = "curl -fsSL 'https://cachyos-g14.tail3a1b.ts.net:8443/join?code=ABCD2345' | sh"
+
 export type Answer = [status: number, body?: unknown]
 export type Answers = Record<string, Answer | ((init?: RequestInit) => Answer)>
 
@@ -39,6 +42,8 @@ const fleet: Answers = {
   'GET /api/github': [200, contract.github],
   'GET /api/readiness/github': [200, contract.githubReadiness],
   'POST /api/viewing': [204],
+  // ADR-0044 decision 13: what Add a machine and Set up show as the join command.
+  'POST /api/join/code': [200, { code: 'ABCD2345', expires_in: 600, command: JOIN }],
 }
 
 /** The app at one width and one settings path, over the contract fixtures

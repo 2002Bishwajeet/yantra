@@ -6,7 +6,7 @@ import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/tes
  *  and one whose install stops at sudo — and a node that arrives three
  *  seconds in. */
 
-const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
+const COMMAND = "curl -fsSL 'https://cachyos-g14.tail3a1b.ts.net:8443/join?code=ABCD2345' | sh"
 const flow = (machine?: string) => `/machines/add?platform=linux${machine ? `&machine=${machine}` : ''}`
 const beat = (page: import('@playwright/test').Page, name: string) =>
   page.getByRole('listitem').filter({ has: page.getByRole('heading', { level: 2, name }) })

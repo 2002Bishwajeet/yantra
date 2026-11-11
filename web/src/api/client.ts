@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 import type { Looked } from '@/api'
 import { ApiError, isApiError } from '@/api/errors'
+import { signedOut } from '@/api/signedIn'
 
 const contract = (path: string, missing?: string) =>
   `${path} answered something this dashboard cannot read${missing ? `: no \`${missing}\`` : ''}`
@@ -74,6 +75,10 @@ export async function fetchJson<T>(
     throw new ApiError('network', String(cause))
   }
   const { status } = response
+  if (status === 401) {
+    signedOut()
+    throw new ApiError('unauthenticated', await said(response), { status })
+  }
   if (status === 404) {
     throw new ApiError('missing', await said(response), { status })
   }
@@ -158,6 +163,10 @@ export async function look<T>(
     // Every fleet state answers 200 with an envelope, so a status is never
     // news about the fleet: something between this browser and the daemon
     // answered instead of it, and every path hears the same thing.
+    if (response.status === 401) {
+      signedOut()
+      return failed('this device is not signed in')
+    }
     if (!response.ok) return notReached(`HTTP ${response.status}`)
     return await envelope<T>(response, path)
   } catch (cause) {

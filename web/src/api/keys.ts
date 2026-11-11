@@ -28,6 +28,10 @@ export const keys = {
   /** Rooted apart from `machines`: the sweep's prefix invalidation must not reread the store. */
   machineThreads: (machine: string) => ['machine-threads', machine] as const,
   sessions: () => ['sessions'] as const,
+  /** The passkeys and signed-in devices (ADR-0044); apart from `sessions`, which are tmux's. */
+  devices: () => ['devices'] as const,
+  /** One join code per machine the page offers the command to. */
+  joinCode: (machine: string) => ['join-code', machine] as const,
   /** The whole sweep, or one machine's report under it. */
   readiness: (machine?: string) =>
     machine === undefined

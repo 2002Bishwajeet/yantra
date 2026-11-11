@@ -21,7 +21,7 @@ vi.mock('@/shell/primary', async (original) => ({
 }))
 
 const NOW = Date.parse('2026-09-06T12:00:00Z')
-const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
+const COMMAND = "curl -fsSL 'https://cachyos-g14.tail3a1b.ts.net:8443/join?code=ABCD2345' | sh"
 
 type Routes = Record<string, [number, unknown]>
 
@@ -59,6 +59,7 @@ const base = (machines: Machine[] = [linux, mac, phone, tablet, windows]): Route
   'GET /api/ssh-identity': [404, 'no ssh identity yet — the first join makes one'],
   'GET /api/github': [200, contract.disconnected],
   'GET /api/readiness/github': [200, contract.githubReadiness],
+  'POST /api/join/code': [200, { code: 'ABCD2345', expires_in: 600, command: COMMAND }],
 })
 
 async function draw(routes: Routes) {
@@ -554,7 +555,7 @@ describe('the machine lines', () => {
     expect(screen.queryByText('Permission denied (publickey)')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
     expect(await screen.findByText('Permission denied (publickey)')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
     expect(screen.getAllByText(COMMAND)).toHaveLength(1)
   })
 
@@ -575,7 +576,7 @@ describe('the machine lines', () => {
       expect(screen.getByText(command)).toBeTruthy()
     }
     expect(screen.queryByText(/sysadminctl/)).toBeNull()
-    expect(screen.getByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeTruthy()
   })
 
   it('tells a Mac line to join as a Standard account named karigar', async () => {
@@ -584,7 +585,7 @@ describe('the machine lines', () => {
     fireEvent.click(screen.getByRole('button', { name: /How Run it as karigar/ }))
     expect(screen.getByText('sudo sysadminctl -addUser karigar -fullName Karigar -password -')).toBeTruthy()
     expect(screen.queryByText(/useradd/)).toBeNull()
-    expect(screen.getByRole('button', { name: 'Copy the join command for macbook' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Copy the join command for macbook' })).toBeTruthy()
   })
 
   /** D7 §4.1: the first machine with only Install-able checks missing gets

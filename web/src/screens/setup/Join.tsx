@@ -1,18 +1,27 @@
-import { joinCommand } from '@/lib/join'
+import { useJoinCommand } from '@/api/passkey'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { Text } from '@/m3/text/Text'
 
-/** The join command where it can be built, and why not where it cannot. */
-export function Join(props: { url: string | null; about: { error: Error | null; data: unknown }; what: string }) {
-  const { url, about, what } = props
-  if (url) return <Copyable text={joinCommand(url)} what={what} />
+/** The join command with a fresh code (ADR-0044 decision 13), or why there is
+ *  none. `machine` keeps each machine's code apart, since a code works once. */
+export function Join(props: { machine: string; what: string }) {
+  const { machine, what } = props
+  const command = useJoinCommand(machine)
+  if (command.data) {
+    return (
+      <>
+        <Copyable text={command.data.command} what={what} />
+        <Text scale="body-small" tone="variant">
+          The code in it works once, within 10 minutes. This page makes a new one before then.
+        </Text>
+      </>
+    )
+  }
   return (
     <Text scale="body-small" tone="variant">
-      {about.error
-        ? "the daemon's address could not be read, so the join command cannot be built"
-        : about.data
-          ? 'the daemon reports no tailnet address, so the join command cannot be built · check that Tailscale is up on the appliance, then restart yantrad'
-          : "reading the daemon's address…"}
+      {command.error
+        ? `the join command could not be made · ${command.error.describe()} ${command.error.said}`
+        : 'making a join command…'}
     </Text>
   )
 }
