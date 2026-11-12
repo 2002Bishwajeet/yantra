@@ -40,6 +40,8 @@ export default defineConfig({
   // yantrad binds this machine's Tailscale addresses and refuses loopback
   // (R-22), so `npm run dev` supplies the real target.
   server: {
+    // Y-788: loopback unless `--host` asks. Vite's default, `localhost`, can resolve to ::1.
+    host: '127.0.0.1',
     // A phone or a Mac on the tailnet opens the dev server by its MagicDNS
     // name, which Vite refuses unless the host is listed.
     allowedHosts: ['.ts.net'],

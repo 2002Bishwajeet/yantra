@@ -73,14 +73,18 @@ if (!diffEntry) {
   process.exit(1)
 }
 const inFirstLoad = new Set(named.map((url) => url.replace(/^\//, '')))
+// Y-788: the chunk that lazy-loads the viewer is on the page before the panel opens, and
+// Rolldown may fold a shared module into it. It is not a chunk only the panel needs.
+const lazyLoadsViewer = new RegExp(`import\\(["'\`]\\./${diffEntry}`)
 const diffChunks = []
 const pending = [`assets/${diffEntry}`]
 while (pending.length > 0) {
   const url = pending.pop()
   if (diffChunks.some((c) => c.url === url) || inFirstLoad.has(url)) continue
   const bytes = readFileSync(join(dist, url))
-  diffChunks.push({ url, raw: bytes.length, gzip: gz(bytes) })
   const code = bytes.toString('utf8')
+  if (lazyLoadsViewer.test(code)) continue
+  diffChunks.push({ url, raw: bytes.length, gzip: gz(bytes) })
   for (const [, dep] of code.matchAll(/(?:from|import)\s*"\.\/([^"]+\.js)"/g)) pending.push(`assets/${dep}`)
 }
 const diffBytes = diffChunks.reduce((sum, c) => sum + c.gzip, 0)
