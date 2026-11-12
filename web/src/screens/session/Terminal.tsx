@@ -24,7 +24,10 @@ type Size = { cols: number; rows: number }
 type Wired = Keys & { close: () => void }
 
 /** How the socket ends: a session's reopens, a one-off's never does. */
-type Ending = { attempts: number; exited?: (exit: number | null) => void }
+type Ending = { attempts: number; exited?: (exit: number | null) => void; typeIn?: string }
+
+/** Quiet this long after the first output means the shell has drawn its prompt. */
+const PROMPT_MS = 300
 
 const SIZE = 13
 const FAMILY = '"IBM Plex Mono", ui-monospace, monospace'
@@ -69,13 +72,24 @@ function attach(
   })
   xterm.textarea?.setAttribute('aria-describedby', hint)
 
+  let prompt: ReturnType<typeof setTimeout> | undefined
+  let typedIn = ending.typeIn === undefined
   const link = attachTerminal(url, {
     size: () => {
       fit.fit()
       sized({ rows: xterm.rows, cols: xterm.cols })
       return { rows: xterm.rows, cols: xterm.cols }
     },
-    onBytes: (bytes) => xterm.write(bytes),
+    onBytes: (bytes) => {
+      xterm.write(bytes)
+      if (typedIn) return
+      clearTimeout(prompt)
+      prompt = setTimeout(() => {
+        typedIn = true
+        // Never a CR or LF: the owner reads the command and presses Enter.
+        link.type(ending.typeIn!)
+      }, PROMPT_MS)
+    },
     onEnd: over,
     onLink: linked,
     onExit: ending.exited,
@@ -100,6 +114,7 @@ function attach(
 
   return {
     close: () => {
+      clearTimeout(prompt)
       watching?.disconnect()
       window.removeEventListener('resize', link.resize)
       typed.dispose()
@@ -126,6 +141,8 @@ export type TerminalProps = {
   /** Where the status line goes when the page has a header to hold it. It then
    *  drops the label, because the page title already names the session. */
   statusIn?: HTMLElement | null
+  /** Typed once, with no Enter, when the shell has drawn its prompt (Y-702). */
+  typeIn?: string
   /** Drawn under the pane, inside `KeysContext`: the phone's key row. */
   children?: ReactNode
 }
@@ -139,7 +156,7 @@ export type TerminalProps = {
  *  reopening would run the command again. An owner target is one too (Y-701):
  *  it ends when its shell does. */
 export function Terminal(props: TerminalProps) {
-  const { target, height, label, onExit, onEnd, statusIn, children } = props
+  const { target, height, label, onExit, onEnd, statusIn, typeIn, children } = props
   const host = useRef<HTMLDivElement>(null)
   const wired = useRef<ReturnType<typeof attach> | null>(null)
   const told = useRef(onExit)
@@ -195,6 +212,7 @@ export function Terminal(props: TerminalProps) {
         once
           ? {
               attempts: 0,
+              typeIn,
               exited: (exit) => {
                 setEnd({ ended: 'exited', exit })
                 told.current?.(exit)
@@ -209,7 +227,7 @@ export function Terminal(props: TerminalProps) {
       wired.current = null
       live?.close()
     }
-  }, [url, opened, hint, once])
+  }, [url, opened, hint, once, typeIn])
 
   const again = () => {
     setEnd({ ended: 'no' })

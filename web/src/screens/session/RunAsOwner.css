@@ -1,0 +1,30 @@
+.run-owner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-owner > p {
+  margin: 0;
+}
+
+.run-owner__button {
+  min-block-size: 48px;
+}
+
+.run-owner__ask {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.run-owner__ask > p {
+  margin: 0;
+}
+
+.run-owner__ask .run-owner__button {
+  align-self: stretch;
+}

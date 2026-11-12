@@ -783,7 +783,7 @@ impl Shared {
                             item_id: id,
                             item_type: Some(item_type(&name)),
                             status: Some(chat::ItemStatus::InProgress),
-                            title: logs::target_in(&input),
+                            title: item_title(&name, &input),
                             output: plan,
                             changes: Vec::new(),
                         }));
@@ -1193,6 +1193,16 @@ fn for_this_session(suggestions: Vec<Value>) -> Vec<Value> {
             suggestion
         })
         .collect()
+}
+
+/// A shell command is shown whole: the owner may type it into an admin shell
+/// (ADR-0046 3.2), and a cut command is not the one Claude ran.
+fn item_title(tool: &str, input: &Value) -> Option<String> {
+    let command = input["command"].as_str().map(str::trim);
+    match command {
+        Some(command) if tool == "Bash" && !command.is_empty() => Some(command.to_owned()),
+        _ => logs::target_in(input),
+    }
 }
 
 fn item_type(tool: &str) -> chat::ItemType {
@@ -1837,6 +1847,27 @@ mod tests {
                 return seen;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_bash_command_item_carries_the_whole_command() {
+        let (_turn, mut events, mut fake) = pair(None);
+        let command = format!("sudo apt-get install -y {}", "package-name ".repeat(20));
+        assert!(command.chars().count() > 250);
+        let line = json!({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": TOOL, "name": "Bash", "input": {"command": format!("  {command}\n")}}]}});
+        fake.play(&format!("{line}\n")).await;
+        let mut titles = Vec::new();
+        while titles.is_empty() {
+            let next = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("an event within 5 s")
+                .expect("the channel is open");
+            if let Event::ItemStarted(item) = next.event {
+                titles.push(item.title);
+            }
+        }
+        assert_eq!(titles, vec![Some(command.trim().to_owned())]);
     }
 
     #[tokio::test]
