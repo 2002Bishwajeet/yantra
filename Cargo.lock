@@ -4125,7 +4125,7 @@ dependencies = [
 
 [[package]]
 name = "yantra"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -4142,7 +4142,7 @@ dependencies = [
 
 [[package]]
 name = "yantra-agent"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4152,7 +4152,7 @@ dependencies = [
 
 [[package]]
 name = "yantra-box"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4163,7 +4163,7 @@ dependencies = [
 
 [[package]]
 name = "yantra-core"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -4184,7 +4184,7 @@ dependencies = [
 
 [[package]]
 name = "yantra-stt"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "axum",
  "clap",
@@ -4200,7 +4200,7 @@ dependencies = [
 
 [[package]]
 name = "yantrad"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "axum",

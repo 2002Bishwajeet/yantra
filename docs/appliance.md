@@ -4,7 +4,7 @@ How Yantra gets onto the always-on box and how it is updated afterwards. For loc
 [`development.md`](development.md); for what the appliance milestone is, see
 [`plans/m7-appliance.md`](plans/m7-appliance.md).
 
-**[v0.12.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.12.0) is the current release**
+**[v0.13.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.13.0) is the current release**
 ([Y-405](../tracker.md)), and there are two ways in. [`install.sh`](../install.sh) fetches the
 current release onto the box itself, verifies it, and at a terminal takes the box from bare to an
 open dashboard ([Y-384](../tracker.md)). `just appliance-install` builds on the machine that
@@ -34,20 +34,20 @@ One command, on the box, as the account you log in with — **not** as root. The
 for the steps that need it.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | bash
 ```
 
 Debian 13 ships `wget` and no `curl`. Use this form there; the script installs `curl` with `apt-get`
 before it goes on:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | bash
+wget -qO- https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | bash
 ```
 
 Read it first if you would rather — it is one file:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh -o install.sh
 less install.sh
 bash install.sh
 ```
@@ -347,8 +347,8 @@ real systemd ([Y-158](../tracker.md#3-task-board)).
 `YANTRA_YES=1` does the same:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | bash -s -- --yes
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | YANTRA_YES=1 bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | YANTRA_YES=1 bash
 ```
 
 The run then does what a yes at a terminal does: it installs Tailscale, logs the box in, turns on
@@ -356,7 +356,7 @@ HTTPS, starts the units and ends on the dashboard's URL. Without a key, `tailsca
 login URL and waits for someone to open it. To log in with no one there, give it an auth key:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | TS_AUTHKEY=tskey-auth-… bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | TS_AUTHKEY=tskey-auth-… bash -s -- --yes
 ```
 
 - **The key is never written to disk.** The script pipes it to
@@ -376,7 +376,7 @@ curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/insta
   makes first:
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | YANTRA_ACCOUNT=<account> bash -s -- --yes
+  curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | YANTRA_ACCOUNT=<account> bash -s -- --yes
   ```
 
 - **`--uninstall` ignores `--yes`.** Its questions are default no, and `--yes` never deletes
@@ -489,7 +489,7 @@ The macOS archives carry none: they ship `yantra-agent` alone and no systemd rea
 account logged in at the Mac, and name the daemon's tailnet address:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | YANTRA_DAEMON=<address>:7717 bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | YANTRA_DAEMON=<address>:7717 bash
 ```
 
 It needs no root, and it refuses to run as root. It writes the binary to `~/.local/bin/yantra-agent`
@@ -522,7 +522,7 @@ does, so an agent never passes the daemon (ADR-0013: the daemon goes first). On 
 machine, run it as an account with sudo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | YANTRA_VERSION=<daemon version> bash -s -- --agent
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | YANTRA_VERSION=<daemon version> bash -s -- --agent
 ```
 
 A nightly has no tag to pin, so under a nightly daemon the command names `--channel nightly` instead.
@@ -546,7 +546,7 @@ and `yantra-agent.service`, keeps `/etc/yantra/agent.env` and restarts the agent
 **[Y-407](../tracker.md):** `install.sh --uninstall`, or piped the same way the install itself is:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | bash -s -- --uninstall
 ```
 
 **It always** stops and disables `yantrad.service`, `yantra-agent.service` and the two update units,
@@ -573,7 +573,7 @@ what was kept, and a reinstall with the same script picks up where it left off f
 **This is not how you switch versions.** Install over the current release and restart:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | YANTRA_VERSION=0.3.0 bash
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | YANTRA_VERSION=0.3.0 bash
 sudo systemctl restart yantrad yantra-agent
 ```
 

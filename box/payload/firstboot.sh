@@ -32,7 +32,7 @@ bash "$state/ui/install.sh" "$user" || echo 'yantra-box: FAILED: the login scree
 # This script is root, so install.sh cannot tell which account yantrad logs in to.
 export YANTRA_ACCOUNT=$agent
 # Y-787: the tag of the current release, never a branch. own_box.rs serves Cargo.toml's version only.
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.12.0/install.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.13.0/install.sh | bash -s -- --yes
 tailscale set --auto-update || echo 'yantra-box: tailscale auto-update is not on'
 
 rm -rf /etc/yantra-box.tskey /etc/yantra-box.user "$state"
