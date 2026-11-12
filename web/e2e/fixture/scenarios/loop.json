@@ -1,0 +1,88 @@
+{
+  "extends": "busy",
+  "pulls": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "workspace": "yantra-web",
+        "url": "https://github.com/2002Bishwajeet/yantra/pull/497",
+        "number": 497,
+        "head_sha": "0a1b2c3d",
+        "summary": "failed",
+        "checks": [
+          {
+            "name": "rust / test",
+            "status": "completed",
+            "conclusion": "failure",
+            "output": {
+              "title": "1 test failed",
+              "summary": "`watch::tests::a_304_keeps_the_checks` panicked at watch.rs:212"
+            }
+          },
+          {
+            "name": "web / lint",
+            "status": "completed",
+            "conclusion": "success",
+            "output": {
+              "title": "Clean",
+              "summary": ""
+            }
+          }
+        ],
+        "reviews": [
+          {
+            "id": 7,
+            "author": "reviewer",
+            "state": "CHANGES_REQUESTED",
+            "body": "Please cover the 304 path."
+          }
+        ],
+        "comments": [
+          {
+            "id": 31,
+            "author": "reviewer",
+            "path": "crates/yantrad/src/watch.rs",
+            "line": 142,
+            "body": "This drops the etag on a new head."
+          }
+        ]
+      }
+    ]
+  },
+  "fixed": {
+    "looked": "ok",
+    "age_seconds": 0,
+    "data": [
+      {
+        "workspace": "yantra-web",
+        "url": "https://github.com/2002Bishwajeet/yantra/pull/497",
+        "number": 497,
+        "head_sha": "0a1b2c3e",
+        "summary": "passed",
+        "checks": [
+          {
+            "name": "rust / test",
+            "status": "completed",
+            "conclusion": "success",
+            "output": {
+              "title": "326 tests passed",
+              "summary": ""
+            }
+          },
+          {
+            "name": "web / lint",
+            "status": "completed",
+            "conclusion": "success",
+            "output": {
+              "title": "Clean",
+              "summary": ""
+            }
+          }
+        ],
+        "reviews": [],
+        "comments": []
+      }
+    ]
+  }
+}

@@ -359,7 +359,7 @@ async fn a_push_sets_the_upstream_and_a_refused_one_sets_nothing() -> Result<()>
 /// A loopback GitHub that answers each request in turn and returns what it
 /// was sent. The GitHub calls stay faked; the tip read is what goes over ssh.
 fn github_answering(
-    replies: Vec<(&'static str, &'static str)>,
+    replies: Vec<(&'static str, String)>,
 ) -> (Github, std::thread::JoinHandle<Vec<String>>) {
     use std::io::{Read as _, Write as _};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
@@ -443,11 +443,11 @@ async fn a_pr_opens_from_the_pushed_tip_read_over_ssh() -> Result<()> {
     let token = Token::new("gho_notarealtoken".to_owned());
 
     let (github, served) = github_answering(vec![
-        ("200 OK", NONE_OPEN),
-        ("200 OK", r#"{"default_branch":"main"}"#),
+        ("200 OK", NONE_OPEN.into()),
+        ("200 OK", r#"{"default_branch":"main"}"#.into()),
         (
             "201 Created",
-            r#"{"number":3,"html_url":"https://github.com/o/r/pull/3","state":"open","merged_at":null}"#,
+            r#"{"number":3,"html_url":"https://github.com/o/r/pull/3","state":"open","merged_at":null}"#.into(),
         ),
     ]);
     let opened = commit::open_pr(&ssh, &thread, &github, &token, None, None).await?;
@@ -468,10 +468,135 @@ async fn a_pr_opens_from_the_pushed_tip_read_over_ssh() -> Result<()> {
 
     fixture.run(&format!("cd {} && printf 'b\\n' > b.txt", place.worktree))?;
     commit::commit(&ssh, &place, "Add b").await?;
-    let (github, _served) = github_answering(vec![("200 OK", NONE_OPEN)]);
+    let (github, _served) = github_answering(vec![("200 OK", NONE_OPEN.into())]);
     assert!(matches!(
         commit::open_pr(&ssh, &thread, &github, &token, None, None).await,
         Err(commit::Failed::Ahead)
     ));
+    Ok(())
+}
+
+/// Y-497: one thread walks the whole loop, as the owner does it, against the
+/// bare origin in the container and the loopback GitHub, and is then removed.
+#[tokio::test]
+async fn a_thread_walks_from_a_commit_to_a_merge_and_is_removed() -> Result<()> {
+    const REPO: &str = "/home/yantra/loop";
+    const ORIGIN: &str = "/home/yantra/loop-origin.git";
+    const OPEN_PR: &str = r#"{"number":3,"html_url":"https://github.com/o/r/pull/3","state":"open","merged_at":null}"#;
+    let Some((fixture, ssh, workspace)) = lab("yt-loop", REPO).await? else {
+        return Ok(());
+    };
+    install_claude(&ssh).await?;
+    fixture.run(&format!(
+        "git -C {REPO} config user.name Owner && git -C {REPO} config user.email owner@example.com \
+         && git init -q --bare {ORIGIN} && git -C {REPO} remote add origin {ORIGIN}"
+    ))?;
+
+    let place = thread::open(&ssh, &workspace).await?;
+    fixture.run(&format!("cd {} && printf 'a\\n' > a.txt", place.worktree))?;
+    let message = commit::draft(&ssh, &place, None).await?;
+    let committed = commit::commit(&ssh, &place, &message).await?;
+    assert_eq!(committed.subject, SUBJECT);
+
+    let issue: IssueRef = "o/r#7".parse()?;
+    let pushed = commit::push(&ssh, &place, Some(&issue), None).await?;
+    assert_eq!(pushed.branch, format!("yantra/7-{}", thread::name(&place)));
+    let tip = fixture
+        .run(&format!(
+            "git -C {ORIGIN} rev-parse refs/heads/{}",
+            pushed.branch
+        ))?
+        .trim()
+        .to_owned();
+    assert_eq!(tip, head(&fixture, &place)?);
+
+    fixture.run(&format!(
+        "git -C {REPO} remote set-url origin https://github.com/o/r.git"
+    ))?;
+    let mut thread = thread::listed(&ssh, &workspace)
+        .await?
+        .into_iter()
+        .find(|found| found.place.branch == place.branch)
+        .expect("the thread");
+    thread.issue = Some(issue.to_string());
+    let token = Token::new("gho_notarealtoken".to_owned());
+
+    let (github, served) = github_answering(vec![
+        ("200 OK", "[]".into()),
+        ("200 OK", r#"{"default_branch":"main"}"#.into()),
+        ("201 Created", OPEN_PR.into()),
+    ]);
+    let opened = commit::open_pr(&ssh, &thread, &github, &token, None, None).await?;
+    assert!(opened.created);
+    assert_eq!(opened.number, 3);
+    let seen = served.join().expect("the stub thread");
+    let sent: serde_json::Value =
+        serde_json::from_str(seen[2].rsplit("\r\n\r\n").next().unwrap_or_default())?;
+    assert!(
+        sent["body"]
+            .as_str()
+            .is_some_and(|body| body.ends_with("Closes #7")),
+        "{sent}"
+    );
+
+    let (github, served) = github_answering(vec![
+        ("200 OK", format!("[{OPEN_PR}]")),
+        (
+            "200 OK",
+            serde_json::json!({
+                "state": "open",
+                "merged_at": null,
+                "head": {"sha": tip},
+                "user": {"login": "o"},
+            })
+            .to_string(),
+        ),
+        ("200 OK", r#"{"sha":"5ca1ab1e"}"#.into()),
+        ("204 No Content", String::new()),
+    ]);
+    let merged = commit::merge_pr(&thread, &github, &token, 3, Some(&tip)).await?;
+    assert_eq!(merged.number, 3);
+    assert_eq!(merged.branch, pushed.branch);
+    assert_eq!(merged.kept, None);
+    let seen = served.join().expect("the stub thread");
+    assert!(
+        seen[2].starts_with("PUT /repos/o/r/pulls/3/merge "),
+        "{}",
+        seen[2]
+    );
+    let sent: serde_json::Value =
+        serde_json::from_str(seen[2].rsplit("\r\n\r\n").next().unwrap_or_default())?;
+    assert_eq!(
+        sent,
+        serde_json::json!({"merge_method": "squash", "sha": tip})
+    );
+    assert!(
+        seen[3].starts_with(&format!(
+            "DELETE /repos/o/r/git/refs/heads/{} ",
+            pushed.branch
+        )),
+        "{}",
+        seen[3]
+    );
+
+    thread::remove(&ssh, &place).await?;
+    assert_eq!(
+        fixture.run(&format!(
+            "test -e {} && echo left || echo gone",
+            place.worktree
+        ))?,
+        "gone\n"
+    );
+    assert_eq!(
+        fixture.run(&format!("git -C {REPO} branch --list {}", place.branch))?,
+        ""
+    );
+    assert!(
+        thread::listed(&ssh, &workspace)
+            .await?
+            .iter()
+            .all(|found| found.place.branch != place.branch),
+        "the thread is no longer listed"
+    );
     Ok(())
 }

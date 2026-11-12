@@ -756,6 +756,8 @@ const routes = [
         const { number, url } = contract.threadPrOpened
         ;(s.opened ??= {})[name] = { state: 'open', number, url }
       }
+      // Y-497: a push after the fix is a new head, and its checks pass.
+      if (verb === 'push' && s.fixed && s.opened?.[name]?.state === 'open') s.pulls = s.fixed
       return good
     },
   ]),

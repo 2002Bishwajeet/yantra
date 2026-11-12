@@ -34,6 +34,7 @@ export type Scenario =
   | 'fresh'
   | 'freshdefect'
   | 'checks'
+  | 'loop'
   | 'signedout'
 
 /** Every stamp in the scenarios is aged against this instant, so an age reads
