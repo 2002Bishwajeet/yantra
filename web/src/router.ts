@@ -213,8 +213,9 @@ const setup = createRoute({
   head: () => titled('Set up Yantra'),
 })
 
-// Two routes, one screen: `/settings` is the index on a phone and the first
+// One screen, two URLs: `/settings` is the index on a phone and the first
 // category beside the list on a desktop; `/settings/$category` is one category.
+// The category route is a child so a category change keeps the screen mounted (Y-737).
 const settings = createRoute({
   getParentRoute: () => root,
   path: '/settings',
@@ -223,13 +224,12 @@ const settings = createRoute({
 })
 
 const settingsCategory = createRoute({
-  getParentRoute: () => root,
-  path: '/settings/$category',
+  getParentRoute: () => settings,
+  path: '$category',
   // The key was the one task Access held, and Add a device holds it now.
   beforeLoad: ({ params }) => {
     if (params.category === 'access') throw redirect({ to: '/machines/add', replace: true })
   },
-  component: lazyRouteComponent(() => import('@/screens/settings/Settings'), 'Settings'),
   head: ({ params }) => titled(params.category.charAt(0).toUpperCase() + params.category.slice(1)),
 })
 
@@ -319,8 +319,7 @@ export const routeTree = root.addChildren([
   session,
   repair,
   setup,
-  settings,
-  settingsCategory,
+  settings.addChildren([settingsCategory]),
   addDevice,
   notifications,
   rooms,
@@ -334,13 +333,21 @@ type TransitionInfo = {
 }
 
 /** `false` makes the router skip the view transition: reduce gets a plain cut, and so do the first load and a search-only change. */
+// A list beside its detail on tablet and desktop: a change inside one swaps the detail only.
+const LIST_DETAIL = ['/settings']
+const listDetailOf = (pathname: string) =>
+  LIST_DETAIL.find((base) => pathname === base || pathname.startsWith(`${base}/`))
+
 export function transitionTypes({ fromLocation, toLocation }: TransitionInfo): string[] | false {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false
   if (!fromLocation || fromLocation.pathname === toLocation.pathname) return false
   // Y-732: tabs are peers, so they fade through; a slide says one page opened from another.
   if (isDestination(fromLocation.pathname) && isDestination(toLocation.pathname)) return ['tab']
   const back = (toLocation.state.__TSR_index ?? 0) < (fromLocation.state.__TSR_index ?? 0)
-  return [back ? 'back' : 'forward']
+  // The direction stays as the phone's fallback, where the list and the detail are separate pages.
+  const within = listDetailOf(fromLocation.pathname)
+  const direction = back ? 'back' : 'forward'
+  return within && within === listDetailOf(toLocation.pathname) ? ['pane', direction] : [direction]
 }
 
 /** The history is a parameter rather than a default, which is

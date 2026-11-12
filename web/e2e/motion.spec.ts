@@ -128,6 +128,43 @@ test.describe('route changes with motion', () => {
   })
 })
 
+test.describe('a Settings category change with motion', () => {
+  test.use({ reducedMotion: 'no-preference' })
+
+  test('swaps the detail pane and leaves the list, bar and rail still', async ({ page, size }) => {
+    test.skip(size === 'phone', 'a phone draws the list and the detail as separate pages')
+    await scenario(page, 'busy')
+    await page.addInitScript(() => {
+      const seen: string[] = []
+      Object.assign(window, { pseudos: seen })
+      const start = document.startViewTransition.bind(document)
+      document.startViewTransition = ((arg: unknown) => {
+        const run = start(arg as never)
+        void run.ready.then(() => {
+          for (const a of document.getAnimations())
+            seen.push((a.effect as KeyframeEffect).pseudoElement ?? '')
+        })
+        return run
+      }) as typeof document.startViewTransition
+    })
+    await page.goto('/settings/general')
+    const list = page.getByRole('navigation', { name: 'Settings' })
+    await expect(page.getByRole('heading', { level: 2, name: 'General' })).toBeVisible()
+    await list.evaluate((el) => el.setAttribute('data-same', ''))
+    const before = await list.boundingBox()
+    await list.getByRole('link', { name: 'Agents' }).click()
+    await expect(page.getByRole('heading', { level: 2, name: 'Agents' })).toBeVisible()
+    await page.waitForFunction(() => document.getAnimations().length === 0)
+    const pseudos = await page.evaluate(() => (window as unknown as { pseudos: string[] }).pseudos)
+    // Nothing runs on the root, where the list lives; the pane animates in its own group.
+    expect(pseudos.filter((name) => /^::view-transition-(old|new)\(root\)/.test(name))).toEqual([])
+    expect(pseudos.some((name) => name.includes('(settings-pane)'))).toBe(true)
+    await expect(list).toHaveAttribute('data-same', '')
+    expect(await list.boundingBox()).toEqual(before)
+    await expect(list).toHaveCSS('opacity', '1')
+  })
+})
+
 test.describe('route changes under reduce', () => {
   test.use({ reducedMotion: 'reduce' })
 
