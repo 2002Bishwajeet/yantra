@@ -194,14 +194,17 @@ impl OwnBox {
             "/etc/systemd/system/yantra-firstboot.service",
         )?;
         // The markers skip both Claude Code installs: the fixture cannot reach claude.ai.
+        // Y-787: the script is served at this version's tag only, so a first boot
+        // that names an older tag or a branch fetches nothing.
         self.sh(&format!(
             "chmod 700 /usr/local/sbin/yantra-firstboot && \
              echo {UNPRIVILEGED} > /etc/yantra-box.user && \
              mkdir -p /var/lib/yantra-box && \
              touch /var/lib/yantra-box/user-done /var/lib/yantra-box/agent-done && \
-             install -D /fixture/install.sh /srv/www/{}/main/install.sh && \
+             install -D /fixture/install.sh /srv/www/{}/v{}/install.sh && \
              systemctl daemon-reload && systemctl enable yantra-firstboot.service",
-            self.repo
+            self.repo,
+            env!("CARGO_PKG_VERSION")
         ))?;
         Ok(())
     }

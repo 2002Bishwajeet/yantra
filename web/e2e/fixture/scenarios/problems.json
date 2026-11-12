@@ -110,7 +110,7 @@
           {
             "check": "heartbeat",
             "state": "absent",
-            "detail": "yantra-agent here is v0.3.2 and yantrad is v0.11.0. Update it on macbook: `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_VERSION=0.11.0 bash`"
+            "detail": "yantra-agent here is v0.3.2 and yantrad is v0.11.0. Update it on macbook: `curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | YANTRA_VERSION=0.11.0 bash`"
           },
           {
             "check": "hooks",

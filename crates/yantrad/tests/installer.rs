@@ -421,6 +421,15 @@ fn the_fixtures_archive_is_shaped_the_way_release_yml_stages_one() -> Result<()>
         workflow.contains(r#"install.sh "staging/$stage/""#),
         "release.yml no longer stages install.sh, so no box could leave an updater behind"
     );
+    // Y-787: the first install fetches the release's own copy of install.sh,
+    // so the release and the nightly each list it in the file the owner signs.
+    assert_eq!(
+        workflow
+            .matches("{ cat *.sha256; sha256sum install.sh; } | sort -k2 > SHA256SUMS")
+            .count(),
+        2,
+        "release.yml no longer lists install.sh in SHA256SUMS in both publishing jobs"
+    );
     Ok(())
 }
 

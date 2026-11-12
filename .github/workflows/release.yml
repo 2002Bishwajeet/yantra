@@ -5,8 +5,9 @@ name: release
 # is how you rehearse a release before committing to a tag. Either way the
 # `rehearse` job installs and updates the built x86_64 archive before `release`.
 #
-# A push to main publishes the nightly (Y-662): the two Linux archives only,
-# with no rehearse, re-uploaded to the one rolling `nightly` pre-release.
+# A push to main publishes the nightly (Y-662): the two Linux archives and
+# install.sh, with no rehearse, re-uploaded to the one rolling `nightly`
+# pre-release.
 on:
   push:
     branches:
@@ -406,12 +407,15 @@ jobs:
 
       # Collapse the per-target .sha256 files into one SHA256SUMS asset and
       # verify every archive against it before anything is published.
+      # Y-787: install.sh is an asset too, so the first install fetches the
+      # release's own copy and the owner's signature covers it.
       - name: Aggregate and verify checksums
         shell: bash
         run: |
           set -euo pipefail
+          cp install.sh artifacts/
           cd artifacts
-          cat *.sha256 | sort -k2 > SHA256SUMS
+          { cat *.sha256; sha256sum install.sh; } | sort -k2 > SHA256SUMS
           rm -f -- *.sha256
           sha256sum -c SHA256SUMS
           cat SHA256SUMS
@@ -476,6 +480,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Download all build artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -483,12 +490,14 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # Y-787: a nightly command fetches this copy, which matches the archives.
       - name: Aggregate and verify checksums
         shell: bash
         run: |
           set -euo pipefail
+          cp install.sh artifacts/
           cd artifacts
-          cat *.sha256 | sort -k2 > SHA256SUMS
+          { cat *.sha256; sha256sum install.sh; } | sort -k2 > SHA256SUMS
           rm -f -- *.sha256
           sha256sum -c SHA256SUMS
           cat SHA256SUMS
@@ -505,7 +514,7 @@ jobs:
         run: |
           set -euo pipefail
           notes="The build of ${GITHUB_SHA}, the latest merge to main. Linux only, and not rehearsed.
-          Install it on a box with: \`curl -fsSL https://raw.githubusercontent.com/${GH_REPO}/main/install.sh | bash -s -- --channel nightly\`"
+          Install it on a box with: \`curl -fsSL https://github.com/${GH_REPO}/releases/download/nightly/install.sh | bash -s -- --channel nightly\`"
           if gh release view nightly >/dev/null 2>&1; then
             gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/nightly" -f sha="$GITHUB_SHA" -F force=true >/dev/null
             old=$(gh release view nightly --json assets --jq '.assets[].name')
