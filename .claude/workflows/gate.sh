@@ -76,6 +76,9 @@ run)
       [ $code -eq 75 ] && { echo "gate: $host is running another gate" >&2; continue; }
       exit $code
     done
+  elif [[ $branch == y-*-auto ]] && git -C "$wt" push -q origin "HEAD:refs/heads/$branch" 2>/dev/null; then
+    # Y-804: an unpushed fix commit sent every gate to the laptop. A harness branch is pushed so a gate host can take it.
+    exec "$0" run "$wt" "$command"
   else
     echo "gate: HEAD $sha is not pushed to origin/$branch, so it runs on this machine" >&2
   fi
@@ -85,7 +88,8 @@ run)
   cd "$wt"
   # Y-799: other projects' agents on this laptop take the same machine-wide lock for their heavy commands.
   heavy=(); [ -x ~/.claude/bin/heavy ] && heavy=(~/.claude/bin/heavy)
-  exec "${heavy[@]}" systemd-run --user --scope -q -p MemoryMax="$mem" nice -n 10 bash -c "$command"
+  # Y-804: the laptop shares 16 GB with other sessions, and oomd killed them at the 8 GB gate-host cap.
+  exec "${heavy[@]}" systemd-run --user --scope -q -p MemoryMax="${GATE_LOCAL_MEMORY_MAX:-4G}" -p MemorySwapMax=1G nice -n 10 bash -c "$command"
   ;;
 
 *)
