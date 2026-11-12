@@ -467,3 +467,4 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-12** — **[Y-702](../tracker.md#3-task-board) is in review.** A command tool item that starts with `sudo` now offers *Run in owner terminal*. The terminal opens on the thread's machine with the command typed and Enter not sent. A command with a control character is refused. Tests cover both.
 - **2026-11-12** — Rows Y-737 to Y-743 added: the owner's reports from the v0.12.0 walk, the two owner actions it found, and a review of the two fixes that merged without the build loop.
 - **2026-11-12** — Rows Y-744 to Y-747 added from the owner's reports: a page that keeps its content through one failed read, the same for GitHub, Search as an M3 search view, and an M3 Expressive audit of every screen.
+- **2026-11-12** — Row Y-748 added: the owner asked for an M3 Expressive design of the machine page.
