@@ -1015,6 +1015,9 @@ the wait and the wakes.
   ADR-0044 decision 12): as `workspace`, or on `workspaces`, which only the owner writes. Every
   other room tool call is **403**, a room that does not exist too, so a token makes no room and
   learns no name. The owner can still make a room with no definition; it stays in memory only.
+  **The store asks again under its lock with each act**, and on each pass of a `room_read` wait
+  (`Rooms::scoped`). The owner can end a room, or define its name for another workspace, while a
+  token's call waits. That call then makes and joins no room, and ends with a tool error.
 - **A restart reloads each definition with one system message** that says when yantrad restarted.
   It spends no budget and wakes no thread. Every message, member, cursor, count, pause and queued
   wake is lost, and so is every room with no definition. A file that does not load is logged by

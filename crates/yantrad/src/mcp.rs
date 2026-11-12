@@ -214,7 +214,7 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
                                 thread,
                                 session,
                             };
-                            result(id, tool(&state, &reader, &label, call).await)
+                            result(id, tool(&state, &who, &reader, &label, call).await)
                         }
                     }
                 }
@@ -228,16 +228,20 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
     })
 }
 
-async fn tool<I>(state: &Served<I>, reader: &Reader, label: &str, call: Call) -> Value {
+/// A token's call goes through [`Rooms::scoped`], which asks what [`may_call`]
+/// asked with each act: the owner may end the room while a read waits.
+async fn tool<I>(state: &Served<I>, who: &Who, reader: &Reader, label: &str, call: Call) -> Value {
+    let rooms = match who {
+        Who::Agent { workspace, .. } => &state.rooms.scoped(workspace),
+        Who::Owner(..) => &state.rooms,
+    };
     let said = match call {
-        Call::Send { room, text } => state
-            .rooms
+        Call::Send { room, text } => rooms
             .send(reader, label, &room, &text)
             .map(|sent| json!({"seq": sent.seq, "delivered": sent.delivered}).to_string())
             .map_err(|error| error.to_string()),
         Call::Read { room, wait } => {
-            let read = state
-                .rooms
+            let read = rooms
                 .read(
                     reader,
                     label,
@@ -259,8 +263,7 @@ async fn tool<I>(state: &Served<I>, reader: &Reader, label: &str, call: Call) ->
                 Err(error) => Err(error.to_string()),
             }
         }
-        Call::Info { room } => state
-            .rooms
+        Call::Info { room } => rooms
             .info(reader, label, &room)
             .map(|info| {
                 let summary = info.summary;
@@ -277,8 +280,7 @@ async fn tool<I>(state: &Served<I>, reader: &Reader, label: &str, call: Call) ->
                 .to_string()
             })
             .map_err(|error| error.to_string()),
-        Call::Status { room, doing } => state
-            .rooms
+        Call::Status { room, doing } => rooms
             .status(reader, label, &room, &doing)
             .map(|()| json!({"ok": true}).to_string())
             .map_err(|error| error.to_string()),
@@ -1279,6 +1281,91 @@ mod tests {
         );
         let names: Vec<String> = rooms.list().into_iter().map(|room| room.name).collect();
         assert_eq!(names, ["away", "home", "loose", "shared"]);
+    }
+
+    /// The owner ends a room, or gives its name to another workspace, while a
+    /// token's `room_read` waits: the read is refused, and makes and joins none.
+    #[tokio::test]
+    async fn a_token_read_that_waits_does_not_outlive_its_room() {
+        let passkeys = crate::passkey::Passkeys::memory();
+        let minted = passkeys.mint_agent("wa");
+        let (rooms, woke, pauses) = rooms();
+        let defined = |name: &str, workspace: &str| Definition {
+            name: name.to_owned(),
+            workspace: workspace.to_owned(),
+            brief: None,
+            base: None,
+            workspaces: Vec::new(),
+            made_at: 0,
+        };
+        for (name, workspace) in [("ended", "wa"), ("moved", "wa"), ("other", "wb")] {
+            rooms.create(&defined(name, workspace)).expect("defined");
+        }
+        let app = serve_keyed(fake(), rooms.clone(), woke, pauses, passkeys);
+        let read = |name: &str| {
+            let body = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                              "params": {"name": "room_read",
+                                         "arguments": {"room": name, "wait": 50}}});
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri("/mcp")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {}", minted.token))
+                .header(THREAD, "wa/T1")
+                .body(Body::from(body.to_string()))
+                .expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
+            tokio::spawn(app.router.clone().oneshot(request))
+        };
+        let listening = async |name: &str| {
+            while rooms
+                .presence(name)
+                .expect("held")
+                .first()
+                .map(|member| &member.presence)
+                != Some(&room::Presence::Listening)
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        type Read = tokio::task::JoinHandle<Result<Response, std::convert::Infallible>>;
+        let refused = async |read: Read| {
+            let response = tokio::time::timeout(Duration::from_secs(5), read)
+                .await
+                .expect("the next message ends the wait")
+                .expect("ran")
+                .expect("infallible");
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .expect("in memory");
+            let answer: Value = serde_json::from_slice(&body).expect("JSON");
+            assert_eq!(answer["result"]["isError"], true, "{answer}");
+            text(&answer["result"]).to_owned()
+        };
+
+        let waiting = read("ended");
+        listening("ended").await;
+        assert!(rooms.end("ended").expect("ended"));
+        rooms
+            .post("other", "owner on alpha", "next")
+            .expect("posted");
+        refused(waiting).await;
+        assert!(rooms.view("ended").is_err(), "the read makes no room");
+
+        let waiting = read("moved");
+        listening("moved").await;
+        assert!(rooms.end("moved").expect("ended"));
+        rooms.create(&defined("moved", "wb")).expect("defined");
+        rooms
+            .post("moved", "owner on alpha", "for wb")
+            .expect("posted");
+        let said = refused(waiting).await;
+        assert!(!said.contains("for wb"), "{said}");
+        assert_eq!(rooms.view("moved").expect("held").0.members, 0);
+        assert_eq!(woken(&app.woke).await, []);
     }
 
     #[tokio::test]
