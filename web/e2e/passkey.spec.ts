@@ -94,7 +94,7 @@ test('a page under another name fits the phone and keeps both fixes in reach', a
 
   const alert = page.getByRole('alert')
   await expect(alert).toContainText("this hub's passkeys belong to other.test")
-  const line = page.getByLabel('the YANTRA_ORIGIN line')
+  const line = page.getByRole('group', { name: 'the YANTRA_ORIGIN line' })
   await expect(line).toBeVisible()
   const fits = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
   expect(fits).toBe(true)
