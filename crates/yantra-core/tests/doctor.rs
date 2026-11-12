@@ -270,21 +270,35 @@ async fn a_bare_machine_tells_missing_apart_from_unaskable() -> Result<()> {
     Ok(())
 }
 
-/// Y-740, the hub's case against a real shell: a link into a home this account
-/// cannot enter is a claude that is there. The bare machine above is the absent half.
+/// Y-740, the hub's case against a real shell: a link to a real file in a home
+/// this account cannot enter is a claude that is there, and a link to nothing is not.
 #[tokio::test]
 async fn a_claude_this_account_cannot_reach_is_installed_not_missing() -> Result<()> {
+    async fn link(ssh: &Ssh, target: &str) -> Result<()> {
+        let out = ssh
+            .exec(&format!(
+                "mkdir -p {BIN_DIR} && ln -sfn {target} {BIN_DIR}/claude"
+            ))
+            .await?;
+        anyhow::ensure!(out.success(), "linking to {target} failed");
+        Ok(())
+    }
+
     let Some(lab) = Lab::start("closed-link")? else {
         return Ok(());
     };
-    let out = lab
-        .ssh
-        .exec(&format!(
-            "mkdir -p {BIN_DIR} && ln -s /root/claude {BIN_DIR}/claude"
-        ))
-        .await?;
-    anyhow::ensure!(out.success(), "linking into /root failed");
 
+    link(&lab.ssh, "/home/yantra/gone/claude").await?;
+    let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
+    assert_state(&checks, "agent-cli", State::Absent);
+    let detail = &look(&checks, "agent-cli").detail;
+    assert!(detail.starts_with("claude is not on PATH"), "{detail}");
+
+    lab.fixture.arrange_as_root(
+        "mkdir -p /srv/other && printf '#!/bin/sh\\n' > /srv/other/claude \
+         && chmod 755 /srv/other/claude && chmod 700 /srv/other",
+    )?;
+    link(&lab.ssh, "/srv/other/claude").await?;
     let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
     assert_state(&checks, "agent-cli", State::Absent);
     let detail = &look(&checks, "agent-cli").detail;
