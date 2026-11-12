@@ -51,14 +51,15 @@ export const RESTART = 'sudo systemctl restart yantrad'
  *  `daemon.env`; `rpId` is the host the passkeys belong to. */
 export class OriginMismatch extends ApiError {
   readonly line: string
+  readonly page: string
+  readonly rpId: string
 
-  constructor(
-    readonly page: string,
-    readonly rpId: string,
-  ) {
+  constructor(page: string, rpId: string) {
     super('refused', '', {
       sentence: `This page is at ${page}, but this hub's passkeys belong to ${rpId}.`,
     })
+    this.page = page
+    this.rpId = rpId
     this.line = `YANTRA_ORIGIN=${page}`
   }
 }
