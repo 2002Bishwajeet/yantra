@@ -320,16 +320,24 @@ describe('the short cause of a check (Y-733)', () => {
     expect(absent('login-session')).toBe('claude not signed in')
     expect(absent('login-session', NO_SERVER)).toBe('no tmux server from a login')
     expect(absent('heartbeat')).toBe('no reports arrive')
-    expect(absent('heartbeat', details[7]!)).toBe('installed, older than yantrad')
-    expect(absent('heartbeat', details[6]!)).toBe('v0.3.2 installed, older than yantrad')
     expect(absent('agent-cli')).toBe('not found')
-    expect(absent('agent-cli', UNRUNNABLE)).toBe('installed, but this account cannot run it')
     expect(absent('folder-access')).toBe('macOS blocks your folders')
     expect(absent('reachable', 'Permission denied (publickey).')).toBe('key refused')
     expect(absent('reachable', 'ssh: names no account')).toBe('no account named')
     expect(absent('reachable', 'connection timed out')).toBe('ssh cannot reach it')
     expect(absent('made-up')).toBe('could not be asked')
     expect(causeOf({ check: 'tmux', state: 'unknown' })).toBe('could not be asked')
+  })
+
+  /** Y-740: the phone hides the row's word, so the cause says installed and names the fix. */
+  it('says what is installed is installed, and names its fix', () => {
+    const absent = (check: string, detail: string) => causeOf({ check, state: 'absent', detail })
+    expect(absent('agent-cli', UNRUNNABLE)).toBe('installed, no access; Install')
+    expect(absent('heartbeat', details[6]!)).toBe('installed; update it')
+    expect(absent('heartbeat', details[7]!)).toBe('installed; update it')
+    for (const said of [absent('agent-cli', UNRUNNABLE), absent('heartbeat', details[6]!), absent('heartbeat', details[7]!)]) {
+      expect(said).not.toMatch(/missing|not found/)
+    }
   })
 
   it('knows a nightly by its version', () => {

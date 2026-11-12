@@ -144,19 +144,16 @@ const SHORT_ABSENT: Record<string, string> = {
   'no-sudo': 'it can use sudo',
 }
 
-/** What is wrong, in at most eight words. The daemon's own detail waits behind the row's Fix. */
+/** What is wrong, in at most eight words. The daemon's own detail waits behind the row's Fix.
+ *  The phone hides the row's word, so the cause of an installed tool says *installed* and its fix (Y-740). */
 export function causeOf(check: Pick<Check, 'check' | 'state'> & Partial<Pick<Check, 'detail'>>): string {
   if (check.state === 'present') return ''
   const detail = check.detail ?? ''
   if (check.state !== 'absent') return 'could not be asked'
   if (noLoginServer(detail)) return 'no tmux server from a login'
   if (check.check === 'reachable') return SHORT_REACH[reachableFailure(detail)]
-  if (unrunnable(check)) return 'installed, but this account cannot run it'
-  if (check.check === 'heartbeat') {
-    const older = olderAgent(check)
-    if (!older) return 'no reports arrive'
-    return older.agent ? `v${older.agent} installed, older than yantrad` : 'installed, older than yantrad'
-  }
+  if (unrunnable(check)) return 'installed, no access; Install'
+  if (check.check === 'heartbeat') return olderAgent(check) ? 'installed; update it' : 'no reports arrive'
   return SHORT_ABSENT[check.check] ?? 'could not be asked'
 }
 

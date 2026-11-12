@@ -1,7 +1,7 @@
 import type { About, Check, Connection, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
-import { INSTALLABLE, nameOf, reachableFailure, type ReachableFailure } from '@/lib/checks'
+import { INSTALLABLE, nameOf, reachableFailure, type ReachableFailure, unrunnable } from '@/lib/checks'
 import { grant, REFUSED } from '@/lib/github'
 import { blocking } from '@/lib/ready'
 import { tally } from '@/screens/machines/facts'
@@ -141,9 +141,16 @@ export type Line =
 
 /** The checks that hold ready back, by the names every screen uses. */
 export function lacking(needs: Check[]): string {
-  const absent = needs.filter((one) => one.state === 'absent').map((one) => nameOf(one.check))
-  const unknown = needs.filter((one) => one.state !== 'absent').map((one) => nameOf(one.check))
-  return [absent.length ? `missing ${absent.join(', ')}` : '', unknown.length ? `could not ask about ${unknown.join(', ')}` : '']
+  const names = (some: Check[]) => some.map((one) => nameOf(one.check)).join(', ')
+  // Y-740: a claude that is there is not missing.
+  const closed = needs.filter(unrunnable)
+  const absent = needs.filter((one) => one.state === 'absent' && !unrunnable(one))
+  const unknown = needs.filter((one) => one.state !== 'absent')
+  return [
+    absent.length ? `missing ${names(absent)}` : '',
+    closed.length ? `this account cannot run ${names(closed)}` : '',
+    unknown.length ? `could not ask about ${names(unknown)}` : '',
+  ]
     .filter(Boolean)
     .join(' · ')
 }

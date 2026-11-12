@@ -86,10 +86,10 @@ describe('a row on the machine page', () => {
   /** Y-740: each of these is installed or reports, so none reads as missing. */
   it('never says missing for something that is there', () => {
     const said = (id: string, detail: string) => rowWord({ ...check(id, 'absent'), detail })
-    expect(said('heartbeat', 'yantra-agent here is v0.3.2 and yantrad is v0.11.0. Update it on pi: `x`')).toBe('update')
-    expect(said('heartbeat', 'yantra-agent here sends no version, so it predates yantrad v0.11.0. Update it on pi: `x`')).toBe('update')
+    expect(said('heartbeat', 'yantra-agent here is v0.3.2 and yantrad is v0.11.0. Update it on pi: `x`')).toBe('behind')
+    expect(said('heartbeat', 'yantra-agent here sends no version, so it predates yantrad v0.11.0. Update it on pi: `x`')).toBe('behind')
     expect(said('heartbeat', 'no report since Yantra started.')).toBe('silent')
-    expect(said('agent-cli', 'claude is installed at /usr/local/bin/claude, but this account cannot run it.')).toBe('no access')
+    expect(said('agent-cli', 'claude is installed at /usr/local/bin/claude, but this account cannot run it.')).toBe('closed')
     expect(said('agent-cli', 'claude is not on PATH or in any of: /usr/bin')).toBe('missing')
     expect(said('folder-access', 'macOS blocks the folders')).toBe('blocked')
   })

@@ -3,7 +3,7 @@ import type { Machine, Readiness } from '@/api'
 import { ApiError } from '@/api/errors'
 import * as contract from '@/contract.gen'
 import { joinCommand, joinUrl } from '@/lib/join'
-import { added, firstSession, github, keyExpiry, line, machines, push, ready, tailnet } from './steps'
+import { added, firstSession, github, keyExpiry, lacking, line, machines, push, ready, tailnet } from './steps'
 
 const reading = { data: undefined, error: null, isPending: true }
 const got = <T,>(data: T) => ({ data, error: null, isPending: false })
@@ -181,6 +181,23 @@ describe("a machine's line", () => {
       words: 'missing tmux · could not ask about claude signed in',
       installable: true,
     })
+  })
+})
+
+/** Y-740: a claude that is there is never listed under missing. */
+describe('what holds a machine back', () => {
+  const closed = check('agent-cli', 'absent', 'claude is installed at /usr/local/bin/claude, but this account cannot run it.')
+
+  it('says this account cannot run a claude that is installed', () => {
+    expect(lacking([closed, check('login-session', 'unknown')])).toBe(
+      'this account cannot run claude · could not ask about claude signed in',
+    )
+    expect(lacking([check('tmux', 'absent'), closed])).toBe('missing tmux · this account cannot run claude')
+  })
+
+  it('still offers Install on that line', () => {
+    const one = line(machine(), report(needs({ 'agent-cli': 'absent' }).map((each) => (each.check === 'agent-cli' ? closed : each))), null)
+    expect(one).toMatchObject({ kind: 'missing', words: 'this account cannot run claude', installable: true })
   })
 })
 

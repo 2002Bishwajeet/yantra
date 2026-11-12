@@ -491,20 +491,17 @@ async fn agent_cli<E: Exec>(exec: &E) -> (Check, Option<Claude>) {
             Some(claude),
         ),
         // Still absent, because Install puts claude where this account can run it.
-        Err(agent::Error::NotFound { searched }) => match agent::unrunnable(exec, "claude").await {
-            Ok(Some(path)) => (absent(AGENT_CLI, unrunnable(&path)), None),
-            Ok(None) => (
-                absent(
+        Err(agent::Error::NotFound { searched }) => {
+            let found = match agent::unrunnable(exec, "claude").await {
+                Ok(Some(path)) => absent(AGENT_CLI, unrunnable(&path)),
+                Ok(None) => absent(
                     AGENT_CLI,
                     format!("claude is not on PATH or in any of: {searched}"),
                 ),
-                None,
-            ),
-            Err(err) => (
-                unknown(AGENT_CLI, format!("could not be asked: {err}")),
-                None,
-            ),
-        },
+                Err(err) => unknown(AGENT_CLI, format!("could not be asked: {err}")),
+            };
+            (found, None)
+        }
         Err(err) => (
             unknown(AGENT_CLI, format!("could not be asked: {err}")),
             None,
@@ -692,8 +689,9 @@ async fn login_session<E: Exec>(
     let (Some(tmux), Some(claude)) = (tmux, claude) else {
         return unknown(
             LOGIN_SESSION,
-            "the gate runs `claude` inside that machine's tmux server, and one of the two was not \
-             found there",
+            // Not *not found*: a claude this account cannot run is there (Y-740).
+            "the gate runs `claude` inside that machine's tmux server, and this account cannot \
+             run one of the two there",
         );
     };
 

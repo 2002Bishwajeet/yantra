@@ -190,9 +190,18 @@ test.describe('the problems on a machine card', () => {
     await page.goto('/machines')
     await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
     const mac = card(page, 'macbook')
+    // Y-740: hetzner-1's claude is installed, but the account that runs agents cannot run it.
+    const closed = card(page, 'hetzner-1')
     const rows = mac.locator('.machines__check')
     await expect(rows.first()).toBeVisible()
-    for (const row of await rows.all()) {
+    // The phone hides the row's word, so the cause itself says installed and names Install.
+    await expect(closed.locator('.machines__detail')).toBeVisible()
+    await expect(closed.locator('.machines__detail')).toHaveText('installed, no access; Install')
+    await expect(closed.getByText('1 to install')).toBeVisible()
+    await expect(closed.getByRole('button', { name: 'Install' })).toBeVisible()
+    await expect(closed).not.toContainText(/missing|not found/)
+    await expect(mac.getByText('installed; update it')).toBeVisible()
+    for (const row of [...(await rows.all()), ...(await closed.locator('.machines__check').all())]) {
       const cause = row.locator('.machines__detail')
       const words = ((await cause.textContent()) ?? '').trim().split(/\s+/).length
       expect(words).toBeLessThanOrEqual(8)

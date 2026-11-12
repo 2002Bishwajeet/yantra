@@ -270,6 +270,34 @@ async fn a_bare_machine_tells_missing_apart_from_unaskable() -> Result<()> {
     Ok(())
 }
 
+/// Y-740, the hub's case against a real shell: a link into a home this account
+/// cannot enter is a claude that is there. The bare machine above is the absent half.
+#[tokio::test]
+async fn a_claude_this_account_cannot_reach_is_installed_not_missing() -> Result<()> {
+    let Some(lab) = Lab::start("closed-link")? else {
+        return Ok(());
+    };
+    let out = lab
+        .ssh
+        .exec(&format!(
+            "mkdir -p {BIN_DIR} && ln -s /root/claude {BIN_DIR}/claude"
+        ))
+        .await?;
+    anyhow::ensure!(out.success(), "linking into /root failed");
+
+    let checks = doctor::of(&lab.ssh, KNOWN_REMOTELY).await;
+    assert_state(&checks, "agent-cli", State::Absent);
+    let detail = &look(&checks, "agent-cli").detail;
+    assert!(
+        detail.contains("/.local/bin/claude, but this account cannot run it"),
+        "{detail}"
+    );
+    assert!(!detail.contains("not on PATH"), "{detail}");
+    // The gate runs `claude`, and this account cannot.
+    assert_state(&checks, "login-session", State::Unknown);
+    Ok(())
+}
+
 /// Y-640, against a real shell: a hook whose program is not on the `PATH` is
 /// named, and one whose program is there is not.
 #[tokio::test]

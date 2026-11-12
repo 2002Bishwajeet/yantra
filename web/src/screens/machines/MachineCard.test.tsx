@@ -213,25 +213,26 @@ describe("a card for something that is installed", () => {
   const with_ = (absent: Record<string, string>) =>
     ids.map((id): Check => (id in absent ? { check: id, state: "absent", detail: absent[id]! } : present(id)));
 
-  it("says the hub's claude is installed but this account cannot run it", async () => {
+  it("says the hub's claude is installed, why it does not run, and that Install fixes it", async () => {
     renderCard(
       aMachine({ name: "yantra-box" }),
       with_({ "agent-cli": "claude is installed at /usr/local/bin/claude, but this account cannot run it. Install puts claude where this account can run it" }),
     );
-    expect(await screen.findByText("installed, but this account cannot run it")).toBeTruthy();
-    expect(screen.getByText("no access")).toBeTruthy();
+    expect(await screen.findByText("installed, no access; Install")).toBeTruthy();
+    expect(screen.getByText("closed")).toBeTruthy();
     expect(screen.getByText("1 to install")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Install" })).toBeTruthy();
     expect(screen.queryByText(/missing|not found/)).toBeNull();
   });
 
-  it("names yantra-agent and says it is installed but older", async () => {
+  it("names yantra-agent, says it is installed, and says to update it", async () => {
     renderCard(
       aMachine({ name: "cachyos-g14" }),
       with_({ heartbeat: "yantra-agent here sends no version, so it predates yantrad v0.12.0. Update it on cachyos-g14: `curl x | bash`" }),
     );
-    expect(await screen.findByText("installed, older than yantrad")).toBeTruthy();
+    expect(await screen.findByText("installed; update it")).toBeTruthy();
     expect(screen.getByText("yantra-agent")).toBeTruthy();
-    expect(screen.getByText("update")).toBeTruthy();
+    expect(screen.getByText("behind")).toBeTruthy();
     expect(screen.queryByText(/missing|no version|usage reports/)).toBeNull();
   });
 

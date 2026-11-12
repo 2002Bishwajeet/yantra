@@ -552,8 +552,8 @@ describe('the Readiness card', () => {
     const said = { heartbeat: `yantra-agent here is v0.3.2 and yantrad is v0.11.0. Update it on pi: \`${command}\`` }
     await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'yantra-agent on pi is v0.3.2; yantrad is v0.11.0' })).toBeTruthy()
-    expect(card().getByText('update')).toBeTruthy()
-    expect(card().getByText('v0.3.2 installed, older than yantrad')).toBeTruthy()
+    expect(card().getByText('behind')).toBeTruthy()
+    expect(card().getByText('installed; update it')).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing/)
     expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
     expect(card().queryByText(command)).toBeNull()
@@ -570,8 +570,28 @@ describe('the Readiness card', () => {
     const said = { heartbeat: 'yantra-agent here sends no version, so it predates yantrad v0.11.0. Update it on pi: `curl x | bash`' }
     await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'yantra-agent on pi is older than yantrad v0.11.0' })).toBeTruthy()
-    expect(card().getByText('update')).toBeTruthy()
-    expect(card().getByText('installed, older than yantrad')).toBeTruthy()
+    expect(card().getByText('behind')).toBeTruthy()
+    expect(card().getByText('installed; update it')).toBeTruthy()
+  })
+
+  /** Y-740: the hub's claude links into a home the daemon's account cannot enter. */
+  it('says a claude this account cannot run is installed, and that Install puts it in this account’s home', async () => {
+    daemon()
+    const said =
+      'claude is installed at /usr/local/bin/claude, but this account cannot run it. The file, or a directory it links through, is closed to this account. Install puts claude where this account can run it'
+    const closed = checks(['agent-cli'], { 'agent-cli': said }).map((one): Check =>
+      one.check === 'login-session' ? { ...one, state: 'unknown', detail: 'the gate runs `claude` inside that machine’s tmux server, and this account cannot run one of the two there' } : one,
+    )
+    await draw(report(closed))
+    expect(card().getByRole('heading', { name: 'claude is installed, but this account cannot run it' })).toBeTruthy()
+    expect(card().getByText('installed, no access; Install')).toBeTruthy()
+    expect(card().getByText('Install puts claude in this account’s home on pi, with the vendor’s installer.')).toBeTruthy()
+    expect(card().getByRole('button', { name: 'Install' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing|not found/)
+    pressFix()
+    expect(card().getAllByText(said).length).toBeGreaterThan(0)
+    openSaid()
+    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing|not found/)
   })
 
   /** Y-591: a warning with the fix and its cost, and never a block on a session. */

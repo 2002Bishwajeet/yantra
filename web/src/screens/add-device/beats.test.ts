@@ -261,6 +261,17 @@ describe('beat 4, ready', () => {
     )
   })
 
+  /** Y-740: Install fixes a claude this account cannot run, and no word calls it missing. */
+  it('says this account cannot run an installed claude, and offers Install', () => {
+    const closed = report([
+      ...tools('present').filter(([id]) => id !== 'agent-cli'),
+      ['agent-cli', 'absent', 'claude is installed at /usr/local/bin/claude, but this account cannot run it.'],
+    ])
+    expect(ready(done, NAME, closed, [], idle, idle).words).toBe(
+      'this account cannot run claude · Install adds tmux, git and claude',
+    )
+  })
+
   /** `lib/ready`, the home gate's own test: GitHub and a heartbeat are optional. */
   it('is done when the seven checks a session needs are present, gh or not', () => {
     expect(ready(done, NAME, whole, [], idle, idle)).toEqual({ state: 'done', words: 'ready · open a session on laptop' })

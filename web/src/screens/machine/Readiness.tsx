@@ -21,7 +21,7 @@ import { Doctor } from '@/screens/machines/Doctor'
 import { counted, optionalAbsent, rowMark, rowWord, tally } from '@/screens/machines/facts'
 import { joinUrl } from '@/lib/join'
 import { useTick } from '@/useTick'
-import { answer, LOST_MS, needsSudo, newestInstall } from './install'
+import { answer, listed, LOST_MS, needsSudo, newestInstall } from './install'
 import { ReachFailure } from './ReachFailure'
 import { type Step, SudoSheet } from './SudoSheet'
 import type { Verdicted } from './useVerdict'
@@ -319,8 +319,16 @@ export function ReadinessCard(props: {
 
       {verdict.kind === 'missing' && !verdict.result ? (
         <Text render={<p />} className="readiness__said" scale="body-small" tone="variant">
-          Yantra installs only what is missing, with {name}’s own package manager and the vendor’s installer for claude.
-          Root is sudo without a password; a step that needs more is left for you to run.
+          {/* Y-740: a claude that is there is not missing, so the card says why Install is the fix. */}
+          {verdict.unrunnable
+            ? `Install puts ${listed(verdict.unrunnable)} in this account’s home on ${name}, with the vendor’s installer. `
+            : null}
+          {verdict.unrunnable?.length === verdict.missing.length ? null : (
+            <>
+              Yantra installs only what is missing, with {name}’s own package manager and the vendor’s installer for claude.
+              Root is sudo without a password; a step that needs more is left for you to run.
+            </>
+          )}
         </Text>
       ) : null}
 

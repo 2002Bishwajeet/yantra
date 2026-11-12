@@ -59,10 +59,10 @@ export const rowMark = (check: Check): MarkState =>
 export function rowWord(check: Check): string {
   if (optionalAbsent(check)) return 'optional'
   // Y-713, Y-740: each of these is installed, so *missing* would be false.
-  if (olderAgent(check)) return 'update'
+  if (olderAgent(check)) return 'behind'
   // No beat says only that nothing arrived, not that the agent is absent.
   if (check.check === 'heartbeat' && check.state === 'absent') return 'silent'
-  if (unrunnable(check)) return 'no access'
+  if (unrunnable(check)) return 'closed'
   if (check.check === 'folder-access' && check.state === 'absent') return 'blocked'
   return wordOf(check.state)
 }
