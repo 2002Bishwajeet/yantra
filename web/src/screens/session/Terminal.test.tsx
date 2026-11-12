@@ -617,3 +617,30 @@ describe('the status line in a header slot', () => {
     await settled(() => expect(within(slot).getByRole('status').textContent).toBe('Exited 0'))
   })
 })
+
+describe('a command typed in for the owner (Y-702)', () => {
+  const owner: Target = { machine: MACHINE, owner: 'biswa' }
+  const command = 'sudo systemctl restart sshd'
+  const wait = (ms: number) => new Promise((done) => realTimeout(done, ms))
+
+  it('types the command once the prompt has shown, and never presses Enter', async () => {
+    await renderRouted(<Terminal label="biswa" target={owner} typeIn={command} />)
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+
+    daemonised.print('biswa@pi:~$ ')
+    await settled(() => expect(daemonised.heard.length).toBe(2))
+    const typed = daemonised.heard[1]
+    expect('bytes' in typed && new TextDecoder().decode(new Uint8Array(typed.bytes))).toBe(command)
+
+    await wait(700)
+    expect(daemonised.heard).toHaveLength(2)
+  })
+
+  it('types nothing before the shell has printed', async () => {
+    await renderRouted(<Terminal label="biswa" target={owner} typeIn={command} />)
+    await settled(() => expect(daemonised.heard.length).toBe(1))
+
+    await wait(700)
+    expect(daemonised.heard).toHaveLength(1)
+  })
+})

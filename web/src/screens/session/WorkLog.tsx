@@ -7,10 +7,12 @@
  */
 import { useId, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
-import type { ItemType } from '@/api/thread'
+import type { Harness, ItemType } from '@/api/thread'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Mono, Text } from '@/m3/text/Text'
 import type { Message, Tool } from './timeline'
+import { RunAsOwner } from './RunAsOwner'
+import { sudoCommand } from './sudo'
 import type { Row } from './workLog.logic'
 
 const KIND: Record<ItemType, string> = {
@@ -26,9 +28,10 @@ const STATUS: Record<Tool['status'], { state: MarkState; word: string }> = {
   failed: { state: 'failed', word: 'failed' },
 }
 
-function Call(props: { tool: Tool; alone: boolean; turn: MarkState }) {
-  const { tool, alone, turn } = props
+function Call(props: { tool: Tool; alone: boolean; turn: MarkState; machine: string; harness: Harness | null }) {
+  const { tool, alone, turn, machine, harness } = props
   const status = STATUS[tool.status]
+  const sudo = sudoCommand(tool, harness)
   return (
     <article className="chat__call">
       <div className="chat__tool-head">
@@ -42,6 +45,7 @@ function Call(props: { tool: Tool; alone: boolean; turn: MarkState }) {
         )}
       </div>
       {tool.title ? <Mono className="chat__tool-title chat__code">{tool.title}</Mono> : null}
+      {sudo ? <RunAsOwner machine={machine} sudo={sudo} /> : null}
       {tool.output ? (
         <details className="chat__tool-output">
           <summary>Output</summary>
@@ -55,8 +59,13 @@ function Call(props: { tool: Tool; alone: boolean; turn: MarkState }) {
 type Work = Extract<Row, { kind: 'work' }>
 
 /** A turn's calls in one row. It is open while the turn runs and shut once it ends, until the person chooses. */
-export function WorkLog(props: { work: Work; said: (message: Message) => ReactNode }) {
-  const { work, said } = props
+export function WorkLog(props: {
+  work: Work
+  said: (message: Message) => ReactNode
+  machine: string
+  harness: Harness | null
+}) {
+  const { work, said, machine, harness } = props
   const [chosen, setChosen] = useState<boolean | null>(null)
   const open = chosen ?? work.state === 'running'
   const body = useId()
@@ -76,7 +85,7 @@ export function WorkLog(props: { work: Work; said: (message: Message) => ReactNo
       </button>
       <div className="chat__work-body" hidden={!open} id={body}>
         {work.items.map((item) =>
-          item.kind === 'tool' ? <Call alone={work.calls === 1} key={item.id} tool={item} turn={work.state} /> : <div key={item.id}>{said(item)}</div>,
+          item.kind === 'tool' ? <Call alone={work.calls === 1} harness={harness} key={item.id} machine={machine} tool={item} turn={work.state} /> : <div key={item.id}>{said(item)}</div>,
         )}
       </div>
     </section>
