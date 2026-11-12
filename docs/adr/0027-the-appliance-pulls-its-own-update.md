@@ -335,3 +335,26 @@ once the moved-tag problem bites.
 >
 > **What changed upstream of the reasoning:** the owner could not tell which machine was behind, and
 > asked "how would i know?" Knowing a version is not shipping software; the person still does that.
+
+> **Decision 4 amended 2026-11-12 ([Y-780](../../tracker.md), owner): `SHA256SUMS` is signed, and
+> the box stays on stable.** The 2026-11-12 security audit (F-04) found a fact that decision 4 and
+> the 2026-11-10 amendment did not weigh. The build loop (CLAUDE.md §B7) merges agent-written code to
+> `main` with no owner review, and the box followed `nightly`, so it installed every merge as root.
+> A checksum proves that an archive is whole. It does not prove who made it. The owner decided on
+> 2026-11-12:
+>
+> 1. **The owner signs `SHA256SUMS`** with an ssh key held outside GitHub, by `ssh-keygen -Y sign`.
+>    The key stays offline, so the release job does not sign. The owner signs locally when they
+>    approve a stable release, and uploads `SHA256SUMS.sig` to it.
+> 2. **`install.sh` and the root updater verify the signature** against an `allowed_signers` file
+>    they carry, before `sha256sum -c`. A missing or wrong signature installs nothing.
+> 3. **The box stays on stable.** Nightly stays for the laptop and for tests, and it is unsigned.
+>    Only a person at a terminal installs it, with an explicit flag. The root unit's trigger carries
+>    nothing (decision 3), so the unit cannot pass that flag.
+>
+> Decision 4's *honest limit* now has an answer for stable: the signature names the owner as the
+> person who approved the release. Item 4 of the 2026-11-10 amendment still describes the nightly.
+>
+> **What changed upstream of the reasoning:** on 2026-09-30 the build loop started to merge rows with
+> no owner review, and on 2026-11-10 the box could opt in to the nightly. Together they put
+> unreviewed code on a path to root.

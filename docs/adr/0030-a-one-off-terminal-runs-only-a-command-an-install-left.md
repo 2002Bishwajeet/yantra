@@ -79,3 +79,18 @@ That leaves one question open: **what may such a terminal run?** Three facts bou
 > **ADR-0030, Consequences, 2026-11-10 (Y-698):** a second one-off route opens a login shell
 > as the owner's admin account. It takes no command string, so this ADR's rule holds for it
 > ([ADR-0046](0046-the-owner-types-sudo-in-an-owner-terminal.md) decision 2).
+
+> **2026-11-12 ([Y-778](../../tracker.md), owner): a `sudo` step goes to the owner terminal, never
+> to the joined account.** The 2026-11-12 security audit (F-02) found that this route sends the
+> owner's admin password as keystrokes into a shell that the joined account starts. An agent
+> controls that account's login files and `PATH`, so it controls what reads the keystrokes.
+> [ADR-0046](0046-the-owner-types-sudo-in-an-owner-terminal.md)'s Context rejects the same risk for
+> `su`. The owner decided on 2026-11-12: **the one-off route refuses a step that starts with
+> `sudo`.** The machine page shows the command and offers ADR-0046's owner terminal, which runs as
+> the admin account. Decisions 1 to 3, 5 and 6 still hold for every other remembered command. The
+> last Consequence changes: the page offers the owner terminal for a sudo step, not this route. The
+> cost is one more click for each sudo step.
+>
+> **What changed upstream of the reasoning:** this ADR assumed the joined account was the owner's.
+> Since 2026-11-04 agents run in that account (`karigar`), so a password typed there reaches a
+> shell an agent controls.
