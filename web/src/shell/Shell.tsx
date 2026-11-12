@@ -204,6 +204,17 @@ function BellButton() {
   const ref = useRef<HTMLButtonElement>(null)
   const [armed, setArmed] = useState(false)
   const [open, setOpen] = useState(false)
+  // React holds a lazy Suspense reveal back for 300 ms after the fallback, so a
+  // popup first mounted by the click opens late. Mount it closed once idle, after the chunk is in.
+  useEffect(() => {
+    const arm = () => void loadBellPopover().then(() => setArmed(true), () => {})
+    if (!('requestIdleCallback' in window)) {
+      const id = setTimeout(arm, 1000)
+      return () => clearTimeout(id)
+    }
+    const id = requestIdleCallback(arm, { timeout: 3000 })
+    return () => cancelIdleCallback(id)
+  }, [])
   return (
     <>
       <Bell

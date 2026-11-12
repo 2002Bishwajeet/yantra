@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { FormFactor } from './formFactor'
 
 const loaded = vi.hoisted(() => vi.fn<(name: string) => void>())
@@ -55,6 +55,16 @@ describe('the popups load with their first press', () => {
     const popover = await screen.findByRole('dialog', { name: 'Notifications' })
     expect(await within(popover).findByText('api is waiting for trust')).toBeTruthy()
     expect(names()).toContain('popover')
+  })
+
+  it('mounts the bell popover closed once idle, so the click finds it loaded (Y-736)', async () => {
+    await drawn('desktop')
+    await waitFor(() => expect(names()).toContain('popover'), { timeout: 4000 })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    // Wait out useReady's two frames, then the click must open in the same commit.
+    await new Promise((done) => setTimeout(done, 400))
+    fireEvent.click(screen.getByRole('button', { name: /Notifications/ }))
+    expect(screen.getByRole('dialog', { name: 'Notifications' })).toBeTruthy()
   })
 
   it('keeps the avatar element, and opens nothing, when the pointer or focus reaches it', async () => {
