@@ -83,7 +83,9 @@ for (const [name, type, options] of looks) {
   const browser = await type.launch()
   const context = await browser.newContext({ ...options, reducedMotion: 'reduce', colorScheme: 'light' })
   let belled = false
-  for (const [url, shot] of shots) {
+  // The loop below adds to the queue, so each look starts from the routes the walk named.
+  const queue = [...shots]
+  for (const [url, shot] of queue) {
     const page = await context.newPage()
     page.on('pageerror', (e) => errors.push(`${name} ${shot}: ${e.message}`))
     // Every read on the sign-in hop is a 401 on purpose, and the browser logs each one.
@@ -103,6 +105,14 @@ for (const [name, type, options] of looks) {
         await page.evaluate((top) => window.scrollTo(0, top), y)
         await page.waitForTimeout(300)
         await page.screenshot({ path: `${file}-${n}.png` })
+      }
+    }
+    if (shot === 'machines') {
+      // Y-740: a card lists a failing check and the machine's page holds its fix, so the walk reads both.
+      const faulted = page.locator('.machines__card').filter({ has: page.locator('.machines__check') })
+      for (const link of await faulted.getByRole('link', { name: 'Open' }).all()) {
+        const route = await link.getAttribute('href')
+        if (!queue.some(([, other]) => other === slug(route))) queue.push([`${base}${route}`, slug(route)])
       }
     }
     if (shot === 'settings-about') {

@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router'
 import type { Check, Machine } from '@/api'
 import { useAbout, useNotifications } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
-import { causeOf, nameOf, reachableFailure, reachWords } from '@/lib/checks'
+import { causeOf, nameOf, olderAgent, reachableFailure, reachWords } from '@/lib/checks'
 import { joinCommand, joinUrl } from '@/lib/join'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -27,7 +27,8 @@ function CheckLine(props: { check: Check; pressable: boolean }) {
   const failed = check.check === 'reachable' && check.state === 'absent'
   return (
     <li className="machines__check">
-      <State size="small" state={markOf(check.state)}>
+      {/* An agent that reports but is older needs an update, not a red failure (Y-740). */}
+      <State size="small" state={olderAgent(check) ? 'needs' : markOf(check.state)}>
         {nameOf(check.check)}
       </State>
       <Text className="machines__word" scale="label-small">

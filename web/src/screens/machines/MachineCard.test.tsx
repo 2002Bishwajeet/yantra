@@ -171,7 +171,7 @@ describe("a ready machine with gaps (Y-714)", () => {
 
   it("lists the failing checks and none that pass", async () => {
     renderCard(aMachine(), checks);
-    await screen.findByText(/to fix/);
+    await screen.findByText("ready · 2 to fix");
     expect(screen.queryByText("ssh")).toBeNull();
     expect(screen.queryByText("tmux")).toBeNull();
     expect(screen.queryByText("terminfo")).toBeNull();
@@ -181,7 +181,7 @@ describe("a ready machine with gaps (Y-714)", () => {
 
   it("shows the sudo gap once, in its note, and keeps the other gaps as lines", async () => {
     renderCard(aMachine(), checks);
-    await screen.findByText(/to fix/);
+    await screen.findByText("ready · 2 to fix");
     expect(screen.queryByText(/wheel group/)).toBeNull();
     const said = screen.getAllByText("Agents here can use sudo");
     expect(said).toHaveLength(1);
@@ -201,5 +201,45 @@ describe("a ready machine with gaps (Y-714)", () => {
     // Y-733: a failing row is its short cause, with no daemon paragraph and no Fix on the card.
     expect(document.body.textContent).not.toContain("that machine lacks");
     expect(screen.queryByRole("button", { name: /^Fix/ })).toBeNull();
+  });
+});
+
+/** Y-740: the owner's three cards on 2026-11-12, each about something installed. */
+describe("a card for something that is installed", () => {
+  const ids = [
+    "reachable", "sshd", "tmux", "git", "agent-cli", "terminfo", "provider-cli",
+    "provider-auth", "login-session", "folder-access", "hooks", "no-sudo", "heartbeat",
+  ];
+  const with_ = (absent: Record<string, string>) =>
+    ids.map((id): Check => (id in absent ? { check: id, state: "absent", detail: absent[id]! } : present(id)));
+
+  it("says the hub's claude is installed, why it does not run, and that Install fixes it", async () => {
+    renderCard(
+      aMachine({ name: "yantra-box" }),
+      with_({ "agent-cli": "claude is installed at /usr/local/bin/claude, but this account cannot run it. Install puts claude where this account can run it" }),
+    );
+    expect(await screen.findByText("installed, no access; Install")).toBeTruthy();
+    expect(screen.getByText("closed")).toBeTruthy();
+    expect(screen.getByText("1 to install")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Install" })).toBeTruthy();
+    expect(screen.queryByText(/missing|not found/)).toBeNull();
+  });
+
+  it("names yantra-agent, says it is installed, and says to update it", async () => {
+    renderCard(
+      aMachine({ name: "cachyos-g14" }),
+      with_({ heartbeat: "yantra-agent here sends no version, so it predates yantrad v0.12.0. Update it on cachyos-g14: `curl x | bash`" }),
+    );
+    expect(await screen.findByText("installed; update it")).toBeTruthy();
+    expect(screen.getByText("yantra-agent")).toBeTruthy();
+    expect(screen.getByText("behind")).toBeTruthy();
+    expect(screen.queryByText(/missing|no version|usage reports/)).toBeNull();
+  });
+
+  it("says macOS blocks the folders, not that they are missing", async () => {
+    renderCard(aMachine({ name: "bishwajeets-macbook-pro", os: "macOS" }), with_({ "folder-access": "blocked" }));
+    expect(await screen.findByText("macOS blocks your folders")).toBeTruthy();
+    expect(screen.getByText("blocked")).toBeTruthy();
+    expect(screen.queryByText("missing")).toBeNull();
   });
 });

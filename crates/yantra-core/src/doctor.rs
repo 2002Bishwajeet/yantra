@@ -490,18 +490,33 @@ async fn agent_cli<E: Exec>(exec: &E) -> (Check, Option<Claude>) {
             present(AGENT_CLI, format!("claude found at {}", claude.path())),
             Some(claude),
         ),
-        Err(agent::Error::NotFound { searched }) => (
-            absent(
-                AGENT_CLI,
-                format!("claude is not on PATH or in any of: {searched}"),
-            ),
-            None,
-        ),
+        // Still absent, because Install puts claude where this account can run it.
+        Err(agent::Error::NotFound { searched }) => {
+            let found = match agent::unrunnable(exec, "claude").await {
+                Ok(Some(path)) => absent(AGENT_CLI, unrunnable(&path)),
+                Ok(None) => absent(
+                    AGENT_CLI,
+                    format!("claude is not on PATH or in any of: {searched}"),
+                ),
+                Err(err) => unknown(AGENT_CLI, format!("could not be asked: {err}")),
+            };
+            (found, None)
+        }
         Err(err) => (
             unknown(AGENT_CLI, format!("could not be asked: {err}")),
             None,
         ),
     }
+}
+
+/// The web reads `this account cannot run it` (checks.ts `UNRUNNABLE`). The
+/// link's target is not said, because it names another account's home (Q5).
+fn unrunnable(path: &str) -> String {
+    format!(
+        "claude is installed at {path}, but this account cannot run it. The file, or a \
+         directory it links through, is closed to this account. Install puts claude where \
+         this account can run it"
+    )
 }
 
 /// I-43 bounds what an *absent* here means: `infocmp` answers for the system
@@ -674,8 +689,9 @@ async fn login_session<E: Exec>(
     let (Some(tmux), Some(claude)) = (tmux, claude) else {
         return unknown(
             LOGIN_SESSION,
-            "the gate runs `claude` inside that machine's tmux server, and one of the two was not \
-             found there",
+            // Not *not found*: a claude this account cannot run is there (Y-740).
+            "the gate runs `claude` inside that machine's tmux server, and this account cannot \
+             run one of the two there",
         );
     };
 
@@ -1610,6 +1626,50 @@ mod tests {
         assert_eq!(took(&checks, PROVIDER_AUTH), None);
         assert_eq!(took(&checks, LOGIN_SESSION), None);
         assert_eq!(took(&checks, HEARTBEAT), None);
+    }
+
+    /// Finds no `claude` it can run, and one link in `/usr/local/bin` (Y-740).
+    struct ClosedLink;
+
+    impl Exec for ClosedLink {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            let linked = command.contains("[ -L ");
+            Ok(ssh::Output {
+                status: if linked { 0 } else { 1 },
+                stdout: if linked {
+                    b"/usr/local/bin/claude\n".to_vec()
+                } else {
+                    Vec::new()
+                },
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_claude_this_account_cannot_run_is_installed_not_missing() {
+        let (found, claude) = agent_cli(&ClosedLink).await;
+        assert!(claude.is_none());
+        assert_eq!(found.state, State::Absent, "{}", found.detail);
+        assert!(
+            found.detail.starts_with(
+                "claude is installed at /usr/local/bin/claude, but this account cannot run it."
+            ),
+            "{}",
+            found.detail
+        );
+        assert!(!found.detail.contains("not on PATH"), "{}", found.detail);
+
+        let (none, _) = agent_cli(&Answers {
+            status: 1,
+            stdout: "",
+        })
+        .await;
+        assert!(
+            none.detail.starts_with("claude is not on PATH"),
+            "{}",
+            none.detail
+        );
     }
 
     struct Refuses;

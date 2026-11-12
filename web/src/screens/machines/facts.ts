@@ -7,7 +7,7 @@ import type {
   Session,
   Workspace,
 } from '@/api'
-import { olderAgent, sessionNeeds } from '@/lib/checks'
+import { olderAgent, sessionNeeds, unrunnable } from '@/lib/checks'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** The four a machine card draws; the machine page draws all ten. */
@@ -56,12 +56,20 @@ export const toFix = (check: Check): boolean =>
 export const rowMark = (check: Check): MarkState =>
   optionalAbsent(check) ? 'idle' : toFix(check) ? 'needs' : check.state === 'present' ? 'done' : 'unknown'
 
+/** A binary or a terminfo entry: the only checks whose absence means nothing is there. */
+const CAN_BE_MISSING = ['tmux', 'git', 'agent-cli', 'provider-cli', 'terminfo']
+
 export function rowWord(check: Check): string {
+  if (check.state !== 'absent') return wordOf(check.state)
   if (optionalAbsent(check)) return 'optional'
-  // Y-713: the agent reports, so *missing* would be false.
-  const older = olderAgent(check)
-  if (older) return older.agent ? `older · v${older.agent}` : 'older · no version'
-  return wordOf(check.state)
+  // Y-713, Y-740: each of these is installed, so *missing* would be false.
+  if (olderAgent(check)) return 'behind'
+  // No beat says only that nothing arrived, not that the agent is absent.
+  if (check.check === 'heartbeat') return 'silent'
+  if (unrunnable(check)) return 'closed'
+  if (check.check === 'folder-access') return 'blocked'
+  // A sign-in, the hooks or sudo is a fault in something installed, so it takes the chip's word.
+  return CAN_BE_MISSING.includes(check.check) ? wordOf('absent') : 'to fix'
 }
 
 /** The count the card and the Readiness card both print. */

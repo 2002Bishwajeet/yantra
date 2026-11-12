@@ -1,6 +1,6 @@
 import type { Check, CheckState, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
-import { answerFailure, INSTALLABLE, nameOf, noLoginServer, olderAgent, reachableFailure } from '@/lib/checks'
+import { answerFailure, INSTALLABLE, nameOf, noLoginServer, olderAgent, reachableFailure, unrunnable } from '@/lib/checks'
 import { blocking, isReady, missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
@@ -18,8 +18,9 @@ export type Verdict =
   | { kind: 'browser'; detail: string }
   | { kind: 'changed'; detail: string }
   | { kind: 'unreachable'; detail: string }
-  | { kind: 'sudo'; missing: string[]; result: Event }
-  | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean }
+  /** `unrunnable`: those of `missing` that are there, but this account cannot run them (Y-740). */
+  | { kind: 'sudo'; missing: string[]; result: Event; unrunnable?: string[] }
+  | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean; unrunnable?: string[] }
   | { kind: 'manual'; absent: Check[]; ready: boolean }
   | { kind: 'ready' }
 
@@ -49,7 +50,8 @@ export function verdictOf(input: {
   }
 
   const { checks } = readiness.data
-  const missing = missingBasics(readiness.data).map((one) => nameOf(one.check))
+  const basics = missingBasics(readiness.data)
+  const missing = basics.map((one) => nameOf(one.check))
   const fresh = watch ? answer(events, name, watch) : null
   if (watch && !fresh) return { kind: 'installing', missing }
 
@@ -62,8 +64,10 @@ export function verdictOf(input: {
   // person has since run by hand.
   const stopped = fresh?.kind === 'install_stopped' ? fresh : null
   if (missing.length > 0) {
-    if (stopped?.commands.some(needsSudo)) return { kind: 'sudo', missing, result: stopped }
-    return { kind: 'missing', missing, result: fresh ?? newestInstall(events, name) ?? null, fresh: fresh !== null }
+    const closed = basics.filter(unrunnable).map((one) => nameOf(one.check))
+    const installed = closed.length > 0 ? { unrunnable: closed } : {}
+    if (stopped?.commands.some(needsSudo)) return { kind: 'sudo', missing, result: stopped, ...installed }
+    return { kind: 'missing', missing, result: fresh ?? newestInstall(events, name) ?? null, fresh: fresh !== null, ...installed }
   }
 
   // ADR-0031 §1–2: with every basic there, a sudo step this press stopped is the
@@ -154,8 +158,13 @@ export function titleOf(verdict: Verdict, name: string): string {
       return `ssh to ${name} fails`
     case 'sudo':
       return `${listed(verdict.missing)} ${be(verdict.missing, 'needs', 'need')} your password`
-    case 'missing':
-      return `${listed(verdict.missing)} ${be(verdict.missing, 'is', 'are')} missing`
+    case 'missing': {
+      const closed = verdict.unrunnable ?? []
+      const absent = verdict.missing.filter((one) => !closed.includes(one))
+      if (closed.length === 0) return `${listed(absent)} ${be(absent, 'is', 'are')} missing`
+      if (absent.length === 0) return `${listed(closed)} is installed, but this account cannot run it`
+      return `${listed(absent)} ${be(absent, 'is', 'are')} missing, and this account cannot run ${listed(closed)}`
+    }
     case 'manual':
       // Both keychain checks miss one server on a Mac, and one command fixes both.
       return verdict.absent.length === 1 || verdict.absent.every((one) => noLoginServer(one.detail))
@@ -187,7 +196,8 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
       return { state: 'running', word: 'installing', error: false }
     case 'sudo':
     case 'missing':
-      return { state: 'needs', word: `${verdict.missing.length} missing`, error: false }
+      // Y-740: a tool that is there is not missing, and Install is still what fixes it.
+      return { state: 'needs', word: `${verdict.missing.length} ${verdict.unrunnable ? 'to install' : 'missing'}`, error: false }
     case 'manual':
       return verdict.ready
         ? { state: 'done', word: `ready · ${verdict.absent.length} to fix`, error: false }

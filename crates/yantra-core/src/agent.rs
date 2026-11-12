@@ -175,6 +175,32 @@ pub(crate) fn probe(binary: &'static str) -> String {
     )
 }
 
+/// A [`CANDIDATES`] entry for `binary` that this account cannot run, asked only
+/// after [`locate`] found none it can. On the hub `/usr/local/bin/claude` links
+/// into another account's closed home, and *not found* sent the owner to install
+/// what was there (Y-740). A link to nothing is not one: nothing is installed.
+pub async fn unrunnable<E: Exec>(exec: &E, binary: &'static str) -> Result<Option<String>, Error> {
+    let out = exec.exec(&unrunnable_probe(binary, &CANDIDATES)).await?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    Ok((out.success() && path.starts_with('/')).then_some(path))
+}
+
+/// `-e` fails on a link to nothing and on a link into a closed directory alike.
+/// Only the kernel's error tells them apart, and `ls -L` is how a shell reads it.
+fn unrunnable_probe(binary: &'static str, dirs: &[&str]) -> String {
+    format!(
+        "for d in {dirs}; do\n\
+         \x20 c=\"$d/{binary}\"\n\
+         \x20 if [ -e \"$c\" ]; then printf '%s\\n' \"$c\"; exit 0; fi\n\
+         \x20 if [ -L \"$c\" ]; then\n\
+         \x20   case \"$(LC_ALL=C ls -Ld \"$c\" 2>&1)\" in (*'Permission denied'*) printf '%s\\n' \"$c\"; exit 0 ;; esac\n\
+         \x20 fi\n\
+         done\n\
+         exit 1\n",
+        dirs = dirs.join(" "),
+    )
+}
+
 /// [`Claude::resolve`], and whether the machine's C library is musl, in the one
 /// round trip the launch already made — the musl answer decides one variable
 /// in the start command ([`launch_command`]).
@@ -404,6 +430,70 @@ mod tests {
     fn the_probe_pairs_every_paren_so_it_survives_bash_3_2() {
         let probe = probe("claude");
         assert_eq!(probe.matches('(').count(), probe.matches(')').count());
+    }
+
+    /// Y-740: a link into a closed home and a file without `x` are there and do
+    /// not run. A link to nothing is not there.
+    #[test]
+    fn a_binary_this_account_cannot_run_is_named_and_an_absent_one_is_not() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let root = std::env::temp_dir().join(format!("yantra-unrunnable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (closed, linked, chained, dangling, plain, empty) = (
+            root.join("closed"),
+            root.join("linked"),
+            root.join("chained"),
+            root.join("dangling"),
+            root.join("plain"),
+            root.join("empty"),
+        );
+        for dir in [&closed, &linked, &chained, &dangling, &plain, &empty] {
+            std::fs::create_dir_all(dir).expect("a directory");
+        }
+        std::fs::write(closed.join("claude"), "#!/bin/sh\n").expect("a file");
+        std::fs::set_permissions(
+            closed.join("claude"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .expect("chmod");
+        std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        symlink(closed.join("claude"), linked.join("claude")).expect("a link");
+        symlink("../linked/claude", chained.join("claude")).expect("a link");
+        symlink(root.join("gone/claude"), dangling.join("claude")).expect("a link");
+        std::fs::write(plain.join("claude"), "#!/bin/sh\n").expect("a file");
+
+        let run = |first: &std::path::Path, second: &std::path::Path| {
+            let dirs = [
+                first.to_str().expect("utf-8"),
+                second.to_str().expect("utf-8"),
+            ];
+            let out = std::process::Command::new("sh")
+                .args(["-c", &unrunnable_probe("claude", &dirs)])
+                .output()
+                .expect("sh runs");
+            (
+                out.status.success(),
+                String::from_utf8_lossy(&out.stdout).trim().to_owned(),
+            )
+        };
+        for dir in [&linked, &chained, &plain] {
+            let want = dir.join("claude").display().to_string();
+            assert_eq!(run(&empty, dir), (true, want), "{}", dir.display());
+        }
+        for dir in [&dangling, &empty] {
+            assert_eq!(
+                run(&empty, dir),
+                (false, String::new()),
+                "{}",
+                dir.display()
+            );
+        }
+        // A link to nothing does not hide a closed one later in the list.
+        let want = linked.join("claude").display().to_string();
+        assert_eq!(run(&dangling, &linked), (true, want));
+
+        std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        std::fs::remove_dir_all(&root).expect("cleanup");
     }
 
     #[test]

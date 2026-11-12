@@ -227,6 +227,8 @@ test.describe('the problems on a machine page', () => {
     const ready = card(page, 'Readiness')
     const rows = ready.locator('.machine__check')
     await expect(rows.first()).toBeVisible({ timeout: 15_000 })
+    // Y-740: gh, the agent, the hooks and sudo are all on macbook, so no row says missing.
+    await expect(ready).not.toContainText('missing')
     for (const row of await rows.all()) {
       const cause = row.locator('.machine__cause')
       const words = ((await cause.textContent()) ?? '').trim().split(/\s+/).length
@@ -254,6 +256,28 @@ test.describe('the problems on a machine page', () => {
     }
     await fits(page)
     await screenshot(page, 'machine', 'problems', size)
+  })
+
+  /* Y-740: a claude that is there is never called missing, and Install is its fix. */
+  test('says an installed claude this account cannot run is installed, on one uncut line', async ({ page, size }) => {
+    await scenario(page, 'problems')
+    await page.goto('/m/hetzner-1')
+    const ready = card(page, 'Readiness')
+    await expect(ready.getByRole('heading', { name: 'claude is installed, but this account cannot run it' })).toBeVisible({ timeout: 15_000 })
+    const cause = ready.locator('.machine__check', { hasText: 'claude' }).first().locator('.machine__cause')
+    await expect(cause).toHaveText('installed, no access; Install')
+    // Beside the Fix button the line is at its narrowest, and it is still whole.
+    expect((await cause.boundingBox())!.height).toBeLessThanOrEqual(24)
+    const [client, scroll] = await cause.evaluate((el) => [el.clientWidth, el.scrollWidth])
+    expect(scroll).toBeLessThanOrEqual(client)
+    await expect(ready.getByText('Install puts claude in this account’s home on hetzner-1, with the vendor’s installer.')).toBeVisible()
+    await expect(filled(ready)).toHaveText('Install')
+    await ready.getByRole('button', { name: /^Fix/ }).click()
+    await expect(ready.locator('.machine__fix')).toContainText('claude is installed at /usr/local/bin/claude, but this account cannot run it.')
+    await ready.getByRole('button', { name: /^Show What ssh said/ }).click()
+    await expect(ready).not.toContainText(/missing|not found/)
+    await fits(page)
+    await screenshot(page, 'machine', 'problems-2', size)
   })
 })
 

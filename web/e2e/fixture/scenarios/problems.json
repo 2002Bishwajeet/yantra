@@ -193,9 +193,14 @@
             "detail": "tmux 3.4 at /usr/bin/tmux"
           },
           {
-            "check": "agent-cli",
+            "check": "git",
             "state": "present",
-            "detail": "claude 2.1.0 at /root/.local/bin/claude"
+            "detail": "found at /usr/bin/git"
+          },
+          {
+            "check": "agent-cli",
+            "state": "absent",
+            "detail": "claude is installed at /usr/local/bin/claude, but this account cannot run it. The file, or a directory it links through, is closed to this account. Install puts claude where this account can run it"
           },
           {
             "check": "terminfo",
@@ -214,8 +219,8 @@
           },
           {
             "check": "login-session",
-            "state": "present",
-            "detail": "a systemd user session is running"
+            "state": "unknown",
+            "detail": "the gate runs `claude` inside that machine's tmux server, and this account cannot run one of the two there"
           },
           {
             "check": "heartbeat",

@@ -147,6 +147,32 @@ describe('the machine page’s verdict', () => {
     expect(startable(v)).toBe(false)
   })
 
+  /** Y-740: the hub's claude links into a home the daemon's account cannot read. */
+  it('says a claude this account cannot run is installed, and still offers Install', () => {
+    const detail = 'claude is installed at /usr/local/bin/claude, but this account cannot run it. Install puts claude where this account can run it'
+    const v = verdict(all({ 'agent-cli': 'absent' }, { 'agent-cli': detail }))
+    expect(v).toEqual({ kind: 'missing', missing: ['claude'], result: null, fresh: false, unrunnable: ['claude'] })
+    expect(titleOf(v, 'pi')).toBe('claude is installed, but this account cannot run it')
+    expect(chipOf(v, null)).toEqual({ state: 'needs', word: '1 to install', error: false })
+  })
+
+  it('calls missing only what is absent beside a claude this account cannot run', () => {
+    const detail = { 'agent-cli': 'claude is installed at /usr/local/bin/claude, but this account cannot run it.' }
+    const mixed = verdict(all({ tmux: 'absent', git: 'absent', 'agent-cli': 'absent' }, detail))
+    expect(mixed).toMatchObject({ kind: 'missing', missing: ['tmux', 'git', 'claude'], unrunnable: ['claude'] })
+    expect(titleOf(mixed, 'pi')).toBe('tmux and git are missing, and this account cannot run claude')
+    expect(chipOf(mixed, null).word).toBe('3 to install')
+
+    const watch = { since: 0, pressed: 0, mic: false }
+    const sudo = verdict(all({ tmux: 'absent', 'agent-cli': 'absent' }, detail), { watch, events: [stopped(20, ['sudo apk add tmux'])] })
+    expect(sudo).toMatchObject({ kind: 'sudo', unrunnable: ['claude'] })
+    expect(chipOf(sudo, null).word).toBe('2 to install')
+    expect(titleOf(sudo, 'pi')).not.toMatch(/missing/)
+    // With no claude that is closed, both chips keep their word.
+    expect(chipOf(verdict(all({ tmux: 'absent' })), null).word).toBe('1 missing')
+    expect(chipOf(verdict(all({ tmux: 'absent' }), { watch, events: [stopped(20, ['sudo apk add tmux'])] }), null).word).toBe('1 missing')
+  })
+
   /** Y-402 review: the machines-list card reads `lib/ready`'s
    *  `missingBasics` too, and the two must not disagree about a basic the
    *  report never asked about — `git` is left out of this report entirely. */
