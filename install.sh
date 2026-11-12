@@ -26,8 +26,8 @@
 #
 # `--channel nightly` installs the build of the latest merge to main, and
 # `--channel stable`, the default, the latest tagged release (Y-662). The choice
-# is kept in /etc/yantra/channel. Later updates follow a kept stable. The nightly
-# is not signed, so each nightly install names the flag again (Y-780):
+# is kept in /etc/yantra/channel, and later updates follow it. The release
+# workflow signs each channel with its own key (Y-803).
 #
 #     curl -fsSL <url>/install.sh | bash -s -- --channel nightly
 #
@@ -51,9 +51,10 @@
 set -euo pipefail
 
 REPO=2002Bishwajeet/yantra
-# ADR-0027 decision 4: the public key the owner signs SHA256SUMS with, as
-# "ssh-ed25519 AAAA…". Y-798 sets it; until then this checks no signature.
-RELEASE_KEY=''
+# ADR-0027 decision 4: release.yml's `sign` job signs SHA256SUMS with these keys
+# (Y-803). A `v*` release takes the stable key, and `nightly` the nightly key.
+STABLE_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKWmXvkfNo9r509vy22IcrOfGTrVf7WZeQG7Ol5wmmy3'
+NIGHTLY_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE+Xh/af0VMj+KBHzPsyzOyQTcJHZtxtESP0FouO6kyv'
 BIN_DIR=/usr/local/bin
 AGENT_ENV=/etc/yantra/agent.env
 DAEMON_ENV=/etc/yantra/daemon.env
@@ -107,8 +108,8 @@ fi
 # were a person's choice in a reviewed commit, and the comment beside COMMIT
 # recorded that v0.1.0's tag was moved once. SHA256SUMS still proves the archive
 # arrived intact from the release it names. The signature on SHA256SUMS proves
-# the owner approved that release (verify_signature). The nightly has none: what
-# is left there is trust in the repository and in whoever can publish to it.
+# that this repository's release workflow built that release (verify_signature).
+# It does not prove that a person read the code.
 # Stable reads /releases/latest. Nightly reads the rolling `nightly` release,
 # whose tag names no version, so the version is read off this target's archive.
 latest_version() {
@@ -147,20 +148,19 @@ latest_version() {
 fetch() { curl -fsSL --proto '=https' --tlsv1.2 -o "$1" "$2"; }
 
 # ADR-0027 decision 4: a checksum proves the archive is whole, not who made it.
-# $1 is the release's URL and $2 the folder that holds SHA256SUMS.
+# $1 is the release's URL and $2 the folder that holds SHA256SUMS. The key
+# follows the release, so a nightly signature never installs as stable.
 verify_signature() {
-    if [ -z "$RELEASE_KEY" ]; then
-        echo "install: this installer carries no release key, so no signature was checked" >&2
-        return 0
-    fi
+    local signer=stable key=$STABLE_KEY
+    case "$1" in */download/nightly) signer=nightly key=$NIGHTLY_KEY ;; esac
     command -v ssh-keygen >/dev/null 2>&1 ||
         fail "ssh-keygen is not installed, so the signature of SHA256SUMS cannot be checked — nothing was installed"
     fetch "$work/SHA256SUMS.sig" "$1/SHA256SUMS.sig" ||
-        fail "v$VERSION carries no SHA256SUMS.sig, so nothing shows that the owner approved it — nothing was installed"
-    printf 'yantra-release namespaces="file" %s\n' "$RELEASE_KEY" >"$work/allowed_signers"
+        fail "v$VERSION carries no SHA256SUMS.sig, so nothing shows that the release workflow built it — nothing was installed"
+    printf 'yantra-release namespaces="file" %s\n' "$key" >"$work/allowed_signers"
     ssh-keygen -Y verify -f "$work/allowed_signers" -I yantra-release -n file \
         -s "$work/SHA256SUMS.sig" <"$2/SHA256SUMS" >/dev/null 2>&1 ||
-        fail "SHA256SUMS.sig is not the release key's signature of SHA256SUMS — nothing was installed"
+        fail "SHA256SUMS.sig is not the $signer key's signature of SHA256SUMS — nothing was installed"
 }
 
 # Y-502: a Mac takes yantra-agent alone, as a LaunchAgent in the login session of
@@ -445,12 +445,6 @@ if [ "$uninstalling" = yes ]; then
     exit 0
 fi
 
-# ADR-0027 decision 4: yantrad's account can write the channel file, and the unit
-# passes no flag. So a nightly from the file alone is refused.
-if [ "$channel" = nightly ] && [ "$channel_named" != nightly ]; then
-    fail "$CHANNEL_FILE names nightly, and the nightly is not signed — nothing was installed. A person installs it by name: sudo yantra-update --channel nightly"
-fi
-
 # The landing page's mark, traced from its PNG into braille. A terminal that is not
 # UTF-8 would draw boxes, so it gets the wordmark alone. Drawn at a terminal only.
 mark() {
@@ -562,7 +556,7 @@ fetch "$here/SHA256SUMS" "$download/SHA256SUMS"
 # a corrupted download or a substituted archive, and neither is repaired by
 # trying again.
 step verifying
-[ "$channel" = nightly ] || verify_signature "$download" "$here"
+verify_signature "$download" "$here"
 (cd "$here" && sha256sum -c --ignore-missing SHA256SUMS) ||
     fail "$archive does not match SHA256SUMS — nothing was installed"
 
