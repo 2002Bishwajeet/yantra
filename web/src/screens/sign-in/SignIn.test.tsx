@@ -26,7 +26,12 @@ function hub(extra: Answers = {}) {
   const gated = (body: unknown) => (): Answer => (cookie ? [200, body] : [401, SAID])
   return mountSettings('phone', '/settings/devices', {
     'GET /api/workspaces': gated({ looked: 'ok', age_seconds: 0, data: [] }),
-    'GET /api/passkey': gated({ relying_party: 'hub.example.ts.net', passkeys: [], sessions: [] }),
+    // A finish leaves a passkey and this device's session, so Devices shows its Signed in group.
+    'GET /api/passkey': gated({
+      relying_party: 'hub.example.ts.net',
+      passkeys: [{ name: 'iPhone', made: 1_762_819_200 }],
+      sessions: [{ id: 'a1', passkey: 'iPhone', device: 'iPhone', made: 1_762_819_200, ends: 1_765_411_200, this_device: true }],
+    }),
     'POST /api/passkey/login/start': [200, { ceremony: 'c1', options: OPTIONS }],
     'POST /api/passkey/register/start': [200, { ceremony: 'c2', options: OPTIONS }],
     'POST /api/passkey/login/finish': () => {

@@ -128,7 +128,8 @@ test.describe('the session screen, chat first', () => {
   test('a short link in a chat turn is 44 px wide and owns every row of its own line', async ({ page, size }) => {
     test.skip(size !== 'phone', 'the 44 px rule is the phone rule')
     await page.goto(`${PATH}?thread=${THREAD}`)
-    const reach = await page.getByRole('link', { name: '#663' }).evaluate((el) => {
+    const link = page.getByRole('link', { name: '#663' })
+    const measure = () => link.evaluate((el) => {
       const rect = el.getBoundingClientRect()
       const after = getComputedStyle(el, '::after')
       // The ::after offsets are negative when it reaches outside the link's own box.
@@ -142,7 +143,9 @@ test.describe('the session screen, chat first', () => {
       }
       return { width, stolen }
     })
-    expect(reach.width).toBeGreaterThanOrEqual(44)
+    // The link is drawn again when the thread's worktree arrives; a detached node measures NaN.
+    let reach = await measure()
+    await expect.poll(async () => (reach = await measure()).width).toBeGreaterThanOrEqual(44)
     expect(reach.stolen).toEqual([])
   })
 
