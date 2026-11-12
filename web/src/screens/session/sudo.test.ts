@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Harness } from '@/api/thread'
-import { sudoCommand } from './sudo'
+import { spelled, sudoCommand } from './sudo'
 import type { Tool } from './timeline'
 
 const tool = (title: string | null, itemType: Tool['itemType'] = 'command_execution'): Tool => ({
@@ -49,5 +49,38 @@ describe('sudoCommand', () => {
     ['a line separator', 'sudo ls x'],
   ])('refuses %s', (_, command) => {
     expect(offer(command)).toEqual({ command, refused: true })
+  })
+})
+
+describe('spelled', () => {
+  it('leaves a command with no unsafe character in one part', () => {
+    expect(spelled('sudo ls -la')).toEqual([{ text: 'sudo ls -la', escape: false }])
+  })
+
+  it.each([
+    ['a newline', '\n', '\\n'],
+    ['a carriage return', '\r', '\\r'],
+    ['a tab', '\t', '\\t'],
+    ['ESC', '\u001b', '\\x1b'],
+    ['NUL', '\u0000', '\\x00'],
+    ['DEL', '\u007f', '\\x7f'],
+    ['a C1 control', '\u009b', '\\x9b'],
+    ['a soft hyphen', '\u00ad', '\\xad'],
+    ['a bidi override', '\u202e', '\\u{202e}'],
+    ['a zero-width space', '\u200b', '\\u{200b}'],
+    ['a line separator', '\u2028', '\\u{2028}'],
+    ['a tag character above the BMP', '\u{e0041}', '\\u{e0041}'],
+  ])('spells %s as an escape', (_, hidden, escape) => {
+    expect(spelled(`sudo ls${hidden}x`)).toEqual([
+      { text: 'sudo ls', escape: false },
+      { text: escape, escape: true },
+      { text: 'x', escape: false },
+    ])
+  })
+
+  it('spells each hidden character of a paste break, and no part holds one', () => {
+    const parts = spelled("sudo apt update\u001b[201~\rsudo sh -c 'x'")
+    expect(parts.map((part) => part.text).join('')).toBe("sudo apt update\\x1b[201~\\rsudo sh -c 'x'")
+    expect(parts.filter((part) => part.escape).map((part) => part.text)).toEqual(['\\x1b', '\\r'])
   })
 })

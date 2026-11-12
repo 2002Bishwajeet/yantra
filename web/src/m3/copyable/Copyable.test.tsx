@@ -3,6 +3,9 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Copyable } from './Copyable'
 
 const TEXT = 'curl -fsSL http://100.64.0.1:7717/join | sh'
+/** Y-779: ESC[201~ ends a bracketed paste early, and the CR runs what follows. */
+const HIDDEN = "sudo apt update\u001b[201~\rsudo sh -c 'x'\r"
+const CONTROL = /[^\P{Cc}\t\n]/u
 
 const clipboard = (writeText: ((text: string) => Promise<void>) | undefined) =>
   Object.defineProperty(navigator, 'clipboard', {
@@ -67,6 +70,26 @@ describe('Copyable', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy the join command' }))
     expect(await screen.findByText(/the text is selected/)).toBeTruthy()
     expect(window.getSelection()?.toString()).toBe(TEXT)
+  })
+
+  it('puts no control character on the clipboard (Y-779)', async () => {
+    const writeText = vi.fn((_: string) => Promise.resolve())
+    clipboard(writeText)
+    render(<Copyable text={HIDDEN} what="the command" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy the command' }))
+    expect(await screen.findByRole('button', { name: 'Copied the command' })).toBeTruthy()
+    expect(writeText).toHaveBeenCalledTimes(1)
+    expect(writeText.mock.calls[0][0]).not.toMatch(CONTROL)
+    expect(writeText.mock.calls[0][0]).toBe("sudo apt update[201~sudo sh -c 'x'")
+  })
+
+  it('selects no control character where there is no clipboard (Y-779)', async () => {
+    clipboard(undefined)
+    render(<Copyable text={HIDDEN} what="the command" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Copy the command' }))
+    expect(await screen.findByText(/the text is selected/)).toBeTruthy()
+    expect(window.getSelection()?.toString()).not.toMatch(CONTROL)
+    expect(window.getSelection()?.toString()).toBe("sudo apt update[201~sudo sh -c 'x'")
   })
 
   /** Only a selection that ran may be claimed. */

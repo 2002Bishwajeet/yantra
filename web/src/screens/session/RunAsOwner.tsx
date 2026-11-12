@@ -2,12 +2,11 @@ import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { Button } from '@/m3/button/Button'
-import { Copyable } from '@/m3/copyable/Copyable'
-import { Text } from '@/m3/text/Text'
+import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { adminProblem, problemWords, rememberAdmin, rememberedAdmin } from '@/screens/machine/owner'
 import { OwnerSheet } from '@/screens/machine/OwnerTerminal'
-import type { Sudo } from './sudo'
+import { spelled, type Sudo } from './sudo'
 import './RunAsOwner.css'
 
 function Ask(props: { machine: string; onOpen: (admin: string) => void }) {
@@ -66,9 +65,20 @@ export function RunAsOwner(props: { machine: string; sudo: Sudo }) {
     return (
       <div className="run-owner">
         <Text render={<p />} scale="body-medium">
-          This command holds a control character, so Yantra will not type it. Copy it by hand.
+          This command holds a hidden character, so Yantra will not type it or copy it. Each hidden
+          character shows as an escape. Copy it by hand if you trust it.
         </Text>
-        <Copyable text={sudo.command} what="the command" />
+        <Mono className="run-owner__command" translate="no">
+          {spelled(sudo.command).map((part, at) =>
+            part.escape ? (
+              <span className="run-owner__escape" key={at}>
+                {part.text}
+              </span>
+            ) : (
+              part.text
+            ),
+          )}
+        </Mono>
       </div>
     )
   }

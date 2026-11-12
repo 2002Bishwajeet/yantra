@@ -158,6 +158,47 @@ describe('the terminal in the dashboard', () => {
     expect(daemonised.heard[1]).toEqual({ bytes: [0x03] })
   })
 
+  describe('a paste (Y-779)', () => {
+    const paste = (text: string) =>
+      fireEvent.paste(document.querySelector('.xterm-helper-textarea')!, {
+        clipboardData: { getData: (type: string) => (type === 'text/plain' ? text : '') },
+      })
+    const said = (frame: Frame) => ('bytes' in frame ? new TextDecoder().decode(new Uint8Array(frame.bytes)) : frame)
+
+    it('loses its control characters before the socket, and is sent once', async () => {
+      await open()
+      await settled(() => expect(daemonised.heard.length).toBe(1))
+
+      paste('a\u001b[201~\rb\u007f\u009bc')
+      paste('z')
+
+      await settled(() => expect(daemonised.heard.length).toBe(3))
+      expect(daemonised.heard.slice(1).map(said)).toEqual(['a[201~bc', 'z'])
+    })
+
+    it('sends a newline as the Enter key, so a paste of lines still works', async () => {
+      await open()
+      await settled(() => expect(daemonised.heard.length).toBe(1))
+
+      paste('a\nb\r\nc')
+
+      await settled(() => expect(daemonised.heard.length).toBe(2))
+      expect(said(daemonised.heard[1])).toBe('a\rb\rc')
+    })
+
+    it('holds no ESC inside the bracket when the shell asked for a bracketed paste', async () => {
+      await open()
+      await settled(() => expect(daemonised.heard.length).toBe(1))
+      daemonised.print('\u001b[?2004hready')
+      await settled(() => expect(screenText()).toContain('ready'))
+
+      paste('x\u001b[201~\ry')
+
+      await settled(() => expect(daemonised.heard.length).toBe(2))
+      expect(said(daemonised.heard[1])).toBe('\u001b[200~x[201~y\u001b[201~')
+    })
+  })
+
   it('says the window changed rather than letting the far side guess', async () => {
     await open()
     await settled(() => expect(daemonised.heard.length).toBe(1))

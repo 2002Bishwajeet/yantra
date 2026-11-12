@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { clsx } from 'clsx'
+import { stripControls } from '@/lib/controls'
 import { Button } from '@/m3/button/Button'
 import { Mono, Text } from '@/m3/text/Text'
 import './Copyable.css'
@@ -12,19 +13,21 @@ export const hints = {
 
 /** `navigator.clipboard` needs a secure context, and plain HTTP to a tailnet
  *  address is not one, so a refused copy selects the text and says so rather
- *  than failing silently. */
+ *  than failing silently. `clean` is the text with no control character, and
+ *  the only text a caller may draw: a selection copies what the page shows. */
 export function useCopy(text: string) {
+  const clean = stripControls(text)
   const ref = useRef<HTMLSpanElement>(null)
   const [said, setSaid] = useState<'copied' | 'selected' | 'manual' | null>(null)
-  const [seen, setSeen] = useState(text)
+  const [seen, setSeen] = useState(clean)
   // A new text is not the one that was copied; a stale 'Copied' would mislead.
-  if (seen !== text) {
-    setSeen(text)
+  if (seen !== clean) {
+    setSeen(clean)
     setSaid(null)
   }
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(text)
+      await navigator.clipboard.writeText(clean)
       setSaid('copied')
     } catch {
       const selection = window.getSelection()
@@ -36,7 +39,7 @@ export function useCopy(text: string) {
       }
     }
   }
-  return { ref, said, copy }
+  return { ref, said, copy, clean }
 }
 
 /** Text a person copies. A caller that needs the same copy elsewhere passes
@@ -44,7 +47,7 @@ export function useCopy(text: string) {
 export function Copyable(props: { text: string; what: string; line?: boolean; copier?: ReturnType<typeof useCopy> }) {
   const { text, what } = props
   const own = useCopy(text)
-  const { ref, said, copy } = props.copier ?? own
+  const { ref, said, copy, clean } = props.copier ?? own
   return (
     <div className="m3-copyable">
       <div className="m3-copyable__row">
@@ -55,7 +58,7 @@ export function Copyable(props: { text: string; what: string; line?: boolean; co
           {...(props.line ? { tabIndex: 0, role: 'group', 'aria-label': what } : {})}
           translate="no"
         >
-          {text}
+          {clean}
         </Mono>
         <Button
           aria-label={`${said === 'copied' ? 'Copied' : 'Copy'} ${what}`}

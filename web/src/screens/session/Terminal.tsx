@@ -6,6 +6,7 @@ import { Terminal as Xterm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { ApiError } from '@/api/errors'
 import { ATTEMPTS, attachTerminal, type Link as Wire, type Target, terminalAddress } from '@/api/socket'
+import { stripControls } from '@/lib/controls'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Mark } from '@/m3/mark/Mark'
@@ -104,6 +105,13 @@ function attach(
       spent()
     } else link.type(data)
   })
+  // Y-779: xterm removes no ESC from a paste, so a pasted ESC[201~ would end its bracket early.
+  const paste = (event: ClipboardEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    xterm.paste(stripControls(event.clipboardData?.getData('text/plain') ?? ''))
+  }
+  host.addEventListener('paste', paste, true)
   window.addEventListener('resize', link.resize)
   // The window is not the only thing that moves the pane: a sheet that opens
   // takes the page's scrollbar with it, and a pane measured either side of
@@ -117,6 +125,7 @@ function attach(
       clearTimeout(prompt)
       watching?.disconnect()
       window.removeEventListener('resize', link.resize)
+      host.removeEventListener('paste', paste, true)
       typed.dispose()
       link.close()
       xterm.dispose()

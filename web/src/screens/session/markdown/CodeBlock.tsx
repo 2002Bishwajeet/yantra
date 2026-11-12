@@ -25,8 +25,8 @@ function Plain(props: { code: string }) {
 }
 
 export function CodeBlock(props: { code: string; language: string; title: string | null }) {
-  const { code, language, title } = props
-  const { ref, said, copy } = useCopy(code)
+  const { language, title } = props
+  const { ref, said, copy, clean: code } = useCopy(props.code)
   const [Body, setBody] = useState(() => lazy(load))
   return (
     <figure className="chat__code" data-language={language}>

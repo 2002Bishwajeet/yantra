@@ -4,6 +4,7 @@ import type { Check, Machine } from '@/api'
 import { useAbout, useNotifications } from '@/api/hooks'
 import { useInstall, useRecheckReadiness } from '@/api/mutations'
 import { causeOf, nameOf, olderAgent, reachableFailure, reachWords } from '@/lib/checks'
+import { stripControls } from '@/lib/controls'
 import { joinCommand, joinUrl } from '@/lib/join'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -98,7 +99,7 @@ function CopyJoin() {
   const copy = async () => {
     if (!url) return
     try {
-      await navigator.clipboard.writeText(joinCommand(url))
+      await navigator.clipboard.writeText(stripControls(joinCommand(url)))
       setSaid('copied')
     } catch {
       setSaid('failed')
