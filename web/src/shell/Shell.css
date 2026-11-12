@@ -226,12 +226,11 @@
     max(var(--m3-gutter), var(--m3-safe-left));
 }
 
-/* Y-673: a route with a FAB docks it. `main` ends above the FAB (64 bar + 16 gap + 56 FAB + 8 air), so
-   content never scrolls under it and the FAB keeps its place and size. */
+/* Y-735: the FAB floats over `main`, as M3 draws it, and the content scrolls under it. The padding lets the
+   last row stop above it: 64 bar + 16 gap + 56 FAB + 16 air. */
 [data-shell="phone"]:has(> .shell__fab) .shell__main {
-  margin-bottom: calc(144px + env(safe-area-inset-bottom, 0px));
-  scroll-padding-bottom: 24px;
-  padding-bottom: 24px;
+  scroll-padding-bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(152px + env(safe-area-inset-bottom, 0px));
 }
 
 [data-shell="phone"] .shell__main h1 {
@@ -257,9 +256,39 @@
 /* A machine's name can be long; the whole label is still the button's name. */
 .shell__fab-label {
   min-width: 0;
+  max-width: 60vw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition:
+    max-width var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
+    opacity var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+/* M3: the extended FAB shrinks to the icon FAB while the page scrolls down (useFabCollapse). The name is
+   `aria-label`, so it stays "New session" in both states. */
+.m3-fab.shell__fab {
+  transition:
+    gap var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
+    padding var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
+    border-radius var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial);
+}
+
+[data-shell][data-fab-collapsed] .shell__fab {
+  gap: 0;
+  padding-inline: 16px;
+}
+
+[data-shell][data-fab-collapsed] .shell__fab-label {
+  max-width: 0;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell__fab,
+  .shell__fab-label {
+    transition: none;
+  }
 }
 
 /* Holds the rail's FAB place on a route without one, so nothing under it moves. */
