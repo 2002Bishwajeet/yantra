@@ -43,19 +43,21 @@ function declined(cause: unknown): ApiError {
   })
 }
 
+/** The command that makes the hub read `daemon.env` again. */
+export const RESTART = 'sudo systemctl restart yantrad'
+
 /** The page is not under the name the hub's passkeys belong to, so the browser
  *  would refuse with a bare SecurityError. `line` is what the owner adds to
- *  `daemon.env`. */
+ *  `daemon.env`; `rpId` is the host the passkeys belong to. */
 export class OriginMismatch extends ApiError {
   readonly line: string
 
-  constructor(page: string, rpId: string) {
+  constructor(
+    readonly page: string,
+    readonly rpId: string,
+  ) {
     super('refused', '', {
-      sentence:
-        `This page is at ${page}, but this hub's passkeys belong to ${rpId}. ` +
-        `Open the dashboard at ${rpId}. ` +
-        'Or add the line below to /etc/yantra/daemon.env on the hub, then run sudo systemctl restart yantrad. ' +
-        'Every device then sets up its passkey again.',
+      sentence: `This page is at ${page}, but this hub's passkeys belong to ${rpId}.`,
     })
     this.line = `YANTRA_ORIGIN=${page}`
   }

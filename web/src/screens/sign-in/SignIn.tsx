@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { KeyRound, Smartphone } from 'lucide-react'
-import { OriginMismatch, useSignIn } from '@/api/passkey'
+import { aboutQuery } from '@/api/queries'
+import { OriginMismatch, RESTART, useSignIn } from '@/api/passkey'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
-import { Text } from '@/m3/text/Text'
+import { Eyebrow, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import './SignIn.css'
 
@@ -32,6 +34,33 @@ function keep(name: string) {
   } catch {
     // Only a convenience.
   }
+}
+
+/** The two ways out of a page that is under the wrong name. The address is the
+ *  daemon's own `https` origin when it carries the passkeys' host, because a
+ *  bare host opens on :443 and the dashboard sits on :8443 (ADR-0044). */
+function OriginFix({ error }: { error: OriginMismatch }) {
+  const about = useQuery(aboutQuery())
+  const known = about.data?.https
+  const open = known?.startsWith(`https://${error.rpId}:`) ? known : `https://${error.rpId}`
+  return (
+    <ol className="sign-in__fix">
+      <li>
+        <Eyebrow>Option 1 · Open the right address</Eyebrow>
+        <Button variant="tonal" render={<a href={open} />} role="link" className="sign-in__fix-link">
+          {open}
+        </Button>
+      </li>
+      <li>
+        <Eyebrow>Option 2 · Keep this address</Eyebrow>
+        <Text scale="body-small" tone="variant">
+          On the hub, add this line to /etc/yantra/daemon.env, then restart. Every device sets up its passkey again.
+        </Text>
+        <Copyable text={error.line} what="the YANTRA_ORIGIN line" line />
+        <Copyable text={RESTART} what="the restart command" line />
+      </li>
+    </ol>
+  )
 }
 
 /** ADR-0044's sign-in screen, drawn in place of every route while the daemon
@@ -120,7 +149,7 @@ export function SignIn() {
             error={sign.error}
             action={
               sign.error instanceof OriginMismatch ? (
-                <Copyable text={sign.error.line} what="the YANTRA_ORIGIN line" line />
+                <OriginFix error={sign.error} />
               ) : (
                 <Button variant="tonal" onClick={() => go(enrolling)}>
                   Try again
