@@ -12,9 +12,12 @@
 //! refusal says.
 //!
 //! **The third is a one-off terminal, and it runs a command it is handed by
-//! index** ([ADR-0030]). An install whose sudo wanted a password left the
-//! command; the socket names its place in what the daemon remembers, never the
-//! command itself, and the terminal ends when the command does, saying how.
+//! index** ([ADR-0030]). An install that stopped left the command; the socket
+//! names its place in what the daemon remembers, never the command itself, and
+//! the terminal ends when the command does, saying how. **A step that starts
+//! with `sudo` is refused by name before ssh runs** (Y-778): this route is the
+//! joined account's shell, which an agent controls, so the owner terminal
+//! takes that step.
 //!
 //! **The fourth is the owner terminal, and it runs no command** ([ADR-0046]
 //! §2). It is the login shell of the owner's admin account, so it needs the
@@ -37,7 +40,7 @@
 //!
 //! **Q5 closed *reference-only, always* and names a terminal stream in the
 //! sentence, so nothing here logs a byte of one** — not truncated, not at
-//! debug. The lifecycle is logged; the payload never is. On the one-off route
+//! debug. The lifecycle is logged; the payload never is. On the owner route
 //! the payload is a sudo password.
 //!
 //! The frames need no envelope, because the protocol already carries two kinds.
@@ -162,8 +165,8 @@ async fn tap<I: Inventory + Clone + Send + Sync + 'static>(
 /// the `at` of the install event the caller read, so nothing a caller writes
 /// can run and a newer install is never run under an older one's name. The
 /// name is checked before the upgrade because it reaches `ssh`'s argv (I-63);
-/// a step that is not there, or no longer the latest, is refused by name after
-/// it, as a session that is not there is.
+/// a step that is not there, no longer the latest, or a `sudo` one is refused
+/// by name after it, as a session that is not there is.
 ///
 /// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
 async fn step<I: Inventory + Clone + Send + Sync + 'static>(
@@ -272,17 +275,7 @@ impl Target {
                 at,
                 left,
             } => {
-                let command =
-                    left_command(left, machine, *index, *at).map_err(|missed| match missed {
-                        Missed::Nothing => Unopened::NoStep {
-                            machine: machine.clone(),
-                            index: *index,
-                        },
-                        Missed::Newer => Unopened::Newer {
-                            machine: machine.clone(),
-                            index: *index,
-                        },
-                    })?;
+                let command = step_command(left, machine, *index, *at)?;
                 pty::run(machine, &command, term, size).await?
             }
             Self::Owner { machine, user } => pty::login(machine, user, term, size).await?,
@@ -294,6 +287,29 @@ impl Target {
     fn reports_exit(&self) -> bool {
         matches!(self, Self::Step { .. } | Self::Owner { .. })
     }
+}
+
+/// The command a step socket may run as the joined account. An agent controls
+/// that account's login files and `PATH`, so a `sudo` step is refused here and
+/// the owner types it in the owner terminal (Y-778, [ADR-0030]'s 2026-11-12
+/// note).
+///
+/// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
+fn step_command(left: &Left, machine: &str, index: usize, at: u64) -> Result<String, Unopened> {
+    let found = left_command(left, machine, index, at);
+    let machine = machine.to_owned();
+    match found {
+        Err(Missed::Nothing) => Err(Unopened::NoStep { machine, index }),
+        Err(Missed::Newer) => Err(Unopened::Newer { machine, index }),
+        Ok(command) if starts_with_sudo(&command) => Err(Unopened::Sudo { machine, index }),
+        Ok(command) => Ok(command),
+    }
+}
+
+/// The dashboard's `sudo.ts` holds the same rule. An install puts `sudo` in
+/// front of every part of a command or of none, so the first word decides.
+fn starts_with_sudo(command: &str) -> bool {
+    command.split_whitespace().next() == Some("sudo")
 }
 
 /// What every log line on this route says, and the whole of what Q5 lets it
@@ -322,6 +338,13 @@ enum Unopened {
     /// shows is not the one this step would run.
     #[error("a newer install on {machine} replaced step {index}; read the page again")]
     Newer { machine: String, index: usize },
+
+    /// A password typed on this route reaches a shell an agent controls.
+    #[error(
+        "step {index} on {machine} starts with sudo, so it runs in the owner terminal, not in \
+         the joined account"
+    )]
+    Sudo { machine: String, index: usize },
 }
 
 /// The browser's window and the terminal it is, which are the facts about the
@@ -751,8 +774,8 @@ pub(crate) mod tests {
         assert!(owner.starts_with("HTTP/1.1 101"), "{owner}");
     }
 
-    /// **ADR-0030's route sits on it too**, and it is the one a password is
-    /// typed into.
+    /// **ADR-0030's route sits on it too**: it runs a command as the joined
+    /// account.
     #[tokio::test]
     async fn a_one_off_terminal_sits_on_the_same_authoriser() {
         let tagged = handshake(direct(Some(caller(ME, &["tag:ci"]))), STEP, "").await;
@@ -827,6 +850,101 @@ pub(crate) mod tests {
         );
     }
 
+    /// Y-778, ADR-0030's 2026-11-12 note: the joined account's shell is the
+    /// agent's, so a sudo step never reaches it. A real `ssh` to this name
+    /// prints its diagnosis as a binary frame and ends on `{"exit":255}`, as
+    /// the lifecycle test below shows, so neither one arriving is no `ssh`.
+    #[tokio::test]
+    async fn a_sudo_step_is_refused_by_name_and_starts_no_ssh() {
+        let capture = Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+
+        let mut socket = upgraded_at(
+            direct(Some(caller(ME, &[]))),
+            left("nowhere.invalid", &["sudo apk add tmux"]),
+            "/api/machines/nowhere.invalid/install/0/terminal?at=100",
+            "",
+        )
+        .await;
+        send(&mut socket, TEXT, WINDOW.as_bytes()).await;
+        send(&mut socket, BINARY, b"typed-as-keystrokes\r").await;
+
+        let mut said = Vec::new();
+        // The read fails when the daemon drops the socket.
+        while let Ok((opcode, payload)) = timeout(Duration::from_secs(30), frame(&mut socket))
+            .await
+            .expect("the socket ends")
+        {
+            match opcode {
+                PING => pong(&mut socket).await,
+                TEXT => said.push(String::from_utf8_lossy(&payload).into_owned()),
+                other => assert_ne!(other, BINARY, "a terminal printed, so ssh started"),
+            }
+        }
+        assert_eq!(
+            said,
+            [
+                "step 0 on nowhere.invalid starts with sudo, so it runs in the owner terminal, \
+              not in the joined account"
+            ],
+            "the refusal is the only text frame, so no exit frame followed it"
+        );
+
+        let logged = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+        assert!(
+            logged.contains("no terminal for install step 0 on nowhere.invalid"),
+            "{logged}"
+        );
+        assert!(!logged.contains("exited"), "{logged}");
+    }
+
+    /// The same rule with no socket: only a step that starts with `sudo` is
+    /// refused, and a place with nothing in it is still named first.
+    #[test]
+    fn a_step_command_is_what_was_left_unless_it_starts_with_sudo() {
+        let left = left(
+            "pi",
+            &[
+                "sudo apk add tmux",
+                "sudo",
+                " sudo -n true",
+                "apk add tmux",
+                "xcode-select --install",
+            ],
+        );
+        for index in 0..3 {
+            assert!(
+                matches!(
+                    step_command(&left, "pi", index, AT),
+                    Err(Unopened::Sudo { index: named, .. }) if named == index
+                ),
+                "step {index} was not refused as sudo"
+            );
+        }
+        assert_eq!(
+            step_command(&left, "pi", 3, AT).ok().as_deref(),
+            Some("apk add tmux")
+        );
+        assert_eq!(
+            step_command(&left, "pi", 4, AT).ok().as_deref(),
+            Some("xcode-select --install")
+        );
+        assert!(matches!(
+            step_command(&left, "pi", 5, AT),
+            Err(Unopened::NoStep { .. })
+        ));
+        assert!(matches!(
+            step_command(&left, "pi", 0, AT - 1),
+            Err(Unopened::Newer { .. })
+        ));
+    }
+
     /// A socket that names no install cannot be matched to one, so it is
     /// refused before the upgrade.
     #[tokio::test]
@@ -872,13 +990,14 @@ pub(crate) mod tests {
         }
     }
 
-    /// **Q5 on the route that carries a password, as far as a unit test
-    /// reaches.** A real `ssh` under a real pty, to a name that cannot resolve,
-    /// prints and exits with no network: what it printed reaches the socket and
-    /// not this thread's log, and the terminal ends on `ssh`'s own status. The
-    /// typed frame is sent, but `ssh` may exit before it is written, so the
-    /// password half is `yantra-core/tests/install.rs`'s: it captures every
-    /// thread's log while a real password goes through the pty.
+    /// **Q5 on the one-off route, as far as a unit test reaches.** The route
+    /// carries no password since Y-778, and Q5 still binds its stream. A real
+    /// `ssh` under a real pty, to a name that cannot resolve, prints and exits
+    /// with no network: what it printed reaches the socket and not this
+    /// thread's log, and the terminal ends on `ssh`'s own status. The typed
+    /// frame is sent, but `ssh` may exit before it is written, so the typed
+    /// half is `yantra-core/tests/install.rs`'s: it captures every thread's log
+    /// while real keystrokes go through the pty.
     #[tokio::test]
     async fn a_one_off_terminal_logs_its_lifecycle_and_never_its_stream() {
         let capture = Capture::default();
@@ -892,7 +1011,7 @@ pub(crate) mod tests {
 
         let mut socket = upgraded_at(
             direct(Some(caller(ME, &[]))),
-            left("nowhere.invalid", &["sudo apk add tmux"]),
+            left("nowhere.invalid", &["apk add tmux"]),
             "/api/machines/nowhere.invalid/install/0/terminal?at=100",
             "",
         )

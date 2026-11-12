@@ -26,11 +26,15 @@ export function spelled(command: string): { text: string; escape: boolean }[] {
     .filter((part) => part.text !== '')
 }
 
-/** ADR-0046 3.2: only a Claude command that starts with `sudo` is offered, and
- *  one with an unsafe character is shown but never typed. */
+/** ADR-0046 3.4: a command with an unsafe character is shown but never typed. */
+export const typable = (command: string): Sudo => ({ command, refused: UNSAFE.test(command) })
+
+/** What the page says beside a refused command. */
+export const NOT_TYPED = 'This command holds a control character, so Yantra will not type it. Copy it by hand.'
+
+/** ADR-0046 3.2: only a Claude command that starts with `sudo` is offered. */
 export function sudoCommand(tool: Tool, harness: Harness | null): Sudo | null {
   if (harness !== 'claude' || tool.itemType !== 'command_execution') return null
   const command = tool.title?.trim() ?? ''
-  if (!SUDO.test(command)) return null
-  return { command, refused: UNSAFE.test(command) }
+  return SUDO.test(command) ? typable(command) : null
 }

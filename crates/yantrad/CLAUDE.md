@@ -682,8 +682,12 @@ with a `400` before the upgrade (I-63), and refuses an index outside the list by
 pty runs `ssh -tt <machine> 'TERM=… /bin/sh -c …'` with no tmux, because `tmux` can be what the step
 installs. **It ends when the command does**: the daemon sends `{"exit": n}` as a text frame and
 closes, and the browser never reopens it, because a reopened socket runs the command again. **A
-password is typed there**, so Q5's rule below binds hardest on this route: a test drives a real
-`ssh` under a real pty and asserts that neither what was typed nor what was printed reaches the log.
+step that starts with `sudo` is refused by name, before ssh runs** (Y-778, ADR-0030's note of
+2026-11-12). This route runs as the joined account. An agent controls that account's login files and
+`PATH`, so a password typed there reaches a shell the agent controls. The owner terminal below takes
+a sudo step. **No password is typed on this route now, and Q5's rule below still binds its stream**:
+a test drives a real `ssh` under a real pty and asserts that neither what was typed nor what was
+printed reaches the log.
 
 **A fourth address is the owner terminal, and it runs no command**
 ([ADR-0046](../../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md) decision 2, Y-701).

@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react'
+import { type RefObject, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { Button } from '@/m3/button/Button'
 import { Mono, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
-import { adminProblem, problemWords, rememberAdmin, rememberedAdmin } from '@/screens/machine/owner'
+import { adminProblem, type OwnerRun, ownerRun, problemWords, rememberAdmin } from '@/screens/machine/owner'
 import { OwnerSheet } from '@/screens/machine/OwnerTerminal'
 import { spelled, type Sudo } from './sudo'
 import './RunAsOwner.css'
@@ -53,13 +53,37 @@ function Ask(props: { machine: string; onOpen: (admin: string) => void }) {
   )
 }
 
+/** The owner terminal with a command typed in, never sent. It asks for the
+ *  admin account first when this browser keeps none. It is drawn on the body,
+ *  so what hides or redraws around its button cannot take an open shell away. */
+export function OwnerRunSheet(props: {
+  machine: string
+  run: OwnerRun | null
+  opener: RefObject<HTMLElement | null>
+  onRun: (next: OwnerRun | null) => void
+}) {
+  const { machine, run, opener, onRun } = props
+  const admin = run?.admin ?? null
+  return createPortal(
+    <OwnerSheet
+      admin={admin ?? ''}
+      ask={admin === null ? <Ask machine={machine} onOpen={(named) => run && onRun({ ...run, admin: named })} /> : undefined}
+      machine={machine}
+      onClose={() => onRun(null)}
+      open={run !== null}
+      opener={opener}
+      typeIn={run?.command}
+    />,
+    document.body,
+  )
+}
+
 /** ADR-0046 decision 3: a sudo command from Claude, typed into the owner's own
  *  shell for the owner to read and send. Nothing it prints goes back to the agent. */
 export function RunAsOwner(props: { machine: string; sudo: Sudo }) {
   const { machine, sudo } = props
   const opener = useRef<HTMLButtonElement>(null)
-  const [asking, setAsking] = useState(false)
-  const [openAs, setOpenAs] = useState<string | null>(null)
+  const [run, setRun] = useState<OwnerRun | null>(null)
 
   if (sudo.refused) {
     return (
@@ -83,33 +107,18 @@ export function RunAsOwner(props: { machine: string; sudo: Sudo }) {
     )
   }
 
-  const start = () => {
-    const kept = rememberedAdmin(machine)
-    if (adminProblem(kept)) setAsking(true)
-    else setOpenAs(kept)
-  }
-  const close = () => {
-    setAsking(false)
-    setOpenAs(null)
-  }
-
   return (
     <div className="run-owner">
-      <Button className="run-owner__button" disabled={machine === ''} onClick={start} ref={opener} variant="tonal">
+      <Button
+        className="run-owner__button"
+        disabled={machine === ''}
+        onClick={() => setRun(ownerRun(machine, sudo.command))}
+        ref={opener}
+        variant="tonal"
+      >
         Run in owner terminal
       </Button>
-      {createPortal(
-        <OwnerSheet
-          admin={openAs ?? ''}
-          ask={openAs === null ? <Ask machine={machine} onOpen={setOpenAs} /> : undefined}
-          machine={machine}
-          onClose={close}
-          open={asking || openAs !== null}
-          opener={opener}
-          typeIn={sudo.command}
-        />,
-        document.body,
-      )}
+      <OwnerRunSheet machine={machine} onRun={setRun} opener={opener} run={run} />
     </div>
   )
 }

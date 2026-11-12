@@ -525,26 +525,34 @@ Three decisions:
   without an ssh. A session is known only to its machine, so this attaches and
   lets the daemon refuse a name that is not there (ADR-0022 §5).
 
-## A one-off terminal for a sudo step (Y-394)
+## A sudo step goes to the owner terminal (Y-778)
 
-`Target` has a third variant, `{ machine, step }`: a place in the commands the newest install on
-that machine left
-([ADR-0030](../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md)).
-[`SudoSheet.tsx`](src/screens/machine/SudoSheet.tsx) opens it from the Readiness card, beside a
-command `install.rs` put `sudo` in front of: a side sheet beside the page on the desktop and the
-tablet, and the full height on the phone. Three rules:
+An install leaves a command for a person when it needs root and sudo asks for a password. The
+Readiness card shows each command with Copy. A command that starts with `sudo` also gets **Run in
+owner terminal**. The owner decided this on 2026-11-12
+([ADR-0030](../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md)'s note of
+that date): an agent controls the joined account's shell, so the owner does not type a password
+there.
 
-- **It never reopens.** A reopened socket runs the command again, so `attachTerminal` gets no
-  reopen budget for it.
-- **It names the install it read.** The step carries the event's `at`, and the daemon refuses a
-  step whose install is no longer the latest, so the sheet cannot show one command while another
-  runs.
-- **The daemon's `{"exit": n}` is the one text frame that is not a refusal.** `exitOf` tells the
-  two apart, and the pane says `exited n`.
-- **Escape stays with the terminal** inside the sheet. The sheet closing on it would stop sudo in
-  the middle of a password.
+- **The press opens the owner terminal with the command typed in, and never sends Enter**
+  ([ADR-0046](../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md)). The owner reads the
+  command and presses Enter. A browser that keeps no admin account for the machine asks for it
+  first.
+- **The Chat and the card share one sheet.** `OwnerRunSheet` in
+  [`RunAsOwner.tsx`](src/screens/session/RunAsOwner.tsx) holds it, and
+  [`Readiness.tsx`](src/screens/machine/Readiness.tsx) mounts it once for the card. A verdict
+  change redraws the commands and does not close an open shell.
+- **A command with a control character is shown and not typed.** `typable` in
+  [`sudo.ts`](src/screens/session/sudo.ts) is the rule, for the Chat and for the card.
+- **Closing the sheet asks readiness again**, when a shell was open. The card also drops its
+  install watch. Focus returns to the pressed button, or to the card's title when the recheck
+  removed the button.
+- **Escape stays with the shell** inside the sheet. The sheet closing on it would stop sudo in the
+  middle of a password.
 
-When the command ends, the card drops its install watch and asks readiness again.
+`Target` still has the variant `{ machine, step, at }`, and the daemon still serves that route for a
+remembered command without `sudo`. No screen opens it now. The daemon refuses a `sudo` step on it by
+name, before ssh runs.
 
 ## The spend view
 

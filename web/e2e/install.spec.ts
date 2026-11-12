@@ -52,33 +52,47 @@ test.describe('install from the machine page', () => {
     await screenshot(page, 'machine-install-stopped', 'install', size)
   })
 
-  /* Y-394, ADR-0030: the password step in a terminal of its own. */
-  test('sudo: the step runs in a one-off terminal, and the password is only keystrokes', async ({ page, size }) => {
+  /* Y-778, ADR-0030's note of 2026-11-12: the password step goes to the owner terminal. */
+  test('sudo: the step is typed into the owner terminal, and the password is only keystrokes', async ({ page, size }) => {
     await open(page, 'nas')
     await ready(page).getByRole('button', { name: 'Install' }).click()
-    await ready(page).getByRole('button', { name: 'Open a terminal' }).click({ timeout: 15_000 })
+    await ready(page).getByRole('button', { name: 'Run in owner terminal' }).click({ timeout: 15_000 })
 
-    const sheet = size === 'phone' ? page.getByRole('dialog', { name: 'Run it on nas' }) : page.getByRole('complementary', { name: 'Run it on nas' })
+    const sheetNamed = (name: string) =>
+      size === 'phone' ? page.getByRole('dialog', { name }) : page.getByRole('complementary', { name })
+    // This browser keeps no admin account for nas, so the sheet asks for it first.
+    const asking = sheetNamed('Owner terminal on nas')
+    await asking.getByRole('textbox', { name: 'Admin account' }).fill('owner')
+    await asking.getByRole('button', { name: 'Open owner terminal' }).click()
+
+    const sheet = sheetNamed('owner on nas')
+    const rows = sheet.locator('.xterm-rows')
     await expect(sheet).toBeVisible()
-    await expect(sheet.getByText(/Your password goes to nas as keystrokes; Yantra does not keep it./)).toBeVisible()
-    await expect(sheet.locator('.xterm-rows')).toContainText('password for yantra', { timeout: 15_000 })
+    // The command is typed in and not sent: sudo has not asked yet. A narrow
+    // pane wraps the line, and a wrap can take the space at the row's end.
+    await expect(rows).toContainText(/install\s*-y\s*tmux\s*curl/, { timeout: 15_000 })
+    await expect(rows).not.toContainText('password for owner')
     await axe(page)
 
     await sheet.locator('.xterm-helper-textarea').focus()
-    // Escape is the terminal's inside the sheet: closing on it would stop sudo.
+    // Escape is the shell's inside the sheet: closing on it would hang up sudo.
     await page.keyboard.press('Escape')
     await expect(sheet).toBeVisible()
+    await page.keyboard.press('Enter')
+    await expect(rows).toContainText('password for owner')
     await page.keyboard.type('hunter2')
     await page.keyboard.press('Enter')
+    // sudo took the password and ran; the shell drew its prompt again.
+    await expect(rows).toContainText(/password for owner:\s*0\s*owner@nas/)
+    await expect(rows).not.toContainText('hunter2')
 
-    await expect(sheet.getByText('It finished on nas. Readiness asks nas again now.')).toBeVisible({ timeout: 15_000 })
-    await expect(sheet.getByRole('status').first()).toContainText('exited 0')
-    await expect(sheet.locator('.xterm-rows')).not.toContainText('hunter2')
-    // The step installed tmux, so claude is what is left, and Install asks for it.
-    await expect(ready(page).getByRole('heading', { name: 'claude is missing' })).toBeVisible({ timeout: 15_000 })
-
-    await sheet.getByRole('button', { name: size === 'phone' ? 'Close' : 'Close Run it on nas' }).click()
+    await sheet.getByRole('button', { name: size === 'phone' ? 'Close' : 'Close owner on nas' }).click()
     await expect(sheet).toBeHidden()
+    // The step installed tmux, so claude is what is left, and Install asks for it.
+    const title = ready(page).getByRole('heading', { name: 'claude is missing' })
+    await expect(title).toBeVisible({ timeout: 15_000 })
+    // The pressed button went with the verdict, so focus is on the card's title.
+    await expect(title).toBeFocused()
   })
 
   test('running: a second press is the 409, and the page waits', async ({ page, size }) => {

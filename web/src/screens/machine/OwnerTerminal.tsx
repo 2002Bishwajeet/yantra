@@ -71,13 +71,14 @@ export function Shell(props: { machine: string; admin: string; height: string; t
 }
 
 /** ADR-0046 §2: a side sheet beside the page, and the full height on the
- *  phone, as the sudo step's is. The shell is mounted only while the sheet is
- *  open, so closing it closes the socket. */
+ *  phone. The shell is mounted only while the sheet is open, so closing it
+ *  closes the socket. */
 export function OwnerSheet(props: {
   machine: string
   admin: string
   open: boolean
-  opener: RefObject<HTMLButtonElement | null>
+  /** Where focus goes back to on the phone. */
+  opener: RefObject<HTMLElement | null>
   onClose: () => void
   typeIn?: string
   /** Drawn in place of the shell, for a sheet that has no account yet. */
