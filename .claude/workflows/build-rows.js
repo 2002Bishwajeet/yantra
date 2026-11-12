@@ -11,7 +11,7 @@ export const meta = {
   ],
 }
 
-// args: { today: 'YYYY-MM-DD' (required), maxRows?: 3, parallel?: 3, rows?: ['Y-371'], retry?: ['Y-417'], dryRun?: false, webWalk?: false }
+// args: { today: 'YYYY-MM-DD' (required), maxRows?: 3, parallel?: 3, rows?: ['Y-371'], retry?: ['Y-417'], dryRun?: false }
 const A = args || {}
 if (!A.today) throw new Error('pass args.today as YYYY-MM-DD')
 const TODAY = A.today
@@ -19,8 +19,6 @@ const MAX_ROWS = A.maxRows ?? 3
 const PARALLEL = A.parallel ?? 3
 const DRY = !!A.dryRun
 const RETRY = A.retry || []
-// Y-809: owner, 2026-11-12: CI's e2e checks the screens for now, so the walk takes no web screenshots unless asked.
-const WEB_WALK = !!A.webWalk
 const REPO = '/home/biswa/Github/homelab/yantra'
 const WT_ROOT = `${REPO}/.claude/worktrees`
 const REPORT = `${REPO}/.claude/build-loop/${TODAY}.md`
@@ -292,7 +290,7 @@ async function walk(row, wt) {
   return serialWalk(() =>
     agent(
       `Walk ${row.id} in ${wt} on the real product. Do not change any tracked file.
-1. Run \`bash ${WALK} needs ${wt}\`. Return its lines as needs. If it prints nothing, return needs=[], shots=[], mac=not-needed and stop.${WEB_WALK ? '' : ' Web screenshots are off: drop web from needs. If needs is then empty, return needs=[], shots=[], mac=not-needed and stop. Otherwise skip steps 2 to 5.'}
+1. Run \`bash ${WALK} needs ${wt}\`. Return its lines as needs. If it prints nothing, return needs=[], shots=[], mac=not-needed and stop.
 2. Run \`bash ${WALK} up ${wt}\`. It builds the branch's yantrad and dashboard and serves them against the real fleet on a spare port. A cold build takes longer than a Bash call, so run \`mkdir -p ${wt}/.walk && rm -f ${wt}/.walk/up.log\`. ${DETACH(`${wt}/.walk/up.log`, 'WALK_EXIT', `bash ${WALK} up ${wt}`)} ${WALK_WAIT(`${wt}/.walk/up.log`)} Go on only when WALK_EXIT=0.
 3. Read \`git diff origin/main...HEAD\` and web/src/router.ts, and choose the routes that show what the row changed. For a machine row, choose the screens that show that path: the fleet, the machine's page, or the Chat. Run \`bash ${WALK} shoot ${wt} <route>...\`. Only open pages; never press a control that writes, because the machines are real.
 4. Read every PNG and TXT file it lists with the Read tool, and read ${wt}/.walk/shots/errors.txt. Describe each screen in seen.
