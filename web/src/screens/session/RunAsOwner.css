@@ -18,7 +18,7 @@
 .run-owner > .run-owner__command {
   min-width: 0;
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--md-sys-shape-corner-small);
   font-size: var(--md-sys-typescale-body-small-size);
   line-height: var(--md-sys-typescale-body-small-line-height);
   /* Only 400 and 500 of the mono face load, so the escape is the 500. */
