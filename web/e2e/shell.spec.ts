@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import type { Scenario } from './lib/scenario'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { at } from './lib/sizes'
-import { scrollTo } from './lib/scroller'
+import { endGap, scrollTo } from './lib/scroller'
 
 /** The shell (Y-345): the four destinations at three widths, the palette,
  *  the bell, on the busy fleet. The screens under it are stubs until their
@@ -598,33 +598,36 @@ test.describe('the FAB on the phone leaves the end of the page clear', () => {
       await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
       await expect(page.locator('.shell__fab')).toBeVisible()
 
-      await scrollTo(page, 'end')
-      const offenders = await page.evaluate(() => {
-        const main = document.querySelector('.shell__main')!
-        const box = main.getBoundingClientRect()
-        const fab = document.querySelector('.shell__fab')!
-        const f = fab.getBoundingClientRect()
-        const rects: { text: string; r: DOMRect }[] = []
-        for (const el of main.querySelectorAll('a, button')) {
-          if (fab.contains(el)) continue
-          rects.push({ text: (el.textContent ?? '').trim() || el.tagName, r: el.getBoundingClientRect() })
-        }
-        const walk = document.createTreeWalker(main, NodeFilter.SHOW_TEXT)
-        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-          if (!n.textContent?.trim() || fab.contains(n)) continue
-          const range = document.createRange()
-          range.selectNodeContents(n)
-          for (const r of range.getClientRects()) rects.push({ text: n.textContent.trim(), r })
-        }
-        return rects
-          .filter(({ r }) => {
-            const w = Math.min(r.right, box.right, f.right) - Math.max(r.left, box.left, f.left)
-            const h = Math.min(r.bottom, box.bottom, f.bottom) - Math.max(r.top, box.top, f.top)
-            return w > 0 && h > 0
-          })
-          .map(({ text }) => text.slice(0, 40))
-      })
-      expect(offenders, `under the FAB at the end of the page`).toEqual([])
+      await expect(async () => {
+        await scrollTo(page, 'end')
+        expect(await endGap(page)).toBe(0)
+        const offenders = await page.evaluate(() => {
+          const main = document.querySelector('.shell__main')!
+          const box = main.getBoundingClientRect()
+          const fab = document.querySelector('.shell__fab')!
+          const f = fab.getBoundingClientRect()
+          const rects: { text: string; r: DOMRect }[] = []
+          for (const el of main.querySelectorAll('a, button')) {
+            if (fab.contains(el)) continue
+            rects.push({ text: (el.textContent ?? '').trim() || el.tagName, r: el.getBoundingClientRect() })
+          }
+          const walk = document.createTreeWalker(main, NodeFilter.SHOW_TEXT)
+          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            if (!n.textContent?.trim() || fab.contains(n)) continue
+            const range = document.createRange()
+            range.selectNodeContents(n)
+            for (const r of range.getClientRects()) rects.push({ text: n.textContent.trim(), r })
+          }
+          return rects
+            .filter(({ r }) => {
+              const w = Math.min(r.right, box.right, f.right) - Math.max(r.left, box.left, f.left)
+              const h = Math.min(r.bottom, box.bottom, f.bottom) - Math.max(r.top, box.top, f.top)
+              return w > 0 && h > 0
+            })
+            .map(({ text }) => text.slice(0, 40))
+        })
+        expect(offenders, `under the FAB at the end of the page`).toEqual([])
+      }).toPass()
     })
   }
 
@@ -632,15 +635,18 @@ test.describe('the FAB on the phone leaves the end of the page clear', () => {
     test.skip(size !== 'phone', 'the FAB floats over the page only on a phone')
     await scenario(page, 'busy')
     await page.goto('/')
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
     const fab = page.locator('.shell__fab')
     await expect(fab).toBeVisible()
     const name = await fab.getAttribute('aria-label')
     expect(name).toContain('New session')
     const wide = (await fab.boundingBox())!.width
     await scrollTo(page, 300)
+    await expect.poll(() => page.locator('.shell__main').evaluate((el) => el.scrollTop)).toBeGreaterThan(100)
     await expect.poll(async () => (await fab.boundingBox())!.width).toBeLessThan(60)
     await expect(fab).toHaveAttribute('aria-label', name!)
     await scrollTo(page, 0)
+    await expect.poll(() => page.locator('.shell__main').evaluate((el) => el.scrollTop)).toBe(0)
     await expect.poll(async () => (await fab.boundingBox())!.width).toBeGreaterThanOrEqual(wide - 1)
   })
 })
