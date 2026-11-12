@@ -342,6 +342,24 @@
   }
 }
 
+/* Y-737: beside its list, a detail pane changes alone. The root does not move,
+   so the list stays still; the pane has its own group and fades through. A phone
+   draws the list and the detail as separate pages, so it keeps the slide. */
+@media (min-width: 600px) and (not ((pointer: coarse) and (orientation: landscape) and (max-height: 479px))) {
+  :root:active-view-transition-type(pane) {
+    .settings__pane { view-transition-name: settings-pane; }
+    &::view-transition-old(root),
+    &::view-transition-new(root) { animation: none; }
+    &::view-transition-group(settings-pane) { animation: none; }
+    &::view-transition-old(settings-pane) {
+      animation: shell-tab-out 90ms var(--md-sys-motion-easing-emphasized-accelerate) both;
+    }
+    &::view-transition-new(settings-pane) {
+      animation: shell-tab-in 210ms var(--md-sys-motion-easing-emphasized-decelerate) 90ms both;
+    }
+  }
+}
+
 /* Covers a browser that has startViewTransition and no types, where the
    router never asks `transitionTypes`. The pseudo-elements take no taps. */
 @media (prefers-reduced-motion: reduce) {

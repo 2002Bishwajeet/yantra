@@ -59,6 +59,14 @@ describe('transitionTypes', () => {
   it('goes back to a lower history index', () => {
     expect(transitionTypes({ fromLocation: at('/m/pi-5', 2), toLocation: at('/machines', 1) })).toEqual(['back'])
   })
+  it('marks a change inside Settings as a pane change, keeping the direction for the phone', () => {
+    expect(transitionTypes({ fromLocation: at('/settings', 1), toLocation: at('/settings/providers', 2) })).toEqual(['pane', 'forward'])
+    expect(transitionTypes({ fromLocation: at('/settings/general', 2), toLocation: at('/settings/agents', 3) })).toEqual(['pane', 'forward'])
+    expect(transitionTypes({ fromLocation: at('/settings/agents', 3), toLocation: at('/settings/general', 2) })).toEqual(['pane', 'back'])
+  })
+  it('does not mark a move into or out of Settings as a pane change', () => {
+    expect(transitionTypes({ fromLocation: at('/machines', 1), toLocation: at('/settings/general', 2) })).toEqual(['forward'])
+  })
   it('does not animate a search change on the same path', () => {
     expect(transitionTypes({ fromLocation: at('/usage', 1), toLocation: at('/usage', 2) })).toBe(false)
   })
@@ -99,6 +107,19 @@ describe('a route change in the router', () => {
   })
 })
 
+describe('a category change in Settings', () => {
+  it('keeps the screen mounted and runs a pane transition', async () => {
+    const history = createMemoryHistory({ initialEntries: ['/settings'] })
+    const router = getRouter(history, makeQueryClient())
+    render(<App router={router} />)
+    const nav = await screen.findByRole('navigation', { name: 'Settings' })
+    await router.navigate({ to: '/settings/$category', params: { category: 'agents' } })
+    await screen.findByRole('heading', { level: 2, name: 'Agents' })
+    expect(screen.getByRole('navigation', { name: 'Settings' })).toBe(nav)
+    expect(calls).toEqual([['pane', 'forward']])
+  })
+})
+
 describe('the shell chrome stays out of the slide', () => {
   // The e2e test skips the tablet, so this pins the class each shell's rail really wears.
   it('names the desktop and the tablet rail', () => {
@@ -106,5 +127,11 @@ describe('the shell chrome stays out of the slide', () => {
     const block = shellCss.slice(shellCss.indexOf(':root:active-view-transition {'))
     expect(block).toMatch(/\.rail\b[^;]*view-transition-name: shell-rail/)
     expect(block).toMatch(/\.m3-rail\b[^;]*view-transition-name: shell-rail/)
+  })
+  it('gives the Settings pane its own group and stills the root for a pane change', () => {
+    const shellCss = readFileSync(resolve(process.cwd(), 'src/shell/Shell.css'), 'utf8')
+    const block = shellCss.slice(shellCss.indexOf('active-view-transition-type(pane)'))
+    expect(block).toMatch(/\.settings__pane \{ view-transition-name: settings-pane/)
+    expect(block).toMatch(/view-transition-old\(root\),\s*&::view-transition-new\(root\) \{ animation: none/)
   })
 })
