@@ -15,6 +15,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
   }
+
+  .machine__columns > .readiness {
+    grid-column: 1 / -1;
+  }
 }
 
 .machine__card {
@@ -46,73 +50,88 @@
   padding: 0 4px;
 }
 
+.machine__head .machine__icon {
+  flex: none;
+  align-self: center;
+  width: 24px;
+  height: 24px;
+  color: var(--md-sys-color-primary);
+}
+
 .machine__num {
   font-variant-numeric: tabular-nums;
 }
 
-/* One value column at every width: the labels size the first track, so every
-   value starts at one left edge. A name breaks at a <wbr> between labels and
-   inside a word only when it has to. */
-.machine__about {
+/* Y-748: the numbers sit in tiles, and the two long names are list items. */
+.machine__facts {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
   margin: 0;
-  padding: 0 4px;
 }
 
-.machine__about dt,
-.machine__about dd {
+.machine__fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: var(--md-sys-shape-corner-large);
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.machine__fact dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.machine__fact dt svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.machine__fact dd {
   margin: 0;
   min-width: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
 
-.machine__about .machine__value {
-  overflow-wrap: break-word;
-}
-
-.machine__about .machine__num {
-  white-space: normal;
-}
-
-/* On the phone the value drops under its label. */
-@media (max-width: 599px) {
-  .machine__about {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 0;
-  }
-
-  .machine__about .machine__value {
-    margin-bottom: 8px;
-  }
+.machine__named .m3-list-item__supporting {
+  color: var(--md-sys-color-on-surface);
 }
 
 .machine__checks {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  min-width: 0;
 }
 
-/* Y-733: a check is one line, the cause cut with an ellipsis; its fix waits behind Fix. */
+/* Y-748: a check is a list item; its cause wraps rather than being cut, and its fix waits behind Fix. */
 .machine__check {
   min-width: 0;
 }
 
-.machine__line {
-  display: grid;
-  grid-template-columns: minmax(0, 190px) auto minmax(0, 1fr);
+.machine__lead {
   align-items: center;
-  column-gap: 10px;
-  flex: 1;
-  min-width: 0;
-  min-height: 24px;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-high);
 }
 
-.machine__line .m3-state {
-  white-space: nowrap;
+.machine__line {
+  min-height: 56px;
+}
+
+.machine__line .m3-list-item__headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
 }
 
 .machine__line .machine__word {
@@ -121,39 +140,31 @@
 
 .machine__cause {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .machine__check .machine__fixrow {
+  flex: 1;
+  min-width: 0;
   border: 0;
   border-radius: 0;
 }
 
 .machine__check .machine__fixrow .m3-disclosure__row {
-  min-height: 40px;
-  padding: 0;
+  min-height: 56px;
+  padding: 0 8px 0 0;
 }
 
 .machine__check .machine__fixrow .m3-disclosure__summary {
   flex: 1;
+  min-width: 0;
 }
 
 .machine__check .machine__fixrow .m3-disclosure__content {
-  padding: 0 0 8px;
+  padding: 0 16px 12px;
 }
 
-/* On the phone the state word gives way to the cause, and the Fix target is 48 px. */
 @media (max-width: 599px) {
-  .machine__line {
-    grid-template-columns: minmax(0, auto) minmax(0, 1fr);
-  }
-
-  .machine__line .machine__word {
-    display: none;
-  }
-
   .machine__check .machine__fixrow .m3-disclosure__trigger {
     height: 48px;
     min-width: 48px;

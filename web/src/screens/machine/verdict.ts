@@ -209,6 +209,14 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
   }
 }
 
+/** The hero's tint: the verdict's tone, so the state reads before the title does. */
+export function surfaceOf(verdict: Verdict): 'primary' | 'tertiary' | 'error' | 'high' {
+  const { state, error } = chipOf(verdict, null)
+  if (error) return 'error'
+  if (state === 'done') return 'primary'
+  return state === 'needs' ? 'tertiary' : 'high'
+}
+
 const order: Record<CheckState, number> = { absent: 0, unknown: 1, present: 2 }
 
 /** Missing first, so the line that says what to do is the first one read. */

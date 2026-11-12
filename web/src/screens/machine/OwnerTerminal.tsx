@@ -1,4 +1,5 @@
 import { lazy, type ReactNode, type RefObject, Suspense, useRef, useState } from 'react'
+import { SquareTerminal } from 'lucide-react'
 import { useSshIdentity } from '@/api/hooks'
 import { asApiError } from '@/api/errors'
 import { BottomSheet, BottomSheetPopup } from '@/m3/bottom-sheet/BottomSheet'
@@ -150,7 +151,9 @@ function KeyLine(props: { machine: string; admin: string }) {
         Add this line once to <strong className="owner-terminal__path">~{admin || '<admin>'}/.ssh/authorized_keys</strong>{' '}
         on {machine}. It lets the hub's key in from the hub's own address.
       </Text>
-      <Copyable text={key.owner_line} what="the authorized_keys line" />
+      <div className="owner-terminal__code">
+        <Copyable text={key.owner_line} what="the authorized_keys line" />
+      </div>
     </div>
   )
 }
@@ -178,8 +181,9 @@ export function OwnerTerminal(props: { machine: string }) {
   }
 
   return (
-    <Card aria-labelledby="machine-owner" className="machine__card owner-terminal">
+    <Card aria-labelledby="machine-owner" className="machine__card owner-terminal" surface="low">
       <div className="machine__head">
+        <SquareTerminal aria-hidden="true" className="machine__icon" />
         <Text render={<h2 />} emphasized id="machine-owner" scale="title-large">
           Owner terminal
         </Text>
@@ -187,25 +191,30 @@ export function OwnerTerminal(props: { machine: string }) {
       <Text render={<p />} className="owner-terminal__note" scale="body-medium" tone="variant">
         A shell as your admin account on {machine}, for the commands that need sudo. The agent never gets it.
       </Text>
-      <TextField
-        autoCapitalize="none"
-        autoComplete="off"
-        autoCorrect="off"
-        enterKeyHint="go"
-        error={error}
-        label="Admin account"
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') start()
-        }}
-        onValueChange={(value: string) => {
-          setAdmin(value)
-          rememberAdmin(machine, value)
-        }}
-        ref={field}
-        spellCheck={false}
-        supporting="The account you use sudo as. Kept in this browser."
-        value={admin}
-      />
+      <div className="owner-terminal__row">
+        <TextField
+          autoCapitalize="none"
+          autoComplete="off"
+          autoCorrect="off"
+          enterKeyHint="go"
+          error={error}
+          label="Admin account"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') start()
+          }}
+          onValueChange={(value: string) => {
+            setAdmin(value)
+            rememberAdmin(machine, value)
+          }}
+          ref={field}
+          spellCheck={false}
+          supporting="The account you use sudo as. Kept in this browser."
+          value={admin}
+        />
+        <Button onClick={start} ref={opener} variant="tonal">
+          Open owner terminal
+        </Button>
+      </div>
       {phone ? (
         <Disclosure summary="The authorized_keys line">
           <KeyLine admin={admin} machine={machine} />
@@ -213,11 +222,6 @@ export function OwnerTerminal(props: { machine: string }) {
       ) : (
         <KeyLine admin={admin} machine={machine} />
       )}
-      <div className="owner-terminal__actions">
-        <Button onClick={start} ref={opener} variant="tonal">
-          Open owner terminal
-        </Button>
-      </div>
       <OwnerSheet
         admin={openAs ?? admin}
         machine={machine}

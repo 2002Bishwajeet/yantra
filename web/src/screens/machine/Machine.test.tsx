@@ -172,20 +172,27 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
 })
 
 describe('About on the machine page', () => {
-  it('lists each fact in one value column, with no Heartbeat row and no trailing dot', async () => {
+  it('draws the numbers as tiles and the two long names as list items, with no Heartbeat row and no trailing dot', async () => {
     mount('desktop', '/m/cachyos-g14')
     await screen.findByText(/^looked /)
-    const about = screen.getByRole('region', { name: 'About' }).querySelector('dl')!
-    expect(about.tagName).toBe('DL')
+    const region = screen.getByRole('region', { name: 'About' })
+    const about = region.querySelector('dl')!
     const labels = [...about.querySelectorAll('dt')].map((one) => one.textContent)
-    expect(labels).toEqual(expect.arrayContaining(['OS', 'Address', 'Tailnet name', 'Status', 'CPU', 'Memory', 'Disk', 'Power']))
+    expect(labels).toEqual(expect.arrayContaining(['OS', 'Architecture', 'Status', 'CPU', 'Memory', 'Disk', 'Power']))
     expect(labels).not.toContain('Heartbeat')
-    // Every dt has exactly one dd, so each value sits in the one value column.
-    expect(about.querySelectorAll('dd')).toHaveLength(labels.length)
-    expect(about.children).toHaveLength(labels.length * 2)
+    // Each tile holds one dt, one dd and an icon.
+    const tiles = [...about.querySelectorAll('.machine__fact')]
+    expect(tiles).toHaveLength(labels.length)
+    for (const tile of tiles) {
+      expect(tile.querySelectorAll('dt')).toHaveLength(1)
+      expect(tile.querySelectorAll('dd')).toHaveLength(1)
+      expect(tile.querySelector('dt svg')).not.toBeNull()
+    }
 
-    const name = [...about.querySelectorAll('dt')].find((one) => one.textContent === 'Tailnet name')!
-      .nextElementSibling as HTMLElement
+    const items = [...region.querySelectorAll('.m3-list-item')]
+    const named = (word: string) => items.find((one) => one.querySelector('.m3-list-item__headline')?.textContent === word)!
+    expect(named('Address').querySelector('.machine__num')).not.toBeNull()
+    const name = named('Tailnet name').querySelector('.m3-list-item__supporting') as HTMLElement
     expect(name.textContent).not.toMatch(/\.$/)
     expect(name.querySelectorAll('wbr').length).toBeGreaterThan(0)
     expect(name.textContent).toMatch(/^cachyos-g14\..+\.ts\.net$/)

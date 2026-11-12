@@ -12,9 +12,11 @@ import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
-import { State } from '@/m3/mark/Mark'
+import { List, ListItem } from '@/m3/list/List'
+import { Mark, State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Snackbar } from '@/m3/snackbar/Snackbar'
+import { Switch } from '@/m3/switch/Switch'
 import { Eyebrow, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Doctor } from '@/screens/machines/Doctor'
@@ -27,27 +29,35 @@ import { answer, listed, LOST_MS, needsSudo, newestInstall } from './install'
 import { type OwnerRun, ownerRun } from './owner'
 import { ReachFailure } from './ReachFailure'
 import type { Verdicted } from './useVerdict'
-import { sorted, startable, titleOf, type Verdict } from './verdict'
+import { chipOf, sorted, startable, surfaceOf, titleOf, type Verdict } from './verdict'
 import './Readiness.css'
 
 function CheckLine(props: { check: Check; machine: string; fix?: boolean; nightlyMac?: boolean }) {
   const { check, machine } = props
   const showFix = props.fix ?? true
   const fix = showFix && check.state === 'absent' ? fixOf(check, machine) : null
+  // The row is a list item by hand: its Fix disclosure owns the row's right end and its panel, which ListItem's `<li>` cannot hold.
   const line = (
-    <div className="machine__line">
-      <State size="small" state={rowMark(check)}>
-        {nameOf(check.check)}
-      </State>
-      <Text className="machine__word" scale="label-small">
-        {rowWord(check)}
-      </Text>
-      <Text className="machine__cause" scale="body-small" tone="variant">
-        {causeOf(check)}
-      </Text>
+    <div className="m3-list-item machine__line">
+      <span className="m3-list-item__leading machine__lead">
+        <State size="small" state={rowMark(check)}>
+          {''}
+        </State>
+      </span>
+      <span className="m3-list-item__text">
+        <span className="m3-list-item__headline">
+          {nameOf(check.check)}
+          <Text className="machine__word" scale="label-small">
+            {rowWord(check)}
+          </Text>
+        </span>
+        <Text className="m3-list-item__supporting machine__cause" scale="body-small" tone="variant">
+          {causeOf(check)}
+        </Text>
+      </span>
     </div>
   )
-  if (!fix) return <li className="machine__check">{line}</li>
+  if (!fix) return <li className="m3-list__row machine__check">{line}</li>
   const where =
     fix.by !== 'command'
       ? null
@@ -61,7 +71,7 @@ function CheckLine(props: { check: Check; machine: string; fix?: boolean; nightl
   // An older agent's words only repeat the command in the fix.
   const said = check.detail && !olderAgent(check) && !optionalAbsent(check) ? withoutMarkdown(withoutSignIn(check.detail)) : null
   return (
-    <li className="machine__check">
+    <li className="m3-list__row machine__check">
       <Disclosure action="Fix" className="machine__fixrow" summary={line}>
         <div className="machine__fix">
           <Text scale="body-small" tone="variant">
@@ -86,11 +96,11 @@ function CheckLine(props: { check: Check; machine: string; fix?: boolean; nightl
 
 function Checks(props: { checks: Check[]; machine: string; fix?: boolean; nightlyMac?: boolean }) {
   return (
-    <ul className="machine__checks">
+    <List className="machine__checks">
       {sorted(props.checks).map((check) => (
         <CheckLine check={check} fix={props.fix} key={check.check} machine={props.machine} nightlyMac={props.nightlyMac} />
       ))}
-    </ul>
+    </List>
   )
 }
 
@@ -185,7 +195,6 @@ export function ReadinessCard(props: {
   const [run, setRun] = useState<OwnerRun | null>(null)
   const opener = useRef<HTMLElement | null>(null)
   const [mic, setMic] = useState(false)
-  const micId = useId()
 
   const answered = fresh?.at
   const { mutate: ask } = recheck
@@ -254,31 +263,41 @@ export function ReadinessCard(props: {
   // The microphone is optional: on a machine that can start sessions its fix waits inside the closed Optional row.
   const inside = startable(verdict) && offerMic
   const micBox = (
-    <label className="readiness__mic" htmlFor={micId}>
-            <input checked={mic} id={micId} onChange={(event) => setMic(event.target.checked)} type="checkbox" />
-            <Text scale="label-large">Microphone</Text>
-          </label>
+    <List className="readiness__mic">
+      <ListItem
+        headline="Also set up the microphone"
+        trailing={<Switch checked={mic} label="Microphone" onCheckedChange={setMic} />}
+      />
+    </List>
   )
   const installButton = (
     <Button
-            // Until the first read, the newest result is unknown, and an older
-            // one would be taken for this press's answer.
-            disabled={install.isPending || notifications.isPending || nothingAsked}
-            onClick={press}
-            variant={verdict.kind === 'missing' ? 'filled' : 'tonal'}
-          >
-            {install.isPending
-              ? 'Starting…'
-              : verdict.kind === 'sudo' || (verdict.kind === 'missing' && verdict.result)
-                ? 'Install again'
-                : 'Install'}
-          </Button>
+      // Until the first read, the newest result is unknown, and an older
+      // one would be taken for this press's answer.
+      disabled={install.isPending || notifications.isPending || nothingAsked}
+      onClick={press}
+      variant={verdict.kind === 'missing' ? 'filled' : 'tonal'}
+    >
+      {install.isPending
+        ? 'Starting…'
+        : verdict.kind === 'sudo' || (verdict.kind === 'missing' && verdict.result)
+          ? 'Install again'
+          : 'Install'}
+    </Button>
   )
   const corner = !['asleep', 'expired', 'unasked', 'installing', 'pending'].includes(verdict.kind)
 
   return (
-    <Card aria-labelledby={eyebrow} className="machine__card readiness" data-verdict={verdict.kind}>
+    <Card
+      aria-labelledby={eyebrow}
+      className="machine__card readiness"
+      data-verdict={verdict.kind}
+      surface={surfaceOf(verdict)}
+    >
       <div className="readiness__head">
+        <span className="readiness__badge">
+          <Mark state={chipOf(verdict, null).state} />
+        </span>
         <div className="readiness__titles">
           <Eyebrow id={eyebrow}>Readiness</Eyebrow>
           {/* Polite: the verdict changes on its own when an install lands. */}
@@ -288,7 +307,7 @@ export function ReadinessCard(props: {
             emphasized
             id={heading}
             render={<h2 />}
-            scale="title-large"
+            scale="headline-medium"
             tabIndex={-1}
           >
             {titleOf(verdict, name)}
