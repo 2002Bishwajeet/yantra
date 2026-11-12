@@ -1,7 +1,7 @@
 # ADR-0037 — Continue is a handoff
 
 - **Date:** 2026-10-19
-- **Status:** Proposed 2026-10-19 ([Y-519](../../tracker.md)). The owner accepts or changes it.
+- **Status:** Accepted 2026-11-12 by the owner, as written ([Y-519](../../tracker.md)). Proposed 2026-10-19.
 - **Evidence:** [the continue-elsewhere plan](../plans/continue-elsewhere.md), and
   [R22](../research/22-claude-mem-shared-memory.md) for why the summary is Yantra's own.
 - **Amends** [ADR-0011](0011-claude-code-runs-as-a-tui-in-tmux.md) (a TUI may start with a prompt).
