@@ -76,8 +76,9 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
     }),
     session: false,
   },
+  // The agent's heartbeat, which carries the usage reports (Y-740).
   heartbeat: {
-    name: 'usage reports',
+    name: 'yantra-agent',
     fix: () => ({ by: 'hand', words: 'The join command offers Yantra’s agent, which reports CPU, memory and disk.' }),
     session: false,
   },
@@ -104,6 +105,10 @@ export function olderAgent(check: Pick<Check, 'check'> & Partial<Pick<Check, 'de
   const said = check.check === 'heartbeat' ? OLDER_AGENT.exec(check.detail ?? '') : null
   return said ? { agent: said[1] ?? null, daemon: said[2]! } : null
 }
+
+/** doctor.rs `unrunnable` (Y-740): claude is there, but the account that runs agents cannot run it. */
+export const unrunnable = (check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'>>): boolean =>
+  check.check === 'agent-cli' && /this account cannot run it/.test(check.detail ?? '')
 
 /** A check with no detail gets the fix its id names. */
 export function fixOf(check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'>>, machine: string): Fix | null {
@@ -146,10 +151,11 @@ export function causeOf(check: Pick<Check, 'check' | 'state'> & Partial<Pick<Che
   if (check.state !== 'absent') return 'could not be asked'
   if (noLoginServer(detail)) return 'no tmux server from a login'
   if (check.check === 'reachable') return SHORT_REACH[reachableFailure(detail)]
+  if (unrunnable(check)) return 'installed, but this account cannot run it'
   if (check.check === 'heartbeat') {
     const older = olderAgent(check)
-    if (!older) return 'no usage reports arrive'
-    return older.agent ? 'older than yantrad' : 'sends no version'
+    if (!older) return 'no reports arrive'
+    return older.agent ? `v${older.agent} installed, older than yantrad` : 'installed, older than yantrad'
   }
   return SHORT_ABSENT[check.check] ?? 'could not be asked'
 }

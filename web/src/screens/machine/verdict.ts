@@ -1,6 +1,6 @@
 import type { Check, CheckState, Event, Machine, Readiness } from '@/api'
 import type { Reading } from '@/api/client'
-import { answerFailure, INSTALLABLE, nameOf, noLoginServer, olderAgent, reachableFailure } from '@/lib/checks'
+import { answerFailure, INSTALLABLE, nameOf, noLoginServer, olderAgent, reachableFailure, unrunnable } from '@/lib/checks'
 import { blocking, isReady, missingBasics } from '@/lib/ready'
 import type { MarkState } from '@/m3/mark/Mark'
 import { answer, listed, needsSudo, newestInstall, type Watch } from './install'
@@ -19,7 +19,8 @@ export type Verdict =
   | { kind: 'changed'; detail: string }
   | { kind: 'unreachable'; detail: string }
   | { kind: 'sudo'; missing: string[]; result: Event }
-  | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean }
+  /** `installed`: each one is there, but this account cannot run it (Y-740). */
+  | { kind: 'missing'; missing: string[]; result: Event | null; fresh: boolean; installed?: true }
   | { kind: 'manual'; absent: Check[]; ready: boolean }
   | { kind: 'ready' }
 
@@ -49,7 +50,8 @@ export function verdictOf(input: {
   }
 
   const { checks } = readiness.data
-  const missing = missingBasics(readiness.data).map((one) => nameOf(one.check))
+  const basics = missingBasics(readiness.data)
+  const missing = basics.map((one) => nameOf(one.check))
   const fresh = watch ? answer(events, name, watch) : null
   if (watch && !fresh) return { kind: 'installing', missing }
 
@@ -63,7 +65,10 @@ export function verdictOf(input: {
   const stopped = fresh?.kind === 'install_stopped' ? fresh : null
   if (missing.length > 0) {
     if (stopped?.commands.some(needsSudo)) return { kind: 'sudo', missing, result: stopped }
-    return { kind: 'missing', missing, result: fresh ?? newestInstall(events, name) ?? null, fresh: fresh !== null }
+    const result = fresh ?? newestInstall(events, name) ?? null
+    return basics.every(unrunnable)
+      ? { kind: 'missing', missing, result, fresh: fresh !== null, installed: true }
+      : { kind: 'missing', missing, result, fresh: fresh !== null }
   }
 
   // ADR-0031 §1–2: with every basic there, a sudo step this press stopped is the
@@ -155,6 +160,7 @@ export function titleOf(verdict: Verdict, name: string): string {
     case 'sudo':
       return `${listed(verdict.missing)} ${be(verdict.missing, 'needs', 'need')} your password`
     case 'missing':
+      if (verdict.installed) return `${listed(verdict.missing)} is installed, but this account cannot run it`
       return `${listed(verdict.missing)} ${be(verdict.missing, 'is', 'are')} missing`
     case 'manual':
       // Both keychain checks miss one server on a Mac, and one command fixes both.
@@ -185,8 +191,10 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'installing':
       return { state: 'running', word: 'installing', error: false }
-    case 'sudo':
     case 'missing':
+      if (verdict.installed) return { state: 'needs', word: `${verdict.missing.length} to install`, error: false }
+      return { state: 'needs', word: `${verdict.missing.length} missing`, error: false }
+    case 'sudo':
       return { state: 'needs', word: `${verdict.missing.length} missing`, error: false }
     case 'manual':
       return verdict.ready

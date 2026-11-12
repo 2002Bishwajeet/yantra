@@ -14,6 +14,7 @@ import {
   reachWords,
   sessionNeeds,
   tookOf,
+  unrunnable,
   withoutSignIn,
 } from './checks'
 import { CHANGED_KEY, CHECK_RULE } from '@/test/sshSaid'
@@ -55,7 +56,7 @@ describe('the check name table', () => {
       'folder access',
       'agent hooks',
       'account without sudo',
-      'usage reports',
+      'yantra-agent',
     ])
   })
 
@@ -267,6 +268,22 @@ describe('how long a step took', () => {
   })
 })
 
+/** doctor.rs `unrunnable` (Y-740). */
+const UNRUNNABLE =
+  'claude is installed at /usr/local/bin/claude, but this account cannot run it. The file, or a directory it links through, is closed to this account. Install puts claude where this account can run it'
+
+describe('a claude this account cannot run (Y-740)', () => {
+  it('is known by the doctor’s sentence, and only on agent-cli', () => {
+    expect(unrunnable({ check: 'agent-cli', detail: UNRUNNABLE })).toBe(true)
+    expect(unrunnable({ check: 'agent-cli', detail: 'claude is not on PATH or in any of: /usr/bin' })).toBe(false)
+    expect(unrunnable({ check: 'tmux', detail: UNRUNNABLE })).toBe(false)
+  })
+
+  it('keeps Install as its fix', () => {
+    expect(fixOf({ check: 'agent-cli', detail: UNRUNNABLE }, 'hub')).toEqual({ by: 'install' })
+  })
+})
+
 describe('the short cause of a check (Y-733)', () => {
   const words = (said: string) => said.split(/\s+/).filter(Boolean).length
   const details = [
@@ -278,6 +295,7 @@ describe('the short cause of a check (Y-733)', () => {
     'requires an additional check',
     'yantra-agent here is v0.3.2 and yantrad is v0.11.1-nightly.20261111000000.abc1234. Update it on pi: `curl x | bash`',
     'yantra-agent here sends no version, so it predates yantrad v0.11.0. Update it on pi: `curl x | bash`',
+    UNRUNNABLE,
   ]
 
   it('says each id in eight words or fewer, absent or unknown, with no backtick', () => {
@@ -301,9 +319,12 @@ describe('the short cause of a check (Y-733)', () => {
     expect(absent('provider-auth')).toBe('gh not signed in')
     expect(absent('login-session')).toBe('claude not signed in')
     expect(absent('login-session', NO_SERVER)).toBe('no tmux server from a login')
-    expect(absent('heartbeat')).toBe('no usage reports arrive')
-    expect(absent('heartbeat', details[7]!)).toBe('sends no version')
-    expect(absent('heartbeat', details[6]!)).toBe('older than yantrad')
+    expect(absent('heartbeat')).toBe('no reports arrive')
+    expect(absent('heartbeat', details[7]!)).toBe('installed, older than yantrad')
+    expect(absent('heartbeat', details[6]!)).toBe('v0.3.2 installed, older than yantrad')
+    expect(absent('agent-cli')).toBe('not found')
+    expect(absent('agent-cli', UNRUNNABLE)).toBe('installed, but this account cannot run it')
+    expect(absent('folder-access')).toBe('macOS blocks your folders')
     expect(absent('reachable', 'Permission denied (publickey).')).toBe('key refused')
     expect(absent('reachable', 'ssh: names no account')).toBe('no account named')
     expect(absent('reachable', 'connection timed out')).toBe('ssh cannot reach it')

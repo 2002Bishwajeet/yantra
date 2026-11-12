@@ -147,6 +147,17 @@ describe('the machine page’s verdict', () => {
     expect(startable(v)).toBe(false)
   })
 
+  /** Y-740: the hub's claude links into a home the daemon's account cannot read. */
+  it('says a claude this account cannot run is installed, and still offers Install', () => {
+    const detail = 'claude is installed at /usr/local/bin/claude, but this account cannot run it. Install puts claude where this account can run it'
+    const v = verdict(all({ 'agent-cli': 'absent' }, { 'agent-cli': detail }))
+    expect(v).toEqual({ kind: 'missing', missing: ['claude'], result: null, fresh: false, installed: true })
+    expect(titleOf(v, 'pi')).toBe('claude is installed, but this account cannot run it')
+    expect(chipOf(v, null)).toEqual({ state: 'needs', word: '1 to install', error: false })
+    const both = verdict(all({ tmux: 'absent', 'agent-cli': 'absent' }, { 'agent-cli': detail }))
+    expect(chipOf(both, null).word).toBe('2 missing')
+  })
+
   /** Y-402 review: the machines-list card reads `lib/ready`'s
    *  `missingBasics` too, and the two must not disagree about a basic the
    *  report never asked about — `git` is left out of this report entirely. */

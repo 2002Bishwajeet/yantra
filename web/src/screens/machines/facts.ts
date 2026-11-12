@@ -7,7 +7,7 @@ import type {
   Session,
   Workspace,
 } from '@/api'
-import { olderAgent, sessionNeeds } from '@/lib/checks'
+import { olderAgent, sessionNeeds, unrunnable } from '@/lib/checks'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** The four a machine card draws; the machine page draws all ten. */
@@ -58,9 +58,12 @@ export const rowMark = (check: Check): MarkState =>
 
 export function rowWord(check: Check): string {
   if (optionalAbsent(check)) return 'optional'
-  // Y-713: the agent reports, so *missing* would be false.
-  const older = olderAgent(check)
-  if (older) return older.agent ? `older · v${older.agent}` : 'older · no version'
+  // Y-713, Y-740: each of these is installed, so *missing* would be false.
+  if (olderAgent(check)) return 'update'
+  // No beat says only that nothing arrived, not that the agent is absent.
+  if (check.check === 'heartbeat' && check.state === 'absent') return 'silent'
+  if (unrunnable(check)) return 'no access'
+  if (check.check === 'folder-access' && check.state === 'absent') return 'blocked'
   return wordOf(check.state)
 }
 

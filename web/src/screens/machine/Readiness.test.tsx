@@ -552,14 +552,15 @@ describe('the Readiness card', () => {
     const said = { heartbeat: `yantra-agent here is v0.3.2 and yantrad is v0.11.0. Update it on pi: \`${command}\`` }
     await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'yantra-agent on pi is v0.3.2; yantrad is v0.11.0' })).toBeTruthy()
-    expect(card().getByText('older · v0.3.2')).toBeTruthy()
+    expect(card().getByText('update')).toBeTruthy()
+    expect(card().getByText('v0.3.2 installed, older than yantrad')).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing/)
     expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
     expect(card().queryByText(command)).toBeNull()
     pressFix()
     expect(card().getByText('Run this on pi:')).toBeTruthy()
     expect(card().getByText(command)).toBeTruthy()
-    expect(card().getByRole('button', { name: 'Copy the command that fixes usage reports' })).toBeTruthy()
+    expect(card().getByRole('button', { name: 'Copy the command that fixes yantra-agent' })).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
   })
 
@@ -569,7 +570,8 @@ describe('the Readiness card', () => {
     const said = { heartbeat: 'yantra-agent here sends no version, so it predates yantrad v0.11.0. Update it on pi: `curl x | bash`' }
     await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'yantra-agent on pi is older than yantrad v0.11.0' })).toBeTruthy()
-    expect(card().getByText('older · no version')).toBeTruthy()
+    expect(card().getByText('update')).toBeTruthy()
+    expect(card().getByText('installed, older than yantrad')).toBeTruthy()
   })
 
   /** Y-591: a warning with the fix and its cost, and never a block on a session. */
