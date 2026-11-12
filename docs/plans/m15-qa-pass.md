@@ -51,7 +51,7 @@ Record the box: architecture, OS, and how you reach it. `http://<tailscale-ip>:7
 
 The first release `install.sh` can install. It has been inert since #282 by design.
 
-- [ ] `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash`
+- [ ] `curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | bash`
       → it resolves v0.12.0 on its own. **You name no version.**
 - [ ] It prints the checksum it verified. → the archive is checked before anything is written.
 - [ ] It creates the `yantra` account and installs three binaries to `/usr/local/bin`.

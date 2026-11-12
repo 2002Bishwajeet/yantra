@@ -34,27 +34,35 @@ One command, on the box, as the account you log in with — **not** as root. The
 for the steps that need it.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | bash
 ```
 
 Debian 13 ships `wget` and no `curl`. Use this form there; the script installs `curl` with `apt-get`
 before it goes on:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash
+wget -qO- https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | bash
 ```
 
 Read it first if you would rather — it is one file:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh -o install.sh
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh -o install.sh
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/SHA256SUMS -o SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
 less install.sh
 bash install.sh
 ```
 
-**Take it from `main` or from the v0.12.0 tag.** A copy from v0.2.0 or earlier is the script before
-Y-384: it asks nothing and starts nothing. [Y-159](../tracker.md) gives the script a name that resolves off the tailnet; until
-then the URL is GitHub's.
+**The URL is the latest stable release's own copy of the script, never a branch**
+([Y-787](../tracker.md)). A merge to `main` does not change what the command runs; only a release
+does. `SHA256SUMS` lists `install.sh`, so the owner's signature of that file covers the script too
+([Sign a release](#sign-a-release)).
+
+**The first release after v0.12.0 is the first that publishes the script.** v0.12.0 has no
+`install.sh` asset, so the URL answers 404 until that release exists.
+[Y-159](../tracker.md) gives the script a name that resolves off the tailnet; until then the URL is
+GitHub's.
 
 **Every device you use with Yantra must be on one tailnet**, logged in with the same Tailscale
 account. The script says so first, because the dashboard cannot exist before the box is on it:
@@ -248,14 +256,14 @@ amendments.** There are two channels:
 - **stable**, the default: each `v*` tag, read through `/releases/latest`. The owner signs it
   ([Sign a release](#sign-a-release)).
 - **nightly**: the build of the latest merge to `main`. It is one rolling pre-release, tagged
-  `nightly`, with the two Linux archives only. Its version reads like
+  `nightly`, with the two Linux archives and its own copy of `install.sh`. Its version reads like
   `0.10.4-nightly.20261110143205.abc1234`. **Nobody signs it**, and the build loop merges to `main`
   with no owner review.
 
 **Only a person at a terminal installs a nightly, and names it each time:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --channel nightly
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/download/nightly/install.sh | bash -s -- --channel nightly
 sudo yantra-update --channel nightly      # on a box that has Yantra
 yantra update --check --channel nightly   # says what is published, and installs nothing
 ```
@@ -336,8 +344,8 @@ real systemd ([Y-158](../tracker.md#3-task-board)).
 `YANTRA_YES=1` does the same:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --yes
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_YES=1 bash
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | bash -s -- --yes
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | YANTRA_YES=1 bash
 ```
 
 The run then does what a yes at a terminal does: it installs Tailscale, logs the box in, turns on
@@ -345,7 +353,7 @@ HTTPS, starts the units and ends on the dashboard's URL. Without a key, `tailsca
 login URL and waits for someone to open it. To log in with no one there, give it an auth key:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | TS_AUTHKEY=tskey-auth-… bash -s -- --yes
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | TS_AUTHKEY=tskey-auth-… bash -s -- --yes
 ```
 
 - **The key is never written to disk.** The script pipes it to
@@ -365,7 +373,7 @@ curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.
   makes first:
 
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_ACCOUNT=<account> bash -s -- --yes
+  curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | YANTRA_ACCOUNT=<account> bash -s -- --yes
   ```
 
 - **`--uninstall` ignores `--yes`.** Its questions are default no, and `--yes` never deletes
@@ -439,11 +447,14 @@ gh release upload v<V> --repo 2002Bishwajeet/yantra SHA256SUMS.sig
 - `install.sh` carries the public key in `RELEASE_KEY`. It runs `ssh-keygen -Y verify` on
   `SHA256SUMS` before `sha256sum -c`, and it refuses to install on a machine with no `ssh-keygen`.
   `SHA256SUMS` covers the archive, and the archive holds the updater and the units.
+- `SHA256SUMS` also covers `install.sh`, the copy that the release publishes for the first install
+  ([Y-787](../tracker.md)). So one signature covers the script and the archives.
 - **A script that carries a key installs a release only after `SHA256SUMS.sig` is uploaded.** With
   no signature, or with another key's signature, it installs nothing. The root unit runs the same
   script, so the dashboard's update waits for the signature too.
 - **A script that carries no key says so.** `RELEASE_KEY` is empty until [Y-798](../tracker.md)
-  puts the owner's public key on `main`. The script then prints
+  puts the owner's public key on `main`. A release's copy carries the key from the first release
+  cut after that. A script with no key prints
   `this installer carries no release key, so no signature was checked` and checks the checksum
   alone.
 - The nightly has no signature ([Stable and nightly](#stable-and-nightly)).
@@ -461,7 +472,7 @@ The macOS archives carry none: they ship `yantra-agent` alone and no systemd rea
 account logged in at the Mac, and name the daemon's tailnet address:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_DAEMON=<address>:7717 bash
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | YANTRA_DAEMON=<address>:7717 bash
 ```
 
 It needs no root, and it refuses to run as root. It writes the binary to `~/.local/bin/yantra-agent`
@@ -494,10 +505,12 @@ does, so an agent never passes the daemon (ADR-0013: the daemon goes first). On 
 machine, run it as an account with sudo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_VERSION=<daemon version> bash -s -- --agent
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | YANTRA_VERSION=<daemon version> bash -s -- --agent
 ```
 
 A nightly has no tag to pin, so under a nightly daemon the command names `--channel nightly` instead.
+It also fetches the nightly's own script, `releases/download/nightly/install.sh`, because that
+script matches the archive it installs.
 A Mac drops `-s -- --agent`. A nightly has no macOS archive, so under a nightly daemon a Mac is held
 to the stable release that nightly builds on, one patch below it.
 
@@ -512,7 +525,7 @@ and `yantra-agent.service`, keeps `/etc/yantra/agent.env` and restarts the agent
 **[Y-407](../tracker.md):** `install.sh --uninstall`, or piped the same way the install itself is:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --uninstall
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | bash -s -- --uninstall
 ```
 
 **It always** stops and disables `yantrad.service`, `yantra-agent.service` and the two update units,
@@ -539,7 +552,7 @@ what was kept, and a reinstall with the same script picks up where it left off f
 **This is not how you switch versions.** Install over the current release and restart:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_VERSION=0.3.0 bash
+curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | YANTRA_VERSION=0.3.0 bash
 sudo systemctl restart yantrad yantra-agent
 ```
 

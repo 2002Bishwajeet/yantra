@@ -187,7 +187,8 @@ jobs:
   pinned:
     # A tag is mutable and an action runs with the job's token, so `release.yml`
     # taking one would put a stranger's code next to a `contents: write`. Needs
-    # no toolchain: it reads the workflows.
+    # no toolchain: it reads the workflows. Y-787: it also reads every file for
+    # an install.sh fetched from a branch, so it runs on a docs-only change too.
     name: pinned
     runs-on: ubuntu-24.04
     steps:

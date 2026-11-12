@@ -127,6 +127,21 @@ pinned:
     fi
     echo "pinned: every action names a commit"
 
+    # Y-787: a branch moves with every merge, and these commands pipe the script
+    # into a root shell. A release asset, a version tag and Homebrew's own installer pass.
+    fetched=$(git grep -n --untracked -oE '(raw\.githubusercontent\.com|github\.com)/[^[:space:]"`)>]*install\.sh') || [ $? -eq 1 ]
+    branch=$(echo "$fetched" \
+      | grep -vE 'github\.com/[^[:space:]]*/releases/(latest/download|download/[^/]+)/install\.sh$' \
+      | grep -vE 'raw\.githubusercontent\.com/[^/]+/[^/]+/v[0-9$][^/]*/install\.sh$' \
+      | grep -vF 'raw.githubusercontent.com/Homebrew/install/HEAD/install.sh' || true)
+
+    if [ -n "$branch" ]; then
+      echo "pinned: these fetch install.sh from a branch rather than a release:" >&2
+      echo "$branch" >&2
+      exit 1
+    fi
+    echo "pinned: every install.sh comes from a release"
+
 # Codex, Grok and opencode read AGENTS.md, not CLAUDE.md (ADR-0033), so each one is a symlink to the rules.
 agents:
     #!/usr/bin/env bash
