@@ -578,6 +578,21 @@ pub(crate) async fn allowed_socket<I: Inventory>(
     }
 }
 
+/// [`allowed_socket`] for the owner terminal, which is an admin shell: a live
+/// session cookie and nothing else (ADR-0046 §2.6). The socket's own account
+/// presents none, so it is refused as a caller with no cookie is.
+pub(crate) async fn signed_in_socket<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    peer: &Peer,
+    headers: &HeaderMap,
+) -> Result<(Caller, tokio::sync::watch::Receiver<bool>), Refused> {
+    match identify(authoriser, peer, headers).await? {
+        Who::Owner(caller, Some(session)) => Ok((caller, authoriser.passkeys.ended(&session.id))),
+        Who::Owner(_, None) => Err(Refused::SignIn),
+        Who::Agent { .. } => Err(Refused::AgentScope),
+    }
+}
+
 /// Runs a socket's bridge until its session is revoked. Dropping the bridge
 /// drops the socket, which closes it.
 pub(crate) async fn until_revoked(

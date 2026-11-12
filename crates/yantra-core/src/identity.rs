@@ -322,6 +322,19 @@ pub fn usable_user(user: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
+/// The `authorized_keys` line that lets this key log in to the owner's admin
+/// account from `addresses` alone (ADR-0046 §2). The owner appends it by hand;
+/// Yantra never writes that file.
+pub fn owner_line(public_key: &str, addresses: &[std::net::IpAddr]) -> String {
+    let mut from: Vec<String> = Vec::new();
+    for address in addresses.iter().map(ToString::to_string) {
+        if !from.contains(&address) {
+            from.push(address);
+        }
+    }
+    format!("from=\"{}\" {}", from.join(","), public_key.trim())
+}
+
 /// A tailnet machine name is a DNS label, and anything else here would be a
 /// `Host` pattern (`*`, `!`) rather than a name.
 fn usable_label(machine: &str) -> bool {
@@ -682,6 +695,20 @@ mod tests {
             );
         }
         assert!(!dir.exists(), "refused before anything was written");
+    }
+
+    /// One `from=` for every address, each once, v4 and v6 alike, and the key
+    /// after it as `ssh-keygen` wrote it.
+    #[test]
+    fn the_owner_line_limits_the_key_to_the_hub() {
+        let addresses: Vec<std::net::IpAddr> = ["100.64.0.1", "fd7a:115c:a1e0::1", "100.64.0.1"]
+            .iter()
+            .map(|a| a.parse().expect("an address"))
+            .collect();
+        assert_eq!(
+            owner_line("ssh-ed25519 AAAAC3Nza yantra@hub\n", &addresses),
+            "from=\"100.64.0.1,fd7a:115c:a1e0::1\" ssh-ed25519 AAAAC3Nza yantra@hub"
+        );
     }
 
     #[test]

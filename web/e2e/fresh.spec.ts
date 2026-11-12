@@ -84,6 +84,9 @@ const MACHINE_PAGE: Record<string, Expect> = {
   Check: text('Ready for sessions', 'Not checked yet'),
   'New session': url('/new'),
   Show: expanded,
+  Copy: text('Copied'),
+  // A fresh browser has no admin account kept, so the press asks for one.
+  'Open owner terminal': text('Name the admin account first', 'The account you use sudo as. Kept in this browser.'),
 }
 
 const PRESSES: Record<string, Record<string, Expect>> = {

@@ -113,6 +113,15 @@ describe('the socket wrapper', () => {
     )
   })
 
+  it('names the owner terminal by its machine and the admin account, encoded', () => {
+    expect(terminalAddress({ machine: 'pi', owner: 'biswa' })).toBe(
+      `ws://127.0.0.1:${daemonised.port}/api/machines/pi/owner/terminal?as=biswa`,
+    )
+    expect(terminalAddress({ machine: 'pi', owner: 'a&b c' })).toBe(
+      `ws://127.0.0.1:${daemonised.port}/api/machines/pi/owner/terminal?as=a%26b%20c`,
+    )
+  })
+
   it('sends the size frame first, from the size it was given', async () => {
     const { links } = attach()
 

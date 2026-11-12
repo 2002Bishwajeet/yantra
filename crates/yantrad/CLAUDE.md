@@ -670,6 +670,14 @@ closes, and the browser never reopens it, because a reopened socket runs the com
 password is typed there**, so Q5's rule below binds hardest on this route: a test drives a real
 `ssh` under a real pty and asserts that neither what was typed nor what was printed reaches the log.
 
+**A fourth address is the owner terminal, and it runs no command**
+([ADR-0046](../../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md) decision 2, Y-701).
+`GET /api/machines/{machine}/owner/terminal?as=<admin>` opens `ssh -tt <admin>@<machine>`, the
+admin account's login shell, with no tmux. It calls `signed_in_socket()`, not `allowed_socket()`:
+only a live session cookie passes, so the socket's own account is 401 and an agent token is 403.
+The machine and `as` reach `ssh`'s argv, so each is a `400` before the upgrade (I-63). It ends on
+`{"exit": n}` as the one-off does, and Q5 binds it as hard: sudo's password is typed there.
+
 **The frames carry no envelope, because the protocol already carries two kinds.** Binary is terminal
 bytes, in both directions. Text is control: from the browser it is `{"rows":…,"cols":…,"term":…}`,
 and it must arrive **before** anything else, because a pty is opened with a window and a terminal and

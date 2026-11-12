@@ -10,9 +10,9 @@
 //! tmux path for that host (I-34), the session spelled so a login `zsh` cannot
 //! glob it (I-35) and a `TERM` the far side has (I-36, I-43); this runs what
 //! [`attach::remote_command`] renders from those, over the same multiplexed
-//! socket as every other ssh Yantra opens (I-20, I-28). [`run`] is the one
-//! exception, and it runs a command an install left rather than one it writes
-//! (ADR-0030).
+//! socket as every other ssh Yantra opens (I-20, I-28). [`run`] and [`login`]
+//! are the exceptions: one runs a command an install left rather than one it
+//! writes (ADR-0030), and the other runs no command at all (ADR-0046).
 //!
 //! **Reconnecting is opening another one.** tmux draws the pane's current
 //! contents for every client that attaches — measured, alternate screen
@@ -127,7 +127,7 @@ fn started(plan: Plan, size: Size) -> Result<Terminal, Error> {
 /// The testable half — everything after the plan is resolved.
 pub fn on(ssh: &Ssh, plan: &Plan, size: Size) -> Result<Terminal, Error> {
     let remote = attach::remote_command(&plan.tmux.command(), &plan.session, plan.term.term());
-    spawned(ssh, &remote, plan.term.term(), size)
+    spawned(ssh.tty_argv(&remote)?, plan.term.term(), size)
 }
 
 /// Y-394 ([ADR-0030]): `command` on `machine` under a terminal of its own, with
@@ -147,16 +147,32 @@ pub async fn run(machine: &str, command: &str, term: &str, size: Size) -> Result
 /// and the command in single quotes, so a login `zsh` or `fish` parses none of
 /// it (I-35).
 pub fn run_on(ssh: &Ssh, command: &str, term: &str, size: Size) -> Result<Terminal, Error> {
-    spawned(ssh, &run_command(command, term), term, size)
+    spawned(ssh.tty_argv(&run_command(command, term))?, term, size)
+}
+
+/// Y-701 ([ADR-0046] §2): `user`'s own login shell on `machine`, with no
+/// command and no tmux. It is the owner's admin account, where sudo asks for
+/// the owner's password.
+///
+/// [ADR-0046]: ../../../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md
+pub async fn login(machine: &str, user: &str, term: &str, size: Size) -> Result<Terminal, Error> {
+    let mut machine = ssh::machine_at(machine).ok_or(attach::Error::NoStateDir)?;
+    machine.user = Some(user.to_owned());
+    let ssh = Ssh::new(machine)?;
+    let chosen = terminfo::choose(&ssh, term).await?;
+    login_on(&ssh, chosen.term(), size)
+}
+
+/// The testable half of [`login`]. `ssh` sends `term` with its pty request.
+pub fn login_on(ssh: &Ssh, term: &str, size: Size) -> Result<Terminal, Error> {
+    spawned(ssh.login_argv()?, term, size)
 }
 
 pub(crate) fn run_command(command: &str, term: &str) -> String {
     format!("TERM={term} /bin/sh -c {}", tmux::sq(command))
 }
 
-fn spawned(ssh: &Ssh, remote: &str, term: &str, size: Size) -> Result<Terminal, Error> {
-    let argv = ssh.tty_argv(remote)?;
-
+fn spawned(argv: Vec<String>, term: &str, size: Size) -> Result<Terminal, Error> {
     let pair = native_pty_system()
         .openpty(window(size))
         .map_err(|e| Error::Open(format!("{e:#}")))?;

@@ -256,3 +256,71 @@ test.describe('the problems on a machine page', () => {
     await screenshot(page, 'machine', 'problems', size)
   })
 })
+
+/* Y-701, ADR-0046 §2: the owner terminal, at 390 px and at the desktop. The
+   fixture's shell asks for a password on `sudo` and echoes none of it. */
+test.describe('the owner terminal on a machine', () => {
+  test.skip(({ size }) => size === 'tablet', 'the phone and the desktop are the two sheets')
+
+  test.beforeEach(async ({ page }) => {
+    await scenario(page, 'busy')
+    await page.goto('/m/cachyos-g14')
+    await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('refuses a bad name inline, and keeps a good one for the machine', async ({ page }) => {
+    const owner = card(page, 'Owner terminal')
+    await owner.getByRole('button', { name: 'Open owner terminal' }).click()
+    await expect(owner.getByText('Name the admin account first')).toBeVisible()
+    const field = owner.getByRole('textbox', { name: 'Admin account' })
+    await field.fill('-x')
+    await expect(owner.getByText('An account name cannot start with - or .')).toBeVisible()
+    await field.fill('owner')
+    await expect(owner.getByText(/cannot start/)).toHaveCount(0)
+    await page.reload()
+    await expect(card(page, 'Owner terminal').getByRole('textbox', { name: 'Admin account' })).toHaveValue('owner')
+  })
+
+  test('shows the authorized_keys line with from=, and fits the screen', async ({ page, size }) => {
+    const owner = card(page, 'Owner terminal')
+    if (size === 'phone') await owner.getByRole('button', { name: /^Show/ }).click()
+    await expect(owner.getByText(/^from="/)).toBeVisible()
+    await expect(owner.getByRole('button', { name: 'Copy the authorized_keys line' })).toBeVisible()
+    if (size === 'phone') {
+      const open = owner.getByRole('button', { name: 'Open owner terminal' })
+      expect((await open.boundingBox())!.height).toBeGreaterThanOrEqual(40)
+    }
+    await fits(page)
+    await axe(page)
+  })
+
+  test('runs sudo with the password as keystrokes, and ends with the shell', async ({ page, size }) => {
+    const owner = card(page, 'Owner terminal')
+    await owner.getByRole('textbox', { name: 'Admin account' }).fill('owner')
+    await owner.getByRole('button', { name: 'Open owner terminal' }).click()
+
+    const name = 'owner on cachyos-g14'
+    const sheet = size === 'phone' ? page.getByRole('dialog', { name }) : page.getByRole('complementary', { name })
+    await expect(sheet).toBeVisible()
+    await expect(sheet.locator('.xterm-rows')).toContainText('owner@cachyos-g14:~$', { timeout: 15_000 })
+    await axe(page)
+
+    await sheet.locator('.xterm-helper-textarea').focus()
+    // Escape is the shell's inside the sheet: closing on it would hang up sudo.
+    await page.keyboard.press('Escape')
+    await expect(sheet).toBeVisible()
+    await page.keyboard.type('sudo id -u')
+    await page.keyboard.press('Enter')
+    await expect(sheet.locator('.xterm-rows')).toContainText('password for owner')
+    await page.keyboard.type('hunter2')
+    await page.keyboard.press('Enter')
+    await expect(sheet.locator('.xterm-rows')).not.toContainText('hunter2')
+    await page.keyboard.type('exit')
+    await page.keyboard.press('Enter')
+    await expect(sheet.getByText('The shell ended.')).toBeVisible({ timeout: 15_000 })
+    await expect(sheet.getByRole('status').first()).toContainText('exited 0')
+
+    await sheet.getByRole('button', { name: size === 'phone' ? 'Close' : `Close ${name}` }).click()
+    await expect(sheet).toBeHidden()
+  })
+})

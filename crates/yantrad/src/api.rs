@@ -168,7 +168,9 @@ async fn ssh_identity(State(fleet): State<Fleet>) -> Response {
     // `ssh-keygen -l` is a subprocess, so off the worker (I-13).
     let described = tokio::task::spawn_blocking(move || identity::describe_in(&dir)).await;
     match described {
-        Ok(Ok(Some(identity))) => Json(SshIdentity::of(&identity)).into_response(),
+        Ok(Ok(Some(identity))) => {
+            Json(SshIdentity::of(&identity, &fleet.facts.listening_on)).into_response()
+        }
         Ok(Ok(None)) => (
             StatusCode::NOT_FOUND,
             Json(Missing {
@@ -775,15 +777,19 @@ pub(crate) struct SshIdentity {
     pub(crate) kind: String,
     pub(crate) public_key: String,
     pub(crate) fingerprint: String,
+    /// The `authorized_keys` line for an owner terminal (ADR-0046 §2.2).
+    pub(crate) owner_line: String,
 }
 
 impl SshIdentity {
-    fn of(identity: &identity::Identity) -> Self {
+    fn of(identity: &identity::Identity, listening_on: &[SocketAddr]) -> Self {
+        let hub: Vec<_> = listening_on.iter().map(SocketAddr::ip).collect();
         Self {
             path: identity.path.display().to_string(),
             kind: identity.kind.clone(),
             public_key: identity.public_key.clone(),
             fingerprint: identity.fingerprint.clone(),
+            owner_line: identity::owner_line(&identity.public_key, &hub),
         }
     }
 }
@@ -1046,6 +1052,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 kind: "ed25519".to_owned(),
                 public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra".to_owned(),
                 fingerprint: "SHA256:<fingerprint>".to_owned(),
+                owner_line: "from=\"100.64.0.1,fd7a:115c:a1e0::1\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra".to_owned(),
             }),
         ),
     ]
@@ -2835,7 +2842,10 @@ pub(crate) mod tests {
         let with_dir = |dir: &std::path::Path| Fleet {
             facts: Arc::new(crate::heartbeat::Facts {
                 started: std::time::Instant::now(),
-                listening_on: Vec::new(),
+                listening_on: vec![
+                    "100.64.0.1:7717".parse().expect("an address"),
+                    "[fd7a:115c:a1e0::1]:7717".parse().expect("an address"),
+                ],
                 ssh_dir: dir.to_owned(),
                 ssh_state: std::path::PathBuf::new(),
                 relay: false,
@@ -2867,6 +2877,13 @@ pub(crate) mod tests {
                 .as_str()
                 .is_some_and(|f| f.starts_with("SHA256:")),
             "{body}"
+        );
+        assert_eq!(
+            body["owner_line"],
+            json!(format!(
+                "from=\"100.64.0.1,fd7a:115c:a1e0::1\" {}",
+                prepared.public_key
+            ))
         );
         assert!(!body.to_string().contains("PRIVATE"));
 
