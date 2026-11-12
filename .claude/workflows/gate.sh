@@ -83,7 +83,9 @@ run)
   exec 9>"${XDG_RUNTIME_DIR:-/tmp}/yantra-gate.lock"
   flock 9
   cd "$wt"
-  exec systemd-run --user --scope -q -p MemoryMax="$mem" nice -n 10 bash -c "$command"
+  # Y-799: other projects' agents on this laptop take the same machine-wide lock for their heavy commands.
+  heavy=(); [ -x ~/.claude/bin/heavy ] && heavy=(~/.claude/bin/heavy)
+  exec "${heavy[@]}" systemd-run --user --scope -q -p MemoryMax="$mem" nice -n 10 bash -c "$command"
   ;;
 
 *)
