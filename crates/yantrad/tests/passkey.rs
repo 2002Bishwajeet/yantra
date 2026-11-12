@@ -25,6 +25,10 @@ use common::{Systemd, UNPRIVILEGED, repo_root};
 const SOCKET: &str = "/run/yantra/yantrad.sock";
 const FILE: &str = "/home/yantra/.config/yantra/passkeys.toml";
 const PHONE: &str = "100.64.0.9";
+/// The owner's second device.
+const MAC: &str = "100.64.0.8";
+/// An address `whois` does not know.
+const STRANGER: &str = "100.64.0.7";
 const COOKIE: &str = "__Host-yantra_session";
 
 /// A WebSocket on the socket as the `serve` hop's root, from the owner's phone
@@ -265,6 +269,13 @@ impl Hub {
         self.curl("root", method, path, &headers, body)
     }
 
+    /// Half of a ceremony through the `serve` hop from `address`, with no cookie.
+    fn ceremony_from(&self, address: &str, half: &str, body: Option<&Value>) -> Result<Answer> {
+        let from = format!("X-Forwarded-For: {address}");
+        let path = format!("/api/passkey/{half}");
+        self.curl("root", "POST", &path, &[from], body)
+    }
+
     /// A code from `user` on the socket.
     fn code(&self, user: &str) -> Result<Answer> {
         self.curl(user, "POST", "/api/passkey/code", &[], None)
@@ -325,7 +336,8 @@ impl Hub {
 }
 
 /// Self at 127.0.0.1, the one address the daemon binds here, and `whois`
-/// naming Self there and the owner's phone at [`PHONE`]. The node's name.
+/// naming Self there, the owner's phone at [`PHONE`] and the owner's Mac at
+/// [`MAC`]. The node's name.
 fn tailnet(systemd: &Systemd) -> Result<String> {
     let fixtures = repo_root().join("crates/yantra-core/tests/fixture");
     let mut status: Value = serde_json::from_str(&std::fs::read_to_string(
@@ -341,6 +353,7 @@ fn tailnet(systemd: &Systemd) -> Result<String> {
     for (address, id) in [
         ("127.0.0.1", status["Self"]["ID"].clone()),
         (PHONE, json!("nPHONE0000011CNTRL")),
+        (MAC, json!("nMAC000000011CNTRL")),
     ] {
         let mut answer = whois.clone();
         answer["Node"]["StableID"] = id;
@@ -390,13 +403,34 @@ fn a_write_needs_the_owners_passkey() -> Result<()> {
         assert_ne!(answer.status, 403, "{open}: {}", answer.body);
     }
 
+    // Y-789: a caller that is not the owner's own node reaches no half of a
+    // ceremony.
+    for half in [
+        "register/start",
+        "register/finish",
+        "login/start",
+        "login/finish",
+    ] {
+        let stranger = hub.ceremony_from(STRANGER, half, None)?;
+        assert_eq!(stranger.status, 403, "{half}: {}", stranger.body);
+        let path = format!("/api/passkey/{half}");
+        let other = hub.curl(UNPRIVILEGED, "POST", &path, &[], None)?;
+        assert_eq!(other.status, 403, "{half}: {}", other.body);
+    }
+
     // (b) A code from the yantra uid enrols once; a code from another uid is
-    //     refused, and a used code is refused.
+    //     refused, and a used code is refused. Five wrong codes from the Mac
+    //     leave the code open for the phone (Y-789).
     let refused = hub.code(UNPRIVILEGED)?;
     assert_eq!(refused.status, 403, "{}", refused.body);
     let code = hub.code("yantra")?;
     assert_eq!(code.status, 200, "{}", code.body);
     let code = code.json()?["code"].as_str().context("a code")?.to_owned();
+    for _ in 0..5 {
+        let guess = json!({ "code": "WRONGONE", "device": "Mac" });
+        let wrong = hub.ceremony_from(MAC, "register/start", Some(&guess))?;
+        assert_eq!(wrong.status, 401, "{}", wrong.body);
+    }
     let mut phone = SoftPasskey::new(true);
     let enrolled = hub.enrol(&mut phone, &code, "iPhone")?;
     assert_eq!(enrolled.status, 200, "{}", enrolled.body);
