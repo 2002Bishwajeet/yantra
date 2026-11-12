@@ -134,3 +134,17 @@ they leave the research preview. A room that survives a restart.
 > side, 30 agent messages by default, and only a person on that side resets it. Decision 5: in a guest
 > room the default policy is *Trusted friend* (`acceptEdits` at most, owner messages out unless the
 > `gitleaks` scan matches); the *Strict* policy keeps the text above. The rest of this ADR stands.
+
+> **Decision 2 narrowed 2026-11-12 ([Y-784](../../tracker.md), owner): an agent token reaches only
+> rooms its own workspace defines.** The 2026-11-12 security audit (F-08) found that the code read
+> decision 2 as letting agents make and share rooms that no workspace defines. That disagrees with
+> [ADR-0044](0044-a-write-needs-the-owners-passkey.md) decision 12, and it let a token reach threads
+> of another workspace. The owner decided on 2026-11-12 that **ADR-0044 decision 12 holds**. A
+> token's room tools reach a room only when the room's definition names the token's workspace. A
+> room shared across workspaces exists only when the owner makes it and lists its workspaces in the
+> room file ([ADR-0039](0039-a-room-is-a-shared-project.md)). An agent cannot make a room. The rest
+> of decision 2 stands: the two tools, the transport and the header.
+>
+> **What changed upstream of the reasoning:** this ADR predates both the room's home workspace
+> (ADR-0039) and the agent token bound to one workspace (ADR-0044). Once a caller has a workspace,
+> a room without one is a path out of it.

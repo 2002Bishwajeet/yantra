@@ -289,3 +289,21 @@ Accessed 2026-11-09.
 > origin is allowed, never a list. A passkey belongs to its relying party id, so a passkey made on one
 > name does not work on the other, and changing the name later costs every passkey, as the
 > *Cost: the relying party id is a name* consequence already says.
+
+> **Decision 8 amended 2026-11-12 ([Y-789](../../tracker.md), owner): only the owner's own devices
+> start a passkey ceremony.** The 2026-11-12 security audit (F-15) found that the four ceremony
+> routes answer any caller and have no limit. That allows a denial of service against enrolment and
+> unbounded memory. A guess still cannot succeed. The owner decided on 2026-11-12: **the four routes
+> run [ADR-0016](0016-the-dashboard-writes-and-tailscale-identity-authorises-it.md)'s predicate**
+> (the owner's own untagged node, live `whois`, failure closed), with no cookie needed. Any other
+> caller gets 403. Wrong codes are counted for each caller node, so one node's wrong codes void no
+> other node's code. The number of open ceremonies is capped.
+>
+> **What changed upstream of the reasoning:** decision 8 left these routes open because a browser
+> with no cookie must reach them. Only the owner's own devices sign in, and ADR-0016's predicate
+> needs no cookie, so the routes can ask it.
+>
+> **Decision 12's room rule holds, 2026-11-12 ([Y-784](../../tracker.md), owner).** *The room tools
+> for that workspace* means the rooms whose definition names that workspace, and a room whose file
+> the owner lists that workspace in. A room that no workspace defines is out of reach.
+> [ADR-0038](0038-rooms-and-guest-devices.md) decision 2's dated note records the change there.
