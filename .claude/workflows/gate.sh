@@ -87,9 +87,10 @@ run)
   flock 9
   cd "$wt"
   # Y-799: other projects' agents on this laptop take the same machine-wide lock for their heavy commands.
-  heavy=(); [ -x ~/.claude/bin/heavy ] && heavy=(~/.claude/bin/heavy)
   # Y-804: the laptop shares 16 GB with other sessions, and oomd killed them at the 8 GB gate-host cap.
-  exec "${heavy[@]}" systemd-run --user --scope -q -p MemoryMax="${GATE_LOCAL_MEMORY_MAX:-4G}" -p MemorySwapMax=1G nice -n 10 bash -c "$command"
+  # Y-807: heavy opens its own capped scope, so it gets the cap instead of a second systemd-run.
+  [ -x ~/.claude/bin/heavy ] && exec env HEAVY_MEM="${GATE_LOCAL_MEMORY_MAX:-4G}" ~/.claude/bin/heavy nice -n 10 bash -c "$command"
+  exec systemd-run --user --scope -q -p MemoryMax="${GATE_LOCAL_MEMORY_MAX:-4G}" -p MemorySwapMax=1G nice -n 10 bash -c "$command"
   ;;
 
 *)
