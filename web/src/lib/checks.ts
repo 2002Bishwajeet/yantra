@@ -47,7 +47,7 @@ const CHECKS: Record<string, { name: string; fix: (machine: string) => Fix; sess
   // ADR-0031 §9: optional, so a machine without it is still ready.
   mic: {
     name: 'microphone',
-    fix: () => ({ by: 'hand', words: 'Run Install with Microphone ticked.' }),
+    fix: () => ({ by: 'hand', words: 'Turn on Also set up the microphone, then press Install.' }),
     session: false,
   },
   // Y-591: only a warning, because a session outside those folders works.

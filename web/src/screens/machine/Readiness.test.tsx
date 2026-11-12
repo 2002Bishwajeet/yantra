@@ -152,6 +152,65 @@ describe('the counts on a machine with optional checks absent', () => {
   })
 })
 
+describe('the hero (Y-748)', () => {
+  const hero = () => screen.getByRole('region', { name: 'Readiness' })
+
+  it.each([
+    ['ready', [] as string[], 'ready', 'primary'],
+    ['a fix to make', ['provider-auth'], 'manual', 'primary'],
+    ['a tool missing', ['tmux'], 'missing', 'secondary'],
+  ])('carries the verdict and a surface for %s', async (_, absent, kind, surface) => {
+    daemon()
+    await draw(report(checks(absent)))
+    expect(hero().getAttribute('data-verdict')).toBe(kind)
+    expect(hero().getAttribute('data-surface')).toBe(surface)
+  })
+
+  it('is an error surface when ssh fails, and a high one while the machine sleeps', async () => {
+    daemon()
+    await draw(report(checks(['reachable'], { reachable: 'ssh: connect to host pi port 22: Connection refused' })))
+    expect(hero().getAttribute('data-surface')).toBe('error')
+    cleanup()
+    await draw(report(checks()), [earlier], { machine: machine({ online: false }) })
+    expect(hero().getAttribute('data-verdict')).toBe('asleep')
+    expect(hero().getAttribute('data-surface')).toBe('high')
+  })
+
+  it('never tints a hero green while the owner has something to do', async () => {
+    daemon()
+    await draw(report(checks(['tmux', 'claude'])))
+    expect(hero().getAttribute('data-surface')).not.toBe('tertiary')
+  })
+
+  it('draws the Optional and ssh-said disclosures as list folds, not outlined pills', async () => {
+    daemon()
+    await draw(report([...checks(), { check: 'mic', state: 'absent', detail: 'not installed' } as Check]))
+    const open = card().getByRole('button', { name: /^Show Optional: microphone/ })
+    expect(open.closest('.m3-disclosure')?.classList.contains('readiness__fold')).toBe(true)
+  })
+
+  it('keeps the heading polite and focusable, with one large status mark before it', async () => {
+    daemon()
+    await draw(report(checks()))
+    const title = card().getByRole('heading', { name: 'Ready for sessions' })
+    expect(title.getAttribute('aria-live')).toBe('polite')
+    expect(title.getAttribute('tabindex')).toBe('-1')
+    expect(hero().querySelector('.readiness__badge .m3-mark')?.getAttribute('data-state')).toBe('done')
+  })
+
+  it('draws each failing check as a list item with a status mark and a state word', async () => {
+    daemon()
+    await draw(report(checks(['tmux', 'git'])))
+    const rows = [...document.querySelectorAll('.machine__check')]
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row.querySelector('.m3-list-item .m3-mark')).not.toBeNull()
+      expect(row.querySelector('.machine__word')?.textContent).toBeTruthy()
+    }
+    expect(rows[0]!.closest('ul')!.classList.contains('m3-list')).toBe(true)
+  })
+})
+
 describe('the Readiness card', () => {
   it('leads with Ready for sessions and New session when nothing is absent', async () => {
     daemon()
@@ -169,13 +228,13 @@ describe('the Readiness card', () => {
     expect(card().getByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
     expect(card().getByRole('link', { name: 'New session' })).toBeTruthy()
     showOptional()
-    const box = card().getByRole('checkbox', { name: 'Microphone' }) as HTMLInputElement
-    expect(box.checked).toBe(false)
+    const box = card().getByRole('switch', { name: 'Microphone' })
+    expect(box.getAttribute('aria-checked')).toBe('false')
     box.focus()
     expect(document.activeElement).toBe(box)
 
     fireEvent.click(box)
-    expect(box.checked).toBe(true)
+    expect(box.getAttribute('aria-checked')).toBe('true')
     fireEvent.click(card().getByRole('button', { name: 'Install' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi/install?mic=true'))
   })
@@ -193,9 +252,9 @@ describe('the Readiness card', () => {
     showOptional()
     const install = card().getByRole('button', { name: 'Install' })
     expect(install.hasAttribute('disabled')).toBe(true)
-    fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
+    fireEvent.click(card().getByRole('switch', { name: 'Microphone' }))
     expect(install.hasAttribute('disabled')).toBe(false)
-    fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
+    fireEvent.click(card().getByRole('switch', { name: 'Microphone' }))
     expect(install.hasAttribute('disabled')).toBe(true)
   })
 
@@ -206,7 +265,7 @@ describe('the Readiness card', () => {
       machine: machine({ os: 'macOS' }),
     })
     expect(card().getByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
-    expect(card().queryByRole('checkbox', { name: 'Microphone' })).toBeNull()
+    expect(card().queryByRole('switch', { name: 'Microphone' })).toBeNull()
     expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
   })
 
@@ -216,7 +275,7 @@ describe('the Readiness card', () => {
     daemon([202], [...checks(), mic])
     const client = await draw(report([...checks(), mic]))
     showOptional()
-    fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
+    fireEvent.click(card().getByRole('switch', { name: 'Microphone' }))
     fireEvent.click(card().getByRole('button', { name: 'Install' }))
     await card().findByRole('heading', { name: 'Installing on pi' })
 
@@ -241,7 +300,7 @@ describe('the Readiness card', () => {
     daemon([202], [...checks(), mic])
     const client = await draw(report([...checks(), mic]))
     showOptional()
-    fireEvent.click(card().getByRole('checkbox', { name: 'Microphone' }))
+    fireEvent.click(card().getByRole('switch', { name: 'Microphone' }))
     fireEvent.click(card().getByRole('button', { name: 'Install' }))
     await card().findByRole('heading', { name: 'Installing on pi' })
 
@@ -261,7 +320,7 @@ describe('the Readiness card', () => {
   it('installs the basics alone while Microphone is unticked', async () => {
     const asked = daemon()
     await draw(report([...checks(['tmux']), { check: 'mic', state: 'absent', detail: 'not installed' }]))
-    expect(card().getByRole('checkbox', { name: 'Microphone' })).toBeTruthy()
+    expect(card().getByRole('switch', { name: 'Microphone' })).toBeTruthy()
     fireEvent.click(card().getByRole('button', { name: 'Install' }))
     await waitFor(() => expect(asked).toContain('POST /api/machines/pi/install'))
     expect(asked).not.toContain('POST /api/machines/pi/install?mic=true')
@@ -270,7 +329,7 @@ describe('the Readiness card', () => {
   it('offers no microphone where doctor found one', async () => {
     daemon()
     await draw(report([...checks(), { check: 'mic', state: 'present', detail: 'PipeWire has the source yantra-mic' }]))
-    expect(card().queryByRole('checkbox', { name: 'Microphone' })).toBeNull()
+    expect(card().queryByRole('switch', { name: 'Microphone' })).toBeNull()
     expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
   })
 
@@ -738,16 +797,16 @@ describe('a ready machine', () => {
   it('keeps the microphone fix behind Optional: microphone until it opens', async () => {
     daemon()
     await draw(report(withMic))
-    expect(card().queryByText(/Run Install with Microphone ticked/)).toBeNull()
+    expect(card().queryByText(/Turn on Also set up the microphone/)).toBeNull()
     expect(card().queryByText('ok')).toBeNull()
-    expect(card().queryByRole('checkbox', { name: 'Microphone' })).toBeNull()
+    expect(card().queryByRole('switch', { name: 'Microphone' })).toBeNull()
     expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
     const open = card().getByRole('button', { name: /^Show Optional: microphone/ })
     expect(open.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(open)
     pressFix()
-    expect(card().getByText(/Run Install with Microphone ticked/)).toBeTruthy()
-    expect(card().getByRole('checkbox', { name: 'Microphone' })).toBeTruthy()
+    expect(card().getByText(/Turn on Also set up the microphone/)).toBeTruthy()
+    expect(card().getByRole('switch', { name: 'Microphone' })).toBeTruthy()
     expect(card().getByRole('button', { name: 'Install' })).toBeTruthy()
     expect(filled()).toHaveLength(1)
   })
@@ -757,7 +816,7 @@ describe('a ready machine', () => {
     await draw(report(withMic), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().queryByRole('button', { name: /Optional: microphone/ })).toBeNull()
     expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
-    expect(card().queryByText(/Run Install with Microphone ticked/)).toBeNull()
+    expect(card().queryByText(/Turn on Also set up the microphone/)).toBeNull()
     expect(filled()).toHaveLength(1)
     expect(filled()[0]!.textContent).toBe('New session')
   })

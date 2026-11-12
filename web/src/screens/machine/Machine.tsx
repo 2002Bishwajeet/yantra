@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
+import { Activity, Clock, Cpu, HardDrive, Layers, MemoryStick, Monitor, Zap, type LucideIcon } from 'lucide-react'
 import type { AgentRow, Beat, Machine as OneMachine, Workspace } from '@/api'
 import { fromReading } from '@/api/client'
 import {
@@ -19,6 +20,7 @@ import { Chip } from '@/m3/chip/Chip'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { List, ListItem } from '@/m3/list/List'
 import { Mark, State } from '@/m3/mark/Mark'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
@@ -45,17 +47,19 @@ import './Machine.css'
 const power = (beat: Beat) =>
   beat.power === 'ac' ? 'on AC' : `battery ${beat.power.battery.percent}%`
 
-/** One value column at every width; on the phone the value drops under its label. */
-function Fact(props: { label: string; children: ReactNode }) {
+/** A tile: the label with its icon, then the value. A `dt` and its `dd` share one `div`, so a reader gets each pair. */
+function Fact(props: { label: string; icon: LucideIcon; children: ReactNode }) {
+  const Icon = props.icon
   return (
-    <>
-      <Text render={<dt />} scale="body-medium" tone="variant">
+    <div className="machine__fact">
+      <Text render={<dt />} scale="label-medium" tone="variant">
+        <Icon aria-hidden="true" />
         {props.label}
       </Text>
-      <Text render={<dd />} className="machine__value" scale="body-medium">
+      <Text render={<dd />} scale="title-medium">
         {props.children}
       </Text>
-    </>
+    </div>
   )
 }
 
@@ -84,34 +88,41 @@ function About(props: { machine: OneMachine; lastSeen: string | null }) {
   const { word } = machineState(machine)
   const beat = machine.heartbeat
   return (
-    <dl className="machine__about">
-      <Fact label="OS">{machine.os}</Fact>
-      <Fact label="Address">
-        {machine.address ? (
-          <Text className="machine__num" scale="body-medium">
-            {machine.address}
-          </Text>
-        ) : (
-          'none reported'
-        )}
-      </Fact>
-      <Fact label="Tailnet name">
-        <Tailnet name={machine.dns_name} />
-      </Fact>
-      <Fact label="Status">{word}</Fact>
-      {lastSeen && !machine.online ? (
-        <Fact label="Last seen">{/^\d+[smhd]$/.test(lastSeen) ? `${lastSeen} ago` : lastSeen}</Fact>
-      ) : null}
-      {beat ? (
-        <>
-          <Fact label="Architecture">{beat.arch}</Fact>
-          <Fact label="CPU">{beat.cpu_busy_pct}% busy</Fact>
-          <Fact label="Memory">{gb(beat.free_ram_mb)} GB free</Fact>
-          <Fact label="Disk">{gb(beat.free_disk_mb)} GB free</Fact>
-          <Fact label="Power">{power(beat)}</Fact>
-        </>
-      ) : null}
-    </dl>
+    <>
+      <dl className="machine__facts">
+        <Fact icon={Monitor} label="OS">{machine.os}</Fact>
+        <Fact icon={Activity} label="Status">{word}</Fact>
+        {lastSeen && !machine.online ? (
+          <Fact icon={Clock} label="Last seen">
+            {/^\d+[smhd]$/.test(lastSeen) ? `${lastSeen} ago` : lastSeen}
+          </Fact>
+        ) : null}
+        {beat ? (
+          <>
+            <Fact icon={Layers} label="Architecture">{beat.arch}</Fact>
+            <Fact icon={Cpu} label="CPU">{beat.cpu_busy_pct}% busy</Fact>
+            <Fact icon={MemoryStick} label="Memory">{gb(beat.free_ram_mb)} GB free</Fact>
+            <Fact icon={HardDrive} label="Disk">{gb(beat.free_disk_mb)} GB free</Fact>
+            <Fact icon={Zap} label="Power">{power(beat)}</Fact>
+          </>
+        ) : null}
+      </dl>
+      <List className="machine__named">
+        <ListItem
+          headline="Address"
+          supporting={
+            machine.address ? (
+              <Text className="machine__num" scale="body-medium">
+                {machine.address}
+              </Text>
+            ) : (
+              'none reported'
+            )
+          }
+        />
+        <ListItem headline="Tailnet name" supporting={<Tailnet name={machine.dns_name} />} />
+      </List>
+    </>
   )
 }
 
@@ -120,7 +131,7 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
   // D7 B3: a card with nothing in it and no way to start one says nothing.
   if (!pending && rows.length === 0 && !ready) return null
   return (
-    <Card aria-labelledby="machine-workspaces" className="machine__card">
+    <Card aria-labelledby="machine-workspaces" className="machine__card" surface="container">
       <div className="machine__head">
         <Text render={<h2 />} emphasized id="machine-workspaces" scale="title-large">
           Workspaces on this machine
@@ -280,7 +291,7 @@ export function Machine() {
         </ErrorBoundary>
 
         <ErrorBoundary eyebrow={name} title="About could not be drawn">
-          <Card aria-labelledby="machine-about" className="machine__card">
+          <Card aria-labelledby="machine-about" className="machine__card" surface="low">
             <div className="machine__head">
               <Text render={<h2 />} emphasized id="machine-about" scale="title-large">
                 About
