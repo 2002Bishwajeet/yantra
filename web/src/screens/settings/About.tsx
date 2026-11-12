@@ -197,15 +197,21 @@ function ChannelSwitch(props: { channel: Channel | null }) {
         <Segment value="stable">Stable</Segment>
         <Segment value="nightly">Nightly</Segment>
       </Segmented>
-      <Text render={<p />} scale="body-small" tone="variant">
-        {channel === null ? (
-          <>
-            <Mono>/etc/yantra/channel</Mono> names no channel. Pick one to rewrite it.
-          </>
-        ) : (
-          'Stable is each release. Nightly is the latest merge.'
-        )}
-      </Text>
+      {set.isPending ? (
+        <Text render={<p role="status" />} scale="body-small" tone="variant">
+          Looking up the latest {set.variables === 'nightly' ? 'Nightly' : 'Stable'} release.
+        </Text>
+      ) : (
+        <Text render={<p />} scale="body-small" tone="variant">
+          {channel === null ? (
+            <>
+              <Mono>/etc/yantra/channel</Mono> names no channel. Pick one to rewrite it.
+            </>
+          ) : (
+            'Stable is each release. Nightly is the latest merge.'
+          )}
+        </Text>
+      )}
       {set.error ? <ErrorSurface.Inline error={set.error} title="The channel did not change" /> : null}
     </div>
   )

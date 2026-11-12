@@ -75,6 +75,19 @@ describe('About', () => {
       )
     })
 
+    it('says it is looking up the new channel while the switch waits on the daemon', async () => {
+      let answerPut: (reply: Answer) => void = () => {}
+      mountSettings('desktop', '/settings/about', {
+        'PUT /api/update/channel': () => new Promise<Answer>((resolve) => (answerPut = resolve)),
+      })
+      const group = await screen.findByRole('radiogroup', { name: 'Release channel' })
+      fireEvent.click(within(group).getByRole('radio', { name: 'Nightly' }))
+      expect(await screen.findByText('Looking up the latest Nightly release.')).toBeTruthy()
+      expect(screen.queryByText(/Stable is each release/)).toBeNull()
+      answerPut([204])
+      await waitFor(() => expect(screen.queryByText('Looking up the latest Nightly release.')).toBeNull())
+    })
+
     it('draws a refused switch and keeps the channel it had', async () => {
       mountSettings('desktop', '/settings/about', {
         'PUT /api/update/channel': [409, 'could not write /etc/yantra/channel: Permission denied'],
