@@ -131,9 +131,9 @@ pub fn on(ssh: &Ssh, plan: &Plan, size: Size) -> Result<Terminal, Error> {
 }
 
 /// Y-394 ([ADR-0030]): `command` on `machine` under a terminal of its own, with
-/// no tmux — `tmux` can be the thing the command installs. It is the terminal a
-/// sudo password is typed into, so the command is one an install left and
-/// never one a caller wrote.
+/// no tmux — `tmux` can be the thing the command installs. It runs as the
+/// joined account, so the command is one an install left and never one a
+/// caller wrote, and the daemon hands it no `sudo` step (Y-778).
 ///
 /// [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
 pub async fn run(machine: &str, command: &str, term: &str, size: Size) -> Result<Terminal, Error> {

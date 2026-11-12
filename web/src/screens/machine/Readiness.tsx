@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useState } from 'react'
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import type { Check, Event, Readiness as Report } from '@/api'
 import { fromReading, type Reading } from '@/api/client'
@@ -19,11 +19,13 @@ import { Eyebrow, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Doctor } from '@/screens/machines/Doctor'
 import { counted, optionalAbsent, rowMark, rowWord, tally } from '@/screens/machines/facts'
+import { OwnerRunSheet } from '@/screens/session/RunAsOwner'
+import { NOT_TYPED, typable } from '@/screens/session/sudo'
 import { joinUrl } from '@/lib/join'
 import { useTick } from '@/useTick'
 import { answer, listed, LOST_MS, needsSudo, newestInstall } from './install'
+import { type OwnerRun, ownerRun } from './owner'
 import { ReachFailure } from './ReachFailure'
-import { type Step, SudoSheet } from './SudoSheet'
 import type { Verdicted } from './useVerdict'
 import { sorted, startable, titleOf, type Verdict } from './verdict'
 import './Readiness.css'
@@ -120,32 +122,37 @@ function Optional(props: { checks: Check[]; machine: string; fix: boolean; actio
   )
 }
 
-/** Each command left for a person, with Copy. A step sudo stopped also
- *  opens in a terminal of its own (Y-394); `emphasis` is filled where that is
- *  the card's one next thing. */
+/** Each command left for a person, with Copy. A `sudo` one is also offered to
+ *  the owner terminal, because the joined account's shell is the agent's
+ *  (Y-778). `emphasis` is filled where that is the card's one next thing. */
 function Commands(props: {
   result: Event
   machine: string
-  onTerminal: (step: Step) => void
+  onRun: (command: string, from: HTMLElement) => void
   emphasis: 'filled' | 'tonal'
 }) {
-  const { result, machine, onTerminal, emphasis } = props
+  const { result, machine, onRun, emphasis } = props
   if (result.commands.length === 0) return null
-  const firstSudo = result.commands.findIndex(needsSudo)
+  const rows = result.commands.map((command) => ({ command, sudo: needsSudo(command) ? typable(command) : null }))
+  const first = rows.findIndex((row) => row.sudo?.refused === false)
   return (
     <div className="readiness__left">
       <Text render={<p />} scale="label-large">
         {result.commands.length === 1 ? 'Left for you to run' : 'Left for you to run, in order'} on {machine}
       </Text>
       <ul className="readiness__commands">
-        {result.commands.map((command, index) => (
+        {rows.map(({ command, sudo }, index) => (
           <li className="readiness__command" key={command}>
             <Copyable line text={command} what={`the command for ${machine}`} />
-            {needsSudo(command) ? (
-              <Button data-sudo-opener="" onClick={() => onTerminal({ index, command, at: result.at })} variant={index === firstSudo ? emphasis : 'tonal'}>
-                Open a terminal
+            {sudo === null ? null : sudo.refused ? (
+              <Text className="readiness__untyped" render={<p />} scale="body-small" tone="variant">
+                {NOT_TYPED}
+              </Text>
+            ) : (
+              <Button onClick={(event) => onRun(command, event.currentTarget)} variant={index === first ? emphasis : 'tonal'}>
+                Run in owner terminal
               </Button>
-            ) : null}
+            )}
           </li>
         ))}
       </ul>
@@ -175,7 +182,8 @@ export function ReadinessCard(props: {
   const now = useTick(running)
   const fresh = watch ? answer(events, name, watch) : null
   const [dismissed, setDismissed] = useState<number | null>(null)
-  const [step, setStep] = useState<Step | null>(null)
+  const [run, setRun] = useState<OwnerRun | null>(null)
+  const opener = useRef<HTMLElement | null>(null)
   const [mic, setMic] = useState(false)
   const micId = useId()
 
@@ -184,6 +192,15 @@ export function ReadinessCard(props: {
   useEffect(() => {
     if (answered !== undefined) ask(name)
   }, [answered, name, ask])
+
+  // A recheck can take the pressed button away, at the close or after it.
+  // Focus then goes to the card's title, not to the page's body.
+  useEffect(() => {
+    if (run !== null || opener.current === null || opener.current.isConnected) return
+    opener.current = document.getElementById(heading)
+    const active = document.activeElement
+    if (active === null || active === document.body || active.closest('[hidden]')) opener.current?.focus()
+  })
 
   const cheer = fresh?.kind === 'installed' && startable(verdict) && dismissed !== fresh.at ? fresh.at : null
   useEffect(() => {
@@ -203,6 +220,19 @@ export function ReadinessCard(props: {
         if (error.status === 409) waiting()
       },
     })
+  }
+
+  const toOwner = (command: string, from: HTMLElement) => {
+    opener.current = from
+    setRun(ownerRun(name, command))
+  }
+  const onRun = (next: OwnerRun | null) => {
+    setRun(next)
+    // A shell was open, so what is missing now is readiness's to say.
+    if (next === null && run?.admin) {
+      setWatch(null)
+      ask(name)
+    }
   }
 
   const checks = readiness.looked === 'ok' ? readiness.data.checks : []
@@ -298,7 +328,7 @@ export function ReadinessCard(props: {
           <Text render={<p />} className="readiness__said" scale="body-small" tone="variant">
             sudo on {name} wants a password; run this there.
           </Text>
-          <Commands emphasis="filled" machine={name} onTerminal={setStep} result={verdict.result} />
+          <Commands emphasis="filled" machine={name} onRun={toOwner} result={verdict.result} />
         </>
       ) : null}
 
@@ -313,7 +343,7 @@ export function ReadinessCard(props: {
           <Text render={<p />} className="readiness__said" scale="body-small" tone="variant">
             {verdict.result.said}
           </Text>
-          <Commands emphasis="tonal" machine={name} onTerminal={setStep} result={verdict.result} />
+          <Commands emphasis="tonal" machine={name} onRun={toOwner} result={verdict.result} />
         </div>
       ) : null}
 
@@ -379,17 +409,8 @@ export function ReadinessCard(props: {
         ) : null}
       </div>
 
-      {/* The command ended: what is missing now is readiness's to say. */}
-      <SudoSheet
-        fallback={heading}
-        machine={name}
-        onClose={() => setStep(null)}
-        onDone={() => {
-          setWatch(null)
-          ask(name)
-        }}
-        step={step}
-      />
+      {/* Here, not beside a command: a verdict change must not unmount an open shell. */}
+      <OwnerRunSheet machine={name} onRun={onRun} opener={opener} run={run} />
 
       {cheer !== null ? (
         <Snackbar className="readiness__snackbar" onClose={() => setDismissed(cheer)}>

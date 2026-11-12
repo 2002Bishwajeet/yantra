@@ -78,6 +78,18 @@
   min-width: 0;
 }
 
+.readiness__untyped {
+  flex: 1 1 100%;
+  margin: 0;
+  padding: 0 4px;
+}
+
+@media (pointer: coarse) {
+  .readiness__command > .m3-button {
+    min-height: 48px;
+  }
+}
+
 .readiness__actions {
   display: flex;
   flex-wrap: wrap;

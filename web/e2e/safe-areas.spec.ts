@@ -82,14 +82,14 @@ const withSideInsets = (page: import('@playwright/test').Page) =>
     document.documentElement.style.setProperty('--m3-safe-right', '47px')
   })
 
-test('the tablet sudo side sheet clears the side insets', async ({ page, size }) => {
+test('the tablet owner side sheet clears the side insets', async ({ page, size }) => {
   test.skip(size !== 'tablet', 'the side sheet is the tablet shell')
   await scenario(page, 'install')
   await page.goto('/m/nas')
   const ready = page.getByRole('region', { name: 'Readiness' })
   await ready.getByRole('button', { name: 'Install' }).click()
-  await ready.getByRole('button', { name: 'Open a terminal' }).click({ timeout: 15_000 })
-  const sheet = page.getByRole('complementary', { name: 'Run it on nas' })
+  await ready.getByRole('button', { name: 'Run in owner terminal' }).click({ timeout: 15_000 })
+  const sheet = page.getByRole('complementary', { name: 'Owner terminal on nas' })
   await expect(sheet).toBeVisible()
   await withInset(page)
   await withSideInsets(page)

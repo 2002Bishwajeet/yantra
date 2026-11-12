@@ -1037,9 +1037,8 @@ const server = createServer(async (request, response) => {
 const sockets = new WebSocketServer({ noServer: true })
 
 /** ADR-0030's socket: a step an install left, by its place in the newest
- *  install event for that machine. It asks for a password as sudo does, takes
- *  what is typed without echoing it, then ends on the command's status and
- *  marks present what the scenario's `typed` says the step fixes. */
+ *  install event for that machine. It refuses a step that starts with `sudo`
+ *  as terminal.rs does (Y-778), and ends any other on status 0. */
 function oneOff(state, request, socket, head, machine, index, at) {
   if (state.refuse) {
     socket.end(
@@ -1053,33 +1052,18 @@ function oneOff(state, request, socket, head, machine, index, at) {
   // terminal.rs: a newer install than the one the page read is refused by name.
   const stale = newest !== undefined && newest.at !== at
   const command = stale ? undefined : newest?.commands?.[index]
+  const refusal = stale
+    ? `a newer install on ${machine} replaced step ${index}; read the page again`
+    : command === undefined
+      ? `no install on ${machine} left a step ${index}; press Install again`
+      : command.trim().split(/\s+/)[0] === 'sudo'
+        ? `step ${index} on ${machine} starts with sudo, so it runs in the owner terminal, not in the joined account`
+        : null
   sockets.handleUpgrade(request, socket, head, (ws) => {
-    let sized = false
-    ws.on('message', (data, binary) => {
-      if (!sized) {
-        if (binary) return
-        sized = true
-        if (!command) {
-          ws.send(
-            stale
-              ? `a newer install on ${machine} replaced step ${index}; read the page again`
-              : `no install on ${machine} left a step ${index}; press Install again`,
-            { binary: false },
-          )
-          ws.close()
-          return
-        }
-        ws.send(Buffer.from('[sudo] password for yantra: '), { binary: true })
-        return
-      }
-      if (!binary || !data.toString().includes('\r')) return
-      ws.send(Buffer.from('\r\n(1/2) Installing tmux\r\nOK: 2 packages installed\r\n'), { binary: true })
-      const typed = state.installs?.[machine]?.typed ?? []
-      const report = state.readiness.data?.find((one) => one.machine === machine)
-      for (const check of report?.checks ?? []) {
-        if (typed.includes(check.check)) Object.assign(check, { state: 'present', detail: 'installed from the terminal' })
-      }
-      ws.send(JSON.stringify({ exit: 0 }), { binary: false })
+    ws.on('message', (_, binary) => {
+      if (binary) return
+      if (refusal === null) ws.send(JSON.stringify({ exit: 0 }), { binary: false })
+      else ws.send(refusal, { binary: false })
       ws.close()
     })
   })
@@ -1087,7 +1071,9 @@ function oneOff(state, request, socket, head, machine, index, at) {
 
 /** ADR-0046 §2's socket: the admin account's login shell. It echoes what is
  *  typed, asks for a password when a line starts with `sudo` and echoes none
- *  of it, and ends on `exit` with status 0, as the shell would. */
+ *  of it, and ends on `exit` with status 0, as the shell would. A sudo line
+ *  that got its password marks present what the scenario's `typed` says a
+ *  sudo step fixes. */
 function ownerShell(state, request, socket, head, machine, admin) {
   if (state.refuse) {
     socket.end(
@@ -1120,6 +1106,11 @@ function ownerShell(state, request, socket, head, machine, admin) {
         line = ''
         if (password) {
           password = false
+          const fixed = state.installs?.[machine]?.typed ?? []
+          const report = state.readiness.data?.find((one) => one.machine === machine)
+          for (const check of report?.checks ?? []) {
+            if (fixed.includes(check.check)) Object.assign(check, { state: 'present', detail: 'installed from the terminal' })
+          }
           ws.send(Buffer.from(`\r\n0\r\n${prompt}`), { binary: true })
         } else if (typed === 'exit') {
           ws.send(Buffer.from('\r\nlogout\r\n'), { binary: true })

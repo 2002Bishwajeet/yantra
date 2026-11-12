@@ -20,7 +20,6 @@ const ALLOWED = new Set([
   'screens/session/Terminal.tsx',
   'screens/session/RunAsOwner.tsx',
   'screens/fleet/Github.tsx',
-  'screens/machine/SudoSheet.tsx',
   'screens/repair/Repair.tsx',
   'screens/session/Session.tsx',
   'screens/fleet/Fleet.tsx',

@@ -37,3 +37,14 @@ export function rememberAdmin(machine: string, name: string) {
     // Kept for this visit only.
   }
 }
+
+/** What the owner sheet has open: the command to type in, and the admin
+ *  account once it is named. */
+export type OwnerRun = { command: string; admin: string | null }
+
+/** The kept account is read at the press: an edit to it while the sheet is
+ *  open must not reopen the socket as someone else. */
+export function ownerRun(machine: string, command: string): OwnerRun {
+  const kept = rememberedAdmin(machine)
+  return { command, admin: adminProblem(kept) ? null : kept }
+}

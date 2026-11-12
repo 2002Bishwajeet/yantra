@@ -210,8 +210,8 @@ describe('the Readiness card', () => {
     expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
   })
 
-  /** ADR-0031 §2: linger is the step sudo stopped, and the one-off terminal runs it. */
-  it('leaves linger for a person when sudo asks, with a terminal for it', async () => {
+  /** ADR-0031 §2: linger is the step sudo stopped, and the owner terminal takes it. */
+  it('leaves linger for a person when sudo asks, with the owner terminal for it', async () => {
     const mic: Check = { check: 'mic', state: 'absent', detail: 'not installed' }
     daemon([202], [...checks(), mic])
     const client = await draw(report([...checks(), mic]))
@@ -232,7 +232,7 @@ describe('the Readiness card', () => {
     // Y-733: one sentence, and the command is one line that scrolls.
     expect(card().getByText(/^sudo on pi wants a password/).textContent).toBe('sudo on pi wants a password; run this there.')
     expect(card().getByText('sudo loginctl enable-linger biswa').classList.contains('m3-copyable__text--line')).toBe(true)
-    expect(card().getByRole('button', { name: 'Open a terminal' })).toBeTruthy()
+    expect(card().getByRole('button', { name: 'Run in owner terminal' })).toBeTruthy()
   })
 
   /** ADR-0031 §1: on a ready machine, a package step sudo stopped is the microphone's. */
@@ -791,7 +791,7 @@ describe('the one filled action', () => {
     const two: Event = { ...stopped, commands: ['sudo apk add tmux', 'sudo apk add git'] }
     act(() => client.setQueryData(keys.notifications(), ring([two, earlier])))
     await card().findByRole('heading', { name: 'tmux and git need your password' })
-    const openers = [...document.querySelectorAll<HTMLElement>('[data-sudo-opener]')]
+    const openers = card().getAllByRole('button', { name: 'Run in owner terminal' })
     expect(openers.map((one) => one.getAttribute('data-variant'))).toEqual(['filled', 'tonal'])
     expect(filled()).toHaveLength(1)
   })
