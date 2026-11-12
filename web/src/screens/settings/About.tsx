@@ -12,7 +12,7 @@ import { Lead } from '@/m3/lead/Lead'
 import { ListChevron, ListItem, ListValue } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
-import { Mono, Text } from '@/m3/text/Text'
+import { Mono, Num, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { Group, Note } from './Group'
 import { Sheet } from './Sheet'
@@ -57,14 +57,14 @@ export function About() {
       <section aria-label="Daemon" className="settings__about">
         {facts ? (
           <Text render={<p />} className="settings__version" scale="title-large" emphasized>
-            yantrad <Mono>{facts.version}</Mono> · built {built(facts.built)} · running
+            yantrad <Num>{facts.version}</Num> · built {built(facts.built)} · running
           </Text>
         ) : (
           <Skeleton shape="text" />
         )}
         <dl className="settings__facts">
           <Fact label="Target" value={facts ? <Mono clip title={facts.target}>{facts.target}</Mono> : null} wide />
-          <Fact label="Uptime" value={facts ? <Mono>{uptime(facts.uptime_seconds)}</Mono> : null} />
+          <Fact label="Uptime" value={facts ? <Num>{uptime(facts.uptime_seconds)}</Num> : null} />
           <Fact
             label="Listens on"
             value={
@@ -168,12 +168,12 @@ function Release(props: {
   const { channel, published } = props
   if (published.looked === 'never') return <Text scale="body-medium" tone="variant">not asked yet</Text>
   const { version, newer } = published.data
-  if (!newer) return <Mono>{version} · current</Mono>
+  if (!newer) return <Num>{version} · current</Num>
   // The nightly's tag names no version, and it moves with each merge.
   const tag = channel === 'nightly' ? 'nightly' : `v${version}`
   return (
     <a className="m3-hit" href={`https://github.com/2002Bishwajeet/yantra/releases/tag/${tag}`} rel="noreferrer" target="_blank">
-      <Mono>v{version} is out</Mono>
+      <Num>v{version} is out</Num>
     </a>
   )
 }

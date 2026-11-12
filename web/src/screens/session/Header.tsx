@@ -13,7 +13,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
 import { State } from '@/m3/mark/Mark'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Row, RowText } from '@/m3/row/Row'
-import { Mono, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { DeleteWorkspace } from '@/screens/fleet/Confirm'
 import { SshSaid } from '@/screens/machine/ReachFailure'
@@ -162,7 +162,7 @@ export function Header(props: HeaderProps) {
         subtitle={
           <State state={mark}>
             {words}
-            {started !== null ? <Mono className="session__age"> · {ago(now / 1000 - started, now).text}</Mono> : null}
+            {started !== null ? <Num className="session__age"> · {ago(now / 1000 - started, now).text}</Num> : null}
           </State>
         }
         title={workspace.name}

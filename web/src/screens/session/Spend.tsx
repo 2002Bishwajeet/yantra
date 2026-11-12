@@ -11,7 +11,7 @@ import { Chip } from '@/m3/chip/Chip'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Mark, State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Num, Text } from '@/m3/text/Text'
 import { count, money } from './format'
 
 // The four token fields, and never `responses` — a response is not a token.
@@ -41,12 +41,12 @@ function Hero(props: { spend: Read }) {
               </Text>
             ) : spend.cost === null || unpriced ? (
               <>
-                <Mono className="spend__number">{count(tokens(spend.total))}</Mono>
+                <Num className="spend__number">{count(tokens(spend.total))}</Num>
                 <Text scale="title-medium">tokens, unpriced</Text>
               </>
             ) : (
               <>
-                <Mono className="spend__number">{money(spend.cost)}</Mono>
+                <Num className="spend__number">{money(spend.cost)}</Num>
                 <Text scale="title-medium">
                   across {spend.models.length} model{spend.models.length === 1 ? '' : 's'}
                 </Text>
@@ -56,7 +56,7 @@ function Hero(props: { spend: Read }) {
         </div>
         {/* `as_of` is the day a written-down table was read, not an instant. */}
         <Text scale="body-small">
-          prices as of <Mono>{asOf ? asOf.text : spend.as_of}</Mono>
+          prices as of <Num>{asOf ? asOf.text : spend.as_of}</Num>
         </Text>
       </div>
       {!nothing && (spend.cost === null || unpriced) ? (
@@ -81,7 +81,7 @@ function Hero(props: { spend: Read }) {
             <div className="spend__count" key={label}>
               <dt>{label}</dt>
               <dd>
-                <Mono>{count(value)}</Mono>
+                <Num>{count(value)}</Num>
               </dd>
             </div>
           ))}
@@ -106,15 +106,15 @@ function Figure(props: { spend: Read }) {
             <li key={model.model}>
               <Card className="spend__model">
                 <div className="spend__model-head">
-                  <Mono clip>{model.model}</Mono>
+                  <Text scale="body-small" clip>{model.model}</Text>
                   <Chip icon={<Mark size="small" state={model.cost === null ? 'unknown' : 'needs'} />}>
                     {model.cost === null ? 'unpriced' : 'priced'}
                   </Chip>
                 </div>
                 <div className="spend__model-figure">
-                  <Mono className="spend__model-cost">{model.cost === null ? '—' : money(model.cost)}</Mono>
+                  <Num className="spend__model-cost">{model.cost === null ? '—' : money(model.cost)}</Num>
                   <Text scale="body-small" tone="variant">
-                    <Mono>{count(model.responses)}</Mono> response{model.responses === 1 ? '' : 's'}
+                    <Num>{count(model.responses)}</Num> response{model.responses === 1 ? '' : 's'}
                   </Text>
                 </div>
               </Card>
@@ -131,7 +131,7 @@ function Figure(props: { spend: Read }) {
           <Text scale="title-medium">Fast mode</Text>
         </State>
         <Text scale="body-small" tone="variant">
-          <Mono>{count(spend.fast)}</Mono> responses ran at fast mode's rate. Above zero, every cost here is
+          <Num>{count(spend.fast)}</Num> responses ran at fast mode's rate. Above zero, every cost here is
           null and this card shows tokens and no money.
         </Text>
       </Card>
@@ -174,11 +174,11 @@ export function Spend(props: SpendProps) {
             <>
               {' '}
               Read{' '}
-              <Mono>
+              <Num>
                 <time dateTime={read.iso} title={read.title}>
                   {read.text}
                 </time>
-              </Mono>{' '}
+              </Num>{' '}
               ago.
             </>
           ) : null}

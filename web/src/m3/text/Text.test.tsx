@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { Eyebrow, Mono, Text } from './Text'
+import { Eyebrow, Mono, Num, Text } from './Text'
 
 describe('Text', () => {
   it('names its scale on the element and emphasis as an attribute', () => {
@@ -26,14 +26,16 @@ describe('Text', () => {
     expect(span.dataset.tone).toBe('variant')
   })
 
-  it('draws numbers in mono and the eyebrow uppercase', () => {
+  it('draws code in mono, a number in the body face and the eyebrow uppercase', () => {
     render(
       <>
-        <Mono>3h 41m</Mono>
+        <Mono>journalctl -u yantrad</Mono>
+        <Num clip>3h 41m</Num>
         <Eyebrow render={<h2 />}>Needs you</Eyebrow>
       </>,
     )
-    expect(screen.getByText('3h 41m').className).toBe('m3-mono')
+    expect(screen.getByText('journalctl -u yantrad').className).toBe('m3-mono')
+    expect(screen.getByText('3h 41m').className).toBe('m3-num m3-clip')
     expect(screen.getByRole('heading', { name: 'Needs you' }).className).toBe('m3-eyebrow')
   })
 })

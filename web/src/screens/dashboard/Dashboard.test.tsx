@@ -258,9 +258,10 @@ describe('the Dashboard keeps one style per kind of action', () => {
     expect(when(/^4m ago$/, screen.getByRole('region', { name: 'Needs you' })).length).toBe(1)
     const worth = screen.getByRole('region', { name: 'Worth a look' })
     expect(worth.querySelectorAll('.dash__when')).toHaveLength(2)
-    for (const one of screen.getByRole('region', { name: 'Needs you' }).querySelectorAll('.m3-mono')) {
+    for (const one of screen.getByRole('region', { name: 'Needs you' }).querySelectorAll('.m3-num')) {
       expect(one.classList.contains('dash__when')).toBe(true)
     }
+    expect(screen.getByRole('region', { name: 'Needs you' }).querySelector('.m3-mono')).toBeNull()
   })
 })
 

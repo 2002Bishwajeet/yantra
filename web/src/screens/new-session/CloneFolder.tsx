@@ -7,7 +7,7 @@ import { Button } from '@/m3/button/Button'
 import { FilterChip } from '@/m3/chip/Chip'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { FolderTree } from './FolderTree'
 import { tilde } from './form'
 import { PathBar } from './PathBar'
@@ -85,7 +85,7 @@ export function CloneFolder(props: {
         <Text scale="body-medium" tone="variant">
           Clone folder:
         </Text>
-        <Mono>{tilde(folder, root)}</Mono>
+        <Text scale="body-small">{tilde(folder, root)}</Text>
         <Button aria-expanded={changing} onClick={() => setChanging(!changing)} type="button" variant="text">
           Change
         </Button>

@@ -12,7 +12,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Mono } from '@/m3/text/Text'
+import { Eyebrow, Num } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { useTick } from '@/useTick'
 import { unreachable } from '@/work'
@@ -52,7 +52,7 @@ function Group(props: { label: string; rows: AgentRow[]; sessions: Reading<Machi
                     </State>
                   }
                 />
-                {started !== null ? <Mono>{ago(now / 1000 - started, now).text}</Mono> : null}
+                {started !== null ? <Num>{ago(now / 1000 - started, now).text}</Num> : null}
               </Row>
             </li>
           )

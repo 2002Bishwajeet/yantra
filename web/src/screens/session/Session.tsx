@@ -15,7 +15,7 @@ import { PageHeader } from '@/m3/page/PageHeader'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Mono, Num, Text } from '@/m3/text/Text'
 import { useFormFactor } from '@/shell/formFactor'
 import { useTick } from '@/useTick'
 import { VIEWS, type View } from '@/views'
@@ -117,7 +117,7 @@ export function Workspace(props: {
           <Text render={<h2 />} scale="title-large">
             {name} is not usable.
           </Text>
-          <Mono className="session__error">{entry.error}</Mono>
+          <Mono className="session__error m3-wrap">{entry.error}</Mono>
           {/* D3 §7.5: naming the error and offering nothing is what sent
               people to a terminal. Only the bytes fix this file (ADR-0020). */}
           <div>
@@ -215,13 +215,13 @@ function Loaded(props: { workspace: Workspace; view: View; thread?: string; onTh
         {view === 'chat' ? <div className="session__chatbar" ref={setSlot} /> : null}
         {view === 'terminal' ? <div className="session__termbar" ref={setTermSlot} /> : null}
         {readAt ? (
-          <Mono className="session__read">
+          <Num className="session__read">
             read{' '}
             <time dateTime={readAt.iso} title={readAt.title}>
               {readAt.text}
             </time>{' '}
             ago · over ssh
-          </Mono>
+          </Num>
         ) : null}
       </div>
       {/* Only the open tab is mounted, except the chat: mounting the terminal

@@ -146,7 +146,7 @@
 .usage__table td[data-numeric],
 .usage__table th[data-numeric] {
   text-align: right;
-  font-family: var(--md-ref-typeface-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .usage__table tr:last-child td {

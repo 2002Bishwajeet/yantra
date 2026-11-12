@@ -11,7 +11,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
 import { Row, RowText } from '@/m3/row/Row'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
-import { Eyebrow, Mono } from '@/m3/text/Text'
+import { Eyebrow, Num } from '@/m3/text/Text'
 import { IconTile, Tile } from '@/m3/tile/Tile'
 import { useTick } from '@/useTick'
 import { grouped, type Entry } from './notifications'
@@ -62,7 +62,7 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
       <Row render={render} tone="lowest">
         <EntryTile tile={entry.tile} />
         <EntryText entry={entry} supporting={supporting} />
-        <Mono className="notifications__age">{ago(now / 1000 - entry.at, now).text}</Mono>
+        <Num className="notifications__age">{ago(now / 1000 - entry.at, now).text}</Num>
       </Row>
       {entry.answer ? (
         <div className="notifications__answer">
@@ -119,7 +119,7 @@ export function NotificationsList(props: { onOpen?: () => void }) {
       <div className="notifications__bar">
         <Segmented label="Show" onValueChange={(value) => setFilter(value as 'unread' | 'all')} value={filter}>
           <Segment value="unread">
-            Unread{fresh.length ? <Mono className="notifications__count">{fresh.length}</Mono> : null}
+            Unread{fresh.length ? <Num className="notifications__count">{fresh.length}</Num> : null}
           </Segment>
           <Segment value="all">All</Segment>
         </Segmented>

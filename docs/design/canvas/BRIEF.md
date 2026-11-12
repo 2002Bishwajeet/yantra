@@ -38,8 +38,8 @@ gradients, no shadows, no emoji. State is always a **mark plus a word**, never c
 
 ## Type
 
-Google Sans Flex from Google Fonts, IBM Plex Mono for every age, duration, count of tokens and
-amount of money. Sizes: display 64 or 44 Bold; title 18 SemiBold; row title 14 or 15 Medium;
+Google Sans Flex from Google Fonts, IBM Plex Mono for code, commands and keys; ages, durations,
+counts and money use Google Sans Flex with tabular figures. Sizes: display 64 or 44 Bold; title 18 SemiBold; row title 14 or 15 Medium;
 body 13 Regular; meta 12 Regular; eyebrow 12 Medium, uppercase, 0.8 px tracking.
 
 ## Shell

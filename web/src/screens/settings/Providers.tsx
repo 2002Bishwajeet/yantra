@@ -8,7 +8,7 @@ import { Button } from '@/m3/button/Button'
 import { Lead } from '@/m3/lead/Lead'
 import { Avatar } from '@/shell/Avatar'
 import { ListItem, ListValue } from '@/m3/list/List'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
 import { ConnectSheet } from './ConnectSheet'
@@ -188,7 +188,7 @@ function ManageSheet(props: { open: boolean; onOpenChange: (open: boolean) => vo
           <Text render={<p />} scale="body-medium" tone="error" emphasized>
             {logout.error.describe()}
           </Text>
-          <Mono className="settings__said">{logout.error.said}</Mono>
+          <Text scale="body-small" className="settings__said">{logout.error.said}</Text>
         </div>
       ) : null}
     </Sheet>
@@ -270,7 +270,7 @@ function ClientIdSheet(props: {
               <Text render={<p />} scale="body-medium" tone="error" emphasized>
                 {error.describe()}
               </Text>
-              <Mono className="settings__said">{error.said}</Mono>
+              <Text scale="body-small" className="settings__said">{error.said}</Text>
             </>
           ) : null}
         </div>

@@ -6,7 +6,7 @@ import { Button } from '@/m3/button/Button'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Mono, Num, Text } from '@/m3/text/Text'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { isAge } from '@/screens/fleet/clock'
 import { KeyRow } from '@/screens/session/Keys'
@@ -68,11 +68,11 @@ export function SessionTerminal() {
           {sessions.looked === 'pending' ? (
             <Skeleton className="session-terminal__age" shape="text" />
           ) : one ? (
-            <Mono className="session-terminal__age">
+            <Num className="session-terminal__age">
               started {ago(now / 1000 - one.created_at, now).text}
               {isAge(now / 1000 - one.created_at) ? ' ago' : null} · {one.windows} window
               {one.windows === 1 ? '' : 's'}
-            </Mono>
+            </Num>
           ) : null}
         </div>
         <div className="session-terminal__status" ref={setSlot} />

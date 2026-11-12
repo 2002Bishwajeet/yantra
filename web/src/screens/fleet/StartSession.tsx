@@ -8,7 +8,7 @@ import { Button } from '@/m3/button/Button'
 import { Dialog, DialogClose, DialogPopup, DialogTrigger } from '@/m3/dialog/Dialog'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { pickWorkspaces, type Choice } from './issuePick'
 
@@ -91,7 +91,7 @@ export function StartSession(props: {
       >
         <div className="start">
           {workspaces.looked === 'failed' ? (
-            <Mono className="start__note">The workspaces could not be read: {workspaces.error}</Mono>
+            <Text scale="body-small" className="start__note m3-wrap">The workspaces could not be read: {workspaces.error}</Text>
           ) : null}
           {workspaces.looked === 'pending' || (workspaces.looked === 'ok' && !settled) ? (
             <div aria-busy="true" className="start__pending">
@@ -155,7 +155,7 @@ function Pick(props: { choice: Choice; issue: string }) {
       >
         {workspace.name}
       </Button>
-      <Mono className="start__machine">{workspace.machine}</Mono>
+      <Text scale="body-small" className="start__machine m3-wrap">{workspace.machine}</Text>
       {choice.owned ? null : (
         <Text scale="body-small" tone="variant">
           Matched by folder name only. Check the repository before you start.

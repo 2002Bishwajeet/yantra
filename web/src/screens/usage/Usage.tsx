@@ -13,7 +13,7 @@ import { State } from '@/m3/mark/Mark'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { Track } from '@/m3/track/Track'
 import { type FormFactor, useFormFactor } from '@/shell/formFactor'
@@ -84,9 +84,9 @@ function ByWorkspace(props: { rows: Row[] }) {
                     {one.machine} · {count(one.responses)} responses
                   </span>
                 </span>
-                <Mono className="usage__cost">
+                <Num className="usage__cost">
                   {one.cost === null ? 'unpriced' : money(one.cost)}
-                </Mono>
+                </Num>
               </div>
               <Share cost={one.cost} most={most} />
             </li>
@@ -129,9 +129,9 @@ function ByModel(props: { rows: Row[] }) {
                     read
                   </span>
                 </span>
-                <Mono className="usage__cost">
+                <Num className="usage__cost">
                   {one.cost === null ? 'unpriced' : money(one.cost)}
-                </Mono>
+                </Num>
               </div>
               <Share cost={one.cost} most={most} />
             </li>
@@ -154,7 +154,7 @@ function Refusals(props: { rows: Row[] }) {
           <State size="small" state={row.read === 'nothing' ? 'idle' : 'failed'}>
             <span className="usage__who" title={row.workspace.name}>{row.workspace.name}</span>
           </State>
-          <Mono className="usage__reason m3-wrap">{row.said}</Mono>
+          <Text scale="body-small" className="usage__reason m3-wrap">{row.said}</Text>
         </li>
       ))}
     </ul>
@@ -298,8 +298,8 @@ export function Usage() {
         }
         stamp={
           <>
-            <Mono>as read · {AS_READ[span]}</Mono>
-            {asOf ? <Mono> · prices from {asOf}</Mono> : null}
+            <Num>as read · {AS_READ[span]}</Num>
+            {asOf ? <Num> · prices from {asOf}</Num> : null}
           </>
         }
         title="Usage"

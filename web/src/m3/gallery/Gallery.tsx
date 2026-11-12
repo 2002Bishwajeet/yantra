@@ -47,7 +47,7 @@ import { Skeleton } from '../skeleton/Skeleton'
 import { Snackbar } from '../snackbar/Snackbar'
 import { Stepper } from '../stepper/Stepper'
 import { Switch } from '../switch/Switch'
-import { Eyebrow, Mono, Text, type TypeScale } from '../text/Text'
+import { Eyebrow, Num, Text, type TypeScale } from '../text/Text'
 import { TextField } from '../text-field/TextField'
 import { IconTile, Tile } from '../tile/Tile'
 import { TopAppBar } from '../top-app-bar/TopAppBar'
@@ -98,7 +98,7 @@ function Catalogue() {
             </div>
           ))}
           <div className="m3-gallery__pair">
-            <Mono>3h 41m</Mono>
+            <Num>3h 41m</Num>
             <Eyebrow>Needs you</Eyebrow>
             <Text scale="body-medium" tone="variant">
               variant
@@ -231,19 +231,19 @@ function Catalogue() {
           <Row tone="selected">
             <Tile name="yantra-web" />
             <RowText headline="yantra-web" supporting={<State state="needs" size="small">waiting for trust · cachyos-g14</State>} />
-            <Mono>4m</Mono>
+            <Num>4m</Num>
           </Row>
           <Row render={<a href="#row" />}>
             <Tile name="landing" />
             <RowText headline="landing" supporting={<State state="running" size="small">running · macbook</State>} />
             <Track value={1} label="elapsed, the longest" />
-            <Mono>3h 41m</Mono>
+            <Num>3h 41m</Num>
           </Row>
           <Row tone="plain">
             <Tile name="price-table" size="small" />
             <RowText headline="price-table" supporting={<State state="idle" size="small">stopped · cachyos-g14</State>} />
             <Track value={0.33} label="elapsed" />
-            <Mono>7 Jul</Mono>
+            <Num>7 Jul</Num>
             <Button variant="text">Open</Button>
           </Row>
           <Card surface="primary">
@@ -478,7 +478,7 @@ function Catalogue() {
               <Tile name="landing" />
               <RowText headline="landing" supporting="macbook" />
               <State state="running" />
-              <Mono>3h 41m</Mono>
+              <Num>3h 41m</Num>
             </Row>
           </DialogPopup>
         </Dialog>
@@ -497,7 +497,7 @@ function Catalogue() {
             <Row>
               <Tile name="landing" />
               <RowText headline="landing" supporting="running · macbook" />
-              <Mono>3h 41m</Mono>
+              <Num>3h 41m</Num>
             </Row>
           </BottomSheetPopup>
         </BottomSheet>
