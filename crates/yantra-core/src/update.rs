@@ -306,6 +306,7 @@ mod tests {
             .arg("-c")
             .arg(format!(
                 "dir=$1\nas_root() {{ \"$@\"; }}\nsystemctl() {{ echo \"$*\" >>\"$dir/systemctl\"; }}\n\
+                 caddy() {{ [ -e \"$dir/refused\" ] || echo '{{\"admin\":{{\"disabled\":true}}}}'; }}\n\
                  {}\n{function} {args}",
                 &SCRIPT[start..end]
             ))
@@ -335,7 +336,8 @@ mod tests {
     }
 
     /// `close_the_admin_api` on a Caddyfile: the file afterwards, what the run printed, and
-    /// what it asked of `systemctl`.
+    /// what it asked of `systemctl`. `caddy adapt` accepts the copy unless `refused` is there;
+    /// `tests/caddy_admin.rs` in `yantrad` asks a real Caddy.
     fn close_the_admin_api(dir: &Path, caddy: &str) -> (String, String, String) {
         let _ = std::fs::remove_file(dir.join("systemctl"));
         std::fs::write(dir.join("Caddyfile"), caddy).expect("written");
@@ -406,6 +408,57 @@ mod tests {
         let (file, _, asked) = close_the_admin_api(&dir, &old);
         assert_eq!(file, format!("{{\n    admin off\n}}\n\n{old}"));
         assert_eq!(asked, RESTART);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The global block is the first line that holds only `{`: a comment or a CR can follow
+    /// the brace, and a snippet can stand before the block.
+    #[test]
+    fn an_update_finds_a_global_block_that_is_not_a_bare_brace_on_line_one() {
+        let dir = scratch("admin-shapes");
+        let commented = CADDY.replacen("{\n", "{ # global options\n", 1);
+        let (file, _, asked) = close_the_admin_api(&dir, &commented);
+        assert_eq!(
+            file,
+            commented.replacen('\n', "\n    admin off\n", 1),
+            "a comment after the brace"
+        );
+        assert_eq!(asked, RESTART);
+
+        let crlf = CADDY.replace('\n', "\r\n");
+        let (file, ..) = close_the_admin_api(&dir, &crlf);
+        assert_eq!(
+            file,
+            crlf.replacen("{\r\n", "{\r\n    admin off\r\n", 1),
+            "CRLF line ends"
+        );
+
+        let snippet = format!("(common) {{\n    encode gzip\n}}\n\n{CADDY}");
+        let (file, ..) = close_the_admin_api(&dir, &snippet);
+        assert_eq!(
+            file,
+            snippet.replacen("\n{\n", "\n{\n    admin off\n", 1),
+            "a snippet before the block"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A copy that `caddy adapt` does not read as a config with the admin API off is not
+    /// written: the Caddyfile stays, Caddy is not restarted, and each run says so.
+    #[test]
+    fn an_update_leaves_a_caddyfile_that_caddy_refuses_with_admin_off() {
+        let dir = scratch("admin-refused");
+        std::fs::write(dir.join("refused"), "").expect("written");
+        for run in ["the first run", "the second run"] {
+            let (file, said, asked) = close_the_admin_api(&dir, CADDY);
+            assert_eq!(file, CADDY, "{run}");
+            assert!(said.contains("is not changed"), "{run}: {said}");
+            assert_eq!(asked, "", "{run}");
+        }
+        assert!(
+            !dir.join("Caddyfile.admin-off").exists(),
+            "the copy is gone"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

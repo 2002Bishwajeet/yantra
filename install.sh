@@ -807,17 +807,32 @@ close_the_admin_api() {
         echo "install: $1 sets Caddy's admin API itself, so it is not changed. Any account on this box can use that API to act as yantrad's proxy; \"admin off\" closes it."
         return 0
     fi
-    local closed
+    # The first line that holds only "{" opens the global block. A snippet can stand before the
+    # block, and a comment or a CR can follow the brace.
+    local closed adapted
     closed=$(as_root cat "$1" | awk '
-        seen { print; next }
-        /^[ \t]*(#|$)/ { held = held $0 "\n"; next }
-        {
-            seen = 1
-            if ($0 ~ /^[{][ \t]*$/) printf "%s%s\n    admin off\n", held, $0
-            else printf "{\n    admin off\n}\n\n%s%s\n", held, $0
+        { line[NR] = $0 }
+        !at && /^[ \t]*[{]([ \t]+#.*)?[ \t\r]*$/ { at = NR }
+        END {
+            if (!at) printf "{\n    admin off\n}\n\n"
+            for (i = 1; i <= NR; i++) {
+                print line[i]
+                if (i == at) print "    admin off" (line[i] ~ /\r$/ ? "\r" : "")
+            }
         }')
-    # Empty when only a comment names the socket; an empty file must not be written.
-    [ -n "$closed" ] || return 0
+    # Caddy judges a copy before the file changes: a file that Caddy refuses stops the proxy.
+    # The copy is beside the file for its import paths, and cp -p gives it the same owner and mode.
+    as_root cp -p "$1" "$1.admin-off"
+    printf '%s\n' "$closed" | as_root tee "$1.admin-off" >/dev/null
+    adapted=$(as_root caddy adapt --config "$1.admin-off" --adapter caddyfile 2>/dev/null) || true
+    as_root rm -f "$1.admin-off"
+    case "$adapted" in
+    *'"admin":{"disabled":true'*) ;;
+    *)
+        echo "install: $1 is not changed. \"caddy adapt\" did not read a copy with \"admin off\" added as a config with the admin API off. Any account on this box can use that API to act as yantrad's proxy. Put \"admin off\" in the global options block, then run: sudo systemctl restart caddy.service"
+        return 0
+        ;;
+    esac
     printf '%s\n' "$closed" | as_root tee "$1" >/dev/null
     if as_root systemctl try-restart caddy.service; then
         echo "install: Caddy's admin API is now off in $1. Any account on this box could use it to act as yantrad's proxy."

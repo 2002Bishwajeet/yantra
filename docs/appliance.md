@@ -174,6 +174,12 @@ proxies to the socket and has no `admin` line, `install.sh` adds `admin off` to 
 restarts Caddy once and says so. It does not change a file that has its own `admin` line, and it
 prints that the API can still be open.
 
+**Caddy checks the new file before the update writes it.** `install.sh` adds the line to a copy and
+runs `caddy adapt` on that copy. It writes the Caddyfile only when the result has the admin API
+off. A file that Caddy refuses stops the proxy at the restart. Otherwise the Caddyfile stays as it
+was and Caddy is not restarted. Each update then prints that the API can still be open, and you
+add the line as step 3 shows. This also happens when `caddy` is not on root's `PATH`.
+
 **The cost: any process that runs as `caddy` can name a caller.** It writes the one address that the
 daemon judges. A local process that reaches Caddy is still refused, because Caddy then forwards
 this box's own address. Caddy's `X-Forwarded-For` must hold one address, as the line in step 3
