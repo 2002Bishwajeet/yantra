@@ -240,7 +240,8 @@ web-e2e *args:
     nm="$(readlink -f node_modules)"
     name="yantra-e2e-$(git rev-parse --show-toplevel | sha1sum | cut -c1-8)"
     podman rm -f "$name" >/dev/null 2>&1 || true
-    podman run --rm --name "$name" -e CI=1 -v "$PWD/..:/work" -v "$nm:$nm" \
+    # Y-800: a cap like the other projects' browser containers, so one e2e run cannot take the shared laptop's memory.
+    podman run --rm --name "$name" --memory "${E2E_MEMORY:-4g}" --memory-swap "${E2E_MEMORY:-4g}" -e CI=1 -v "$PWD/..:/work" -v "$nm:$nm" \
         -w /work/web "$image" npx playwright test "$@"
 
 # M7's one file to copy: the appliance daemon with the dashboard inside it.
