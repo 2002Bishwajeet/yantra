@@ -110,3 +110,11 @@ actually needs it.
 - Headless remains available and unbuilt. Adding it later is additive; nothing in this decision
   forecloses it.
 - Whether the agent is *driven* rather than merely launched. See above.
+
+> **Amended 2026-11-12 ([Y-519](../../tracker.md), [ADR-0037](0037-continue-is-a-handoff.md)
+> decision 5):** a TUI may start with a prompt. A session that a handoff starts passes the handoff
+> to `claude` as its launch argument. This is not keystrokes into a running pane, so a running agent
+> still gets no input from Yantra.
+>
+> **What changed upstream of the reasoning:** the owner accepted *continue on another machine* as a
+> handoff, and a fresh session needs its first message at launch.
