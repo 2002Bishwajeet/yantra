@@ -358,3 +358,25 @@ once the moved-tag problem bites.
 > **What changed upstream of the reasoning:** on 2026-09-30 the build loop started to merge rows with
 > no owner review, and on 2026-11-10 the box could opt in to the nightly. Together they put
 > unreviewed code on a path to root.
+
+> **Decision 4 amended again 2026-11-12 ([Y-803](../../tracker.md), owner): CI signs, in a job
+> that builds nothing, and the nightly is signed too.** The owner wants stable and nightly to
+> update from the dashboard with no hand step, and keeps the signature check. This replaces items 1
+> and 3 of the amendment above. Item 2 stands.
+>
+> 1. **A `sign` job signs `SHA256SUMS` with `ssh-keygen -Y sign`.** It downloads the build job's
+>    archives and runs no npm, cargo or build step. The build job never holds a key.
+> 2. **The keys live in the GitHub environment `release`.** Its protection admits only `main` and
+>    `v*` tags. A pull request, another branch or another workflow cannot read them. A rule lets only
+>    the release workflow create a `v*` tag.
+> 3. **Stable and nightly have separate keys.** The box verifies with the key of the channel it
+>    follows, so a nightly signature never installs as stable. The box still never downgrades.
+> 4. **The nightly installs from the dashboard**, as stable does.
+>
+> **The honest limit:** a signature now proves that this repository's release workflow built the
+> archive from `main`. It does not prove that a person read the code. The merge gate does that
+> work. Whoever controls the owner's GitHub account can change the environment, so that account is
+> the root of trust.
+>
+> **What changed upstream of the reasoning:** the owner weighed a hand step on every release against
+> this limit and chose automation, 2026-11-12.
