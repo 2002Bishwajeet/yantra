@@ -554,6 +554,7 @@ span.ns__crumb {
 
 .ns__join {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
   min-width: 0;

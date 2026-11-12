@@ -83,6 +83,14 @@ test.describe('the four steps', () => {
     await expect(steps.nth(1)).toHaveAttribute('aria-current', 'step')
   })
 
+  test('opens on the Name field, names the three steps, and names the machine', async ({ page, size }) => {
+    await expect(page.getByText('Three steps: name, source, start.')).toBeVisible()
+    // On the phone nothing is focused, because that would raise the keyboard.
+    if (size === 'phone') await expect(page.getByLabel('Name')).not.toBeFocused()
+    else await expect(page.getByLabel('Name')).toBeFocused()
+    await expect(page.getByText(/^The session runs on .+\.$|^Choose a machine to continue\.$/)).toBeVisible()
+  })
+
   test('looks like the board', async ({ page, size }) => {
     await page.getByLabel('Name').fill('quiet-otter')
     await screenshot(page, 'new-session-name', 'busy', size, { overlay: size !== 'phone' })
@@ -380,6 +388,8 @@ const fits = async (page: Page, action: 'Continue' | 'Create and open') => {
   const tall = await page.locator('.ns p').evaluateAll((nodes) =>
     nodes
       .filter((node) => node.getBoundingClientRect().height > 0)
+      // Y-768: the unjoined hub's note wraps, so a short phone does not cut it.
+      .filter((node) => !node.closest('.ns__join'))
       .filter((node) => node.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(node).lineHeight))
       .map((node) => node.textContent),
   )
@@ -417,7 +427,7 @@ test.describe('the steps fit a phone (Y-719)', () => {
     await fits(page, 'Create and open')
   })
 
-  test('step 1 stays one line when the hub is unjoined and no machine can be suggested', async ({ page }) => {
+  test('step 1 fits when the hub is unjoined and no machine can be suggested', async ({ page }) => {
     // `fresh` has an unjoined hub; in `hub` the box has joined, so the note never renders.
     await scenario(page, 'fresh')
     await page.route('**/api/placement', (route) =>
@@ -429,6 +439,9 @@ test.describe('the steps fit a phone (Y-719)', () => {
     await expect(page.getByRole('alert').filter({ hasText: 'No suggestion' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Ask again' })).toBeVisible()
     await fits(page, 'Continue')
+    const note = page.getByRole('note').filter({ hasText: 'karigar account' }).locator('p')
+    expect(await note.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeInViewport()
   })
 })
 

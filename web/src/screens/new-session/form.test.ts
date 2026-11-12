@@ -13,6 +13,7 @@ import {
   plan,
   reachable,
   repoName,
+  soleMachine,
   slug,
   sourceHint,
   tilde,
@@ -189,6 +190,27 @@ describe('pickMachine', () => {
 
   it.each(['down', 'old', 'theirs', 'gone', ''])('drops %j', (given) => {
     expect(pickMachine(given, list)).toBe('')
+  })
+})
+
+describe('soleMachine', () => {
+  const one = (name: string, over: Partial<Machine> = {}) => aMachine({ name, ...over })
+
+  it('is empty for no machine', () => {
+    expect(soleMachine([])).toBe('')
+  })
+
+  it('names the one machine that can be pressed', () => {
+    expect(soleMachine([one('pi')])).toBe('pi')
+  })
+
+  it('is empty for two', () => {
+    expect(soleMachine([one('pi'), one('box')])).toBe('')
+  })
+
+  it('skips the unreachable, expired and shared ones', () => {
+    const list = [one('down', { online: false }), one('old', { expired: true }), one('theirs', { ownership: 'shared' }), one('up')]
+    expect(soleMachine(list)).toBe('up')
   })
 })
 
