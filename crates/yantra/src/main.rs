@@ -299,8 +299,7 @@ enum Command {
         check: bool,
         /// stable or nightly. Without --check it is written to
         /// /etc/yantra/channel; by default the box keeps the channel it
-        /// has, and a new box is on stable. The nightly is not signed, so
-        /// only `sudo yantra-update --channel nightly` installs one
+        /// has, and a new box is on stable
         #[arg(long)]
         channel: Option<update::Channel>,
     },

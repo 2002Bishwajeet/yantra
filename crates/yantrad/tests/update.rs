@@ -544,11 +544,48 @@ fn a_failed_update_restarts_nothing_and_the_socket_stays_up() -> Result<()> {
     Ok(())
 }
 
-/// Y-780, ADR-0027 decision 4: the nightly is not signed, so only a person who
-/// names it installs it. yantrad's account can write the channel file, and the
-/// unit takes no argument, so the unit refuses a nightly.
+/// Y-803, ADR-0027 decision 4: the nightly key signs the nightly. yantrad's
+/// account writes the channel file and the unit takes no argument, so the unit
+/// installs the nightly that the file names and restarts the daemon.
 #[test]
-fn the_root_unit_refuses_a_nightly() -> Result<()> {
+fn the_root_unit_installs_a_signed_nightly() -> Result<()> {
+    let Some(appliance) = Appliance::start()? else {
+        return Ok(());
+    };
+    appliance.arrange()?;
+    let before = appliance.daemon_pid()?;
+    appliance.publish(NEW, NEW_MARK)?;
+    // With no stable release list, only the nightly can resolve.
+    appliance.sh(&format!(
+        "bash /fixture/release.sh nightly {repo} {NEW} && \
+         bash /fixture/release.sh unresolvable {repo} && \
+         runuser -u yantra -- sh -c 'echo nightly > /etc/yantra/channel'",
+        repo = appliance.repo
+    ))?;
+
+    let started = appliance
+        .systemd
+        .exec(&["systemctl", "start", "yantra-update.service"])?;
+    let journal = appliance.systemd.journal("yantra-update.service");
+    assert!(started.status.success(), "{journal}");
+    assert!(
+        journal.contains(&format!("install: yantra v{NEW},")) && journal.contains(", nightly"),
+        "the unit did not install the nightly:\n{journal}"
+    );
+    let after = appliance.daemon_pid()?;
+    assert_ne!(after, before, "yantrad was not restarted:\n{journal}");
+    assert!(
+        appliance.runs(&after, NEW_MARK)?,
+        "the running yantrad is not the nightly"
+    );
+    appliance.healthy()
+}
+
+/// Y-803: the box verifies with the key of the release it fetches. A nightly
+/// that the stable key signed, or that nothing signed, is not the sign job's
+/// nightly. The root unit installs nothing and restarts nothing.
+#[test]
+fn the_root_unit_refuses_a_nightly_the_nightly_key_did_not_sign() -> Result<()> {
     let Some(appliance) = Appliance::start()? else {
         return Ok(());
     };
@@ -556,16 +593,22 @@ fn the_root_unit_refuses_a_nightly() -> Result<()> {
     let before = appliance.daemon_pid()?;
     appliance.publish(NEW, NEW_MARK)?;
     appliance.sh(&format!(
-        "bash /fixture/release.sh nightly {} {NEW} && \
+        "bash /fixture/release.sh nightly {repo} {NEW} && \
+         bash /fixture/release.sh cross {repo} nightly && \
          runuser -u yantra -- sh -c 'echo nightly > /etc/yantra/channel'",
+        repo = appliance.repo
+    ))?;
+    appliance.unit_refuses(&before, "is not the nightly key's signature")?;
+
+    appliance.sh(&format!(
+        "bash /fixture/release.sh unsign {} nightly",
         appliance.repo
     ))?;
-
-    appliance.unit_refuses(&before, "the nightly is not signed")
+    appliance.unit_refuses(&before, "carries no SHA256SUMS.sig")
 }
 
-/// Y-780: a stable release with no `SHA256SUMS.sig` is one the owner has not
-/// approved. The root unit installs nothing and restarts nothing.
+/// Y-780: a stable release with no `SHA256SUMS.sig` is one the release
+/// workflow did not sign. The root unit installs nothing and restarts nothing.
 #[test]
 fn the_root_unit_refuses_an_unsigned_release() -> Result<()> {
     let Some(appliance) = Appliance::start()? else {

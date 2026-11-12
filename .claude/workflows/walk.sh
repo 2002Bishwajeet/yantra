@@ -46,9 +46,10 @@ up)
     exit 1
   fi
   # Y-799: the builds share the laptop's machine-wide lock for heavy commands with other projects' agents.
-  heavy=(); [ -x ~/.claude/bin/heavy ] && heavy=(~/.claude/bin/heavy)
   # Y-804: the builds are capped, so a walk cannot push other sessions on the laptop into oomd.
-  heavy+=(systemd-run --user --scope -q -p MemoryMax="${WALK_MEMORY_MAX:-4G}" -p MemorySwapMax=1G nice -n 10)
+  # Y-807: heavy opens its own capped scope; a second systemd-run inside it collides on the scope name.
+  heavy=(systemd-run --user --scope -q -p MemoryMax="${WALK_MEMORY_MAX:-4G}" -p MemorySwapMax=1G nice -n 10)
+  [ -x ~/.claude/bin/heavy ] && heavy=(env HEAVY_MEM="${WALK_MEMORY_MAX:-4G}" ~/.claude/bin/heavy nice -n 10)
   (cd "$wt" && CARGO_TARGET_DIR="$wt/target" "${heavy[@]}" cargo build --bin yantrad)
   (cd "$wt/web" && { [ -d node_modules ] || "${heavy[@]}" npm ci --prefer-offline; } && "${heavy[@]}" npx vite build)
   # The developer's own yantrad holds 7717 on the tailnet addresses, so this one runs in its own network

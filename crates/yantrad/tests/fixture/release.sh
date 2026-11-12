@@ -2,9 +2,9 @@
 #
 # github.com and api.github.com, inside the container, so install.sh can be run
 # against a release that this fixture publishes (Y-158). Real curl, real TLS,
-# real checksums, a real signature of them, a release list to resolve a version
-# from, and a corrupted, unsigned or forged release on demand — which the real
-# host cannot serve.
+# real checksums, a real signature of them by each channel's key, a release list
+# to resolve a version from, and a corrupted, unsigned, forged or cross-signed
+# release on demand — which the real host cannot serve.
 #
 # What it does not prove is that a published archive is shaped this way; the
 # test asserts that against release.yml instead.
@@ -15,7 +15,8 @@ STAGING=/srv/staging
 UNITS=/srv/units
 CERT=/srv/fixture.crt
 KEY=/srv/fixture.key
-SIGNING=/srv/signing
+STABLE=/srv/signing-stable
+NIGHTLY=/srv/signing-nightly
 
 case "$(uname -m)" in
 aarch64 | arm64) target=aarch64-unknown-linux-musl other=x86_64-unknown-linux-musl ;;
@@ -23,15 +24,22 @@ x86_64 | amd64) target=x86_64-unknown-linux-musl other=aarch64-unknown-linux-mus
 *) echo "release.sh: no release is built for $(uname -m)" >&2 && exit 1 ;;
 esac
 
-downloads() { echo "$WWW/$1/releases/download/v$2"; }
+# $2 is a version, or `nightly` for the rolling release.
+downloads() {
+    case "$2" in
+    nightly) echo "$WWW/$1/releases/download/nightly" ;;
+    *) echo "$WWW/$1/releases/download/v$2" ;;
+    esac
+}
 staged() { echo "yantra-$1-$target"; }
 
-# install.sh carries the owner's key, which the fixture cannot sign with (Y-780).
+# install.sh carries release.yml's two keys, which the fixture cannot sign with (Y-803).
 trust() {
-    sed -i "s|^RELEASE_KEY=.*|RELEASE_KEY='$(cut -d ' ' -f 1,2 "$SIGNING.pub")'|" "$1"
+    sed -i -e "s|^STABLE_KEY=.*|STABLE_KEY='$(cut -d ' ' -f 1,2 "$STABLE.pub")'|" \
+        -e "s|^NIGHTLY_KEY=.*|NIGHTLY_KEY='$(cut -d ' ' -f 1,2 "$NIGHTLY.pub")'|" "$1"
 }
 
-# The owner's step, with the key $1. ssh-keygen asks before it replaces a signature.
+# The `sign` job's step, with the key $1. ssh-keygen asks before it replaces a signature.
 sign() {
     rm -f SHA256SUMS.sig
     ssh-keygen -q -Y sign -f "$1" -n file SHA256SUMS
@@ -53,7 +61,8 @@ serve() {
 
     printf '127.0.0.1 github.com api.github.com raw.githubusercontent.com\n' >> /etc/hosts
 
-    ssh-keygen -q -t ed25519 -N '' -f "$SIGNING"
+    ssh-keygen -q -t ed25519 -N '' -f "$STABLE"
+    ssh-keygen -q -t ed25519 -N '' -f "$NIGHTLY"
     trust /fixture/install.sh
 
     mkdir -p "$WWW"
@@ -167,7 +176,7 @@ pack() {
     printf '%s  yantra-%s-%s.tar.gz\n' \
         0000000000000000000000000000000000000000000000000000000000000000 \
         "$version" "$other" >> SHA256SUMS
-    sign "$SIGNING"
+    sign "$STABLE"
 }
 
 # An archive shaped the way every release up to v0.1.0 is: three binaries and no
@@ -192,15 +201,16 @@ unresolvable() {
 }
 
 # The publication served as the rolling nightly as well (Y-662): under the
-# `nightly` tag, whose only version is in the title and the archives' names.
+# `nightly` tag, whose only version is in the title and the archives' names,
+# and under the nightly key's signature (Y-803).
 # The other target's archive is listed first, so a resolver must pick its own.
 nightly() {
-    local repo=$1 version=$2
+    local repo=$1 version=$2 rolling
+    rolling=$(downloads "$repo" nightly)
     mkdir -p "$WWW/repos/$repo/releases/tags"
-    rm -rf "$WWW/$repo/releases/download/nightly"
-    cp -r "$(downloads "$repo" "$version")" "$WWW/$repo/releases/download/nightly"
-    # A real nightly carries no signature.
-    rm -f "$WWW/$repo/releases/download/nightly/SHA256SUMS.sig"
+    rm -rf "$rolling"
+    cp -r "$(downloads "$repo" "$version")" "$rolling"
+    (cd "$rolling" && sign "$NIGHTLY")
     printf '{"tag_name":"nightly","name":"v%s","prerelease":true,"assets":[{"name":"yantra-%s-%s.tar.gz"},{"name":"yantra-%s-%s.tar.gz"},{"name":"SHA256SUMS"}]}\n' \
         "$version" "$version" "$other" "$version" "$target" > "$WWW/repos/$repo/releases/tags/nightly"
 }
@@ -211,7 +221,7 @@ corrupt() {
         bs=1 seek=0 conv=notrunc status=none
 }
 
-# A release the owner has not signed yet.
+# A release that the `sign` job never reached.
 unsign() {
     rm -f "$(downloads "$1" "$2")/SHA256SUMS.sig"
 }
@@ -222,6 +232,12 @@ stranger() {
     ssh-keygen -q -t ed25519 -N '' -f /srv/stranger
     cd "$(downloads "$1" "$2")"
     sign /srv/stranger
+}
+
+# A release under the other channel's signature (Y-803).
+cross() {
+    cd "$(downloads "$1" "$2")"
+    if [ "$2" = nightly ]; then sign "$STABLE"; else sign "$NIGHTLY"; fi
 }
 
 # Another archive with a SHA256SUMS that matches it, under the signature of the first.

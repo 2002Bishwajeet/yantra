@@ -8,6 +8,9 @@ name: release
 # A push to main publishes the nightly (Y-662): the two Linux archives and
 # install.sh, with no rehearse, re-uploaded to the one rolling `nightly`
 # pre-release.
+#
+# The `sign` job signs SHA256SUMS for a tag and for a nightly (Y-803). It alone
+# holds a key, and it builds nothing. A workflow_dispatch on a branch signs nothing.
 on:
   push:
     branches:
@@ -385,9 +388,107 @@ jobs:
           YANTRA_RELEASE_ARCHIVE="$PWD/built/yantra-${VERSION}-x86_64-unknown-linux-musl.tar.gz" \
             cargo nextest run -p yantrad --test update --no-tests=fail -E 'test(the_built_archive)'
 
+  # ADR-0027 decision 4, second 2026-11-12 note (Y-803): the one job that holds
+  # a signing key. It runs no step that builds, and no code from the repository.
+  # The environment `release` admits only `main` and `v*` tags.
+  sign:
+    name: sign SHA256SUMS
+    needs: [meta, build]
+    if: github.ref_type == 'tag' || needs.meta.outputs.nightly == 'true'
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout install.sh alone
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: /install.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: yantra-*
+          path: artifacts
+          merge-multiple: true
+
+      # Collapse the per-target .sha256 files into one SHA256SUMS and verify
+      # every archive against it before it is signed.
+      # Y-787: install.sh is an asset too, so the first install fetches the
+      # release's own copy and the signature covers it.
+      - name: Aggregate and verify checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp install.sh artifacts/
+          cd artifacts
+          { cat *.sha256; sha256sum install.sh; } | sort -k2 > SHA256SUMS
+          rm -f -- *.sha256
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+
+      # Two steps, each with its own secret. One expression that chose between
+      # them would give a nightly the stable key if the nightly secret were empty.
+      - name: Sign with the stable key
+        if: github.ref_type == 'tag'
+        shell: bash
+        working-directory: artifacts
+        env:
+          SIGNING_KEY: ${{ secrets.YANTRA_STABLE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/signing"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$RUNNER_TEMP/signing"
+          ssh-keygen -Y sign -f "$RUNNER_TEMP/signing" -n file SHA256SUMS
+
+      - name: Sign with the nightly key
+        if: needs.meta.outputs.nightly == 'true'
+        shell: bash
+        working-directory: artifacts
+        env:
+          SIGNING_KEY: ${{ secrets.YANTRA_NIGHTLY_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/signing"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$RUNNER_TEMP/signing"
+          ssh-keygen -Y sign -f "$RUNNER_TEMP/signing" -n file SHA256SUMS
+
+      # No secret here. The public half comes out of the install.sh that this
+      # release publishes, so a secret that does not match it publishes nothing.
+      - name: Verify the signature with the key install.sh carries
+        shell: bash
+        working-directory: artifacts
+        env:
+          CARRIED: ${{ github.ref_type == 'tag' && 'STABLE_KEY' || 'NIGHTLY_KEY' }}
+        run: |
+          set -euo pipefail
+          key=$(sed -n "s/^${CARRIED}='\(.*\)'\$/\1/p" install.sh)
+          if [ -z "$key" ]; then
+            echo "::error::install.sh assigns no ${CARRIED}"
+            exit 1
+          fi
+          printf 'yantra-release namespaces="file" %s\n' "$key" > "$RUNNER_TEMP/allowed_signers"
+          ssh-keygen -Y verify -f "$RUNNER_TEMP/allowed_signers" -I yantra-release -n file \
+            -s SHA256SUMS.sig < SHA256SUMS
+
+      - name: Upload the signed checksums
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-checksums
+          path: |
+            artifacts/SHA256SUMS
+            artifacts/SHA256SUMS.sig
+            artifacts/install.sh
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: publish release
-    needs: [meta, build, rehearse]
+    needs: [meta, build, rehearse, sign]
     # workflow_dispatch runs are rehearsals: they build and upload artifacts but
     # never publish. Only a tag push gets this far.
     if: github.ref_type == 'tag'
@@ -405,17 +506,19 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      # Collapse the per-target .sha256 files into one SHA256SUMS asset and
-      # verify every archive against it before anything is published.
-      # Y-787: install.sh is an asset too, so the first install fetches the
-      # release's own copy and the owner's signature covers it.
-      - name: Aggregate and verify checksums
+      - name: Download the signed checksums
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-checksums
+          path: artifacts
+
+      # Y-803: this job writes no SHA256SUMS. It checks every archive, and
+      # install.sh, against the file that `sign` signed before it publishes.
+      - name: Verify against the signed checksums
         shell: bash
+        working-directory: artifacts
         run: |
           set -euo pipefail
-          cp install.sh artifacts/
-          cd artifacts
-          { cat *.sha256; sha256sum install.sh; } | sort -k2 > SHA256SUMS
           rm -f -- *.sha256
           sha256sum -c SHA256SUMS
           cat SHA256SUMS
@@ -474,15 +577,12 @@ jobs:
   # A pre-release is never /releases/latest, so stable boxes never see it.
   nightly:
     name: publish nightly
-    needs: [meta, build]
+    needs: [meta, build, sign]
     if: needs.meta.outputs.nightly == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Download all build artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -490,14 +590,19 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      # Y-787: a nightly command fetches this copy, which matches the archives.
-      - name: Aggregate and verify checksums
+      # Y-787: a nightly command fetches this copy of install.sh, which matches
+      # the archives.
+      - name: Download the signed checksums
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-checksums
+          path: artifacts
+
+      - name: Verify against the signed checksums
         shell: bash
+        working-directory: artifacts
         run: |
           set -euo pipefail
-          cp install.sh artifacts/
-          cd artifacts
-          { cat *.sha256; sha256sum install.sh; } | sort -k2 > SHA256SUMS
           rm -f -- *.sha256
           sha256sum -c SHA256SUMS
           cat SHA256SUMS
@@ -513,7 +618,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          notes="The build of ${GITHUB_SHA}, the latest merge to main. Linux only, and not rehearsed.
+          notes="The build of ${GITHUB_SHA}, the latest merge to main. Linux only, signed with the nightly key, and not rehearsed.
           Install it on a box with: \`curl -fsSL https://github.com/${GH_REPO}/releases/download/nightly/install.sh | bash -s -- --channel nightly\`"
           if gh release view nightly >/dev/null 2>&1; then
             gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/nightly" -f sha="$GITHUB_SHA" -F force=true >/dev/null
