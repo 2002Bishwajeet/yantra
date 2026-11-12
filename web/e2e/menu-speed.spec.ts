@@ -8,6 +8,8 @@ async function opens(trigger: Locator) {
   await page.waitForLoadState('networkidle')
   // Let the idle mount land; a tap before it is the slow path this guards against.
   await page.waitForTimeout(500)
+  // Reduced motion hides a late enter transition from the timing below, so also require the closed menu to be mounted before the tap.
+  await expect(page.locator('.m3-menu')).toBeAttached()
   await page.evaluate(() => {
     const seen = { t0: 0, visible: 0 }
     Object.assign(window, { menuSeen: seen })

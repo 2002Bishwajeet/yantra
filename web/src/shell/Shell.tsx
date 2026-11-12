@@ -41,8 +41,9 @@ import { paintThemeColor, syncThemeColor } from './themeColor'
 import './Shell.css'
 
 // The menu, the popover and the sheet's list carry Base UI's popup machinery
-// and the list's code. Each loads on the first press of its trigger, or on the
-// pointer or focus reaching it, never with the shell (Y-375).
+// and the list's code. The list loads on the first press of its trigger, or on
+// the pointer or focus reaching it. The avatar's menu and the bell's popover
+// load once the page is idle, never with the shell (Y-375, Y-736, Y-765).
 const loadAccount = () => import('./Account')
 const loadBellPopover = () => import('./BellPopover')
 const loadList = () => import('./Notifications')
