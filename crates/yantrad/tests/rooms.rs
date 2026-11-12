@@ -619,7 +619,8 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     assert_eq!(status, 403, "{body}");
 
     // 1c. ADR-0044 decision 12: a token reaches no owner route, and, with no
-    //     thread header, no room another workspace defines.
+    //     thread header, no room another workspace defines and no room that
+    //     is not defined. The owner defines the rooms the later steps use.
     for (method, path) in [
         ("GET", "/api/workspaces"),
         ("GET", "/api/repos"),
@@ -631,20 +632,31 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
         let (status, body) = http(ALPHA, Some(a_token), method, path, None, None).await?;
         assert_eq!(status, 403, "{method} {path}: {body}");
     }
-    let defined = json!({"name": "wb-only", "workspace": "wb"});
-    let (status, body) = exchange(
-        UnixStream::connect(daemon_socket()).await?,
-        "POST",
-        "/api/rooms",
-        "",
-        Some(&defined),
-    )
-    .await?;
-    assert_eq!(status, 201, "{body}");
-    let read = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                      "params": {"name": "room_read", "arguments": {"room": "wb-only"}}});
-    let (status, body) = http(ALPHA, Some(a_token), "POST", "/api/mcp", None, Some(&read)).await?;
-    assert_eq!(status, 403, "{body}");
+    for defined in [
+        json!({"name": "wb-only", "workspace": "wb"}),
+        json!({"name": "r1", "workspace": "wa", "workspaces": ["wb"]}),
+        json!({"name": "r2", "workspace": "wa"}),
+    ] {
+        let (status, body) = exchange(
+            UnixStream::connect(daemon_socket()).await?,
+            "POST",
+            "/api/rooms",
+            "",
+            Some(&defined),
+        )
+        .await?;
+        assert_eq!(status, 201, "{defined}: {body}");
+    }
+    for (name, arguments) in [
+        ("room_read", json!({"room": "wb-only"})),
+        ("room_send", json!({"room": "undefined", "text": "hi"})),
+    ] {
+        let call = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                          "params": {"name": name, "arguments": arguments}});
+        let (status, body) =
+            http(ALPHA, Some(a_token), "POST", "/api/mcp", None, Some(&call)).await?;
+        assert_eq!(status, 403, "{name}: {body}");
+    }
 
     // 2. Beta speaks MCP, and thread B joins r1.
     let initialize = json!({"jsonrpc": "2.0", "id": 0, "method": "initialize",

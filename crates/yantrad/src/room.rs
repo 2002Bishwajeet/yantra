@@ -48,6 +48,8 @@ pub struct Rooms {
     /// Where the definitions are. `None` is no config directory, and then a
     /// room cannot be defined.
     dir: Option<PathBuf>,
+    /// The workspace of the agent token that calls, as [`Self::scoped`] set it.
+    scope: Option<String>,
 }
 
 /// One delivery to a member thread, kept until its wake resolves so a wake
@@ -154,6 +156,27 @@ impl Rooms {
             waking: Arc::default(),
             pauses,
             dir,
+            scope: None,
+        }
+    }
+
+    /// These rooms for an agent token of `workspace`: its tool calls reach
+    /// only the rooms that [`room::Rooms::admits`] it to.
+    pub fn scoped(&self, workspace: &str) -> Self {
+        Self {
+            scope: Some(workspace.to_owned()),
+            ..self.clone()
+        }
+    }
+
+    /// Refuses a room a token does not reach, as one that is not there. The
+    /// caller holds the lock it acts under, so the room cannot end in between.
+    fn admit(&self, store: &room::Rooms, name: &str) -> Result<(), room::Error> {
+        match &self.scope {
+            Some(workspace) if !store.admits(name, workspace) => {
+                Err(room::Error::Unknown(name.to_owned()))
+            }
+            _ => Ok(()),
         }
     }
 
@@ -179,6 +202,7 @@ impl Rooms {
         let now = SystemTime::now();
         let (sent, made, woken, workers) = {
             let mut store = self.lock();
+            self.admit(&store, name)?;
             let made = !store.contains(name);
             let sent = store
                 .send(name, reader, from, text, now)
@@ -237,6 +261,11 @@ impl Rooms {
     /// One room and the messages it keeps, for the dashboard.
     pub fn view(&self, name: &str) -> Result<(Summary, Vec<Message>), room::Error> {
         self.lock().view(name, SystemTime::now())
+    }
+
+    /// Whether an agent token for `workspace` reaches the room.
+    pub fn admits(&self, name: &str, workspace: &str) -> bool {
+        self.lock().admits(name, workspace)
     }
 
     /// Queues each thread `sent` wakes with what it has not seen, and says how
@@ -300,6 +329,7 @@ impl Rooms {
         loop {
             let messages = {
                 let mut store = self.lock();
+                self.admit(&store, name)?;
                 let made = !store.contains(name);
                 let messages = store.read(name, reader, label, SystemTime::now())?;
                 if made {
@@ -321,8 +351,9 @@ impl Rooms {
 
     /// The room and its members, for `room_info`.
     pub fn info(&self, reader: &Reader, label: &str, name: &str) -> Result<Info, room::Error> {
-        self.lock()
-            .info(name, reader, label, SystemTime::now(), &*self.look)
+        let mut store = self.lock();
+        self.admit(&store, name)?;
+        store.info(name, reader, label, SystemTime::now(), &*self.look)
     }
 
     /// What `reader` says it is doing, for `room_status`.
@@ -333,8 +364,11 @@ impl Rooms {
         name: &str,
         doing: &str,
     ) -> Result<(), room::Error> {
-        self.lock()
-            .status(name, reader, label, doing, SystemTime::now())?;
+        {
+            let mut store = self.lock();
+            self.admit(&store, name)?;
+            store.status(name, reader, label, doing, SystemTime::now())?;
+        }
         self.bump();
         Ok(())
     }
@@ -508,6 +542,7 @@ fn home(definition: &Definition) -> Home {
         workspace: definition.workspace.clone(),
         brief: definition.brief.clone(),
         base: definition.base.clone(),
+        workspaces: definition.workspaces.clone(),
         made_at: definition.made_at,
     }
 }
@@ -965,8 +1000,57 @@ pub(crate) mod tests {
             workspace: "web".to_owned(),
             brief: None,
             base: None,
+            workspaces: Vec::new(),
             made_at: 1_800_000_000,
         }
+    }
+
+    /// The token's check runs with the act, so a call that `mcp::may_call`
+    /// passed before the owner ended the room still makes and joins none.
+    #[tokio::test]
+    async fn a_scoped_call_reaches_only_a_room_that_names_its_workspace() {
+        let (rooms, _, _) = rooms();
+        rooms.create(&definition("mine")).expect("defined");
+        rooms
+            .send(&reader("alpha", None), "alpha", "loose", "hi")
+            .expect("the owner makes a room");
+        let closing = watch::Sender::new(false);
+        let me = reader("beta", Some("B"));
+        for (workspace, room, reached) in [
+            ("web", "mine", true),
+            ("api", "mine", false),
+            ("web", "loose", false),
+            ("web", "nowhere", false),
+        ] {
+            let token = rooms.scoped(workspace);
+            let wanted = if reached {
+                Ok(())
+            } else {
+                Err(room::Error::Unknown(room.to_owned()))
+            };
+            let answers = [
+                token.send(&me, "m", room, "hi").map(|_| ()),
+                token
+                    .read(&me, "m", room, Duration::ZERO, &closing)
+                    .await
+                    .map(|_| ()),
+                token.info(&me, "m", room).map(|_| ()),
+                token.status(&me, "m", room, "x"),
+            ];
+            for answer in answers {
+                assert_eq!(answer, wanted, "{workspace} on {room}");
+            }
+        }
+        assert!(
+            rooms.view("nowhere").is_err(),
+            "a refused call makes no room"
+        );
+        let members = |name| rooms.view(name).expect("held").0.members;
+        assert_eq!(
+            (members("mine"), members("loose")),
+            (1, 1),
+            "and joins none"
+        );
     }
 
     #[tokio::test]
