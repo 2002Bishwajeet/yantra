@@ -251,6 +251,7 @@
   z-index: 5;
   max-width: calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   transform-origin: 100% 50%;
+  box-shadow: var(--md-sys-elevation-level3);
 }
 
 /* A machine's name can be long; the whole label is still the button's name. */
