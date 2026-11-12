@@ -332,12 +332,10 @@ type TransitionInfo = {
   toLocation: { pathname: string; state: { __TSR_index?: number } }
 }
 
-/** `false` makes the router skip the view transition: reduce gets a plain cut, and so do the first load and a search-only change. */
-// A list beside its detail on tablet and desktop: a change inside one swaps the detail only.
-const LIST_DETAIL = ['/settings']
-const listDetailOf = (pathname: string) =>
-  LIST_DETAIL.find((base) => pathname === base || pathname.startsWith(`${base}/`))
+// Beside its list on tablet and desktop, a change inside Settings swaps the detail only.
+const inSettings = (pathname: string) => pathname === '/settings' || pathname.startsWith('/settings/')
 
+/** `false` makes the router skip the view transition: reduce gets a plain cut, and so do the first load and a search-only change. */
 export function transitionTypes({ fromLocation, toLocation }: TransitionInfo): string[] | false {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false
   if (!fromLocation || fromLocation.pathname === toLocation.pathname) return false
@@ -345,9 +343,8 @@ export function transitionTypes({ fromLocation, toLocation }: TransitionInfo): s
   if (isDestination(fromLocation.pathname) && isDestination(toLocation.pathname)) return ['tab']
   const back = (toLocation.state.__TSR_index ?? 0) < (fromLocation.state.__TSR_index ?? 0)
   // The direction stays as the phone's fallback, where the list and the detail are separate pages.
-  const within = listDetailOf(fromLocation.pathname)
   const direction = back ? 'back' : 'forward'
-  return within && within === listDetailOf(toLocation.pathname) ? ['pane', direction] : [direction]
+  return inSettings(fromLocation.pathname) && inSettings(toLocation.pathname) ? ['pane', direction] : [direction]
 }
 
 /** The history is a parameter rather than a default, which is
