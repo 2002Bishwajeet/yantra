@@ -72,3 +72,5 @@ something else.
 - [docs/plans/smoke-pass.md](docs/plans/smoke-pass.md): the 17-check smoke pass that gates each release (Y-482). The full QA passes are quarterly.
 - [docs/archive/plans/](docs/archive/plans/README.md): the M2, M4 and M5 plans and the heartbeat-agent plan, moved 2026-09-12 because their milestones are done. See the README for what moved and what stayed.
 - [docs/archive/design/](docs/archive/design/README.md): D1, D4, D5 and D6, moved 2026-09-12 because every row each opened is closed. See the README for what moved and what stayed.
+- [docs/archive/m14-m18.md](docs/archive/m14-m18.md): every row closed by 2026-11-12, M14 to M18 and the landing rows. History, not current state.
+- [docs/backlog.md](docs/backlog.md): open tasks that wait on the owner, hardware or a later milestone. The build loop does not read it; a row moves back to `tracker.md` when its reason no longer holds.
