@@ -31,9 +31,11 @@ that address. `write::gate` sits over the whole `/api` nest and asks `presented`
 socket's peer uid (ADR-0042), a `__Host-yantra_session` cookie from a passkey sign-in, or a
 `Bearer` agent token minted for one Chat turn. No cookie is a 401; a write whose `Origin` is not the
 dashboard's is a 403; an agent token reaches only `write::agent_may`. `write::unchecked` is the
-short list that answers with neither, and a new route belongs on it only if a signed-out browser
-must reach it. `passkey.rs` keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and
-never a token.
+short list that answers with neither, and a new route belongs on it only if a caller the daemon
+cannot name must reach it. The four ceremony routes are not on it: `write::owner_node` runs
+ADR-0016's predicate on them with no cookie, so only the owner's own node starts a sign-in (Y-789).
+Wrong codes count for each caller node, and a node holds at most 16 open ceremonies. `passkey.rs`
+keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and never a token.
 
 **The dashboard's origin is `https://<MagicDNS>:8443` unless `YANTRA_ORIGIN` names one** (ADR-0044,
 amended 2026-11-12). `main.rs` reads it from `/etc/yantra/daemon.env` once at start, and

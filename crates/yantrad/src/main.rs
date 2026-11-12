@@ -626,8 +626,7 @@ mod tests {
         }
     }
 
-    const PHONE: SocketAddr =
-        SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(100, 64, 0, 9)), 51000);
+    const PHONE: SocketAddr = at(9);
     const HUB: &str = "hub.example.ts.net";
 
     /// The owner's untagged node at `at`, and this hub named [`HUB`].
@@ -689,6 +688,18 @@ mod tests {
         path: &str,
         headers: &[(&str, &str)],
     ) -> (axum::http::StatusCode, String) {
+        send_from(app, PHONE, method, path, headers, None).await
+    }
+
+    /// [`send`] from the peer at `from`, with a JSON `body` when there is one.
+    async fn send_from(
+        app: &Router,
+        from: SocketAddr,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<serde_json::Value>,
+    ) -> (axum::http::StatusCode, String) {
         use axum::body::Body;
         use tower::ServiceExt;
 
@@ -696,10 +707,17 @@ mod tests {
         for (name, value) in headers {
             request = request.header(*name, *value);
         }
-        let mut request = request.body(Body::empty()).expect("a request");
+        let body = match body {
+            Some(body) => {
+                request = request.header("content-type", "application/json");
+                Body::from(body.to_string())
+            }
+            None => Body::empty(),
+        };
+        let mut request = request.body(body).expect("a request");
         request
             .extensions_mut()
-            .insert(axum::extract::ConnectInfo(write::Peer::from(PHONE)));
+            .insert(axum::extract::ConnectInfo(write::Peer::from(from)));
         let response = app.clone().oneshot(request).await.expect("infallible");
         let status = response.status();
         let body = axum::body::to_bytes(response.into_body(), 1 << 20)
@@ -708,10 +726,41 @@ mod tests {
         (status, String::from_utf8_lossy(&body).into_owned())
     }
 
+    /// The owner's second device.
+    const MAC: SocketAddr = at(8);
+    /// Another user's node, a tagged node, and an address no node holds.
+    const THEIRS: SocketAddr = at(3);
+    const TAGGED: SocketAddr = at(4);
+    const NOBODY: SocketAddr = at(7);
+
+    const fn at(last: u8) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(100, 64, 0, last)), 51000)
+    }
+
+    /// [`owner_at`] the phone, with [`MAC`], [`THEIRS`] and [`TAGGED`] beside it.
+    fn tailnet() -> Fake {
+        let mut fake = owner_at(PHONE);
+        for (at, node, user, tags) in [
+            (MAC, "nMAC", 1, vec![]),
+            (THEIRS, "nTHEIRS", 2, vec![]),
+            (TAGGED, "nTAGGED", 1, vec!["tag:ci".to_owned()]),
+        ] {
+            fake.callers.insert(
+                at.ip(),
+                yantra_core::inventory::Caller {
+                    node: node.to_owned(),
+                    user,
+                    tags,
+                },
+            );
+        }
+        fake
+    }
+
     fn gated(passkeys: passkey::Passkeys) -> Router {
         app(
             named_hub(),
-            write::Authoriser::new(owner_at(PHONE), &[], Path::new(SOCKET), passkeys),
+            write::Authoriser::new(tailnet(), &[], Path::new(SOCKET), passkeys),
             web::placeholder(),
         )
     }
@@ -831,6 +880,86 @@ mod tests {
             axum::http::StatusCode::UNAUTHORIZED,
             "an ended token"
         );
+    }
+
+    /// ADR-0044 decision 8, amended 2026-11-12 (Y-789): a caller that is not
+    /// the owner's own node gets 403 on all four ceremony routes, before its
+    /// body is read, and the owner's node needs no cookie.
+    #[tokio::test]
+    async fn only_the_owners_node_reaches_a_ceremony() {
+        let (passkeys, _) = signed_in();
+        let app = gated(passkeys);
+
+        for (from, why) in [
+            (NOBODY, "no peer"),
+            (THEIRS, "another user's node"),
+            (TAGGED, "a tagged node"),
+        ] {
+            for half in [
+                "register/start",
+                "register/finish",
+                "login/start",
+                "login/finish",
+            ] {
+                let path = format!("/api/passkey/{half}");
+                let (status, body) = send_from(&app, from, "POST", &path, &[], None).await;
+                assert_eq!(
+                    status,
+                    axum::http::StatusCode::FORBIDDEN,
+                    "{why} on {path}: {body}"
+                );
+            }
+        }
+
+        let (status, body) =
+            send_from(&app, PHONE, "POST", "/api/passkey/login/start", &[], None).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    }
+
+    /// One node's wrong codes void no other node's open code.
+    #[tokio::test]
+    async fn five_wrong_codes_from_one_node_leave_the_code_open_for_another() {
+        let passkeys = passkey::Passkeys::memory();
+        let code = passkeys.enrol_code();
+        let app = gated(passkeys);
+        let enrol = |from, code: &str| {
+            let asked = serde_json::json!({ "code": code, "device": "Mac" });
+            let path = "/api/passkey/register/start";
+            send_from(&app, from, "POST", path, &[], Some(asked))
+        };
+
+        for _ in 0..5 {
+            let (status, body) = enrol(MAC, "WRONGONE").await;
+            assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{body}");
+        }
+
+        let (status, body) = enrol(PHONE, &code).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "the phone: {body}");
+        let (status, body) = enrol(MAC, &code).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNAUTHORIZED,
+            "the node that guessed: {body}"
+        );
+    }
+
+    /// A node past the cap is refused, and it stops no other node.
+    #[tokio::test]
+    async fn the_seventeenth_open_ceremony_from_one_node_is_429() {
+        let (passkeys, _) = signed_in();
+        let app = gated(passkeys);
+        let start = |from| send_from(&app, from, "POST", "/api/passkey/login/start", &[], None);
+
+        for nth in 1..=16 {
+            let (status, body) = start(MAC).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{nth}: {body}");
+        }
+        let (status, body) = start(MAC).await;
+        assert_eq!(status, axum::http::StatusCode::TOO_MANY_REQUESTS, "{body}");
+        assert!(body.contains("wait 5 minutes"), "{body}");
+
+        let (status, body) = start(PHONE).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "the phone: {body}");
     }
 
     fn nowhere() -> PathBuf {
