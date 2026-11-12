@@ -210,5 +210,28 @@ describe('the GitHub queue', () => {
     expect(code.tagName).toBe('CODE')
     expect(code.closest('p')?.textContent).toBe('GitHub answered 502 — run yantra doctor')
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull()
+    expect(screen.queryByText('The last GitHub read failed')).toBeNull()
+  })
+
+  /** Y-745: the daemon kept the reading through one failed read, so the items stay. */
+  it('keeps the items of a reading whose last read failed, and says how old it is and why', async () => {
+    daemon()
+    await renderInApp(<Github attention={{ ...contract.attentionRetrying, age_seconds: 372 }} />)
+    expect(items('Reviews')).toHaveLength(contract.attentionRetrying.data.reviews.length)
+    expect(items('Issues')).toHaveLength(contract.attentionRetrying.data.issues.length)
+    // Only the first line is announced: the age under it changes on every poll.
+    expect(screen.getByRole('status').textContent).toBe('The last GitHub read failed')
+    expect(screen.getByText(/^Showing what it said/).textContent).toBe(
+      `Showing what it said 6m ago · ${contract.attentionRetrying.retrying}`,
+    )
+    expect(screen.queryByText('GitHub could not be read')).toBeNull()
+  })
+
+  it('draws no such note on a fresh reading', async () => {
+    daemon()
+    await renderInApp(<Github attention={attention} />)
+    expect(items('Reviews').length).toBeGreaterThan(0)
+    expect(screen.queryByText('The last GitHub read failed')).toBeNull()
+    expect(screen.queryByText(/^Showing what it said/)).toBeNull()
   })
 })

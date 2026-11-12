@@ -25,7 +25,7 @@
 //! loop of its own.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::attention;
@@ -41,10 +41,14 @@ use crate::workspace::{self, Listing};
 ///
 /// The moment is monotonic and only ever leaves as an age, so a reading cannot
 /// become younger because the wall clock moved under it.
+///
+/// A caller may keep a reading through one later look that failed (Y-745): it
+/// then carries that failure, and its age still counts from its own look.
 #[derive(Debug)]
 pub struct Reading<T> {
     value: T,
     taken_at: Instant,
+    outlived: OnceLock<String>,
 }
 
 impl<T> Reading<T> {
@@ -52,7 +56,19 @@ impl<T> Reading<T> {
         Self {
             value,
             taken_at: Instant::now(),
+            outlived: OnceLock::new(),
         }
+    }
+
+    /// Marks the reading as kept through a look that failed with `failure`.
+    /// `false` when it already outlived one, so the caller keeps it only once.
+    pub fn outlive(&self, failure: &str) -> bool {
+        self.outlived.set(failure.to_owned()).is_ok()
+    }
+
+    /// The failure of the look this reading was kept through, if any.
+    pub fn outlived(&self) -> Option<&str> {
+        self.outlived.get().map(String::as_str)
     }
 
     pub fn value(&self) -> &T {
@@ -143,6 +159,21 @@ mod tests {
         let first = reading.age();
         std::thread::sleep(Duration::from_millis(20));
         assert!(reading.age() >= first + Duration::from_millis(20));
+    }
+
+    /// Y-745: the mark is set once, so a second failed look cannot keep the
+    /// reading again, and marking it does not make it younger.
+    #[test]
+    fn a_reading_outlives_one_failed_look_and_keeps_its_age() {
+        let reading = Reading::new("the inbox");
+        assert_eq!(reading.outlived(), None);
+        std::thread::sleep(Duration::from_millis(20));
+
+        assert!(reading.outlive("GitHub could not be reached"));
+        assert!(!reading.outlive("a second failure"));
+
+        assert_eq!(reading.outlived(), Some("GitHub could not be reached"));
+        assert!(reading.age() >= Duration::from_millis(20));
     }
 
     #[test]

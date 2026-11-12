@@ -11,6 +11,7 @@ import { Mono, Num, Text } from '@/m3/text/Text'
 import { IconTile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { Ago } from './age'
+import { KeptReading } from './KeptReading'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { StartSession } from './StartSession'
 
@@ -54,6 +55,8 @@ export function Github(props: { attention: Reading<Attention> }) {
       {attention.looked === 'never' ? <EmptyState state="unknown" title="GitHub not looked at yet" /> : null}
 
       {attention.looked === 'failed' ? <Failed error={attention.error} /> : null}
+
+      <KeptReading reading={attention} />
 
       {attention.looked === 'ok' ? (
         <div className="github__groups">

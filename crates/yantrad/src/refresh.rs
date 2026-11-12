@@ -380,8 +380,46 @@ pub(crate) fn settle(snapshot: &mut Snapshot, reading: Readiness) {
 async fn look_at_attention<F: Forge>(model: &Model, forge: &F) -> bool {
     let attention = forge.attention().await;
     let unreachable = is_unreachable(&attention);
-    model.write().await.attention = Some(Arc::new(Reading::new(attention)));
+    land(
+        &mut model.write().await.attention,
+        attention,
+        "the GitHub inbox",
+    );
     unreachable
+}
+
+/// Y-745: the first failed read marks the good reading in `slot` and leaves it
+/// there. The mark is set once, so the next failed read replaces the reading.
+fn outlasts<T>(
+    slot: &Option<Arc<Reading<T>>>,
+    good: impl FnOnce(&T) -> bool,
+    what: &str,
+    failure: &str,
+) -> bool {
+    let kept = slot
+        .as_deref()
+        .is_some_and(|kept| good(kept.value()) && kept.outlive(failure));
+    if kept {
+        tracing::warn!("{what} keeps its last reading through one failed read: {failure}");
+    }
+    kept
+}
+
+/// Where a GitHub read lands. No grant and a refusal are answers and show at
+/// once; any other failure is kept out once. True when the earlier reading stayed.
+fn land<T>(
+    slot: &mut Option<Arc<Reading<Result<T, github::Error>>>>,
+    read: Result<T, github::Error>,
+    what: &str,
+) -> bool {
+    if let Err(error) = &read
+        && !matches!(error, github::Error::NoGrant | github::Error::Refused)
+        && outlasts(slot, Result::is_ok, what, &crate::write::chain(error))
+    {
+        return true;
+    }
+    *slot = Some(Arc::new(Reading::new(read)));
+    false
 }
 
 /// The one look that touches no machine in the fleet: whether the grant this
@@ -424,8 +462,19 @@ async fn look_at_github(
         *last = Some(verdict);
     }
     let asked = asked.map(|asked| asked.map(|account| account.login));
-    let reading = Reading::new(doctor::github(asked.as_ref()));
-    model.write().await.github = Some(Arc::new(reading));
+    let check = doctor::github(asked.as_ref());
+    let mut snapshot = model.write().await;
+    // *Unknown* is only a GitHub that could not be asked. No grant and a 401 are *absent*.
+    let kept = check.state == doctor::State::Unknown
+        && outlasts(
+            &snapshot.github,
+            |last| last.state == doctor::State::Present,
+            "the GitHub grant check",
+            &check.detail,
+        );
+    if !kept {
+        snapshot.github = Some(Arc::new(Reading::new(check)));
+    }
     unreachable
 }
 
@@ -482,10 +531,26 @@ async fn look_at_repos(model: &Model, grant: &Grant) -> bool {
         }
     };
     let unreachable = is_unreachable(&repos) || hidden.as_ref().is_some_and(is_unreachable);
-    let mut snapshot = model.write().await;
-    snapshot.repos = Some(Arc::new(Reading::new(repos)));
-    snapshot.hidden = hidden.map(|hidden| Arc::new(Reading::new(hidden)));
+    settle_repos(&mut *model.write().await, repos, hidden);
     unreachable
+}
+
+/// A list that stays through a failed read stays with the organisations read
+/// beside it. A list that failed has none.
+fn settle_repos(
+    snapshot: &mut Snapshot,
+    repos: Result<Vec<github::Repo>, github::Error>,
+    hidden: Option<Result<Vec<String>, github::Error>>,
+) {
+    if land(&mut snapshot.repos, repos, "the repository list") {
+        return;
+    }
+    match hidden {
+        Some(hidden) => {
+            land(&mut snapshot.hidden, hidden, "the hidden organisations");
+        }
+        None => snapshot.hidden = None,
+    }
 }
 
 /// The newest published release on the box's channel, with the grant when
@@ -1025,16 +1090,15 @@ mod tests {
         (capture, tracing::subscriber::set_default(subscriber))
     }
 
-    /// Y-648: the journal says when GitHub starts or stops accepting the
-    /// grant, once per change, with the login and never the token.
-    #[tokio::test]
-    async fn the_grant_look_logs_each_change_once_and_never_the_token() {
+    const ACCEPTED: &str = "200 OK\r\nContent-Length: 19\r\n\r\n{\"login\":\"octocat\"}";
+    const REFUSED: &str = "401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
+
+    /// A GitHub on loopback that gives one answer per connection. Joined, it
+    /// has closed its port, so the next read finds GitHub unreachable.
+    fn github_answering(answers: Vec<&'static str>) -> (String, std::thread::JoinHandle<()>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let api = format!("http://{}", listener.local_addr().expect("its address"));
-        const ACCEPTED: &str = "200 OK\r\nContent-Length: 19\r\n\r\n{\"login\":\"octocat\"}";
-        const REFUSED: &str = "401 Unauthorized\r\nContent-Length: 0\r\n\r\n";
-        let answers = [ACCEPTED, REFUSED, REFUSED, ACCEPTED];
         let served = std::thread::spawn(move || {
             for answer in answers {
                 let (mut stream, _) = listener.accept().expect("the look connects");
@@ -1048,6 +1112,14 @@ mod tests {
                     .expect("the fake answers");
             }
         });
+        (api, served)
+    }
+
+    /// Y-648: the journal says when GitHub starts or stops accepting the
+    /// grant, once per change, with the login and never the token.
+    #[tokio::test]
+    async fn the_grant_look_logs_each_change_once_and_never_the_token() {
+        let (api, served) = github_answering(vec![ACCEPTED, REFUSED, REFUSED, ACCEPTED]);
 
         let (capture, _logging) = logged();
         let model = Model::default();
@@ -1185,6 +1257,273 @@ mod tests {
 
         look_and_wait(&model, &forge, &mut backoff).await;
         assert!(start.elapsed() >= ATTENTION, "{:?}", start.elapsed());
+    }
+
+    const LOOKUP: &str = "failed to lookup address information";
+    const KEPT: &str = "keeps its last reading through one failed read";
+
+    fn unreachable() -> github::Error {
+        github::Error::Unreachable {
+            reason: LOOKUP.into(),
+        }
+    }
+
+    fn inbox(notifications: u32) -> Result<Attention, attention::Error> {
+        Ok(Attention {
+            notifications,
+            ..Attention::default()
+        })
+    }
+
+    fn journal(capture: &crate::terminal::tests::Capture) -> String {
+        String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned()
+    }
+
+    /// Y-745's first case: one failed read leaves the last good inbox on
+    /// `/attention`, with the failure beside it and the good read's age.
+    #[tokio::test]
+    async fn one_failed_read_keeps_the_last_inbox_and_says_why_it_is_old() {
+        let (capture, _logging) = logged();
+        let fleet = Fleet::default();
+        let forge = Answers::new([inbox(27), Err(unreachable())]);
+        look_at_attention(&fleet.model, &forge).await;
+        let good = fleet.model.read().await.attention.clone().expect("looked");
+
+        let soon = look_at_attention(&fleet.model, &forge).await;
+
+        assert!(soon, "Y-731 still reads again after five seconds");
+        let kept = fleet.model.read().await.attention.clone().expect("looked");
+        assert!(Arc::ptr_eq(&good, &kept), "the age is the good read's");
+        let body = crate::api::tests::get_json(fleet.clone(), "/attention").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        assert_eq!(body["data"]["notifications"], 27, "{body}");
+        assert_eq!(
+            body["retrying"],
+            format!("GitHub could not be reached: {LOOKUP}"),
+            "{body}"
+        );
+        let log = journal(&capture);
+        assert_eq!(log.matches(KEPT).count(), 1, "{log}");
+        assert!(log.contains(LOOKUP), "{log}");
+    }
+
+    /// The second case: the reading is kept once, so reads that keep failing
+    /// show the failure.
+    #[tokio::test]
+    async fn a_second_failed_read_in_a_row_shows_the_failure() {
+        let (capture, _logging) = logged();
+        let fleet = Fleet::default();
+        let forge = Answers::new([inbox(27), Err(unreachable()), Err(unreachable())]);
+        for _ in 0..3 {
+            look_at_attention(&fleet.model, &forge).await;
+        }
+
+        let body = crate::api::tests::get_json(fleet.clone(), "/attention").await;
+        assert_eq!(body["looked"], "failed", "{body}");
+        assert!(body.get("data").is_none(), "{body}");
+        assert!(
+            body["error"].as_str().is_some_and(|e| e.contains(LOOKUP)),
+            "{body}"
+        );
+        let log = journal(&capture);
+        assert_eq!(log.matches(KEPT).count(), 1, "{log}");
+    }
+
+    /// The third case: a grant that is gone or refused is an answer, and an
+    /// earlier account's inbox must not stay on screen behind it.
+    #[tokio::test]
+    async fn a_grant_that_is_gone_or_refused_shows_at_once() {
+        for (gone, said) in [
+            (github::Error::NoGrant, "yantra github login"),
+            (github::Error::Refused, "refused the grant"),
+        ] {
+            let fleet = Fleet::default();
+            let forge = Answers::new([inbox(27), Err(gone)]);
+            for _ in 0..2 {
+                look_at_attention(&fleet.model, &forge).await;
+            }
+
+            let body = crate::api::tests::get_json(fleet.clone(), "/attention").await;
+            assert_eq!(body["looked"], "failed", "{body}");
+            assert!(
+                body["error"].as_str().is_some_and(|e| e.contains(said)),
+                "{body}"
+            );
+        }
+    }
+
+    /// The mark belongs to the reading, so a good read ends it, and that
+    /// reading can be kept in its turn.
+    #[tokio::test]
+    async fn a_good_read_after_a_kept_one_carries_no_mark() {
+        let fleet = Fleet::default();
+        let forge = Answers::new([
+            inbox(27),
+            Err(unreachable()),
+            inbox(3),
+            Err(github::Error::Status {
+                status: 502,
+                what: "the inbox",
+            }),
+        ]);
+        for _ in 0..3 {
+            look_at_attention(&fleet.model, &forge).await;
+        }
+        let body = crate::api::tests::get_json(fleet.clone(), "/attention").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        assert_eq!(body["data"]["notifications"], 3, "{body}");
+        assert!(body.get("retrying").is_none(), "{body}");
+
+        look_at_attention(&fleet.model, &forge).await;
+        let body = crate::api::tests::get_json(fleet.clone(), "/attention").await;
+        assert_eq!(body["data"]["notifications"], 3, "{body}");
+        assert_eq!(
+            body["retrying"], "GitHub answered 502 to the inbox",
+            "{body}"
+        );
+    }
+
+    /// The grant check has no `failed`: accepted stays *present* through one
+    /// read that could not ask, and is *unknown* after the second.
+    #[tokio::test]
+    async fn the_grant_check_stays_present_through_one_read_that_could_not_ask() {
+        let (api, served) = github_answering(vec![ACCEPTED]);
+        let (capture, _logging) = logged();
+        let fleet = Fleet::default();
+        let grant = Grant::holding(Some(Token::new("ghp_secret-value".to_owned())));
+        let github = Github::at(&api, &api);
+        let mut last = None;
+        let check = || crate::api::tests::get_json(fleet.clone(), "/readiness/github");
+
+        look_at_github(&fleet.model, &grant, &github, &mut last).await;
+        served.join().expect("the fake served the first look");
+        let fresh = check().await;
+        assert_eq!(fresh["data"]["state"], "present", "{fresh}");
+        assert!(fresh.get("retrying").is_none(), "{fresh}");
+
+        let soon = look_at_github(&fleet.model, &grant, &github, &mut last).await;
+        assert!(soon, "Y-731 still reads again after five seconds");
+        let kept = check().await;
+        assert_eq!(kept["data"]["state"], "present", "{kept}");
+        assert!(
+            kept["data"]["detail"]
+                .as_str()
+                .is_some_and(|d| d.contains("signed in as octocat")),
+            "{kept}"
+        );
+        assert!(
+            kept["retrying"]
+                .as_str()
+                .is_some_and(|why| why.contains("could not be asked")),
+            "{kept}"
+        );
+
+        look_at_github(&fleet.model, &grant, &github, &mut last).await;
+        let failing = check().await;
+        assert_eq!(failing["data"]["state"], "unknown", "{failing}");
+        assert!(failing.get("retrying").is_none(), "{failing}");
+
+        let log = journal(&capture);
+        assert_eq!(log.matches(KEPT).count(), 1, "{log}");
+        assert!(!log.contains("ghp_secret-value"), "{log}");
+    }
+
+    /// A 401 is GitHub's answer about the grant, so it is *absent* at once.
+    #[tokio::test]
+    async fn the_grant_check_is_absent_at_once_when_github_refuses_the_grant() {
+        let (api, served) = github_answering(vec![ACCEPTED, REFUSED]);
+        let fleet = Fleet::default();
+        let grant = Grant::holding(Some(Token::new("ghp_secret-value".to_owned())));
+        let github = Github::at(&api, &api);
+        let mut last = None;
+        for _ in 0..2 {
+            look_at_github(&fleet.model, &grant, &github, &mut last).await;
+        }
+        served.join().expect("the fake served both looks");
+
+        let body = crate::api::tests::get_json(fleet.clone(), "/readiness/github").await;
+        assert_eq!(body["data"]["state"], "absent", "{body}");
+        assert!(body.get("retrying").is_none(), "{body}");
+    }
+
+    fn listed() -> Snapshot {
+        let mut snapshot = Snapshot::default();
+        settle_repos(
+            &mut snapshot,
+            Ok(Vec::new()),
+            Some(Ok(vec!["Org".to_owned()])),
+        );
+        snapshot
+    }
+
+    fn marks(snapshot: &Snapshot) -> (Option<&str>, Option<&str>) {
+        (
+            snapshot.repos.as_deref().and_then(Reading::outlived),
+            snapshot.hidden.as_deref().and_then(Reading::outlived),
+        )
+    }
+
+    /// The repository list follows the inbox's rule, and the organisations
+    /// read beside a kept list stay with it.
+    #[test]
+    fn a_repository_list_is_kept_once_with_its_organisations() {
+        let mut snapshot = listed();
+
+        settle_repos(&mut snapshot, Err(unreachable()), None);
+        let repos = snapshot.repos.as_deref().expect("looked");
+        assert!(repos.value().is_ok());
+        assert!(repos.outlived().is_some_and(|why| why.contains(LOOKUP)));
+        let hidden = snapshot.hidden.as_deref().expect("kept beside the list");
+        assert_eq!(hidden.value().as_ref().ok(), Some(&vec!["Org".to_owned()]));
+        assert_eq!(hidden.outlived(), None);
+
+        settle_repos(&mut snapshot, Err(unreachable()), None);
+        let repos = snapshot.repos.as_deref().expect("looked");
+        assert!(matches!(
+            repos.value(),
+            Err(github::Error::Unreachable { .. })
+        ));
+        assert!(snapshot.hidden.is_none());
+
+        settle_repos(&mut snapshot, Ok(Vec::new()), Some(Ok(Vec::new())));
+        assert_eq!(marks(&snapshot), (None, None));
+    }
+
+    #[test]
+    fn a_repository_list_fails_at_once_when_the_grant_is_gone_or_refused() {
+        for gone in [github::Error::NoGrant, github::Error::Refused] {
+            let mut snapshot = listed();
+            settle_repos(&mut snapshot, Err(gone), None);
+
+            let repos = snapshot.repos.as_deref().expect("looked");
+            assert!(repos.value().is_err());
+            assert!(snapshot.hidden.is_none());
+        }
+    }
+
+    /// The organisations are a read of their own under a list that answered.
+    #[test]
+    fn the_hidden_organisations_are_kept_once_under_a_list_that_answered() {
+        let mut snapshot = listed();
+
+        settle_repos(&mut snapshot, Ok(Vec::new()), Some(Err(unreachable())));
+        let hidden = snapshot.hidden.as_deref().expect("looked");
+        assert_eq!(hidden.value().as_ref().ok(), Some(&vec!["Org".to_owned()]));
+        assert!(marks(&snapshot).0.is_none(), "the list itself is fresh");
+        assert!(marks(&snapshot).1.is_some_and(|why| why.contains(LOOKUP)));
+
+        settle_repos(&mut snapshot, Ok(Vec::new()), Some(Err(unreachable())));
+        let hidden = snapshot.hidden.as_deref().expect("looked");
+        assert!(hidden.value().is_err());
+
+        let mut snapshot = listed();
+        settle_repos(
+            &mut snapshot,
+            Ok(Vec::new()),
+            Some(Err(github::Error::Refused)),
+        );
+        let hidden = snapshot.hidden.as_deref().expect("looked");
+        assert!(matches!(hidden.value(), Err(github::Error::Refused)));
     }
 
     #[test]

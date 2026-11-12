@@ -1440,6 +1440,7 @@ async fn recheck<I: Inventory + Clone + Send + Sync + 'static>(
         // Asked on this request, so there is no staleness to report — and the
         // envelope is the sweep's so the browser needs no second type.
         age_seconds: 0,
+        retrying: None,
         data: Checked {
             report: crate::api::answered(&report, &snapshot, &beats),
             age_seconds: 0,

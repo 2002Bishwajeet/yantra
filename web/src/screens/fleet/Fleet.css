@@ -168,6 +168,10 @@
   padding: 0 4px;
 }
 
+.github > .kept {
+  padding-inline: 4px;
+}
+
 .github__unread {
   display: inline-flex;
   align-items: center;

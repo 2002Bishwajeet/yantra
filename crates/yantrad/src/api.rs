@@ -14,6 +14,10 @@
 //! being lost: a *machine* that did not answer (Y-054), and a workspace *file*
 //! that did not load (Y-141).
 //!
+//! **The GitHub classes are the exception** (Y-745): their failures pass, so
+//! `refresh.rs` keeps the last good reading through one failed read. The
+//! answer is then `ok` with the failure in `retrying` and the good read's age.
+//!
 //! DTOs live here rather than as `Serialize` on `yantra_core`'s types: a JSON
 //! body is rendering, and ADR-0005 put rendering in the caller. **`doctor` is
 //! the exception**, for `Power`'s reason one route over: its check names and
@@ -209,6 +213,7 @@ async fn ssh_identity(State(fleet): State<Fleet>) -> Response {
 async fn notifications(State(fleet): State<Fleet>) -> Json<Answer<Vec<Event>>> {
     Json(Answer::Ok {
         age_seconds: 0,
+        retrying: None,
         data: events::newest_first(&fleet.events).await,
     })
 }
@@ -219,6 +224,7 @@ async fn pulls(State(fleet): State<Fleet>) -> Json<Answer<Vec<Pull>>> {
     let held = fleet.pulls.read().await;
     Json(Answer::Ok {
         age_seconds: 0,
+        retrying: None,
         data: held
             .iter()
             .map(|((_, _, number), tracked)| Pull::of(*number, tracked))
@@ -387,7 +393,12 @@ async fn workspace_status(State(model): State<Model>, Path(name): Path<String>) 
         }
     };
     match WorkspaceStatus::find(&fleet.machines, &name) {
-        Some(data) => Json(Answer::Ok { age_seconds, data }).into_response(),
+        Some(data) => Json(Answer::Ok {
+            age_seconds,
+            retrying: None,
+            data,
+        })
+        .into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(Missing {
@@ -411,6 +422,7 @@ async fn readiness(State(model): State<Model>, State(beats): State<Beats>) -> im
     };
     Json(Answer::Ok {
         age_seconds: youngest.as_secs(),
+        retrying: None,
         data: snapshot
             .checks
             .values()
@@ -441,6 +453,7 @@ async fn machine_readiness(
     if let Some(kept) = snapshot.checks.get(&name) {
         return Json(Answer::Ok {
             age_seconds: kept.age().as_secs(),
+            retrying: None,
             data: Checked::of(kept, &snapshot, &beats),
         })
         .into_response();
@@ -489,6 +502,7 @@ fn host_check(reading: Option<&Reading<doctor::Check>>) -> Json<Answer<doctor::C
     Json(match reading {
         Some(reading) => Answer::Ok {
             age_seconds: reading.age().as_secs(),
+            retrying: reading.outlived().map(str::to_owned),
             data: reading.value().clone(),
         },
         None => Answer::Never,
@@ -704,8 +718,17 @@ fn absent(fleet: &yantra_core::status::Fleet, name: &str) -> String {
 #[derive(Debug, serde::Serialize)]
 #[serde(tag = "looked", rename_all = "lowercase")]
 pub(crate) enum Answer<T> {
-    Ok { age_seconds: u64, data: T },
-    Failed { age_seconds: u64, error: String },
+    Ok {
+        age_seconds: u64,
+        /// Y-745: why the newest look failed, when `data` is the look before it.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        retrying: Option<String>,
+        data: T,
+    },
+    Failed {
+        age_seconds: u64,
+        error: String,
+    },
     Never,
 }
 
@@ -721,6 +744,7 @@ impl<T> Answer<T> {
         match reading.value() {
             Ok(value) => Self::Ok {
                 age_seconds,
+                retrying: reading.outlived().map(str::to_owned),
                 data: render(value),
             },
             Err(error) => Self::Failed {
@@ -1036,6 +1060,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 relay: true,
                 published: Answer::Ok {
                     age_seconds: 1_234,
+                    retrying: None,
                     data: Published {
                         version: "0.4.0".to_owned(),
                         newer: true,
@@ -2289,6 +2314,34 @@ pub(crate) mod tests {
             "https://github.com/2002Bishwajeet/yantra.git"
         );
         assert_eq!(first["default_branch"], "main");
+    }
+
+    /// Y-745: `retrying` is on the wire only for a reading that was kept
+    /// through a failed look, so a client that never heard of it loses nothing.
+    #[tokio::test]
+    async fn retrying_is_only_on_a_reading_kept_through_a_failed_look() {
+        let fresh = Reading::new(Ok(vec![repo("me/yantra")]));
+        let kept = Reading::new(Ok(vec![repo("me/yantra")]));
+        kept.outlive("GitHub answered 502 to the repository list");
+
+        for (reading, retrying) in [
+            (fresh, Value::Null),
+            (kept, json!("GitHub answered 502 to the repository list")),
+        ] {
+            let fleet = holding(Snapshot {
+                repos: Some(Arc::new(reading)),
+                ..Snapshot::default()
+            });
+            let body = get_json(fleet, "/repos").await;
+            assert_eq!(body["looked"], "ok", "{body}");
+            assert_eq!(body["data"][0]["full_name"], "me/yantra", "{body}");
+            assert_eq!(
+                body.get("retrying").is_some(),
+                !retrying.is_null(),
+                "{body}"
+            );
+            assert_eq!(body["retrying"], retrying, "{body}");
+        }
     }
 
     /// `/attention`'s rule for the list: no grant is a failed look naming the

@@ -1019,6 +1019,11 @@ two, so a surface never reads them from a swept read:
   ([`shell/Reconnecting.tsx`](src/shell/Reconnecting.tsx)). A refusal and a
   failure the daemon reported are never held. These reads are not retried,
   because the poll is the retry, and a tab that becomes visible asks at once.
+- **An `ok` reading with `retrying` is one the daemon kept (Y-745).** The
+  daemon keeps a GitHub reading through one failed read and sends the failure
+  as `retrying`. [`KeptReading`](src/screens/fleet/KeptReading.tsx) draws it
+  above the reading on Fleet, the Dashboard and New session: the reading is
+  old, and why. It draws nothing on a fresh reading.
 - **`data === undefined` is `{looked: 'never'}`**, which is the same sentence the
   daemon sends before its first sweep. Nothing distinguishes them, and nothing
   should: neither is a reading.

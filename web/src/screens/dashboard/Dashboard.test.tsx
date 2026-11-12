@@ -55,6 +55,33 @@ describe('the Dashboard on a busy fleet', () => {
     expect(hero.getByText(/Review requested: yantra#245/)).toBeTruthy()
     expect(hero.getByText(/Issue assigned: yantra#118/)).toBeTruthy()
     expect(hero.queryByText(/cargo-zig/)).toBeNull()
+    expect(hero.queryByText('The last GitHub read failed')).toBeNull()
+  })
+
+  /** Y-745: the daemon kept the reading through one failed read, so the rows stay. */
+  it('keeps the GitHub rows of a reading whose last read failed, and says how old it is and why', async () => {
+    const state = scenario('busy')
+    state.attention = { ...state.attention!, age_seconds: 372, retrying: contract.attentionRetrying.retrying } as never
+    mount('desktop', '/', state)
+    await drawn()
+    const hero = region('Needs you')
+    expect(hero.getByText('6')).toBeTruthy()
+    expect(hero.getByText(/Review requested: yantra#245/)).toBeTruthy()
+    expect(hero.getByText('The last GitHub read failed')).toBeTruthy()
+    expect(reads('Needs you')).toContain(`Showing what it said 6m ago · ${contract.attentionRetrying.retrying}`)
+    expect(hero.queryByText('GitHub could not be read')).toBeNull()
+  })
+
+  it('draws a GitHub read that keeps failing as a failure, with the reason', async () => {
+    const state = scenario('busy')
+    state.attention = { looked: 'failed', age_seconds: 5, error: contract.attentionRetrying.retrying } as never
+    mount('desktop', '/', state)
+    await drawn()
+    const hero = region('Needs you')
+    expect(hero.getByText('GitHub could not be read')).toBeTruthy()
+    expect(reads('Needs you')).toContain(contract.attentionRetrying.retrying)
+    expect(hero.queryByText('The last GitHub read failed')).toBeNull()
+    expect(hero.queryByText(/Review requested/)).toBeNull()
   })
 
   it('moves the hero count when a band changes, while the row stays held', async () => {
@@ -295,6 +322,17 @@ describe('the Dashboard on an empty fleet', () => {
     )
     expect(screen.getByText('No workspaces yet')).toBeTruthy()
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0)
+  })
+
+  /** Y-745: "nothing" from an old reading says that it is old. */
+  it('says under Nothing needs you when the empty GitHub reading is a kept one', async () => {
+    const state = keyed(scenario('empty'))
+    state.attention = { ...state.attention!, age_seconds: 372, retrying: contract.attentionRetrying.retrying } as never
+    mount('phone', '/', state)
+    await drawn()
+    const hero = region('Needs you')
+    expect(hero.getByText('Nothing needs you')).toBeTruthy()
+    expect(hero.getByText('The last GitHub read failed')).toBeTruthy()
   })
 
   it('offers New in the compact Idle card on the phone', async () => {

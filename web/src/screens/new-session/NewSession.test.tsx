@@ -312,6 +312,26 @@ describe('step 2, where the code comes from', () => {
     expect(screen.getAllByText(contract.github.login as string)).toHaveLength(1)
     expect(screen.queryByText(/signed in to Yantra/)).toBeNull()
     expect(screen.queryByText(/Use another account/)).toBeNull()
+    expect(screen.queryByText('The last GitHub read failed')).toBeNull()
+  })
+
+  /** Y-745: the daemon kept the list through one failed read, so it stays usable. */
+  it('keeps the repositories of a list whose last read failed, and says how old it is and why', async () => {
+    mountNew('desktop', '/new', {
+      'GET /api/repos': [
+        200,
+        { ...contract.repos, age_seconds: 372, retrying: 'GitHub answered 502 to the repository list' },
+      ],
+    })
+    await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    await screen.findByRole('list', { name: 'Repositories' })
+    expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
+    expect(screen.getByText('The last GitHub read failed')).toBeTruthy()
+    expect(screen.getByText(/^Showing what it said/).textContent).toBe(
+      'Showing what it said 6m ago · GitHub answered 502 to the repository list',
+    )
   })
 
   it('does not tell anyone to choose from a list that failed to load', async () => {
@@ -322,6 +342,7 @@ describe('step 2, where the code comes from', () => {
     press('cachyos-g14')
     press('Continue')
     expect(await screen.findByText('The repositories could not be read.')).toBeTruthy()
+    expect(screen.queryByText('The last GitHub read failed')).toBeNull()
     expect(screen.getByRole('status').textContent).toBe('')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })

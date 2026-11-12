@@ -136,6 +136,11 @@
   text-decoration: none;
 }
 
+/* In line with the words of the rows under it. */
+.dash__rows > .kept {
+  padding-inline: 12px;
+}
+
 .dash__rows {
   display: flex;
   flex-direction: column;
