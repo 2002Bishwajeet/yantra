@@ -171,7 +171,13 @@ for (const one of ROUTES) {
       const again = page.getByRole('button', { name: 'Try again' }).first()
       await expect(again).toBeVisible()
       await again.click()
-      await expect(page.getByRole('alert')).toHaveCount(0)
+      // Each read fails once. A surface the first retry mounts (the owner
+      // terminal's key) fails its own first read, so recover until none is left.
+      await expect(async () => {
+        const left = page.getByRole('button', { name: 'Try again' })
+        if ((await left.count()) > 0) await left.first().click()
+        await expect(page.getByRole('alert')).toHaveCount(0, { timeout: 1000 })
+      }).toPass({ timeout: 10_000 })
     })
 
     test("on refused: a write shows the daemon's text", async ({ page, size }) => {
