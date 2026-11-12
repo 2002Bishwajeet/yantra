@@ -17,7 +17,7 @@ import { Eyebrow, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { Tile } from '@/m3/tile/Tile'
 import { useReports } from '@/screens/setup/progress'
-import { nameError, type Values } from './form'
+import { MACHINE_NOTE_ID, nameError, type Values } from './form'
 import { SuggestMachine } from './Suggestion'
 import { useOffered } from './useOffered'
 import type { SessionForm } from './useSessionForm'
@@ -52,7 +52,7 @@ function HubJoin(props: { name: string }) {
   const { name } = props
   return (
     <div className="ns__join" role="note">
-      <Text render={<p />} className="ns__note ns__one" scale="body-medium" tone="variant">
+      <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
         {name} needs a karigar account to run sessions.
       </Text>
       <Button render={<Link params={{ machine: name }} to="/m/$machine" />} role="link" variant="text">
@@ -180,8 +180,8 @@ export function StepName(props: { form: SessionForm; values: Values; preset: str
 
       <Eyebrow render={<h2 />}>Machine</Eyebrow>
       <Machines form={form} preset={preset} values={values} />
-      <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
-        The session runs on this machine.
+      <Text render={<p />} className="ns__note" id={MACHINE_NOTE_ID} scale="body-medium" tone="variant">
+        {values.machine ? `The session runs on ${values.machine}.` : 'Choose a machine to continue.'}
       </Text>
     </Card>
   )

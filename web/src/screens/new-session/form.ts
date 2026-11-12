@@ -28,6 +28,9 @@ export type Values = {
 /** One label per panel. */
 export const STEPS = ['Name', 'Source', 'Start'] as const
 
+/** The line under the machine chips; Continue points at it while no machine is chosen. */
+export const MACHINE_NOTE_ID = 'ns-machine-note'
+
 export const nameError = (name: string): string | undefined =>
   name === ''
     ? 'A session needs a name.'
@@ -41,6 +44,12 @@ export const pickMachine = (given: string, machines: Machine[]): string =>
   machines.some((one) => one.name === given && one.ownership === 'yours' && one.online && !one.expired)
     ? given
     : ''
+
+/** The one machine whose chip can be pressed, when there is exactly one; else ''. */
+export const soleMachine = (machines: Machine[]): string => {
+  const usable = machines.filter((one) => pickMachine(one.name, machines) !== '')
+  return usable.length === 1 ? usable[0].name : ''
+}
 
 /** The hub is the daemon's own host, and sessions run there only as an account
  *  that joined. Same rule as Setup: online, and ssh got in (Y-627). */

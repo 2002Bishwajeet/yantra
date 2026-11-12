@@ -19,7 +19,7 @@ import { useFormFactor } from '@/shell/formFactor'
 import { usePrefs } from '@/shell/prefs'
 import { readGeneral } from '@/screens/settings/general'
 import { useCloneFolder } from './clonePath'
-import { complete, knownWorkspace, pickMachine, plan, type Plan, reachable, sourceHint, STEPS, tilde, type Values } from './form'
+import { complete, knownWorkspace, MACHINE_NOTE_ID, pickMachine, plan, type Plan, reachable, soleMachine, sourceHint, STEPS, tilde, type Values } from './form'
 import { Starting } from './Starting'
 import { StepName } from './StepName'
 import { StepSource } from './StepSource'
@@ -40,6 +40,8 @@ const usePresetMachine = () =>
   })
 
 const HINT_ID = 'ns-source-hint'
+
+const INTRO = `Three steps: ${STEPS.join(', ').toLowerCase()}.`
 
 function SourceHint(props: { values: Values; known: Workspace | null }) {
   const { root, home } = useCloneFolder(props.values.machine)
@@ -112,7 +114,8 @@ export function NewSession() {
     // A hub is offered only once readiness shows an account on it joined (Y-627).
     if (seeded.current || machines.looked !== 'ok' || waiting) return
     seeded.current = true
-    const picked = pickMachine(preset, shown)
+    // Several usable machines with no preset leave the choice to the suggestion.
+    const picked = pickMachine(preset, shown) || soleMachine(shown)
     if (picked !== '' && form.getFieldValue('machine') === '') form.setFieldValue('machine', picked)
   }, [machines.looked, waiting, shown, preset, form])
 
@@ -150,10 +153,11 @@ export function NewSession() {
         <DialogPopup
           className="ns-dialog"
           dismiss="Close"
+          initialFocus={step === 1 ? () => host.querySelector<HTMLElement>('.ns__field input') : undefined}
           {...(step === 1
             ? {
                 title: 'New session',
-                description: 'Name, machine, repository, start.',
+                description: INTRO,
               }
             : {
                 leading: <Tile className="ns-dialog__tile" name={values.name} />,
@@ -190,7 +194,7 @@ export function NewSession() {
         <header className="ns__head">
           {step === 1 ? (
             <Text render={<p />} className="ns__lead" scale="body-medium" tone="variant">
-              Name, machine, repository, start.
+              {INTRO}
             </Text>
           ) : (
             <p className="ns__recap">
@@ -224,7 +228,13 @@ export function NewSession() {
           </Button>
         )}
         <Button
-          aria-describedby={step === 2 && !complete(step, values) ? HINT_ID : undefined}
+          aria-describedby={
+            step === 2 && !complete(step, values)
+              ? HINT_ID
+              : step === 1 && values.machine === ''
+                ? MACHINE_NOTE_ID
+                : undefined
+          }
           disabled={!complete(step, values)}
           type="submit"
           variant={step === 2 && known ? 'tonal' : undefined}

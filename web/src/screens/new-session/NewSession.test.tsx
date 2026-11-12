@@ -56,6 +56,31 @@ describe('step 1, the name and the machine', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })
 
+  it('opens on the Name field on the desktop, and names the three steps', async () => {
+    mountNew('desktop', '/new')
+    const dialog = await screen.findByRole('dialog', { name: 'New session' })
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Name')))
+    expect(within(dialog).getByText('Three steps: name, source, start.')).toBeTruthy()
+  })
+
+  it('does not focus the Name field on the phone, where that would raise the keyboard', async () => {
+    mountNew('phone', '/new')
+    await screen.findByLabelText('Name')
+    expect(screen.getByText('Three steps: name, source, start.')).toBeTruthy()
+    expect(document.activeElement).not.toBe(screen.getByLabelText('Name'))
+  })
+
+  it('says which machine the session runs on, and why Continue waits when none is chosen', async () => {
+    mountNew('desktop', '/new', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
+    await screen.findByRole('dialog', { name: 'New session' })
+    const reason = await screen.findByText('Choose a machine to continue.')
+    expect(screen.getByRole('button', { name: 'Continue' }).getAttribute('aria-describedby')).toBe(reason.id)
+    press('cachyos-g14')
+    expect(await screen.findByText('The session runs on cachyos-g14.')).toBeTruthy()
+    expect(screen.queryByText('Choose a machine to continue.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Continue' }).getAttribute('aria-describedby')).toBeNull()
+  })
+
   it('names three steps, one per screen', async () => {
     mountNew('desktop', '/new')
     await screen.findByRole('dialog', { name: 'New session' })
@@ -833,6 +858,40 @@ describe('the default machine', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false))
   })
 
+  it('presses the only reachable machine when the suggestion cannot decide, and Continue enables', async () => {
+    const answers = {
+      'GET /api/machines': [200, looked.ok([aMachine({ name: 'pi' }), aMachine({ name: 'old', online: false })])],
+      'POST /api/placement': [500, { error: 'no placement' }],
+    } satisfies Answers
+    mountNew('desktop', '/new', answers)
+    await screen.findByRole('dialog', { name: 'New session' })
+    await waitFor(() => expect(pressed().map((chip) => chip.textContent)).toEqual(['pi']))
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
+  })
+
+  it('draws the Source step for ?step=2 once the one reachable machine is chosen', async () => {
+    mountNew('desktop', '/new?step=2', {
+      'GET /api/machines': [200, looked.ok([aMachine({ name: 'pi' })])],
+      'POST /api/placement': [500, { error: 'no placement' }],
+    })
+    await screen.findByRole('dialog')
+    await waitFor(() => {
+      const steps = within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')
+      expect(steps.find((one) => one.getAttribute('aria-current') === 'step')?.textContent).toBe('2Source')
+    })
+  })
+
+  it('still draws the first unfinished step for ?step=3 when no source is chosen', async () => {
+    mountNew('desktop', '/new?step=3', {
+      'GET /api/machines': [200, looked.ok([aMachine({ name: 'pi' })])],
+      'POST /api/placement': [500, { error: 'no placement' }],
+    })
+    await waitFor(() => {
+      const steps = within(screen.getByRole('list', { name: 'Steps' })).getAllByRole('listitem')
+      expect(steps.find((one) => one.getAttribute('aria-current') === 'step')?.textContent).toBe('2Source')
+    })
+  })
+
   it('selects no machine when there is no default and nothing is suggested', async () => {
     mountNew('desktop', '/new', { 'POST /api/placement': [200, { ranked: [], rejected: [] }] })
     await stays()
@@ -1136,6 +1195,17 @@ describe('the hub (Y-627)', () => {
     mount(swept(said('present', '')), '/new?machine=yantra-box')
     const chips = await group()
     await waitFor(() => expect(chips.getByRole('button', { name: 'yantra-box' }).getAttribute('aria-pressed')).toBe('true'))
+  })
+
+  it('preselects the one reachable machine when the top suggestion is a hub that has not joined', async () => {
+    mount(swept(said('absent', 'Permission denied (publickey)')), '/new', {
+      'GET /api/machines': [200, looked.ok([box, aMachine({ name: 'pi' })])],
+      'POST /api/placement': [500, { error: 'no placement' }],
+    })
+    const chips = await group()
+    await waitFor(() => expect(chips.getByRole('button', { name: 'pi' }).getAttribute('aria-pressed')).toBe('true'))
+    expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', false)
   })
 
   it('draws no hub chip when the readiness read failed, and says so in the note', async () => {
