@@ -321,7 +321,8 @@ curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.
 - **A run as root names the account.** Root is not an account to log in to, so step 9 reads
   `YANTRA_ACCOUNT`. Without it, the account is `SUDO_USER`, then the account that runs the script.
   If that is `root`, or if `yantra` or an unknown account is named, the run places no key and prints
-  the join command. The box's `firstboot.sh` sets it:
+  the join command. The box's `firstboot.sh` sets it to `karigar`, an account with no sudo that it
+  makes first:
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | YANTRA_ACCOUNT=<account> bash -s -- --yes
@@ -352,9 +353,13 @@ line afterwards, and `YANTRA_YES=1` ends on the same URL. An unknown option inst
 
 [`own_box.rs`](../crates/yantrad/tests/own_box.rs) proves step 9 with a real `sshd`, `tmux`, `yantrad`
 and `yantra`: a session on the person's account appears in `GET /api/sessions` under the box's name,
-with `--yes` as that account and as root with `YANTRA_ACCOUNT`. A second run adds no key line and no
+with `--yes` as that account. A second run adds no key line and no
 `Host` block. Root with no account, and a kept block for another account, place no key and still
-finish. The real update unit writes no file under either `.ssh`. `tailscaled` is a stub and
+finish. The real update unit writes no file under either `.ssh`. It also runs the box's real
+`firstboot.sh` under its own unit (Y-786): `ssh -G` then names `karigar`, `karigar` is in no sudo
+group and `sudo -n` refuses it, and a `karigar` session appears in the listing. The test skips both
+Claude Code installs. The fixture's PAM permits every account, so the test does not prove a key
+login with a `*` password under Debian's PAM. `tailscaled` is a stub and
 `/etc/hosts` stands in for MagicDNS, so the test does not prove that the name resolves on a tailnet.
 
 **The terminal tests talk to a stub `tailscale`** that records its calls. A login, a tailnet address
@@ -561,7 +566,8 @@ the one that reads it.
 **The box itself needs no join command** (Y-598). `yantrad` lists this box's sessions over ssh, so
 [step 9](#what-it-does-at-a-terminal) of the install does here what the join command does elsewhere,
 for the account that ran the install. To run agents as `karigar` there instead, see
-[Join an account without sudo](#join-an-account-without-sudo). `yantra` itself has the shell
+[Join an account without sudo](#join-an-account-without-sudo). A box built from the
+[stick](../box/README.md) already joins as `karigar`. `yantra` itself has the shell
 `/usr/sbin/nologin` and stays that way: it holds the key to the whole fleet, and the sessions are
 not on that account.
 

@@ -23,9 +23,12 @@ The scripts also work alone:
 `build.sh` asks for the account password and a Tailscale auth key. The key is optional. With no key,
 first boot waits for you to open a login link.
 
+First boot also makes a second account, `karigar`, with no sudo and no password. The daemon logs in
+to the box as `karigar`, so agents run there and cannot become root.
+
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `BOX_USER` | `yantra-owner` | The login account |
+| `BOX_USER` | `yantra-owner` | The login account. It is yours, and it has sudo |
 | `BOX_HOSTNAME` | `yantra-box` | The machine name |
 | `BOX_TZ` | `UTC` | The time zone |
 
@@ -37,7 +40,8 @@ holds `.yantra-box/setup.sh`, first boot runs it as the login user.
 ## After first boot
 
 1. Log in with `ssh yantra-box`.
-2. Choose Shell, then run `claude` and `gh auth login`.
+2. Choose Shell, then run `sudo -iu karigar`. Run `claude` and `gh auth login` there, because
+   agents run as `karigar`.
 3. Turn off key expiry for the machine in Tailscale.
 
 ## The home screen
