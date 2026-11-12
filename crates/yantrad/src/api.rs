@@ -681,17 +681,17 @@ fn behind(agent: Option<&str>, daemon: &str, os: &Os, machine: &str) -> Option<S
 /// has no tag of its own to pin, so Linux follows the nightly channel there.
 /// A Mac has no nightly archive (ADR-0027), so under a nightly it takes the
 /// latest stable, the release that nightly builds on. The script is a
-/// release's own copy (Y-787), with one exception below.
+/// release's own copy, never a branch's (Y-787).
 fn update_command(os: &Os, version: &str, nightly: bool) -> Option<String> {
     const STABLE: &str =
         "curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh |";
     const NIGHTLY: &str = "curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/download/nightly/install.sh |";
-    // Y-787: v0.12.0 publishes no install.sh, so STABLE answers 404 until the next stable
-    // release. A stable daemon with this code is that release or a later one; a nightly is not.
-    const MAIN: &str =
-        "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh |";
     match os {
-        Os::MacOs if nightly => Some(format!("{MAIN} bash")),
+        // Y-787: v0.12.0 publishes no install.sh, so STABLE answers 404 while it is the latest
+        // release. The tag of the release that the nightly builds on always holds the script.
+        Os::MacOs if nightly => Some(format!(
+            "curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v{version}/install.sh | bash"
+        )),
         Os::MacOs => Some(format!("{STABLE} YANTRA_VERSION={version} bash")),
         Os::Linux if nightly => Some(format!("{NIGHTLY} bash -s -- --agent --channel nightly")),
         Os::Linux => Some(format!(
@@ -2046,7 +2046,7 @@ pub(crate) mod tests {
             Some(
                 format!(
                     "yantra-agent here is v0.10.2 and yantrad is v{NIGHTLY}. Update it on mac: \
-                     `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh \
+                     `curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/v0.11.0/install.sh \
                      | bash`"
                 )
                 .as_str()
