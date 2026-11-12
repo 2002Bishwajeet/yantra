@@ -147,7 +147,9 @@ draws it as *current*. **The channel decides which release** (Y-662, ADR-0027's 
 amendment): `/etc/yantra/channel` names `stable`, read through `/releases/latest`, or `nightly`,
 read off the `nightly` release's title. About serves it as `channel`. `PUT /api/update/channel` in
 `write.rs`, on the gate, rewrites that one word in place and wakes the release look. It never names
-a version.
+a version. **It answers after the look holds the new channel's release** (Y-735), at most 20 s, because
+the page reads About again on that answer. The model keeps each release with its channel, and About
+serves a release looked up on another channel as `never`.
 
 **It is a class on the refresh sweep, not a handler that runs `doctor`.** Thirteen checks over ssh per
 machine is the dearest look the daemon takes, and a browser polls whether or not anyone is looking.

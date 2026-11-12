@@ -79,6 +79,12 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
         Err(_) => None,
     };
     let channel = crate::refresh::read_channel(&fleet.facts.channel).await;
+    // Y-735: another channel's release is not yet looked at, never this one's.
+    let release = snapshot
+        .release
+        .as_ref()
+        .filter(|(on, _)| *on == channel.unwrap_or_default())
+        .map(|(_, reading)| reading.as_ref());
     Json(About {
         version: about::VERSION,
         target: about::TARGET,
@@ -93,7 +99,7 @@ async fn about(State(fleet): State<Fleet>) -> Json<About> {
         tailnet: tailnet(&snapshot, &fleet.facts.listening_on),
         https: https(&snapshot, &fleet.facts.listening_on),
         relay: fleet.facts.relay,
-        published: Answer::of(snapshot.release.as_deref(), Published::of),
+        published: Answer::of(release, Published::of),
         channel,
         update,
     })
@@ -2730,7 +2736,7 @@ pub(crate) mod tests {
     async fn about_names_the_published_release_and_whether_it_is_newer() {
         let published = |release: Result<github::Release, github::Error>| {
             holding(Snapshot {
-                release: Some(Arc::new(Reading::new(release))),
+                release: Some((update::Channel::Stable, Arc::new(Reading::new(release)))),
                 ..Snapshot::default()
             })
         };
@@ -2765,6 +2771,39 @@ pub(crate) mod tests {
             "{failed}"
         );
         assert_eq!(failed["published"].get("data"), None, "never current");
+    }
+
+    /// Y-735: the owner switched to nightly and the look still holds stable's
+    /// release. About must not offer that release under the nightly channel.
+    #[tokio::test]
+    async fn about_never_pairs_a_release_with_another_channel() {
+        let dir = std::env::temp_dir().join(format!("yantra-api-channel-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a scratch directory");
+        let file = dir.join("channel");
+        std::fs::write(&file, "nightly\n").expect("a channel");
+        let release = github::Release::parse("999.0.0").expect("a version");
+        let fleet = Fleet {
+            facts: Arc::new(crate::heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: Vec::new(),
+                ssh_dir: std::path::PathBuf::new(),
+                ssh_state: std::path::PathBuf::new(),
+                relay: false,
+                trigger: std::path::PathBuf::new(),
+                updater: std::path::PathBuf::new(),
+                progress: std::path::PathBuf::new(),
+                channel: file,
+            }),
+            ..holding(Snapshot {
+                release: Some((update::Channel::Stable, Arc::new(Reading::new(Ok(release))))),
+                ..Snapshot::default()
+            })
+        };
+
+        let body = get_json(fleet, "/about").await;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(body["channel"], json!("nightly"), "{body}");
+        assert_eq!(body["published"]["looked"], json!("never"), "{body}");
     }
 
     /// Y-612: the unit's progress file, read on each request.
