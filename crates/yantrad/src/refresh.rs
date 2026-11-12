@@ -455,7 +455,7 @@ async fn look_at_release(model: &Model, grant: &Grant, github: &Github, channel:
     let token = grant.token().await;
     let release = github.latest_release(channel, token.as_ref()).await;
     let unreachable = is_unreachable(&release);
-    model.write().await.release = Some(Arc::new(Reading::new(release)));
+    model.write().await.release = Some((channel, Arc::new(Reading::new(release))));
     unreachable
 }
 
@@ -1022,7 +1022,7 @@ mod tests {
         )
         .await;
 
-        let reading = model.read().await.release.clone().expect("looked");
+        let (_, reading) = model.read().await.release.clone().expect("looked");
         let failure = reading.value().as_ref().expect_err("the look failed");
         assert!(
             matches!(failure, github::Error::Unreachable { .. }),
