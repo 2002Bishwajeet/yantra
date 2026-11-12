@@ -5,8 +5,12 @@
 #                                       on WALK_PORT as the owner on the socket, and on WALK_PORT+1 as another device
 #                                       of the owner's with no cookie, which draws the sign-in screen (Y-687); the daemon
 #                                       sees its own /etc/yantra, seeded with the Stable channel, so a switch never writes the host
+#                                       it returns when the daemon has checked the machines, so a card shows its checks (Y-740).
+#                                       This daemon runs as you with your ssh config, and no agent reports to it. It cannot show
+#                                       a check that only the hub's own account or an agent's report can fail (Y-740)
 #   walk.sh shoot <worktree> <route>... screenshots and the visible text of each route, WebKit at 390 px, Chromium at
 #                                       1440 px, and of the sign-in screen when WALK_PORT+1 answers
+#                                       /machines also shoots the page of each machine whose card lists a failing check (Y-740)
 #   walk.sh down <worktree>
 #   walk.sh mac <worktree>              runs `just test-mac` against the real Mac; exit 2 when the Mac is unreachable
 #   walk.sh publish <worktree> <pr>     pushes the screenshots to the `walks` branch and comments them on the PR
@@ -84,8 +88,15 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
     >"$dir/daemon.log" 2>&1 </dev/null &
   echo $! >"$dir/daemon.pid"
   for _ in $(seq 60); do
-    curl -sf "http://127.0.0.1:$port/healthz" >/dev/null && { echo "http://127.0.0.1:$port"; exit 0; }
-    sleep 1
+    curl -sf "http://127.0.0.1:$port/healthz" >/dev/null || { sleep 1; continue; }
+    # Y-740: the first readiness sweep runs before the tailnet is read and asks no machine, so a walk shot then
+    # drew every card as "not checked". The next sweep landed 96 s after the start on 2026-11-12.
+    for _ in $(seq 180); do
+      grep -q '"checks":\[{' <<<"$(curl -sf "http://127.0.0.1:$port/api/readiness")" && break
+      sleep 1
+    done
+    echo "http://127.0.0.1:$port"
+    exit 0
   done
   echo "walk: yantrad did not answer on $port; see $dir/daemon.log" >&2
   tail -20 "$dir/daemon.log" >&2
