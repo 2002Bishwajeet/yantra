@@ -320,5 +320,8 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   row, and a release waits for a clean walk. A row that touches a machine is done only when it works
   there through the dashboard (owner, 2026-11-04, Y-637).
 - **Subagents follow the owner's model rule.** Opus plans, reviews and builds Rust; Sonnet builds
-  web and docs, runs the gate, simplifies and ships. No subagent runs on Fable. Owner, 2026-10-05:
-  use Opus only where it matters, and at high effort only to review and to plan transport work.
+  web and docs, runs the gate, simplifies and ships. Owner, 2026-10-05: use Opus only where it
+  matters, and at high effort only to review and to plan transport work. **Fable takes the
+  difficult and the security work** (owner, 2026-11-12): it plans, builds and fixes a row that
+  triage marks `hard` or `security`, reviews a `security` row, takes a row's second review fix,
+  and runs security audits. It never runs the gate, the walk or the ship.

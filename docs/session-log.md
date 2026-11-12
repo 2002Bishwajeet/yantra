@@ -469,3 +469,4 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-12** — Rows Y-744 to Y-747 added from the owner's reports: a page that keeps its content through one failed read, the same for GitHub, Search as an M3 search view, and an M3 Expressive audit of every screen.
 - **2026-11-12** — Row Y-748 added: the owner asked for an M3 Expressive design of the machine page.
 - **2026-11-12** — Row Y-749 added: the owner asked that the desktop top bar stay fixed.
+- **2026-11-12** — **[Y-750](../tracker.md#3-task-board) is in review.** The build loop's triage now marks each row's risk. Fable plans, builds and fixes a hard or security row, reviews a security row and takes a row's second review fix. CLAUDE.md §B7 records the owner's change to the model rule.

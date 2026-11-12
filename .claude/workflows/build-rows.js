@@ -30,6 +30,9 @@ const BUILDER = {
   web: { model: 'sonnet', effort: 'medium' },
   docs: { model: 'sonnet', effort: 'low' },
 }
+// Owner, 2026-11-12: Fable takes the difficult and the security-sensitive work, at the effort it needs.
+const FABLE = { model: 'fable', effort: 'high' }
+const risky = (row) => row.risk === 'security' || row.risk === 'hard'
 
 const branchOf = (row) => `${row.id.toLowerCase()}-auto`
 const titleOf = (row) => `${row.id}: ${row.title.charAt(0).toLowerCase()}${row.title.slice(1)}`
@@ -77,8 +80,9 @@ const TRIAGE_SCHEMA = {
           paths: { type: 'array', items: { type: 'string' }, description: 'the files the change will edit, e.g. web/src/m3/Card.tsx; a folder only for new files in it' },
           priority: { type: 'integer', minimum: 0, maximum: 4 },
           reason: { type: 'string' },
+          risk: { type: 'string', enum: ['normal', 'hard', 'security'], description: 'security: touches auth, sessions, passkeys, write routes, agent permissions, the updater, install or join, secrets, or builds a shell, ssh or tmux command from input. hard: a design or a bug a plain build is likely to get wrong. Else normal.' },
         },
-        required: ['id', 'title', 'kind', 'paths', 'priority', 'reason'],
+        required: ['id', 'title', 'kind', 'paths', 'priority', 'reason', 'risk'],
       },
     },
     skipped: {
@@ -163,7 +167,7 @@ Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
 Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}. An open PR does not rule a retried row out: it continues on that PR's branch.` : ''}
 
 Priority, from CLAUDE.md §B7: 0 = a row that milestone M18 (the daily driver) lists, 1 = closes or unblocks another open milestone, 2 = a defect or a red suite, 3 = a feature whose dependencies are done, 4 = debt. Ties go to the lower Y-number.
-For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
+For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs), its risk (security, hard or normal, as the schema says) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
 }
 
 const rank = (rows) => [...rows].sort((a, b) => a.priority - b.priority || Number(a.id.slice(2)) - Number(b.id.slice(2)))
@@ -238,8 +242,8 @@ ${FLAKY}`,
   )
 }
 
-async function fix(row, wt, what) {
-  const b = BUILDER[row.kind]
+async function fix(row, wt, what, escalate = false) {
+  const b = escalate || risky(row) ? FABLE : BUILDER[row.kind]
   return agent(
     `Fix ${row.id} in ${wt}. ${what}
 When CI failed, find the run with \`gh pr checks ${branchOf(row)}\` and read its failed job log with \`gh run view <run-id> --log-failed\`. Find the cause before you change code. Commit the fix and do not push: the next gate pushes it and CI tests it. Run only the fast local checks. ${CLEANUP}${RULES(wt)}`,
@@ -332,12 +336,12 @@ async function runRow(row, built = () => {}) {
 If ${branch} has commits ahead of origin/main, read them (git log -p origin/main..HEAD) and plan from where they stop.
 Then plan ${row.id} ("${row.title}") in ${wt}. Read the row in tracker.md, the CLAUDE.md, tracker.md and llms.txt of each crate it touches, and the code.${retried}
 Write a short plan and the checks that prove the row's done condition. Set park=true if the row needs something CLAUDE.md §B7 excludes.${RULES(wt)}`,
-    { label: `plan:${row.id}`, phase: 'Build', schema: PLAN_SCHEMA, model: 'opus', effort: row.kind === 'rust-transport' ? 'high' : 'medium' },
+    { label: `plan:${row.id}`, phase: 'Build', schema: PLAN_SCHEMA, ...(risky(row) ? FABLE : { model: 'opus', effort: row.kind === 'rust-transport' ? 'high' : 'medium' }) },
   )
   if (!plan) return park('the planner died')
   if (plan.park) return park(plan.parkReason || 'the planner parked it')
 
-  const b = BUILDER[row.kind]
+  const b = risky(row) ? FABLE : BUILDER[row.kind]
   await agent(
     `Build ${row.id} ("${row.title}") in ${wt} to this plan:\n${plan.plan}\n
 Write the tests that prove the done condition first, then the code. Run the fast checks yourself. Before you commit, load the simplify skill and apply it to git diff origin/main...HEAD, so the reviewer reads the final code. Commit.${RULES(wt)}`,
@@ -354,14 +358,14 @@ Write the tests that prove the done condition first, then the code. Run the fast
     `Review the change for ${row.id} in ${wt} (git diff origin/main...HEAD). You did not write it.
 Load the code-review skill and review at high effort, with the target \`${wt}\` named explicitly: a review run without it reads the main checkout. Check it against the row's done condition in tracker.md and against the invariants of each crate it touches.${shown(w)}
 ${REVIEW_RULE}`,
-    { label: `review:${row.id}:1`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'high' },
+    { label: `review:${row.id}:1`, phase: 'Review', schema: REVIEW_SCHEMA, ...(row.risk === 'security' ? FABLE : { model: 'opus', effort: 'high' }) },
   )
   // The 2026-11-02 run parked four rows after one fix, so a row gets two fixes, and a re-check reads only the findings and the fix.
   for (let fixes = 1; r && !(r.blocking.length === 0 && r.doneMet); fixes++) {
     if (fixes > 2) return park(`review still blocking: ${r.blocking.map((x) => x.issue).join('; ') || 'done condition not met'}`)
     const issues = r.blocking.map((x) => `- ${x.file}${x.line ? ':' + x.line : ''} ${x.issue}`).join('\n') + (r.doneMet ? '' : "\n- The row's done condition is not met or not proved by a test.")
     const base = r.head || 'HEAD~1'
-    await fix(row, wt, `A reviewer found:\n${issues}\nFix every point. A fix that changes the approach must also update the tests and the docs it touches.`)
+    await fix(row, wt, `A reviewer found:\n${issues}\nFix every point. A fix that changes the approach must also update the tests and the docs it touches.`, fixes > 1)
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after review fixes')
     w = await walkUntilGreen(row, wt, plan)
     if (typeof w === 'string') return park(w)
@@ -369,7 +373,7 @@ ${REVIEW_RULE}`,
       `Re-check the change for ${row.id} in ${wt}. You did not write it. An earlier review blocked it on:\n${issues}\n
 Read the fix (git diff ${base}..HEAD) and the code each point names. For each point, decide if the fix resolves it. Also report any new defect the fix brings in. Do not review the rest of the change again.${shown(w)}
 ${REVIEW_RULE}`,
-      { label: `review:${row.id}:${fixes + 1}`, phase: 'Review', schema: REVIEW_SCHEMA, model: 'opus', effort: 'medium' },
+      { label: `review:${row.id}:${fixes + 1}`, phase: 'Review', schema: REVIEW_SCHEMA, ...(row.risk === 'security' ? FABLE : { model: 'opus', effort: 'medium' }) },
     )
   }
   if (!r) return park('the reviewer died')
