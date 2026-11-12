@@ -12,7 +12,7 @@ export function AccountMenu(props: PopupProps & { refused: boolean }) {
   return (
     <Menu onOpenChange={guardOutsidePress(props)} open={props.open && ready}>
       {/* A LinkItem stays open by default, and the open menu's inert layer then covers the page. */}
-      <MenuPopup anchor={props.anchor} finalFocus={props.anchor}>
+      <MenuPopup anchor={props.anchor} finalFocus={props.anchor} keepMounted>
         {props.refused ? (
           <MenuLinkItem
             closeOnClick
