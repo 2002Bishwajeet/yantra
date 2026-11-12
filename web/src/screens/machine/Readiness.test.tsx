@@ -158,7 +158,7 @@ describe('the hero (Y-748)', () => {
   it.each([
     ['ready', [] as string[], 'ready', 'primary'],
     ['a fix to make', ['provider-auth'], 'manual', 'primary'],
-    ['a tool missing', ['tmux'], 'missing', 'tertiary'],
+    ['a tool missing', ['tmux'], 'missing', 'secondary'],
   ])('carries the verdict and a surface for %s', async (_, absent, kind, surface) => {
     daemon()
     await draw(report(checks(absent)))
@@ -174,6 +174,19 @@ describe('the hero (Y-748)', () => {
     await draw(report(checks()), [earlier], { machine: machine({ online: false }) })
     expect(hero().getAttribute('data-verdict')).toBe('asleep')
     expect(hero().getAttribute('data-surface')).toBe('high')
+  })
+
+  it('never tints a hero green while the owner has something to do', async () => {
+    daemon()
+    await draw(report(checks(['tmux', 'claude'])))
+    expect(hero().getAttribute('data-surface')).not.toBe('tertiary')
+  })
+
+  it('draws the Optional and ssh-said disclosures as list folds, not outlined pills', async () => {
+    daemon()
+    await draw(report([...checks(), { check: 'mic', state: 'absent', detail: 'not installed' } as Check]))
+    const open = card().getByRole('button', { name: /^Show Optional: microphone/ })
+    expect(open.closest('.m3-disclosure')?.classList.contains('readiness__fold')).toBe(true)
   })
 
   it('keeps the heading polite and focusable, with one large status mark before it', async () => {
@@ -784,7 +797,7 @@ describe('a ready machine', () => {
   it('keeps the microphone fix behind Optional: microphone until it opens', async () => {
     daemon()
     await draw(report(withMic))
-    expect(card().queryByText(/Run Install with Microphone ticked/)).toBeNull()
+    expect(card().queryByText(/Turn on Also set up the microphone/)).toBeNull()
     expect(card().queryByText('ok')).toBeNull()
     expect(card().queryByRole('switch', { name: 'Microphone' })).toBeNull()
     expect(card().queryByRole('button', { name: 'Install' })).toBeNull()
@@ -792,7 +805,7 @@ describe('a ready machine', () => {
     expect(open.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(open)
     pressFix()
-    expect(card().getByText(/Run Install with Microphone ticked/)).toBeTruthy()
+    expect(card().getByText(/Turn on Also set up the microphone/)).toBeTruthy()
     expect(card().getByRole('switch', { name: 'Microphone' })).toBeTruthy()
     expect(card().getByRole('button', { name: 'Install' })).toBeTruthy()
     expect(filled()).toHaveLength(1)
@@ -803,7 +816,7 @@ describe('a ready machine', () => {
     await draw(report(withMic), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().queryByRole('button', { name: /Optional: microphone/ })).toBeNull()
     expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
-    expect(card().queryByText(/Run Install with Microphone ticked/)).toBeNull()
+    expect(card().queryByText(/Turn on Also set up the microphone/)).toBeNull()
     expect(filled()).toHaveLength(1)
     expect(filled()[0]!.textContent).toBe('New session')
   })

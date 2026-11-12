@@ -169,3 +169,27 @@
   max-width: var(--m3-measure);
   margin-inline: auto;
 }
+
+/* Y-748: a fold is a row of the same list as the checks, not an outlined pill. */
+.readiness__fold.m3-disclosure {
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+}
+
+.readiness__fold .m3-disclosure__row {
+  min-height: 56px;
+  padding: 0 8px 0 16px;
+}
+
+.readiness__fold .m3-disclosure__content {
+  padding: 0 16px 12px;
+}
+
+@media (max-width: 599px) {
+  .readiness__fold .m3-disclosure__trigger {
+    height: 48px;
+    min-width: 48px;
+  }
+}

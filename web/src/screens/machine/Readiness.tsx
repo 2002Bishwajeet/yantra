@@ -110,7 +110,7 @@ function ProbeSaid(props: { checks: Check[] }) {
   const said = props.checks.filter((one) => one.state !== 'present' && one.detail && !optionalAbsent(one) && !olderAgent(one))
   if (said.length === 0) return null
   return (
-    <Disclosure summary="What ssh said">
+    <Disclosure className="readiness__fold" summary="What ssh said">
       {said.map((one) => (
         <Text className="m3-wrap" key={one.check} render={<div />} scale="body-small">
           {nameOf(one.check)}: {withoutSignIn(one.detail)}
@@ -125,7 +125,7 @@ function Optional(props: { checks: Check[]; machine: string; fix: boolean; actio
   const optional = props.checks.filter(optionalAbsent)
   if (optional.length === 0 || !props.fix) return null
   return (
-    <Disclosure summary="Optional: microphone">
+    <Disclosure className="readiness__fold" summary="Optional: microphone">
       <Checks checks={optional} fix={props.fix} machine={props.machine} />
       {props.action ? <div className="readiness__actions">{props.action}</div> : null}
     </Disclosure>
