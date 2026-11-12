@@ -1759,7 +1759,9 @@ async fn rechannel<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// One GitHub call's own timeout, and some more for a look already in flight.
+/// A look already in flight on the old channel and the new channel's own look
+/// can each take GitHub's 15 s, so a slow pair leaves Published at `never`
+/// until About's next poll. It never shows the old channel's release.
 const RELEASE_LOOK: std::time::Duration = std::time::Duration::from_secs(20);
 
 fn from_update(error: &update::Error) -> StatusCode {
