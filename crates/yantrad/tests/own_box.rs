@@ -7,10 +7,14 @@
 //! owner's own sessions never appear. **The done condition is the listing**: a
 //! session on the person's account in `GET /api/sessions`, under the box's name.
 //!
+//! One test runs the real [`firstboot.sh`] under its own unit (Y-786): the box
+//! joins as `karigar`, an account with no sudo, and not as the installer's account.
+//!
 //! `tailscaled` is a stub, and `/etc/hosts` stands in for MagicDNS. So this
 //! proves the login and the listing, and not that the name resolves on a tailnet.
 //!
 //! [`install.sh`]: ../../../install.sh
+//! [`firstboot.sh`]: ../../../box/payload/firstboot.sh
 
 mod common;
 
@@ -32,6 +36,11 @@ const SESSION: &str = "own-box";
 const PUBLIC_KEY: &str = "/home/yantra/.ssh/id_yantra.pub";
 const CONFIG: &str = "/home/yantra/.ssh/config";
 const AUTHORIZED: &str = "/home/deploy/.ssh/authorized_keys";
+
+/// The account `firstboot.sh` makes for agents.
+const AGENT: &str = "karigar";
+/// `SUDO_GROUPS` in `yantra-core/src/doctor.rs`, which the `no-sudo` check reads.
+const SUDO_GROUPS: [&str; 3] = ["sudo", "wheel", "admin"];
 
 const DASHBOARD: &str = "install: open the dashboard at https://cachyos-g14.example.ts.net:8443";
 const JOIN: &str = "curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yantra/join | sh";
@@ -165,18 +174,41 @@ impl OwnBox {
         )
     }
 
-    /// `--yes` as root, with `env` set the way `box/payload/firstboot.sh` sets it.
-    fn install_as_root(&self, env: &str) -> Result<Output> {
-        self.systemd.exec(&[
-            "bash",
-            "-c",
-            &format!("cat /fixture/install.sh | {env} bash -s -- --yes"),
-        ])
+    /// `--yes` as root, with no account named.
+    fn install_as_root(&self) -> Result<Output> {
+        self.systemd
+            .exec(&["bash", "-c", "cat /fixture/install.sh | bash -s -- --yes"])
     }
 
-    fn start_session(&self) -> Result<()> {
+    /// What `box/payload/late.sh` leaves for first boot, with `deploy` as the
+    /// installer's sudo account. Call it after `publish`, which empties the
+    /// folder that `install.sh` is served from.
+    fn arrange_first_boot(&self) -> Result<()> {
+        let payload = repo_root().join("box/payload");
+        self.systemd.copy_in(
+            &payload.join("firstboot.sh"),
+            "/usr/local/sbin/yantra-firstboot",
+        )?;
+        self.systemd.copy_in(
+            &payload.join("yantra-firstboot.service"),
+            "/etc/systemd/system/yantra-firstboot.service",
+        )?;
+        // The markers skip both Claude Code installs: the fixture cannot reach claude.ai.
+        self.sh(&format!(
+            "chmod 700 /usr/local/sbin/yantra-firstboot && \
+             echo {UNPRIVILEGED} > /etc/yantra-box.user && \
+             mkdir -p /var/lib/yantra-box && \
+             touch /var/lib/yantra-box/user-done /var/lib/yantra-box/agent-done && \
+             install -D /fixture/install.sh /srv/www/{}/main/install.sh && \
+             systemctl daemon-reload && systemctl enable yantra-firstboot.service",
+            self.repo
+        ))?;
+        Ok(())
+    }
+
+    fn start_session(&self, account: &str) -> Result<()> {
         let session = self.systemd.exec_as(
-            UNPRIVILEGED,
+            account,
             &["tmux", "new-session", "-d", "-s", SESSION, "sleep 3600"],
         )?;
         if !session.status.success() {
@@ -283,7 +315,7 @@ fn an_install_lets_the_daemon_list_its_own_sessions() -> Result<()> {
         "the run tried no real login, or the login failed:\n{screen}"
     );
 
-    own.start_session()?;
+    own.start_session(UNPRIVILEGED)?;
     own.wait_for_listing()?;
 
     let key = own.sh(&format!("cat {PUBLIC_KEY}"))?;
@@ -302,31 +334,64 @@ fn an_install_lets_the_daemon_list_its_own_sessions() -> Result<()> {
     Ok(())
 }
 
-/// First boot runs as root, and root is not an account to log in as.
+/// Y-786: first boot joins the box as `karigar`, which has no sudo, and not as
+/// the installer's account, which has.
 #[test]
-fn first_boot_names_the_account_as_root() -> Result<()> {
-    let firstboot = std::fs::read_to_string(repo_root().join("box/payload/firstboot.sh"))?;
-    let named = firstboot
-        .find("export YANTRA_ACCOUNT=$user")
-        .context("firstboot.sh does not name the account to install.sh")?;
-    let installed = firstboot
-        .find("install.sh | bash")
-        .context("firstboot.sh no longer pipes install.sh into bash")?;
-    assert!(named < installed, "firstboot.sh names the account too late");
-
+fn first_boot_joins_the_hub_as_karigar() -> Result<()> {
     let Some(own) = OwnBox::start()? else {
         return Ok(());
     };
     own.publish(VERSION, "first")?;
     own.sh("systemctl start sshd.service")?;
+    own.arrange_first_boot()?;
 
-    let screen = finished(own.install_as_root(&format!("YANTRA_ACCOUNT={UNPRIVILEGED}"))?)?;
+    let started = own
+        .systemd
+        .exec(&["systemctl", "start", "yantra-firstboot.service"])?;
+    let journal = own.systemd.journal("yantra-firstboot.service");
+    assert!(started.status.success(), "first boot failed:\n{journal}");
     assert!(
-        screen.contains("yantrad logs in here as deploy"),
-        "{screen}"
+        journal.contains(&format!("install: yantrad logs in here as {AGENT}")),
+        "first boot tried no real login as {AGENT}, or the login failed:\n{journal}"
+    );
+    assert!(
+        journal.contains("yantra-box: first boot finished"),
+        "{journal}"
     );
 
-    own.start_session()?;
+    let config = String::from_utf8(
+        own.systemd
+            .exec_as("yantra", &["ssh", "-G", MACHINE])?
+            .stdout,
+    )?;
+    assert!(
+        config.lines().any(|line| line == format!("user {AGENT}")),
+        "ssh must log in to {MACHINE} as {AGENT}:\n{config}"
+    );
+
+    // The two probes of `doctor`'s `no-sudo` check: the groups, and a rule.
+    let groups = own.sh(&format!("id -Gn {AGENT}"))?;
+    assert!(
+        !groups
+            .split_whitespace()
+            .any(|group| SUDO_GROUPS.contains(&group)),
+        "{AGENT} is in a sudo group: {groups}"
+    );
+    assert!(
+        !own.systemd
+            .exec_as(AGENT, &["sudo", "-n", "true"])?
+            .status
+            .success(),
+        "sudo ran a command for {AGENT}"
+    );
+    assert_eq!(
+        own.sh(&format!("getent shadow {AGENT} | cut -d: -f2"))?
+            .trim(),
+        "*",
+        "{AGENT} must have no password and no lock"
+    );
+
+    own.start_session(AGENT)?;
     own.wait_for_listing()
 }
 
@@ -337,7 +402,7 @@ fn root_with_no_account_authorises_nothing() -> Result<()> {
     };
     own.publish(VERSION, "first")?;
 
-    let screen = finished(own.install_as_root("")?)?;
+    let screen = finished(own.install_as_root()?)?;
     assert!(
         screen.contains(JOIN),
         "with no account, the join command is what is left:\n{screen}"
