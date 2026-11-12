@@ -24,8 +24,10 @@ export const PAUSE = 500
 /** What a socket attaches to: a workspace the daemon looks up, a machine and a
  *  session it is handed
  *  ([ADR-0022](../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md)),
- *  or a step an install left on a machine, by its place in the list
- *  ([ADR-0030](../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md)).
+ *  a step an install left on a machine, by its place in the list
+ *  ([ADR-0030](../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md)),
+ *  or the owner's admin account on a machine
+ *  ([ADR-0046](../../../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md)).
  *  It mirrors the daemon's own `Target`, addresses and all.
  *
  *  **Every variant carries the machine**, which the daemon's does not need and a
@@ -35,6 +37,8 @@ export type Target =
   | { workspace: string; machine: string }
   | { machine: string; session: string }
   | { machine: string; step: number; at: number }
+  // The admin account whose login shell this is (ADR-0046 §2).
+  | { machine: string; owner: string }
 
 export function terminalAddress(target: Target): string {
   const daemon = location.origin.replace(/^http/, 'ws')
@@ -43,6 +47,7 @@ export function terminalAddress(target: Target): string {
   if ('session' in target) {
     return `${daemon}/api/machines/${machine}/sessions/${encodeURIComponent(target.session)}/terminal`
   }
+  if ('owner' in target) return `${daemon}/api/machines/${machine}/owner/terminal?as=${encodeURIComponent(target.owner)}`
   // `at` names the install event the step was read from (ADR-0030 §2).
   return `${daemon}/api/machines/${machine}/install/${target.step}/terminal?at=${target.at}`
 }

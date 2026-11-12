@@ -31,6 +31,8 @@ export type SshIdentity = {
   kind: string
   public_key: string
   fingerprint: string
+  // The `authorized_keys` line for an owner terminal (ADR-0046 §2).
+  owner_line: string
 }
 
 /** One entry of `GET /api/notifications`'s ring buffer (ADR-0025, proposed):

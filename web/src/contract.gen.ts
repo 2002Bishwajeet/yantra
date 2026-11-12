@@ -690,6 +690,7 @@ export const updateFailed = {
 export const sshIdentity = {
   "fingerprint": "SHA256:<fingerprint>",
   "kind": "ed25519",
+  "owner_line": "from=\"100.64.0.1,fd7a:115c:a1e0::1\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra",
   "path": "/home/<user>/.ssh/id_yantra",
   "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB<key> yantra"
 } satisfies SshIdentity

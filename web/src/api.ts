@@ -425,6 +425,9 @@ export type SshIdentity = {
   public_key: string
   // `SHA256:…`
   fingerprint: string
+  // The `authorized_keys` line for an owner terminal, with `from=` set to the
+  // hub's addresses (ADR-0046 §2).
+  owner_line: string
 }
 
 /** `GET /api/here` (Y-589) — the tailnet machine this request came from; `null`

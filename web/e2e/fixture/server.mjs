@@ -1085,6 +1085,56 @@ function oneOff(state, request, socket, head, machine, index, at) {
   })
 }
 
+/** ADR-0046 §2's socket: the admin account's login shell. It echoes what is
+ *  typed, asks for a password when a line starts with `sudo` and echoes none
+ *  of it, and ends on `exit` with status 0, as the shell would. */
+function ownerShell(state, request, socket, head, machine, admin) {
+  if (state.refuse) {
+    socket.end(
+      `HTTP/1.1 ${state.refuse.status} Refused\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n${state.refuse.text}`,
+    )
+    return
+  }
+  const prompt = `${admin}@${machine}:~$ `
+  sockets.handleUpgrade(request, socket, head, (ws) => {
+    let sized = false
+    let line = ''
+    let password = false
+    ws.on('message', (data, binary) => {
+      if (!sized) {
+        if (binary) return
+        sized = true
+        ws.send(Buffer.from(prompt), { binary: true })
+        return
+      }
+      if (!binary) return
+      for (const key of data.toString()) {
+        if (key !== '\r') {
+          line += key
+          if (!password) ws.send(Buffer.from(key), { binary: true })
+          continue
+        }
+        const typed = line.trim()
+        line = ''
+        if (password) {
+          password = false
+          ws.send(Buffer.from(`\r\n0\r\n${prompt}`), { binary: true })
+        } else if (typed === 'exit') {
+          ws.send(Buffer.from('\r\nlogout\r\n'), { binary: true })
+          ws.send(JSON.stringify({ exit: 0 }), { binary: false })
+          ws.close()
+          return
+        } else if (typed.startsWith('sudo')) {
+          password = true
+          ws.send(Buffer.from(`\r\n[sudo] password for ${admin}: `), { binary: true })
+        } else {
+          ws.send(Buffer.from(`\r\n${prompt}`), { binary: true })
+        }
+      }
+    })
+  })
+}
+
 /** The reply to a `diff` frame (Y-491): `chatBranchDiff` with a real patch behind it,
  *  holding a rename, a binary file and two nested edits. */
 const BRANCH_PATCH = [
@@ -1342,6 +1392,7 @@ server.on('upgrade', (request, socket, head) => {
   const workspace = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/terminal$/)
   const session = url.pathname.match(/^\/api\/machines\/([^/]+)\/sessions\/([^/]+)\/terminal$/)
   const step = url.pathname.match(/^\/api\/machines\/([^/]+)\/install\/(\d+)\/terminal$/)
+  const owner = url.pathname.match(/^\/api\/machines\/([^/]+)\/owner\/terminal$/)
   const chat = url.pathname.match(/^\/api\/workspaces\/([^/]+)\/chat$/)
   const homeChat = url.pathname.match(/^\/api\/machines\/([^/]+)\/chat$/)
   if (homeChat) {
@@ -1367,6 +1418,10 @@ server.on('upgrade', (request, socket, head) => {
       url.searchParams.get('thread'),
       url.searchParams.get('after'),
     )
+    return
+  }
+  if (owner) {
+    ownerShell(state, request, socket, head, decodeURIComponent(owner[1]), url.searchParams.get('as') ?? '')
     return
   }
   if (step) {

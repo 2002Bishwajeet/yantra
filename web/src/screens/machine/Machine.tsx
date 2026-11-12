@@ -33,6 +33,7 @@ import { gb, machineState } from '@/screens/machines/facts'
 import { useFormFactor } from '@/shell/formFactor'
 import { useTick } from '@/useTick'
 import { daemonCouldNotRead, unreachable } from '@/work'
+import { OwnerTerminal } from './OwnerTerminal'
 import { ReadinessCard } from './Readiness'
 import { useVerdict } from './useVerdict'
 import { Sessions } from './Sessions'
@@ -172,7 +173,7 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
 }
 
 /** D7 §4.3: header, then Readiness — whose verdict decides the one action —
- *  then Workspaces, Sessions and About. */
+ *  then Workspaces, Sessions, the owner terminal (Y-701) and About. */
 export function Machine() {
   const { machine: name } = useParams({ from: '/m/$machine' })
   const client = useQueryClient()
@@ -272,6 +273,10 @@ export function Machine() {
 
         <ErrorBoundary eyebrow={name} title="The sessions could not be drawn">
           <Sessions machine={name} sessions={sessions} verdict={verdicted.verdict} workspaces={here} />
+        </ErrorBoundary>
+
+        <ErrorBoundary eyebrow={name} title="The owner terminal could not be drawn">
+          <OwnerTerminal key={name} machine={name} />
         </ErrorBoundary>
 
         <ErrorBoundary eyebrow={name} title="About could not be drawn">

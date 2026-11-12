@@ -1,0 +1,26 @@
+.owner-terminal__note {
+  margin: 0;
+  padding: 0 4px;
+  min-width: 0;
+}
+
+.owner-terminal__path {
+  overflow-wrap: anywhere;
+}
+
+.owner-terminal__key {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.owner-terminal__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* D7 §4.3: the card's action is full width at its foot on the phone. */
+[data-shell='phone'] .owner-terminal__actions > * {
+  flex: 1 1 100%;
+}

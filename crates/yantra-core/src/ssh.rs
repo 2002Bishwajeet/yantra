@@ -317,12 +317,20 @@ impl Ssh {
     /// `RequestTTY=no`, and ssh's own diagnostics left on the screen the user is
     /// looking at.
     pub(crate) fn tty_argv(&self, command: &str) -> Result<Vec<String>, Error> {
+        let mut args = self.login_argv()?;
+        args.push(command.to_owned());
+        Ok(args)
+    }
+
+    /// [`Self::tty_argv`] with no command, so the far side runs the account's
+    /// login shell (ADR-0046 §2). `%C` hashes the user, so this rides a master
+    /// of its own.
+    pub(crate) fn login_argv(&self) -> Result<Vec<String>, Error> {
         self.machine.prepare_sockets()?;
         let mut args = self.machine.connection_args();
         args.extend(["-o".to_owned(), "LogLevel=ERROR".to_owned()]);
         args.push("-tt".to_owned());
         args.extend(self.machine.destination_args());
-        args.push(command.to_owned());
         Ok(args)
     }
 
@@ -901,6 +909,31 @@ mod tests {
             argv.last().map(String::as_str),
             Some("tmux attach -t '=demo'")
         );
+    }
+
+    /// ADR-0046 §2: the owner terminal is the account's login shell, so the
+    /// argv ends at the destination and names no command.
+    #[test]
+    fn the_login_argv_ends_at_the_user_and_host() {
+        let state_dir = std::env::temp_dir().join("yantra-login-argv");
+        let ssh = Ssh::new(Machine {
+            host: "pi".to_owned(),
+            user: Some("owner".to_owned()),
+            port: None,
+            identity: None,
+            state_dir: state_dir.clone(),
+        })
+        .expect("the path is short enough");
+
+        let argv = ssh.login_argv().expect("an argv");
+        let _ = std::fs::remove_dir_all(&state_dir);
+
+        assert!(argv.contains(&"-tt".to_owned()), "{argv:?}");
+        assert!(
+            argv.iter().any(|arg| arg.starts_with("ControlPath=")),
+            "{argv:?}"
+        );
+        assert_eq!(&argv[argv.len() - 2..], ["--", "owner@pi"], "{argv:?}");
     }
 
     /// I-63: the destination is never the first thing `ssh` could read as an
