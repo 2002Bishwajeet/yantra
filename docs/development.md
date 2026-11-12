@@ -475,3 +475,17 @@ npx skills add affaan-m/everything-claude-code@rust-testing -y
 They land in `.claude/skills/` and are **gitignored** — local tooling, not part of
 the project. They are documentation only (no scripts), but skills run with full
 agent permissions, so review anything you add.
+
+## Cut a release
+
+The owner approves each release. Then, in one PR named `Y-NNN: version X.Y.Z`:
+
+1. Set `version` in the root `Cargo.toml`, and the six Yantra crates in `Cargo.lock`.
+2. Change the current-release lines in `README.md` and the `install.sh` URLs in `docs/appliance.md`.
+3. Change the `install.sh` URL in `box/payload/firstboot.sh`. The `own_box` test serves only this
+   version's tag, so a stale URL fails CI (v0.13.0).
+4. Move the rows the release ships from 🔵 review to ✅ done.
+
+After the guard merges it, tag the merge commit `vX.Y.Z` and push the tag. The release workflow
+builds, signs `SHA256SUMS` in its `sign` job ([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md)),
+and publishes. If GitHub answers 500 on publish, rerun the failed job.
