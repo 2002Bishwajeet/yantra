@@ -156,7 +156,9 @@ draws it as *current*. **The channel decides which release** (Y-662, ADR-0027's 
 amendment): `/etc/yantra/channel` names `stable`, read through `/releases/latest`, or `nightly`,
 read off the `nightly` release's title. About serves it as `channel`. `PUT /api/update/channel` in
 `write.rs`, on the gate, rewrites that one word in place and wakes the release look. It never names
-a version. **It answers after the look holds the new channel's release** (Y-735), at most 20 s, because
+a version. **The unit installs no nightly** (Y-780, ADR-0027's 2026-11-12 amendment): this account
+can write `nightly`, so `install.sh` refuses a kept `nightly` unless a person names
+`--channel nightly`, and About serves that refusal in `update`. **It answers after the look holds the new channel's release** (Y-735), at most 20 s, because
 the page reads About again on that answer. The model keeps each release with its channel, and About
 serves a release looked up on another channel as `never`.
 

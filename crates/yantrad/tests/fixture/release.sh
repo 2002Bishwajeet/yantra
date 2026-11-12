@@ -2,8 +2,9 @@
 #
 # github.com and api.github.com, inside the container, so install.sh can be run
 # against a release that this fixture publishes (Y-158). Real curl, real TLS,
-# real checksums, a release list to resolve a version from, and a corrupted
-# archive on demand — which the real host cannot serve.
+# real checksums, a real signature of them, a release list to resolve a version
+# from, and a corrupted, unsigned or forged release on demand — which the real
+# host cannot serve.
 #
 # What it does not prove is that a published archive is shaped this way; the
 # test asserts that against release.yml instead.
@@ -14,6 +15,7 @@ STAGING=/srv/staging
 UNITS=/srv/units
 CERT=/srv/fixture.crt
 KEY=/srv/fixture.key
+SIGNING=/srv/signing
 
 case "$(uname -m)" in
 aarch64 | arm64) target=aarch64-unknown-linux-musl other=x86_64-unknown-linux-musl ;;
@@ -23,6 +25,17 @@ esac
 
 downloads() { echo "$WWW/$1/releases/download/v$2"; }
 staged() { echo "yantra-$1-$target"; }
+
+# install.sh carries the owner's key, which the fixture cannot sign with (Y-780).
+trust() {
+    sed -i "s|^RELEASE_KEY=.*|RELEASE_KEY='$(cut -d ' ' -f 1,2 "$SIGNING.pub")'|" "$1"
+}
+
+# The owner's step, with the key $1. ssh-keygen asks before it replaces a signature.
+sign() {
+    rm -f SHA256SUMS.sig
+    ssh-keygen -q -Y sign -f "$1" -n file SHA256SUMS
+}
 
 serve() {
     # Its own trust anchor, which is why it carries CA:TRUE: install.sh pins
@@ -39,6 +52,9 @@ serve() {
     update-ca-trust
 
     printf '127.0.0.1 github.com api.github.com raw.githubusercontent.com\n' >> /etc/hosts
+
+    ssh-keygen -q -t ed25519 -N '' -f "$SIGNING"
+    trust /fixture/install.sh
 
     mkdir -p "$WWW"
     echo ready > "$WWW/ready"
@@ -108,9 +124,9 @@ publish() {
 }
 
 # The archive release.yml built, served under a version of the fixture's
-# choosing (Y-483). Its install.sh, units and binaries are left as built; a
-# marker, when there is one, is appended to each binary so that two
-# publications of the same build are different files.
+# choosing (Y-483). Its units and binaries are left as built, and its install.sh
+# differs in one line: the key. A marker, when there is one, is appended to each
+# binary so that two publications of the same build are different files.
 publish_archive() {
     local repo=$1 version=$2 marker=$3 archive=$4
     local stage built binary
@@ -136,6 +152,7 @@ publish_archive() {
     printf '{"tag_name":"v%s","name":"v%s","draft":false,"prerelease":false}\n' \
         "$version" "$version" > "$WWW/repos/$repo/releases/latest"
 
+    trust "$STAGING/$stage/install.sh"
     pack "$repo" "$version"
 }
 
@@ -150,6 +167,7 @@ pack() {
     printf '%s  yantra-%s-%s.tar.gz\n' \
         0000000000000000000000000000000000000000000000000000000000000000 \
         "$version" "$other" >> SHA256SUMS
+    sign "$SIGNING"
 }
 
 # An archive shaped the way every release up to v0.1.0 is: three binaries and no
@@ -181,6 +199,8 @@ nightly() {
     mkdir -p "$WWW/repos/$repo/releases/tags"
     rm -rf "$WWW/$repo/releases/download/nightly"
     cp -r "$(downloads "$repo" "$version")" "$WWW/$repo/releases/download/nightly"
+    # A real nightly carries no signature.
+    rm -f "$WWW/$repo/releases/download/nightly/SHA256SUMS.sig"
     printf '{"tag_name":"nightly","name":"v%s","prerelease":true,"assets":[{"name":"yantra-%s-%s.tar.gz"},{"name":"yantra-%s-%s.tar.gz"},{"name":"SHA256SUMS"}]}\n' \
         "$version" "$version" "$other" "$version" "$target" > "$WWW/repos/$repo/releases/tags/nightly"
 }
@@ -189,6 +209,26 @@ corrupt() {
     local repo=$1 version=$2
     printf x | dd of="$(downloads "$repo" "$version")/$(staged "$version").tar.gz" \
         bs=1 seek=0 conv=notrunc status=none
+}
+
+# A release the owner has not signed yet.
+unsign() {
+    rm -f "$(downloads "$1" "$2")/SHA256SUMS.sig"
+}
+
+# A release that a key install.sh does not carry signed.
+stranger() {
+    rm -f /srv/stranger /srv/stranger.pub
+    ssh-keygen -q -t ed25519 -N '' -f /srv/stranger
+    cd "$(downloads "$1" "$2")"
+    sign /srv/stranger
+}
+
+# Another archive with a SHA256SUMS that matches it, under the signature of the first.
+forge() {
+    corrupt "$1" "$2"
+    cd "$(downloads "$1" "$2")"
+    sha256sum "$(staged "$2").tar.gz" > SHA256SUMS
 }
 
 "$@"
