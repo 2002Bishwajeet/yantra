@@ -316,6 +316,11 @@ reasonably have gone the other way:
   becomes an `ApiError` of kind `socket` and is drawn beside the terminal. A close
   with nothing said is not an error at all, and is what reconnect turns on.
 
+A paste loses its control characters before the socket
+([`lib/controls.ts`](src/lib/controls.ts), Y-779). xterm.js removes no ESC from a
+paste, so a pasted `ESC[201~` would end the paste bracket early. Tab and newline
+stay. Every copy button puts its text through the same filter.
+
 ## Push-to-talk (Y-418)
 
 [`Talk.tsx`](src/screens/session/Talk.tsx) is

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ChatMarkdown } from './ChatMarkdown'
 import { CodeBlock } from './CodeBlock'
 
@@ -43,6 +43,20 @@ describe('the code block', () => {
     await waitFor(() => expect(container.querySelector('.chat__code-body')?.textContent).toBe('fn broken() {}'))
     expect(container.querySelector('.chat__code-body span[style]')).toBeNull()
     expect(screen.getByRole('button', { name: 'Copy code' })).toBeTruthy()
+  })
+
+  it('copies the code with no control character, and keeps tab and newline (Y-779)', async () => {
+    const writeText = vi.fn((_: string) => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    broken.on = true
+    const { container } = render(
+      <CodeBlock code={'if x:\n\techo a\u001b[201~\r\nrm b\u007f\u009b'} language="sh" title={null} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }))
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeTruthy()
+    expect(writeText).toHaveBeenCalledWith('if x:\n\techo a[201~\nrm b')
+    await waitFor(() => expect(container.querySelector('.chat__code-body')?.textContent).toBe('if x:\n\techo a[201~\nrm b'))
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
   })
 
   it('takes the header from a fence title, and a plain fence from its language', () => {

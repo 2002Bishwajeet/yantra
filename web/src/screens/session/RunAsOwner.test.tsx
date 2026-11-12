@@ -122,12 +122,22 @@ describe('Run in owner terminal', () => {
   })
 
   it.each([
-    ['a newline', 'sudo ls\nrm -rf /'],
-    ['ESC', 'sudo ls \u001b[2J'],
-  ])('refuses a command with %s and offers no button', async (_, command) => {
+    ['a newline', 'sudo ls\nrm -rf /', ['\\n']],
+    ['a paste break', "sudo apt update\u001b[201~\rsudo sh -c 'x'", ['\\x1b', '\\r']],
+    ['a bidi override', 'sudo ls \u202etxt.sh', ['\\u{202e}']],
+  ])('refuses a command with %s, spells it out and offers no copy (Y-779)', async (_, command, escapes) => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     await draw(command)
     expect(run()).toBeNull()
-    expect(screen.getByText(/holds a control character, so Yantra will not type it/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Copy the command' })).toBeTruthy()
+    expect(screen.getByText(/holds a hidden character, so Yantra will not type it or copy it/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Cop/ })).toBeNull()
+
+    const block = document.querySelector('.run-owner__command')!
+    expect(block.textContent).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u)
+    expect([...block.querySelectorAll('.run-owner__escape')].map((escape) => escape.textContent)).toEqual(escapes)
+    expect(block.getAttribute('translate')).toBe('no')
+    expect(writeText).not.toHaveBeenCalled()
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
   })
 })
