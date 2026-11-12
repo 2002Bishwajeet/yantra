@@ -471,3 +471,4 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-12** — Row Y-749 added: the owner asked that the desktop top bar stay fixed.
 - **2026-11-12** — **[Y-750](../tracker.md#3-task-board) is in review.** The build loop's triage now marks each row's risk. Fable plans, builds and fixes a hard or security row, reviews a security row and takes a row's second review fix. CLAUDE.md §B7 records the owner's change to the model rule.
 - **2026-11-12** — Rows Y-751 to Y-775 added from the M3 Expressive audit (Y-747): 43 findings in 25 rows, two of them owner rows.
+- **2026-11-12** — **Y-758 answered:** the owner keeps the uppercase section labels. Y-716 drops its sentence-case clause, so it no longer needs an ADR-0024 amendment.
