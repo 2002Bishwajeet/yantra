@@ -49,6 +49,7 @@ const RULES = (wt) => `
 Rules for this run (CLAUDE.md §B7, the build loop):
 - Work only inside the worktree ${wt}. Never touch ${REPO} itself.
 - Do not edit tracker.md or docs/session-log.md. The ship stage does that.
+- Run every local cargo, npm, npx, just or podman command through \`~/.claude/bin/heavy\` (for example \`~/.claude/bin/heavy cargo nextest run -p yantrad foo\`). It is a machine-wide lock that other projects' agents on this laptop share, so two heavy commands never run at once and the laptop does not run out of memory. It waits for the lock by itself; do not kill a waiting command.
 - Do not create or change anything under docs/adr/, and do not add or change an invariant in a crate tracker. If the row needs either, stop and say so.
 - Commit messages are "Y-NNN: <what changed>" and carry no AI attribution of any kind.
 - Never run the podman suite, \`just check\`, or Playwright in any form (\`just web-e2e\`, \`npm run e2e\`, \`npx playwright test\`). CI runs them on the PR. Rows run in parallel, and parallel local suites run the box out of memory. The one exception: when your gate includes \`just web-e2e\`, a fix agent may run \`just web-e2e --update-snapshots=changed <spec>\` to regenerate a baseline that its change was meant to alter, and commits the new images. Never regenerate a baseline on the host: its fonts differ. You may run \`just fmt-check\`, \`just lint\`, \`cargo nextest run -p <crate>\` without YANTRA_REQUIRE_PODMAN, and the web lint and unit tests.

@@ -41,8 +41,10 @@ up)
     ss -ltnpH "( sport = :$port or sport = :$signin )" >&2
     exit 1
   fi
-  (cd "$wt" && CARGO_TARGET_DIR="$wt/target" cargo build --bin yantrad)
-  (cd "$wt/web" && { [ -d node_modules ] || npm ci --prefer-offline; } && npx vite build)
+  # Y-799: the builds share the laptop's machine-wide lock for heavy commands with other projects' agents.
+  heavy=(); [ -x ~/.claude/bin/heavy ] && heavy=(~/.claude/bin/heavy)
+  (cd "$wt" && CARGO_TARGET_DIR="$wt/target" "${heavy[@]}" cargo build --bin yantrad)
+  (cd "$wt/web" && { [ -d node_modules ] || "${heavy[@]}" npm ci --prefer-offline; } && "${heavy[@]}" npx vite build)
   # The developer's own yantrad holds 7717 on the tailnet addresses, so this one runs in its own network
   # namespace, as `just appliance-runtime` does, with pasta for the outbound ssh and the inbound port.
   rm -rf "$dir/etc-ssh" && mkdir -p "$dir/etc-ssh"
