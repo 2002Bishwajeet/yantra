@@ -268,11 +268,12 @@ test.describe('the shell on busy', () => {
     await page.waitForLoadState('networkidle')
     const fetched = (name: RegExp) => scripts.filter((one) => name.test(one))
     // Y-736: the desktop bell's popup loads once the page is idle, so the click only opens it.
-    expect(fetched(size === 'desktop' ? /\/Account-/ : /\/(Account|BellPopover|Notifications)-/)).toEqual([])
+    if (size !== 'desktop') expect(fetched(/\/(BellPopover|Notifications)-/)).toEqual([])
 
     await page.getByRole('button', { name: 'Account' }).click()
     await expect(page.getByRole('menu')).toBeVisible()
-    expect(fetched(/\/Account-/)).toHaveLength(1)
+    // Y-765: the Account chunk now loads once the page is idle, so the press may find it fetched.
+    expect(fetched(/\/Account-/).length).toBeLessThanOrEqual(1)
     await page.keyboard.press('Escape')
     await expect(page.getByRole('menu')).toBeHidden()
 

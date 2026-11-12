@@ -40,7 +40,7 @@ const drawn = async (size: FormFactor) => {
 const names = () => loaded.mock.calls.map(([name]) => name)
 
 describe('the popups load with their first press', () => {
-  it('loads the avatar menu on the click, not with the desktop shell', async () => {
+  it('does not load the avatar menu with the draw, only once the page is idle or on the click', async () => {
     await drawn('desktop')
     expect(names()).not.toContain('account')
     fireEvent.click(screen.getByRole('button', { name: 'Account' }))
@@ -66,6 +66,18 @@ describe('the popups load with their first press', () => {
     fireEvent.click(screen.getByRole('button', { name: /Notifications/ }))
     expect(screen.getByRole('dialog', { name: 'Notifications' })).toBeTruthy()
   })
+
+  it.each(['phone', 'desktop'] as const)(
+    'mounts the account menu closed once idle, so the %s click finds it loaded (Y-765)',
+    async (size) => {
+      await drawn(size)
+      await waitFor(() => expect(names()).toContain('account'), { timeout: 4000 })
+      expect(screen.queryByRole('menu')).toBeNull()
+      await new Promise((done) => setTimeout(done, 400))
+      fireEvent.click(screen.getByRole('button', { name: 'Account' }))
+      expect(screen.getByRole('menu')).toBeTruthy()
+    },
+  )
 
   it('keeps the avatar element, and opens nothing, when the pointer or focus reaches it', async () => {
     await drawn('desktop')

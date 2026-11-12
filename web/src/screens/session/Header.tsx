@@ -6,6 +6,7 @@ import { useDown, useResume } from '@/api/mutations'
 import type { Reading } from '@/api/hooks'
 import { answerFailure, joinFixes, reachWords } from '@/lib/checks'
 import { ago } from '@/lib/time'
+import { useIdle } from '@/lib/useIdle'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
@@ -102,6 +103,8 @@ export function Header(props: HeaderProps) {
   const failed = stop.error ?? resume.error
   const [deleting, setDeleting] = useState(false)
   const more = useRef<HTMLButtonElement>(null)
+  // Y-765: mounted closed once idle, so the first tap only flips it open.
+  const idle = useIdle()
   // One tonal verb: Stop while the session runs, Resume otherwise.
   const verb = {
     stop: { word: 'Stop', busy: 'Stopping…', enabled: live.stop, why: why.stop, pending: stop.isPending, run: () => stop.mutate(workspace.name) },
@@ -133,7 +136,7 @@ export function Header(props: HeaderProps) {
               <MenuTrigger render={<IconButton label="More actions" ref={more} />}>
                 <Ellipsis />
               </MenuTrigger>
-              <MenuPopup align="end">
+              <MenuPopup align="end" keepMounted={idle}>
                 <MenuItem disabled={!other.enabled || other.pending} onClick={other.run}>
                   {other.pending ? other.busy : other.word}
                   {other.enabled ? null : (
