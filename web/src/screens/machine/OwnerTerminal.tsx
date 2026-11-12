@@ -1,4 +1,4 @@
-import { lazy, type RefObject, Suspense, useRef, useState } from 'react'
+import { lazy, type ReactNode, type RefObject, Suspense, useRef, useState } from 'react'
 import { useSshIdentity } from '@/api/hooks'
 import { asApiError } from '@/api/errors'
 import { BottomSheet, BottomSheetPopup } from '@/m3/bottom-sheet/BottomSheet'
@@ -27,8 +27,8 @@ function ended(exit: number | null, machine: string, admin: string): string {
   return exit === 0 ? 'The shell ended.' : `The shell ended with status ${exit}.`
 }
 
-function Shell(props: { machine: string; admin: string; height: string }) {
-  const { machine, admin, height } = props
+export function Shell(props: { machine: string; admin: string; height: string; typeIn?: string }) {
+  const { machine, admin, height, typeIn } = props
   const [exit, setExit] = useState<number | null | undefined>(undefined)
   return (
     <div className="sudo-sheet__body">
@@ -38,6 +38,11 @@ function Shell(props: { machine: string; admin: string; height: string }) {
       <Text render={<p />} scale="body-small" tone="variant">
         Closing this hangs up the shell.
       </Text>
+      {typeIn ? (
+        <Text render={<p />} scale="body-medium">
+          The command is typed in. Read it, press Enter, then type your password.
+        </Text>
+      ) : null}
       {/* Escape belongs to the shell: the sheet closing on it would hang up
           sudo in the middle of a password. */}
       <div
@@ -52,6 +57,7 @@ function Shell(props: { machine: string; admin: string; height: string }) {
             label={`${admin} on ${machine}`}
             onExit={setExit}
             target={{ machine, owner: admin }}
+            typeIn={typeIn}
           />
         </Suspense>
       </div>
@@ -67,16 +73,21 @@ function Shell(props: { machine: string; admin: string; height: string }) {
 /** ADR-0046 §2: a side sheet beside the page, and the full height on the
  *  phone, as the sudo step's is. The shell is mounted only while the sheet is
  *  open, so closing it closes the socket. */
-function OwnerSheet(props: {
+export function OwnerSheet(props: {
   machine: string
   admin: string
   open: boolean
   opener: RefObject<HTMLButtonElement | null>
   onClose: () => void
+  typeIn?: string
+  /** Drawn in place of the shell, for a sheet that has no account yet. */
+  ask?: ReactNode
 }) {
-  const { machine, admin, open, opener, onClose } = props
-  const title = `${admin} on ${machine}`
-  if (useFormFactor() === 'phone') {
+  const { machine, admin, open, opener, onClose, typeIn, ask } = props
+  const phone = useFormFactor() === 'phone'
+  const title = ask ? `Owner terminal on ${machine}` : `${admin} on ${machine}`
+  const body = ask ?? <Shell admin={admin} height={phone ? '45dvh' : '55vh'} machine={machine} typeIn={typeIn} />
+  if (phone) {
     return (
       <BottomSheet
         open={open}
@@ -94,14 +105,14 @@ function OwnerSheet(props: {
           finalFocus={opener}
           title={title}
         >
-          {open ? <Shell admin={admin} height="45dvh" machine={machine} /> : null}
+          {open ? body : null}
         </BottomSheetPopup>
       </BottomSheet>
     )
   }
   return (
     <SideSheet actions={null} className="sudo-sheet sudo-sheet--side" onClose={onClose} open={open} title={title}>
-      {open ? <Shell admin={admin} height="55vh" machine={machine} /> : null}
+      {open ? body : null}
     </SideSheet>
   )
 }

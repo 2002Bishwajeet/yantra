@@ -507,7 +507,9 @@ export function Chat(props: ChatProps) {
         {rows.map((row) =>
           row.kind === 'work' ? (
             <WorkLog
+              harness={harness}
               key={row.id}
+              machine={machine}
               said={(message) => (
                 <Said agent={agent} machine={machine} message={message} worktree={editors.worktree} />
               )}
