@@ -860,7 +860,7 @@ describe('one short line per problem (Y-733)', () => {
   it('tells a Mac under a nightly daemon that nightly has no Mac build', async () => {
     const nightly = { ...ABOUT, version: '0.11.1-nightly.20261111000000.abc1234' }
     daemon([202], checks(), nightly)
-    const command = 'curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/latest/download/install.sh | bash'
+    const command = 'curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash'
     const said = { heartbeat: `yantra-agent here is v0.3.2 and yantrad is v${nightly.version}. Update it on pi: \`${command}\`` }
     await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     await waitFor(() => expect(card().getByRole('button', { name: /^Fix/ })).toBeTruthy())

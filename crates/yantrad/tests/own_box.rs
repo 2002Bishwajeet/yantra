@@ -199,7 +199,7 @@ impl OwnBox {
              echo {UNPRIVILEGED} > /etc/yantra-box.user && \
              mkdir -p /var/lib/yantra-box && \
              touch /var/lib/yantra-box/user-done /var/lib/yantra-box/agent-done && \
-             install -D /fixture/install.sh /srv/www/{}/releases/latest/download/install.sh && \
+             install -D /fixture/install.sh /srv/www/{}/main/install.sh && \
              systemctl daemon-reload && systemctl enable yantra-firstboot.service",
             self.repo
         ))?;

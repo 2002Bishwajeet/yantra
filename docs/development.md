@@ -58,7 +58,7 @@ just ci           # everything CI runs: check + the arm64 cross-build + shellche
 just fmt          # apply formatting
 just test         # tests only
 just deny         # licence + advisory audit
-just pinned       # every GitHub action names a commit, and no file fetches install.sh from a branch
+just pinned       # every GitHub action names a commit, and no new file fetches install.sh from a branch
 just shellcheck   # lint install.sh and join.sh (needs shellcheck 0.11.0, the version CI pins)
 just fixtures     # rewrite web/src/contract.gen.ts after a DTO moves
 just appliance    # cross-compile the appliance binaries (arm64 by default)
