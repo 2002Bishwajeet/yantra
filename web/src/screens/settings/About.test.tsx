@@ -75,6 +75,36 @@ describe('About', () => {
       )
     })
 
+    it('says it is looking up the new channel while the switch waits on the daemon', async () => {
+      let answerPut: (reply: Answer) => void = () => {}
+      mountSettings('desktop', '/settings/about', {
+        'PUT /api/update/channel': () => new Promise<Answer>((resolve) => (answerPut = resolve)),
+      })
+      const group = await screen.findByRole('radiogroup', { name: 'Release channel' })
+      fireEvent.click(within(group).getByRole('radio', { name: 'Nightly' }))
+      expect(await screen.findByText('Looking up the latest Nightly release.')).toBeTruthy()
+      expect(screen.queryByText(/Stable is each release/)).toBeNull()
+      answerPut([204])
+      await waitFor(() => expect(screen.queryByText('Looking up the latest Nightly release.')).toBeNull())
+    })
+
+    it('draws no release of the old channel while the switch waits on the daemon (Y-743)', async () => {
+      let answerPut: (reply: Answer) => void = () => {}
+      mountSettings('desktop', '/settings/about', {
+        'PUT /api/update/channel': () => new Promise<Answer>((resolve) => (answerPut = resolve)),
+      })
+      await screen.findByRole('link', { name: 'v0.4.0 is out' })
+      expect(screen.getByRole('button', { name: 'Update to v0.4.0' })).toBeTruthy()
+      const group = screen.getByRole('radiogroup', { name: 'Release channel' })
+      fireEvent.click(within(group).getByRole('radio', { name: 'Nightly' }))
+      await screen.findByText('Looking up the latest Nightly release.')
+      expect(screen.queryByRole('link', { name: 'v0.4.0 is out' })).toBeNull()
+      expect(screen.queryByRole('button', { name: /^Update to/ })).toBeNull()
+      expect(screen.getByText('Published').closest('.settings__fact')?.querySelector('.m3-skeleton')).toBeTruthy()
+      answerPut([204])
+      expect(await screen.findByRole('link', { name: 'v0.4.0 is out' })).toBeTruthy()
+    })
+
     it('draws a refused switch and keeps the channel it had', async () => {
       mountSettings('desktop', '/settings/about', {
         'PUT /api/update/channel': [409, 'could not write /etc/yantra/channel: Permission denied'],
@@ -98,6 +128,8 @@ describe('About', () => {
       })
       const link = await screen.findByRole('link', { name: 'v0.4.1-nightly.20261110143205.abc1234 is out' })
       expect(link.getAttribute('href')).toBe('https://github.com/2002Bishwajeet/yantra/releases/tag/nightly')
+      // Y-743: the nightly version ran past a 390 px card when the button named it too.
+      expect(screen.getByRole('button', { name: 'Update to the latest Nightly' })).toBeTruthy()
     })
 
     it('says so when the channel file names no channel', async () => {

@@ -3,7 +3,8 @@
 #   walk.sh needs <worktree>            prints "web" and/or "machine" for what the branch's diff touches
 #   walk.sh up <worktree>               builds the branch's yantrad and dashboard and serves them against the real fleet:
 #                                       on WALK_PORT as the owner on the socket, and on WALK_PORT+1 as another device
-#                                       of the owner's with no cookie, which draws the sign-in screen (Y-687)
+#                                       of the owner's with no cookie, which draws the sign-in screen (Y-687); the daemon
+#                                       sees its own /etc/yantra, seeded with the Stable channel, so a switch never writes the host
 #   walk.sh shoot <worktree> <route>... screenshots and the visible text of each route, WebKit at 390 px, Chromium at
 #                                       1440 px, and of the sign-in screen when WALK_PORT+1 answers
 #   walk.sh down <worktree>
@@ -56,6 +57,10 @@ s = json.load(sys.stdin)
 print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
             if p.get("UserID") == s["Self"]["UserID"] and p.get("OS") in ("iOS", "android") and not p.get("Tags")), ""))')}
   [ -n "$as" ] || echo "walk: the owner has no phone on the tailnet, so no sign-in screen is shot; set WALK_AS" >&2
+  # Y-743: the walk presses the channel switch, and the host's /etc/yantra is root's and has no channel file.
+  # The namespace gets a copy of its own: the switch writes there, and the host files show through unchanged.
+  rm -rf "$dir/etc-yantra" && mkdir -p "$dir/etc-yantra"
+  echo stable >"$dir/etc-yantra/channel"
   rm -rf "$dir/run" && mkdir -p "$dir/run"
   # shellcheck disable=SC2016
   setsid pasta --config-net -T none -U none -t "127.0.0.1/$port:7718" -t "127.0.0.1/$signin:7719" -- unshare --mount bash -c '
@@ -64,6 +69,12 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
       case $a in *:*) ip -6 addr add "$a/128" dev lo ;; *) ip addr add "$a/32" dev lo ;; esac
     done
     mount --bind "$1/etc-ssh" /etc/ssh
+    for f in /etc/yantra/*; do
+      [ -f "$f" ] || continue
+      touch "$1/etc-yantra/${f##*/}"
+      mount --bind "$f" "$1/etc-yantra/${f##*/}"
+    done
+    mount --rbind "$1/etc-yantra" /etc/yantra
     exec unshare --user --map-user="$2" --map-group="$3" bash -c "
       python3 $7/walk-proxy.py 7718 $1/run/yantrad.sock &
       [ -z \"$6\" ] || python3 $7/walk-proxy.py 7719 $4:7717 $6 &

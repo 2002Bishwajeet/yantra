@@ -190,8 +190,25 @@ describe('the GitHub queue', () => {
 
   it('names the failure and links a missing sign-in to Providers', async () => {
     daemon()
-    await renderInApp(<Github attention={{ looked: 'failed', age_seconds: 0, error: 'no GitHub grant' }} />)
-    expect(screen.getByText('GitHub cannot be asked')).toBeTruthy()
+    await renderInApp(
+      <Github attention={{ looked: 'failed', age_seconds: 0, error: 'no GitHub grant — run `yantra github login`' }} />,
+    )
+    expect(screen.getByText('GitHub is not signed in')).toBeTruthy()
+    expect(screen.getByText('Sign in to see the reviews and issues that wait on you.')).toBeTruthy()
+    // Y-743: the daemon's CLI hint is for a shell, not for this card.
+    expect(screen.queryByText(/yantra github login/)).toBeNull()
     expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/settings/providers')
+  })
+
+  it('shows any other reason as said, with its commands drawn as code and no backticks', async () => {
+    daemon()
+    await renderInApp(
+      <Github attention={{ looked: 'failed', age_seconds: 0, error: 'GitHub answered 502 — run `yantra doctor`' }} />,
+    )
+    expect(screen.getByText('GitHub could not be read')).toBeTruthy()
+    const code = screen.getByText('yantra doctor')
+    expect(code.tagName).toBe('CODE')
+    expect(code.closest('p')?.textContent).toBe('GitHub answered 502 — run yantra doctor')
+    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull()
   })
 })

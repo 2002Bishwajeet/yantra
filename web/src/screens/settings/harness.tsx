@@ -25,7 +25,7 @@ const WIDTH: Record<FormFactor, number> = { phone: 390, tablet: 834, desktop: 14
 export const JOIN = "curl -fsSL 'https://cachyos-g14.tail3a1b.ts.net:8443/join?code=ABCD2345' | sh"
 
 export type Answer = [status: number, body?: unknown]
-export type Answers = Record<string, Answer | ((init?: RequestInit) => Answer)>
+export type Answers = Record<string, Answer | ((init?: RequestInit) => Answer | Promise<Answer>)>
 
 /** The fleet a settings page reads around its own facts, so the shell draws
  *  and every category has a real list to count. */
@@ -67,8 +67,8 @@ export function mountSettings(size: FormFactor, path: string, answers: Answers =
       const key = `${init?.method ?? 'GET'} ${path}`
       asked.push(key)
       const found = { ...fleet, ...answers }[key]
-      const [status, body] = typeof found === 'function' ? found(init) : (found ?? [404, { error: `no fixture for ${key}` }])
-      return Promise.resolve(answer(status, body))
+      const reply = typeof found === 'function' ? found(init) : (found ?? [404, { error: `no fixture for ${key}` }])
+      return Promise.resolve(reply).then(([status, body]) => answer(status, body))
     }),
   )
   history.pushState(null, '', path)

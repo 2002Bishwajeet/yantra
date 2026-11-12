@@ -53,17 +53,7 @@ export function Github(props: { attention: Reading<Attention> }) {
 
       {attention.looked === 'never' ? <EmptyState state="unknown" title="GitHub not looked at yet" /> : null}
 
-      {attention.looked === 'failed' ? (
-        <div className="github__failed" role="status">
-          <State state="failed">GitHub cannot be asked</State>
-          <Mono className="github__error">{attention.error}</Mono>
-          {GRANTLESS.test(attention.error) ? (
-            <Button render={<Link params={{ category: 'providers' }} to="/settings/$category" />} role="link" variant="text">
-              Sign in
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      {attention.looked === 'failed' ? <Failed error={attention.error} /> : null}
 
       {attention.looked === 'ok' ? (
         <div className="github__groups">
@@ -72,6 +62,39 @@ export function Github(props: { attention: Reading<Attention> }) {
         </div>
       ) : null}
     </section>
+  )
+}
+
+/** Y-743: a missing grant is a step for the owner, so it gets a sentence and
+ *  a button, never the daemon's CLI hint. Any other reason is shown as said,
+ *  with its backticked commands drawn as code. */
+function Failed(props: { error: string }) {
+  const { error } = props
+  const grantless = GRANTLESS.test(error)
+  return (
+    <div className="github__failed" role="status">
+      <State state="failed">{grantless ? 'GitHub is not signed in' : 'GitHub could not be read'}</State>
+      <Text render={<p />} className="github__error" scale="body-medium">
+        {grantless ? 'Sign in to see the reviews and issues that wait on you.' : <Said text={error} />}
+      </Text>
+      {grantless ? (
+        <Button render={<Link params={{ category: 'providers' }} to="/settings/$category" />} role="link" variant="text">
+          Sign in
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+function Said(props: { text: string }) {
+  return props.text.split('`').map((part, n) =>
+    n % 2 ? (
+      <code className="github__code m3-mono" key={n}>
+        {part}
+      </code>
+    ) : (
+      part
+    ),
   )
 }
 

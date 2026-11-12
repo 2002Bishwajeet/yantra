@@ -13,9 +13,76 @@ const slug = (route) => route.replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9]+/g
 const shots = routes.map((route) => [`${base}${route}`, slug(route)])
 if (process.env.WALK_SIGNIN) shots.push([`${process.env.WALK_SIGNIN}/`, 'sign-in'])
 const errors = []
+const snap = async (page, file, full) => {
+  writeFileSync(`${file}.txt`, await page.locator('body').innerText())
+  await page.screenshot({ path: `${file}.png`, fullPage: full })
+}
+// Y-743: both scenes press only what the walk's own namespace can take back; the channel file is the walk's copy (walk.sh up).
+async function channelScene(page, name, file) {
+  const group = page.getByRole('radiogroup', { name: 'Release channel' })
+  const checked = async () => (await group.getByRole('radio', { checked: true }).innerText()).trim()
+  const first = await checked()
+  const full = name === 'desktop-chromium'
+  const flip = async (to) => {
+    let release
+    const held = new Promise((r) => (release = r))
+    await page.route('**/api/update/channel', async (route) => {
+      if (route.request().method() !== 'PUT') return route.fallback()
+      await held
+      await route.continue()
+    })
+    const done = page.waitForResponse((r) => r.url().includes('/api/update/channel') && r.request().method() === 'PUT')
+    await group.getByRole('radio', { name: to }).click()
+    await page.waitForTimeout(500)
+    await snap(page, file(`about-switching-${to.toLowerCase()}`), full)
+    release()
+    const answer = (await done).status()
+    if (answer !== 204) errors.push(`${name} channel switch to ${to}: answered ${answer}`)
+    await page.waitForTimeout(3000)
+    await snap(page, file(`about-${to.toLowerCase()}`), full)
+  }
+  const other = first === 'Stable' ? 'Nightly' : 'Stable'
+  try {
+    await flip(other)
+    await flip(first)
+  } finally {
+    if ((await checked().catch(() => first)) !== first) {
+      await group.getByRole('radio', { name: first }).click().catch(() => {})
+      await page.waitForTimeout(1000)
+    }
+  }
+}
+async function bellScene(page, name, url, out) {
+  await page.goto(url, { waitUntil: 'load' })
+  await page.waitForTimeout(1500)
+  // The phone's bell is a link to the notifications screen; the desktop's is a button that opens a popover.
+  const bell = page.getByRole(name === 'desktop-chromium' ? 'button' : 'link', { name: /^Notifications/ })
+  if (name === 'desktop-chromium') {
+    await page.waitForTimeout(500)
+    const took = await bell.evaluate(
+      (el) =>
+        new Promise((done) => {
+          const t0 = performance.now()
+          el.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+          const poll = () => (document.querySelector('.m3-popover')?.checkVisibility() ? done(performance.now() - t0) : requestAnimationFrame(poll))
+          poll()
+        }),
+    )
+    await page.waitForTimeout(800)
+    const text = await page.locator('.m3-popover').innerText()
+    writeFileSync(`${out}/bell-open-${name}.txt`, `${text}\n\nopened in ${Math.round(took)} ms\n`)
+    await page.screenshot({ path: `${out}/bell-open-${name}.png` })
+  } else {
+    await bell.tap()
+    await page.waitForTimeout(1500)
+    await snap(page, `${out}/bell-open-${name}`, false)
+  }
+  await page.keyboard.press('Escape')
+}
 for (const [name, type, options] of looks) {
   const browser = await type.launch()
   const context = await browser.newContext({ ...options, reducedMotion: 'reduce', colorScheme: 'light' })
+  let belled = false
   for (const [url, shot] of shots) {
     const page = await context.newPage()
     page.on('pageerror', (e) => errors.push(`${name} ${shot}: ${e.message}`))
@@ -36,6 +103,21 @@ for (const [name, type, options] of looks) {
         await page.evaluate((top) => window.scrollTo(0, top), y)
         await page.waitForTimeout(300)
         await page.screenshot({ path: `${file}-${n}.png` })
+      }
+    }
+    if (shot === 'settings-about') {
+      try {
+        await channelScene(page, name, (scene) => `${out}/${scene}-${name}`)
+      } catch (e) {
+        errors.push(`${name} channel scene: ${e.message}`)
+      }
+    }
+    if (shot !== 'sign-in' && !belled) {
+      belled = true
+      try {
+        await bellScene(page, name, url, out)
+      } catch (e) {
+        errors.push(`${name} bell scene: ${e.message}`)
       }
     }
     await page.close()
