@@ -630,6 +630,7 @@ cp "$YANTRA_TEST_RELEASE/${url##*/}" "$out"
 
 /// A fake release for `install.sh`: both Mac archives, each holding a
 /// `yantra-agent` that writes the `YANTRA_DAEMON` it was started with to `seen`.
+/// Its own key signs `SHA256SUMS`, and its copy of `install.sh` carries that key (Y-780).
 struct Release {
     root: PathBuf,
     uid: String,
@@ -666,6 +667,33 @@ impl Release {
                 .args(["-c", "shasum -a 256 *.tar.gz >SHA256SUMS"])
                 .current_dir(&release),
         )?;
+        let key = root.join("signing");
+        succeed(
+            Command::new("ssh-keygen")
+                .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+                .arg(&key),
+        )?;
+        succeed(
+            Command::new("ssh-keygen")
+                .args(["-q", "-Y", "sign", "-n", "file", "-f"])
+                .arg(&key)
+                .arg(release.join("SHA256SUMS")),
+        )?;
+        let public = std::fs::read_to_string(key.with_extension("pub"))?;
+        let public: Vec<&str> = public.split_whitespace().take(2).collect();
+        let script = std::fs::read_to_string(install_sh())?;
+        let carried = script
+            .lines()
+            .find(|line| line.starts_with("RELEASE_KEY="))
+            .context("install.sh assigns no RELEASE_KEY")?;
+        std::fs::write(
+            root.join("install.sh"),
+            script.replacen(
+                &format!("\n{carried}\n"),
+                &format!("\nRELEASE_KEY='{}'\n", public.join(" ")),
+                1,
+            ),
+        )?;
         executable(&root.join("bin/curl"), CURL_STUB)?;
         let uid = succeed(Command::new("id").arg("-u"))?.trim().to_owned();
         Ok(Self { root, uid })
@@ -680,7 +708,7 @@ impl Release {
     fn install(&self, home: &Path, daemon: Option<&str>, args: &[&str]) -> Result<Output> {
         let mut command = Command::new("/bin/bash");
         command
-            .arg(install_sh())
+            .arg(self.root.join("install.sh"))
             .args(args)
             .env("HOME", home)
             .env(
@@ -792,6 +820,20 @@ fn install_sh_installs_the_agent_on_a_mac() -> Result<()> {
         "--channel nightly was not refused: {}",
         said(&nightly)
     );
+
+    // Y-780: a release the owner has not signed installs nothing.
+    let signature = release.root.join("release/SHA256SUMS.sig");
+    let signed = std::fs::read(&signature)?;
+    std::fs::remove_file(&signature)?;
+    let unsigned = release.install(&fresh, None, &[])?;
+    ensure!(
+        !unsigned.status.success()
+            && said(&unsigned).contains("carries no SHA256SUMS.sig")
+            && !fresh.join(".local/bin/yantra-agent").exists(),
+        "a release with no signature was not refused: {}",
+        said(&unsigned)
+    );
+    std::fs::write(&signature, signed)?;
 
     let out = release.install(&fresh, None, &[])?;
     ensure!(out.status.success(), "install.sh failed: {}", said(&out));

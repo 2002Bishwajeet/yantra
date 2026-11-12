@@ -68,7 +68,11 @@ Material one that M14 built. v0.1.0 carried the dashboard that M14 replaced, and
 systemd units, so `install.sh` refuses it by name.
 
 [`install.sh`](install.sh) puts the current release on an always-on Linux box with one command. It
-reads which release is current, and it verifies what it fetched against `SHA256SUMS`. At a terminal,
+reads which release is current, and it verifies what it fetched against `SHA256SUMS`. The owner
+signs `SHA256SUMS` of each stable release with an offline key, and a script that carries the public
+key installs nothing when the signature is missing or wrong
+([docs/appliance.md](docs/appliance.md#sign-a-release)). The script on `main` carries no key until
+Y-798: it says so, and checks the checksum alone. At a terminal,
 it asks before it installs Tailscale and turns on HTTPS. Then it starts the units and prints the
 dashboard's address ([docs/appliance.md](docs/appliance.md)). `install.sh --uninstall` reverses it.
 On a Mac, the same script installs `yantra-agent` alone, as a LaunchAgent that needs no root
@@ -83,8 +87,10 @@ published. `yantra update` on the box does the same
 updater. To reach v0.12.0, run `install.sh` on that box once more.
 
 **Every merge to `main` also publishes a `nightly` pre-release** for the two Linux targets (Y-662).
-`install.sh --channel nightly`, `yantra update --channel nightly` or Settings → About puts a box on
-it. Stable stays the default ([docs/appliance.md](docs/appliance.md#stable-and-nightly)).
+The nightly is not signed, so only a person at a terminal installs it, and names it each time:
+`install.sh --channel nightly`, or `sudo yantra-update --channel nightly` on a box. The box's own
+updater refuses it. Stable stays the default
+([docs/appliance.md](docs/appliance.md#stable-and-nightly)).
 
 To build from source, you need [rustup](https://rustup.rs). The file `rust-toolchain.toml` pins the
 toolchain version.

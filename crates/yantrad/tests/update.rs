@@ -281,6 +281,33 @@ impl Appliance {
         Ok(self.systemd.exec(&["test", "-e", path])?.status.success())
     }
 
+    /// Starts the root unit, which must fail and say `words`. The v0.2.0
+    /// daemon must still be on disk and still be the process `before`.
+    fn unit_refuses(&self, before: &str, words: &str) -> Result<()> {
+        let started = self
+            .systemd
+            .exec(&["systemctl", "start", "yantra-update.service"])?;
+        let journal = self.systemd.journal("yantra-update.service");
+        assert!(!started.status.success(), "the unit installed:\n{journal}");
+        assert_eq!(
+            self.systemd
+                .property("yantra-update.service", "ActiveState")?,
+            "failed",
+            "{journal}"
+        );
+        assert!(journal.contains(words), "{journal}");
+        assert!(
+            self.carries("/usr/local/bin/yantrad", OLD_MARK)?,
+            "a refused update replaced yantrad"
+        );
+        assert_eq!(
+            self.daemon_pid()?,
+            before,
+            "a refused update restarted yantrad"
+        );
+        Ok(())
+    }
+
     /// `web/src/api/socket.ts`'s reconnect budget, handed to the client.
     fn client(&self, mode: &str) -> Result<Output> {
         let (attempts, pause) = socket_budget()?;
@@ -515,6 +542,44 @@ fn a_failed_update_restarts_nothing_and_the_socket_stays_up() -> Result<()> {
     );
     assert!(!appliance.exists(TRIGGER)?, "the trigger outlived the unit");
     Ok(())
+}
+
+/// Y-780, ADR-0027 decision 4: the nightly is not signed, so only a person who
+/// names it installs it. yantrad's account can write the channel file, and the
+/// unit takes no argument, so the unit refuses a nightly.
+#[test]
+fn the_root_unit_refuses_a_nightly() -> Result<()> {
+    let Some(appliance) = Appliance::start()? else {
+        return Ok(());
+    };
+    appliance.arrange()?;
+    let before = appliance.daemon_pid()?;
+    appliance.publish(NEW, NEW_MARK)?;
+    appliance.sh(&format!(
+        "bash /fixture/release.sh nightly {} {NEW} && \
+         runuser -u yantra -- sh -c 'echo nightly > /etc/yantra/channel'",
+        appliance.repo
+    ))?;
+
+    appliance.unit_refuses(&before, "the nightly is not signed")
+}
+
+/// Y-780: a stable release with no `SHA256SUMS.sig` is one the owner has not
+/// approved. The root unit installs nothing and restarts nothing.
+#[test]
+fn the_root_unit_refuses_an_unsigned_release() -> Result<()> {
+    let Some(appliance) = Appliance::start()? else {
+        return Ok(());
+    };
+    appliance.arrange()?;
+    let before = appliance.daemon_pid()?;
+    appliance.publish(NEW, NEW_MARK)?;
+    appliance.sh(&format!(
+        "bash /fixture/release.sh unsign {} {NEW}",
+        appliance.repo
+    ))?;
+
+    appliance.unit_refuses(&before, "carries no SHA256SUMS.sig")
 }
 
 /// Y-612: the daemon runs as `yantra`, which cannot read the root unit's

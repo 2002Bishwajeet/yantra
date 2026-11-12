@@ -711,6 +711,83 @@ fn a_corrupted_archive_is_refused_and_nothing_is_installed() -> Result<()> {
     fixture.nothing_is_installed("the archive did not verify")
 }
 
+/// Y-780, ADR-0027 decision 4: a checksum proves the archive is whole, not who
+/// made it. Only a release whose `SHA256SUMS` the carried key signed installs.
+#[test]
+fn only_a_release_the_key_signed_is_installed() -> Result<()> {
+    let Some(fixture) = Installer::start()? else {
+        return Ok(());
+    };
+    let refused = |verb: &str, says: &str, because: &str| -> Result<()> {
+        fixture.publish(VERSION, "signed")?;
+        fixture.release(&[verb, &fixture.repo, VERSION])?;
+        let out = fixture.install()?;
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success(),
+            "a release installed although {because}"
+        );
+        assert!(
+            stderr.contains(says) && stderr.contains("nothing was installed"),
+            "the refusal must name what failed:\n{stderr}"
+        );
+        fixture.nothing_is_installed(because)
+    };
+    refused(
+        "unsign",
+        "carries no SHA256SUMS.sig",
+        "it carried no signature",
+    )?;
+    refused(
+        "stranger",
+        "is not the release key's signature",
+        "another key signed it",
+    )?;
+    // The checksum passes here, so only the signature refuses it.
+    refused(
+        "forge",
+        "is not the release key's signature",
+        "SHA256SUMS changed after the owner signed it",
+    )?;
+
+    fixture.publish(VERSION, "signed")?;
+    let out = fixture.install()?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "a signed release did not install: {stderr}"
+    );
+    assert!(
+        !stderr.contains("no signature was checked"),
+        "the fixture's installer carries no key:\n{stderr}"
+    );
+    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), VERSION);
+
+    // Until Y-798 sets the key, the published installer carries none. It says so and
+    // checks the checksum alone.
+    fixture.publish(NEXT_VERSION, "keyless")?;
+    fixture.release(&["unsign", &fixture.repo, NEXT_VERSION])?;
+    let keyless = fixture.systemd.exec_as(
+        UNPRIVILEGED,
+        &[
+            "bash",
+            "-c",
+            "sed \"s|^RELEASE_KEY=.*|RELEASE_KEY=''|\" /fixture/install.sh | bash",
+        ],
+    )?;
+    let stderr = String::from_utf8_lossy(&keyless.stderr);
+    assert!(keyless.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("carries no release key, so no signature was checked"),
+        "a run that checked no signature must say so:\n{stderr}"
+    );
+    assert_eq!(
+        fixture.sh("cat /var/lib/yantra/installed")?.trim(),
+        NEXT_VERSION
+    );
+    Ok(())
+}
+
 /// Y-713: `--agent` updates the agent on a machine that joined a box. It
 /// replaces the binary and its unit, keeps agent.env, restarts the agent and
 /// installs no yantrad. With no agent.env there is no agent, so it refuses.
@@ -871,12 +948,14 @@ fn a_release_whose_archive_carries_no_updater_installs_without_one() -> Result<(
 /// Y-662: `--channel nightly` installs the rolling nightly and keeps the
 /// choice for yantrad's account to rewrite. The unit then refuses to go back
 /// to an older stable release, and a person running the script does not.
+/// Y-780: the nightly is not signed, so only a run that names it installs it.
 #[test]
 fn a_nightly_install_keeps_its_channel_and_only_a_person_goes_back() -> Result<()> {
     let Some(fixture) = Installer::start()? else {
         return Ok(());
     };
     const NIGHTLY: &str = "0.2.1-nightly.20261110143205.abc1234";
+    const NEWER: &str = "0.2.1-nightly.20261111090000.def5678";
 
     fixture.publish(NIGHTLY, "nightly")?;
     fixture.release(&["nightly", &fixture.repo, NIGHTLY])?;
@@ -910,20 +989,36 @@ fn a_nightly_install_keeps_its_channel_and_only_a_person_goes_back() -> Result<(
         );
     }
 
-    // A run that names no channel follows the kept one.
-    let again = fixture.install_ok()?;
+    // A newer nightly, and the kept channel names it. A run that names no
+    // channel installs nothing and gives the command that does.
+    fixture.publish(NEWER, "newer")?;
+    fixture.release(&["nightly", &fixture.repo, NEWER])?;
+    let unnamed = fixture.install()?;
+    let stderr = String::from_utf8_lossy(&unnamed.stderr);
     assert!(
-        again.contains(&format!("install: yantra v{NIGHTLY},")),
-        "{again}"
+        !unnamed.status.success(),
+        "a run that named no channel installed the nightly"
+    );
+    assert!(
+        stderr.contains("the nightly is not signed")
+            && stderr.contains("sudo yantra-update --channel nightly"),
+        "{stderr}"
     );
 
+    // The unit, which RUNTIME_DIRECTORY marks, passes no flag.
+    let as_the_unit = "install -d /run/fake-update && \
+         RUNTIME_DIRECTORY=/run/fake-update bash /fixture/install.sh; echo \"exit=$?\"; \
+         cat /run/fake-update/said";
+    let unit = fixture.sh(as_the_unit)?;
+    assert!(unit.contains("exit=1"), "{unit}");
+    assert!(unit.contains("the nightly is not signed"), "{unit}");
+    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), NIGHTLY);
+
     // Settings switched back to stable, whose release is older than the
-    // nightly. The unit, which RUNTIME_DIRECTORY marks, installs nothing.
+    // nightly. The unit installs nothing.
     fixture.publish(VERSION, "stable")?;
     fixture.sh("echo stable > /etc/yantra/channel")?;
-    let unit = fixture.sh("install -d /run/fake-update && \
-         RUNTIME_DIRECTORY=/run/fake-update bash /fixture/install.sh; echo \"exit=$?\"; \
-         cat /run/fake-update/said")?;
+    let unit = fixture.sh(as_the_unit)?;
     assert!(unit.contains("exit=1"), "{unit}");
     assert!(
         unit.contains(&format!("v{VERSION} is older than v{NIGHTLY}")),
