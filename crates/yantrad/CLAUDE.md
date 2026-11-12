@@ -1200,16 +1200,27 @@ hiding it. The transient case is a *machine* that did not answer, and that alrea
 successful reading. **A malformed workspace file is no longer one of them** (Y-141): it is an entry
 of `data` saying `loaded: "no"` with its reason, and the class stays `ok`.
 
-**The GitHub classes are the exception since Y-745**, because their failures pass. `github.rs` builds
-a new `ureq::Agent` for each request, so each request does its own DNS lookup and TLS handshake, and
-one look sends several requests. One request that fails fails the look. So `refresh.rs` keeps the
-inbox, the repository list, the hidden organisations and the grant check through **one** failed read:
+**The GitHub classes are the exception since Y-745.** On 2026-11-12 the owner saw GitHub fail on the
+dashboard and work again a few refreshes later. **The cause of those failed reads is not verified.**
+Before Y-745 the daemon wrote no journal line for a failed read of the inbox or the repository list,
+so no record says which failure the owner saw. The code shows two things, and neither is a cause:
+
+- `github.rs` builds a new `ureq::Agent` for each request, so each request does its own DNS lookup
+  and TLS handshake, and one look at the inbox sends three requests. A short network fault has more
+  chances to hit a look. That does not make a request fail.
+- A 5xx answer from GitHub is a `Status` error. A new `ureq::Agent` for each request does not
+  explain one.
+
+The rule treats one failed read as a fault that can pass. So `refresh.rs` keeps the inbox, the
+repository list, the hidden organisations and the grant check through **one** failed read:
 
 - The kept reading carries the failure (`Reading::outlive`). The envelope says `looked: "ok"` with
   the failure as `retrying`, and `age_seconds` is still the age of the good read.
 - The mark is set once, so the second failed read in a row replaces the reading with the failure.
 - No grant and a 401 replace the reading at once. An earlier account's data must not stay.
-- The journal has one warning for each kept reading, with the reason and never the token.
+- The journal has one warning for each kept reading, with the reason and never the token. It
+  contains `keeps its last reading through one failed read`. Read those lines on the box to name the
+  cause.
 - The release read is not kept: a failed release read stays failed
   ([ADR-0027](../../docs/adr/0027-the-appliance-pulls-its-own-update.md) §2).
 

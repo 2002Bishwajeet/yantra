@@ -210,28 +210,43 @@ describe('the GitHub queue', () => {
     expect(code.tagName).toBe('CODE')
     expect(code.closest('p')?.textContent).toBe('GitHub answered 502 — run yantra doctor')
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull()
-    expect(screen.queryByText('The last GitHub read failed')).toBeNull()
+    expect(screen.queryByRole('button', { name: /retrying/ })).toBeNull()
   })
 
-  /** Y-745: the daemon kept the reading through one failed read, so the items stay. */
-  it('keeps the items of a reading whose last read failed, and says how old it is and why', async () => {
+  /** Y-745: one failed read is not a failure. The items stay and the stamp is an age. */
+  it('keeps the items of a reading whose last read failed, and marks it as old and not as failed', async () => {
     daemon()
     await renderInApp(<Github attention={{ ...contract.attentionRetrying, age_seconds: 372 }} />)
     expect(items('Reviews')).toHaveLength(contract.attentionRetrying.data.reviews.length)
     expect(items('Issues')).toHaveLength(contract.attentionRetrying.data.issues.length)
-    // Only the first line is announced: the age under it changes on every poll.
-    expect(screen.getByRole('status').textContent).toBe('The last GitHub read failed')
-    expect(screen.getByText(/^Showing what it said/).textContent).toBe(
-      `Showing what it said 6m ago · ${contract.attentionRetrying.retrying}`,
-    )
-    expect(screen.queryByText('GitHub could not be read')).toBeNull()
+    const stamp = screen.getByRole('button', { name: 'as of 6m · retrying' })
+    // The phone hides `.github__age`, and this mark must stay on it.
+    expect(stamp.classList.contains('github__age')).toBe(false)
+    expect(screen.queryByText(/read every 5 min/)).toBeNull()
+    // Nothing is announced, and no failure is on the page.
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText(/failed|could not be/)).toBeNull()
+    expect(document.body.textContent).not.toContain(contract.attentionRetrying.retrying)
   })
 
-  it('draws no such note on a fresh reading', async () => {
+  it('gives the reason of the failed read when the stamp is pressed', async () => {
+    daemon()
+    await renderInApp(<Github attention={{ ...contract.attentionRetrying, age_seconds: 372 }} />)
+    const stamp = screen.getByRole('button', { name: 'as of 6m · retrying' })
+    expect(stamp.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(stamp)
+    const why = await screen.findByRole('dialog', { name: 'The last GitHub read failed' })
+    expect(within(why).getByText(contract.attentionRetrying.retrying)).toBeTruthy()
+    fireEvent.keyDown(why, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('stamps a fresh reading with the clock it is read on, and offers no reason', async () => {
     daemon()
     await renderInApp(<Github attention={attention} />)
     expect(items('Reviews').length).toBeGreaterThan(0)
-    expect(screen.queryByText('The last GitHub read failed')).toBeNull()
-    expect(screen.queryByText(/^Showing what it said/)).toBeNull()
+    expect(screen.getByText(/read every 5 min/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /retrying/ })).toBeNull()
   })
 })

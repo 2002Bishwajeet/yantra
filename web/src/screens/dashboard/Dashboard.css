@@ -136,9 +136,9 @@
   text-decoration: none;
 }
 
-/* In line with the words of the rows under it. */
+/* In line with the words of the rows over it. */
 .dash__rows > .kept {
-  padding-inline: 12px;
+  margin-left: 12px;
 }
 
 .dash__rows {

@@ -354,7 +354,6 @@ function Hero(props: {
           ))}
           {attention.looked === 'ok' ? (
             <>
-              <KeptReading reading={attention} />
               {attention.data.reviews.map((item) => (
                 <GithubRow item={item} key={item.url} kind="review" now={now} />
               ))}
@@ -366,6 +365,7 @@ function Hero(props: {
                   {plural(attention.data.notifications, 'unread notification')} on GitHub →
                 </a>
               ) : null}
+              <KeptReading reading={attention} />
             </>
           ) : attention.looked === 'failed' ? (
             <ErrorSurface.Inline error={fromReading(attention)!} reset={retry} title="GitHub could not be read" />

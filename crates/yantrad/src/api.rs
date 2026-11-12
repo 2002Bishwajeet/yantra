@@ -14,9 +14,9 @@
 //! being lost: a *machine* that did not answer (Y-054), and a workspace *file*
 //! that did not load (Y-141).
 //!
-//! **The GitHub classes are the exception** (Y-745): their failures pass, so
-//! `refresh.rs` keeps the last good reading through one failed read. The
-//! answer is then `ok` with the failure in `retrying` and the good read's age.
+//! **The GitHub classes are the exception** (Y-745): one failed read can be a
+//! fault that passes, so `refresh.rs` keeps the last good reading through it.
+//! The answer is then `ok` with the failure in `retrying` and the good read's age.
 //!
 //! DTOs live here rather than as `Serialize` on `yantra_core`'s types: a JSON
 //! body is rendering, and ADR-0005 put rendering in the caller. **`doctor` is

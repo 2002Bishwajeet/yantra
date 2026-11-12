@@ -180,6 +180,8 @@ any kind waits the full interval (Y-731).
 `looked: "ok"` with the good read's `age_seconds`, and `retrying` carries why the newest read failed.
 The second failed read in a row is `looked: "failed"`. No grant and a refused grant are `failed` at
 once. The inbox, the repository list, the hidden organisations and the grant check follow this rule.
+The journal has a warning with the reason for each kept reading. Why the owner's reads failed is not
+verified: [`CLAUDE.md`](CLAUDE.md) says what is known.
 `GET /api/readiness/github` is a check about **this** host (Y-175, Y-342): whether the grant the
 daemon holds is present and still accepted. It is a route of its own rather than a tenth check on
 every report, since an answer about this machine copied onto each machine's card claims something no

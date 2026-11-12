@@ -1021,9 +1021,13 @@ two, so a surface never reads them from a swept read:
   because the poll is the retry, and a tab that becomes visible asks at once.
 - **An `ok` reading with `retrying` is one the daemon kept (Y-745).** The
   daemon keeps a GitHub reading through one failed read and sends the failure
-  as `retrying`. [`KeptReading`](src/screens/fleet/KeptReading.tsx) draws it
-  above the reading on Fleet, the Dashboard and New session: the reading is
-  old, and why. It draws nothing on a fresh reading.
+  as `retrying`. One failed read is not a failure, so
+  [`KeptReading`](src/screens/fleet/KeptReading.tsx) draws an age and no
+  failure: `as of 6m · retrying`. It is no live region. A press opens a
+  popover with the reason. On Fleet it replaces the stamp in the block's
+  head, and the phone keeps it where it hides the stamp. On the Dashboard it is under the GitHub rows, because the rows need
+  the owner and the age does not. On New session it is above the list. It
+  draws nothing on a fresh reading.
 - **`data === undefined` is `{looked: 'never'}`**, which is the same sentence the
   daemon sends before its first sweep. Nothing distinguishes them, and nothing
   should: neither is a reading.

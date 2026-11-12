@@ -241,6 +241,10 @@ span.ns__toggle {
   gap: 12px;
 }
 
+.ns__github > .kept {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
 .ns__crumbs ol {
   display: flex;
   flex-wrap: wrap;

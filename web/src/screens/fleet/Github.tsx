@@ -37,7 +37,9 @@ export function Github(props: { attention: Reading<Attention> }) {
             <ArrowUpRight aria-hidden="true" />
           </a>
         ) : null}
-        {attention.looked === 'ok' || attention.looked === 'failed' ? (
+        {attention.looked === 'ok' && attention.retrying ? (
+          <KeptReading className="github__kept" reading={attention} />
+        ) : attention.looked === 'ok' || attention.looked === 'failed' ? (
           // On the daemon's 300 s clock, so the block stamps itself (D6 §2).
           <Num className="github__age">
             as of <Ago seconds={attention.age_seconds} /> · read every 5 min
@@ -55,8 +57,6 @@ export function Github(props: { attention: Reading<Attention> }) {
       {attention.looked === 'never' ? <EmptyState state="unknown" title="GitHub not looked at yet" /> : null}
 
       {attention.looked === 'failed' ? <Failed error={attention.error} /> : null}
-
-      <KeptReading reading={attention} />
 
       {attention.looked === 'ok' ? (
         <div className="github__groups">
