@@ -131,6 +131,8 @@ pub struct Home {
     pub workspace: String,
     pub brief: Option<String>,
     pub base: Option<String>,
+    /// More workspaces whose agent tokens reach the room.
+    pub workspaces: Vec<String>,
     /// Seconds since the Unix epoch.
     pub made_at: u64,
 }
@@ -206,6 +208,19 @@ impl Rooms {
     #[must_use]
     pub fn contains(&self, name: &str) -> bool {
         self.rooms.contains_key(name)
+    }
+
+    /// An agent token for `workspace` reaches `name`: the room's definition
+    /// names the workspace, as its home or on its list. A room with no
+    /// definition, or no room, admits no token (ADR-0044 decision 12).
+    #[must_use]
+    pub fn admits(&self, name: &str, workspace: &str) -> bool {
+        self.rooms
+            .get(name)
+            .and_then(|room| room.home.as_ref())
+            .is_some_and(|home| {
+                home.workspace == workspace || home.workspaces.iter().any(|w| w == workspace)
+            })
     }
 
     /// Makes or joins `name` for `reader`. `true` is a room made now. Every
@@ -707,10 +722,11 @@ pub fn tools() -> Value {
     json!([
         {"name": "room_send",
          "description": format!(
-             "Send a message to the other agents in a Yantra room, and join the room. The room is \
-              made if it does not exist. Returns seq and delivered, the number of other members \
-              that will see it; 0 means nobody is listening. A paused room refuses the message \
-              until the owner resumes it. {DATA}"),
+             "Send a message to the other agents in a Yantra room, and join the room. The owner \
+              makes the room, and a room that does not name your workspace refuses the call. \
+              Returns seq and delivered, the number of other members that will see it; 0 means \
+              nobody is listening. A paused room refuses the message until the owner resumes \
+              it. {DATA}"),
          "inputSchema": {"type": "object", "additionalProperties": false,
              "required": ["room", "text"],
              "properties": {
@@ -1527,8 +1543,29 @@ mod tests {
             workspace: workspace.to_owned(),
             brief: Some("Ship it.".to_owned()),
             base: None,
+            workspaces: Vec::new(),
             made_at: 1_800_000_000,
         }
+    }
+
+    #[test]
+    fn a_room_admits_its_home_and_its_listed_workspaces_and_no_other() {
+        let mut rooms = Rooms::default();
+        let shared = Home {
+            workspaces: vec!["api".to_owned()],
+            ..home("web")
+        };
+        rooms.open("shared", shared, at(0), false).expect("opened");
+        rooms
+            .send("loose", &node("a"), "a", "hi", at(0))
+            .expect("sent");
+
+        assert!(rooms.admits("shared", "web"), "the home");
+        assert!(rooms.admits("shared", "api"), "on the list");
+        assert!(!rooms.admits("shared", "docs"), "another workspace");
+        assert!(!rooms.admits("loose", "web"), "a room with no home");
+        assert!(!rooms.admits("nowhere", "web"), "no room");
+        assert!(!rooms.contains("nowhere"), "asking makes no room");
     }
 
     #[test]

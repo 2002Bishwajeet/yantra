@@ -21,6 +21,8 @@ pub struct Definition {
     pub brief: Option<String>,
     /// `None` is the workspace's current branch.
     pub base: Option<String>,
+    /// More workspaces whose agent tokens reach the room. Only the owner writes it.
+    pub workspaces: Vec<String>,
     /// Seconds since the Unix epoch.
     pub made_at: u64,
 }
@@ -32,6 +34,8 @@ struct OnDisk {
     brief: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     base: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    workspaces: Vec<String>,
     made_at: u64,
 }
 
@@ -90,8 +94,11 @@ impl Definition {
         if !room::valid_name(&self.name) {
             return Err(Error::BadName(self.name.clone()));
         }
-        if !crate::workspace::usable_name(&self.workspace) {
-            return Err(Error::BadWorkspace(self.workspace.clone()));
+        if let Some(bad) = std::iter::once(&self.workspace)
+            .chain(&self.workspaces)
+            .find(|workspace| !crate::workspace::usable_name(workspace))
+        {
+            return Err(Error::BadWorkspace(bad.clone()));
         }
         if self
             .brief
@@ -265,6 +272,7 @@ fn load(dir: &Path, name: &str) -> Result<Definition, Error> {
         workspace: on_disk.workspace,
         brief: on_disk.brief,
         base: on_disk.base,
+        workspaces: on_disk.workspaces,
         made_at: on_disk.made_at,
     };
     definition.check()?;
@@ -282,6 +290,7 @@ fn write(dir: &Path, definition: &Definition) -> Result<(), Error> {
         workspace: definition.workspace.clone(),
         brief: definition.brief.clone(),
         base: definition.base.clone(),
+        workspaces: definition.workspaces.clone(),
         made_at: definition.made_at,
     })
     .map_err(|error| unwritable(std::io::Error::other(error)))?;
@@ -309,6 +318,7 @@ mod tests {
             workspace: "web".to_owned(),
             brief: Some("Ship the login page.\nThen the tests.".to_owned()),
             base: Some("feature/login".to_owned()),
+            workspaces: Vec::new(),
             made_at: 1_800_000_000,
         }
     }
@@ -345,6 +355,10 @@ mod tests {
         assert!(matches!(
             refused(|d| d.workspace = "a/b".to_owned()),
             Error::BadWorkspace(_)
+        ));
+        assert!(matches!(
+            refused(|d| d.workspaces = vec!["api".to_owned(), "a/b".to_owned()]),
+            Error::BadWorkspace(bad) if bad == "a/b"
         ));
         assert!(matches!(
             refused(|d| d.brief = Some("x".repeat(BRIEF_LIMIT + 1))),
@@ -399,6 +413,29 @@ mod tests {
         assert_eq!(cleared.brief, None, "a blank brief is none");
         assert_eq!(list_in(&dir).expect("listed").rooms[1], cleared);
         assert!(!dir.join("design-review.toml.tmp").exists());
+    }
+
+    #[test]
+    fn the_workspaces_list_round_trips_and_a_brief_edit_keeps_it() {
+        let dir = scratch("workspaces");
+        let shared = Definition {
+            workspaces: vec!["api".to_owned(), "docs".to_owned()],
+            ..definition("shared")
+        };
+        create_in(&dir, &shared).expect("written");
+        assert_eq!(
+            list_in(&dir).expect("listed").rooms,
+            std::slice::from_ref(&shared)
+        );
+
+        let edited = update_in(&dir, "shared", Some("New brief")).expect("updated");
+        assert_eq!(edited.workspaces, shared.workspaces, "only the brief moves");
+        assert_eq!(list_in(&dir).expect("listed").rooms, [edited]);
+
+        std::fs::write(dir.join("old.toml"), "workspace = \"web\"\nmade_at = 1\n")
+            .expect("written");
+        let listing = list_in(&dir).expect("listed");
+        assert!(listing.rooms[0].workspaces.is_empty(), "no key is no list");
     }
 
     #[test]

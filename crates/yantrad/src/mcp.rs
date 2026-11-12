@@ -13,8 +13,9 @@
 //! keeps no list of the ids.
 //!
 //! **Every request passes [`allowed`] or [`identify`] first**, so only the
-//! owner, or an agent token, reaches a room. An agent token never reaches a
-//! room another workspace defines (ADR-0044 decision 12, [`may_call`]). The label comes from identity and never
+//! owner, or an agent token, reaches a room. An agent token reaches a room
+//! only when the room's definition names its workspace, and it makes no room
+//! (ADR-0044 decision 12, [`may_call`]). The label comes from identity and never
 //! from the body: the caller's machine is `whois` joined to the tailnet list on
 //! the stable id, as `/api/join` does. `X-Yantra-Thread` only routes, and only
 //! when the workspace it names is on the caller's machine: the workspace's ssh
@@ -336,22 +337,13 @@ fn may_reach(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
     }
 }
 
-/// An agent token's room tools reach its own workspace's rooms and the rooms
-/// no workspace defines, which agents make and share (ADR-0038 decision 2), and
-/// never a room another workspace defines (ADR-0044 decision 12).
+/// An agent token's room tools reach a room only when its definition names
+/// the token's workspace, as the home or on the list (ADR-0044 decision 12).
+/// A room that is missing is refused as one that is another's, so a token
+/// makes no room and learns no name.
 fn may_call(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
-    let Who::Agent { workspace, .. } = who else {
-        return Ok(());
-    };
-    match rooms.view(name) {
-        Ok((summary, _))
-            if summary
-                .workspace
-                .as_deref()
-                .is_some_and(|home| home != workspace) =>
-        {
-            Err(Refused::AgentScope)
-        }
+    match who {
+        Who::Agent { workspace, .. } if !rooms.admits(name, workspace) => Err(Refused::AgentScope),
         _ => Ok(()),
     }
 }
@@ -616,6 +608,8 @@ struct Create {
     brief: Option<String>,
     #[serde(default)]
     base: Option<String>,
+    #[serde(default)]
+    workspaces: Vec<String>,
 }
 
 /// `PATCH /api/rooms/{room}`. `brief` is required, and `null` clears it.
@@ -667,22 +661,29 @@ async fn create<I: Inventory + Clone + Send + Sync + 'static>(
     body: Result<Json<Create>, JsonRejection>,
 ) -> Result<(StatusCode, Json<RoomSummary>), Refused> {
     let caller = allowed(&state.authoriser, &from, &headers).await?;
-    let asked = json_only(body, "{\"name\", \"workspace\", \"brief\"?, \"base\"?}")?;
+    let asked = json_only(
+        body,
+        "{\"name\", \"workspace\", \"brief\"?, \"base\"?, \"workspaces\"?}",
+    )?;
     let definition = Definition {
         name: asked.name,
         workspace: asked.workspace,
         brief: room_file::brief(asked.brief.as_deref()),
         base: asked.base.filter(|base| !base.is_empty()),
+        workspaces: asked.workspaces,
         made_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
     };
     definition.check().map_err(|error| defined(&error))?;
-    if (state.locate)(&definition.workspace).is_none() {
+    if let Some(unknown) = std::iter::once(&definition.workspace)
+        .chain(&definition.workspaces)
+        .find(|workspace| (state.locate)(workspace).is_none())
+    {
         return Err(Refused::Verb {
             status: StatusCode::NOT_FOUND,
-            said: format!("no workspace named `{}`", definition.workspace),
+            said: format!("no workspace named `{unknown}`"),
         });
     }
     let summary = state
@@ -1186,13 +1187,14 @@ mod tests {
         result["content"][0]["text"].as_str().expect("a text block")
     }
 
-    /// ADR-0044 decision 12: with no `X-Yantra-Thread`, an agent token still
-    /// never reaches a room another workspace defines. A room no workspace
-    /// defines is the agents' to make and share (ADR-0038 decision 2).
+    /// ADR-0044 decision 12: an agent token reaches a room only when the
+    /// room's definition names its workspace, as the home or on the list. It
+    /// reaches no room that has no home, and it makes no room.
     #[tokio::test]
     async fn an_agent_token_calls_tools_only_on_its_own_workspaces_rooms() {
         let passkeys = crate::passkey::Passkeys::memory();
         let minted = passkeys.mint_agent("wa");
+        let (_, session, _) = crate::passkey::tests::enrolled(&passkeys, "iPhone");
         let (rooms, woke, pauses) = rooms();
         for (name, workspace) in [("home", "wa"), ("away", "wb")] {
             rooms
@@ -1201,20 +1203,23 @@ mod tests {
                     workspace: workspace.to_owned(),
                     brief: None,
                     base: None,
+                    workspaces: Vec::new(),
                     made_at: 0,
                 })
                 .expect("defined");
         }
         let app = serve_keyed(fake(), rooms.clone(), woke, pauses, passkeys);
-        let call = |name: &str, room: &str| {
-            let body = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                              "params": {"name": name,
-                                         "arguments": {"room": room, "text": "hi", "doing": "x"}}});
+        let owner = (
+            header::COOKIE,
+            format!("{}={session}", crate::passkey::COOKIE),
+        );
+        let agent = (header::AUTHORIZATION, format!("Bearer {}", minted.token));
+        let ask = |who: &(header::HeaderName, String), path: &str, body: Value| {
             let mut request = Request::builder()
                 .method(Method::POST)
-                .uri("/mcp")
+                .uri(path)
                 .header(header::CONTENT_TYPE, "application/json")
-                .header(header::AUTHORIZATION, format!("Bearer {}", minted.token))
+                .header(&who.0, &who.1)
                 .body(Body::from(body.to_string()))
                 .expect("a request");
             request
@@ -1222,22 +1227,58 @@ mod tests {
                 .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
             app.router.clone().oneshot(request)
         };
+        let call = |who: &(header::HeaderName, String), name: &str, room: &str| {
+            let body = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                              "params": {"name": name,
+                                         "arguments": {"room": room, "text": "hi", "doing": "x"}}});
+            ask(who, "/mcp", body)
+        };
 
-        for tool in ["room_send", "room_read", "room_info", "room_status"] {
-            let status = call(tool, "away").await.expect("infallible").status();
-            assert_eq!(status, StatusCode::FORBIDDEN, "{tool} on another workspace");
+        let shared = json!({"name": "shared", "workspace": "wb", "workspaces": ["wa"]});
+        let refused = ask(&agent, "/rooms", shared.clone())
+            .await
+            .expect("infallible");
+        assert_eq!(
+            refused.status(),
+            StatusCode::FORBIDDEN,
+            "a token defines no room"
+        );
+        let defined = ask(&owner, "/rooms", shared).await.expect("infallible");
+        assert_eq!(defined.status(), StatusCode::CREATED);
+        let loose = call(&owner, "room_send", "loose")
+            .await
+            .expect("infallible");
+        assert_eq!(loose.status(), StatusCode::OK);
+        assert_eq!(
+            rooms.view("loose").expect("the owner made it").0.workspace,
+            None
+        );
+
+        for tool in room::TOOLS {
+            for room in ["loose", "away", "nowhere"] {
+                let status = call(&agent, tool, room).await.expect("infallible").status();
+                assert_eq!(status, StatusCode::FORBIDDEN, "{tool} on {room}");
+            }
+            for room in ["home", "shared"] {
+                let response = call(&agent, tool, room).await.expect("infallible");
+                assert_eq!(response.status(), StatusCode::OK, "{tool} on {room}");
+                let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                    .await
+                    .expect("in memory");
+                let answer: Value = serde_json::from_slice(&body).expect("JSON");
+                assert_eq!(
+                    answer["result"]["isError"], false,
+                    "{tool} on {room}: {answer}"
+                );
+            }
         }
-        for room in ["home", "made"] {
-            let response = call("room_send", room).await.expect("infallible");
-            assert_eq!(response.status(), StatusCode::OK, "{room}");
-            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
-                .await
-                .expect("in memory");
-            let answer: Value = serde_json::from_slice(&body).expect("JSON");
-            assert_eq!(answer["result"]["isError"], false, "{room}: {answer}");
-        }
-        let made = rooms.view("made").expect("the agent made it").0;
-        assert_eq!(made.workspace, None, "a room no workspace defines");
+
+        assert!(
+            rooms.view("nowhere").is_err(),
+            "a refused call makes no room"
+        );
+        let names: Vec<String> = rooms.list().into_iter().map(|room| room.name).collect();
+        assert_eq!(names, ["away", "home", "loose", "shared"]);
     }
 
     #[tokio::test]
@@ -2228,6 +2269,7 @@ mod tests {
             json!({"name": "r1", "workspace": "a/b"}),
             json!({"name": "r1", "workspace": "wa", "brief": "x".repeat(501)}),
             json!({"name": "r1", "workspace": "wa", "base": "a..b"}),
+            json!({"name": "r1", "workspace": "wa", "workspaces": ["a/b"]}),
             json!({"name": "r1"}),
             json!({"name": "r1", "workspace": "wa", "budget": 30}),
         ] {
@@ -2242,16 +2284,21 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "{body}: {said}");
         }
-        let (status, said) = send(
-            &app,
-            Method::POST,
-            "/rooms",
-            Some(json!({"name": "r1", "workspace": "nowhere"})),
-            ALPHA,
-            None,
-        )
-        .await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "{said}");
+        for body in [
+            json!({"name": "r1", "workspace": "nowhere"}),
+            json!({"name": "r1", "workspace": "wa", "workspaces": ["wb", "nowhere"]}),
+        ] {
+            let (status, said) = send(
+                &app,
+                Method::POST,
+                "/rooms",
+                Some(body.clone()),
+                ALPHA,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{body}: {said}");
+        }
         let (status, said) = send(
             &app,
             Method::PATCH,

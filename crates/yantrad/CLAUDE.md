@@ -1005,13 +1005,16 @@ the wait and the wakes.
 - **A room may have a definition** (Y-550, [ADR-0039](../../docs/adr/0039-a-room-is-a-shared-project.md)
   decision 2): `~/.config/yantra/rooms/<name>.toml`, through
   [`room_file`](../yantra-core/src/room_file.rs). `POST /api/rooms` takes
-  `{name, workspace, brief?, base?}` as application/json only, and answers **201** with the summary.
-  A bad field is **400**, a workspace that does not load **404**, an existing file **409**, and a
+  `{name, workspace, brief?, base?, workspaces?}` as application/json only, and answers **201** with
+  the summary. A bad field is **400**, a workspace or a listed workspace that does not load **404**, an existing file **409**, and a
   file that cannot be written **500**. `PATCH /api/rooms/{room}` takes `{brief}`, where `null`
   clears it, and an undefined room is **404**. `DELETE /api/rooms/{room}` answers
   `200 {"removed": bool}`, as the workspace delete does. Each writes the file first and then
-  changes memory, under the store's lock. A defined room never expires. A room an agent makes with
-  `room_send` stays in memory only.
+  changes memory, under the store's lock. A defined room never expires.
+- **An agent token reaches a room only when the room's definition names its workspace** (Y-784,
+  ADR-0044 decision 12): as `workspace`, or on `workspaces`, which only the owner writes. Every
+  other room tool call is **403**, a room that does not exist too, so a token makes no room and
+  learns no name. The owner can still make a room with no definition; it stays in memory only.
 - **A restart reloads each definition with one system message** that says when yantrad restarted.
   It spends no budget and wakes no thread. Every message, member, cursor, count, pause and queued
   wake is lost, and so is every room with no definition. A file that does not load is logged by

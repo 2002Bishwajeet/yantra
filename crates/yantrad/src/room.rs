@@ -239,6 +239,11 @@ impl Rooms {
         self.lock().view(name, SystemTime::now())
     }
 
+    /// Whether an agent token for `workspace` reaches the room.
+    pub fn admits(&self, name: &str, workspace: &str) -> bool {
+        self.lock().admits(name, workspace)
+    }
+
     /// Queues each thread `sent` wakes with what it has not seen, and says how
     /// many were queued and which threads need a worker. It runs under the
     /// store's lock, so each thread gets a message once and in seq order.
@@ -508,6 +513,7 @@ fn home(definition: &Definition) -> Home {
         workspace: definition.workspace.clone(),
         brief: definition.brief.clone(),
         base: definition.base.clone(),
+        workspaces: definition.workspaces.clone(),
         made_at: definition.made_at,
     }
 }
@@ -965,6 +971,7 @@ pub(crate) mod tests {
             workspace: "web".to_owned(),
             brief: None,
             base: None,
+            workspaces: Vec::new(),
             made_at: 1_800_000_000,
         }
     }
