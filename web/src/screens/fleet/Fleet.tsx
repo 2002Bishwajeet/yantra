@@ -25,7 +25,7 @@ import { Pill } from '@/m3/pill/Pill'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { answerFailure, reachWords } from '@/lib/checks'
-import { Eyebrow, Num, Text } from '@/m3/text/Text'
+import { Eyebrow, Mono, Num, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { type Band, daemonCouldNotRead, speaks, unreachable, work, type WorkRow } from '@/work'
@@ -324,7 +324,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
         <span className="fleet__meta">
           <span className="fleet__name">{row.name}</span>
         </span>
-        <Text scale="body-small" className="fleet__detail m3-wrap">{row.error}</Text>
+        <Mono className="fleet__detail m3-wrap">{row.error}</Mono>
         <span className="fleet__actions">
           <Button render={<Link params={{ name: row.name }} to="/w/$name/repair" />} role="link" variant="outlined">
             Repair

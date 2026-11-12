@@ -95,9 +95,9 @@ function Editor(props: {
           <h2 className="repair__reason-title">
             {refused ? refusal(refused) : `${name} will not load.`}
           </h2>
-          <Text scale="body-small" className="repair__error" id={`${id}-error`}>
+          <Mono className="repair__error" id={`${id}-error`}>
             {error}
-          </Text>
+          </Mono>
         </div>
         <Text render={<p />} scale="body-small" className="repair__advice">
           Fix the file below and save. Save refuses bytes that still will not load, so a

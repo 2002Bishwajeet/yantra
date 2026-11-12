@@ -21,6 +21,10 @@ const ALLOWED = new Set([
   'screens/fleet/Github.tsx',
   'screens/machine/SudoSheet.tsx',
   'screens/repair/Repair.tsx',
+  'screens/session/Session.tsx',
+  'screens/fleet/Fleet.tsx',
+  'screens/dashboard/Dashboard.tsx',
+  'screens/settings/ConnectSheet.tsx',
   'screens/session-terminal/SessionTerminal.tsx',
   'screens/setup/Setup.tsx',
   'screens/settings/About.tsx',
@@ -58,6 +62,16 @@ describe('mono is for code', () => {
       .filter((one) => monoBodies(one.text).some((body) => NUMBER_CALLS.test(body)))
       .map((one) => one.rel)
     expect(wrong).toEqual([])
+  })
+
+  it('keeps a parse error excerpt and a scope token in mono', () => {
+    const read = (rel: string) => readFileSync(join(src, rel), 'utf8')
+    const mono = (rel: string) => monoBodies(read(rel)).join('\n')
+    expect(read('screens/repair/Repair.tsx')).toMatch(/<Mono className="repair__error"/)
+    expect(read('screens/session/Session.tsx')).toMatch(/<Mono className="session__error/)
+    expect(read('screens/fleet/Fleet.tsx')).toMatch(/<Mono className="fleet__detail m3-wrap">\{row\.error\}/)
+    expect(mono('screens/dashboard/Dashboard.tsx')).toContain('row.error')
+    expect(mono('screens/settings/ConnectSheet.tsx')).toContain('{scope}')
   })
 
   it('catches a number in mono', () => {

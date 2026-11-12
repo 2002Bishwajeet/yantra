@@ -37,7 +37,7 @@ import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill } from '@/m3/pill/Pill'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Num, Text } from '@/m3/text/Text'
+import { Eyebrow, Mono, Num, Text } from '@/m3/text/Text'
 import { IconTile, Tile } from '@/m3/tile/Tile'
 import { Track } from '@/m3/track/Track'
 import { useFormFactor } from '@/shell/formFactor'
@@ -224,7 +224,7 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
           headline={`${row.name} will not load`}
           supporting={
             <State size="small" state="failed">
-              <Text scale="body-small" className="m3-wrap">{row.error}</Text>
+              <Mono className="m3-wrap">{row.error}</Mono>
             </State>
           }
         />
