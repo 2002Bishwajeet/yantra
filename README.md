@@ -59,7 +59,7 @@ what is in progress, and what is still an open question.
 
 ## Install
 
-**[v0.11.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.11.0)** is the current release. It
+**[v0.12.0](https://github.com/2002Bishwajeet/yantra/releases/tag/v0.12.0)** is the current release. It
 has static musl archives for `aarch64` and `x86_64`, and a `yantra-agent` for macOS on both. We
 verified all of them against `SHA256SUMS`. **There is no Windows build**, because the probes refuse to
 compile there while Q4 is open. **The released `yantrad` carries the dashboard inside it.** The
@@ -80,7 +80,7 @@ microphone works.
 **From v0.4.0, the box updates itself.** Settings → About shows *Update to vX* when a newer release is
 published. `yantra update` on the box does the same
 ([docs/appliance.md](docs/appliance.md#update-from-the-dashboard)). A box on v0.3.3 or older has no
-updater. To reach v0.11.0, run `install.sh` on that box once more.
+updater. To reach v0.12.0, run `install.sh` on that box once more.
 
 **Every merge to `main` also publishes a `nightly` pre-release** for the two Linux targets (Y-662).
 `install.sh --channel nightly`, `yantra update --channel nightly` or Settings → About puts a box on
