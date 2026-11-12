@@ -11,7 +11,7 @@ import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State, type MarkState } from '@/m3/mark/Mark'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Num, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { Track } from '@/m3/track/Track'
 import { useTick } from '@/useTick'
@@ -148,9 +148,9 @@ export function Starting(props: { plan: Plan; onBack: () => void }) {
                 <Text emphasized scale="title-medium">
                   {named[stage.id]}
                 </Text>
-                {stage.state === 'running' ? <Mono>{ago((now - since) / 1000, now).text}</Mono> : null}
+                {stage.state === 'running' ? <Num>{ago((now - since) / 1000, now).text}</Num> : null}
               </div>
-              {stage.detail ? <Mono className="ns__stage-detail">{stage.detail}</Mono> : null}
+              {stage.detail ? <Text scale="body-small" className="ns__stage-detail m3-wrap">{stage.detail}</Text> : null}
               {stage.state === 'refused' && stage.error ? (
                 <ErrorSurface.Inline
                   action={stage.error.retryable ? null : <Button onClick={retry}>Try again</Button>}

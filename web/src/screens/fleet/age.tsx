@@ -1,14 +1,14 @@
 import type { Reading } from '@/api/hooks'
 import { ago } from '@/lib/time'
-import { Mono } from '@/m3/text/Text'
+import { Num } from '@/m3/text/Text'
 import { useTick } from '@/useTick'
 import { elapsed, isAge, oldest } from './clock'
 
-/** An age the daemon already counted, in mono with the instant in `title`. */
+/** An age the daemon already counted, with the instant in `title`. */
 export function Ago(props: { seconds: number; className?: string; plain?: boolean }) {
   const { seconds, className, plain } = props
   const clock = ago(seconds)
-  const face = plain ? className : className ? `m3-mono ${className}` : 'm3-mono'
+  const face = plain ? className : className ? `m3-num ${className}` : 'm3-num'
   return (
     <time className={face} dateTime={clock.iso} title={clock.title}>
       {clock.text}
@@ -21,7 +21,7 @@ export function Since(props: { at: number; className?: string; plain?: boolean }
   const { at, className, plain } = props
   const now = useTick(true)
   const age = elapsed(now / 1000 - at)
-  return plain ? <span className={className}>{age}</span> : <Mono className={className}>{age}</Mono>
+  return plain ? <span className={className}>{age}</span> : <Num className={className}>{age}</Num>
 }
 
 /** The boards' `opened 3d ago` beside their `opened 9 Jun`, so the caller
@@ -31,7 +31,7 @@ export function SinceAgo(props: { at: number }) {
   const seconds = now / 1000 - props.at
   return (
     <>
-      <Mono>{elapsed(seconds)}</Mono>
+      <Num>{elapsed(seconds)}</Num>
       {isAge(seconds) ? ' ago' : null}
     </>
   )
@@ -53,8 +53,8 @@ export function Looked(props: { reads: Reading<unknown>[]; className?: string; p
       {body}
     </span>
   ) : (
-    <Mono className={className} data-slot="looked">
+    <Num className={className} data-slot="looked">
       {body}
-    </Mono>
+    </Num>
   )
 }

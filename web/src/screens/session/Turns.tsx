@@ -8,7 +8,7 @@ import { Card } from '@/m3/card/Card'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Mono, Num, Text } from '@/m3/text/Text'
 
 /** D5 §8's four verbs. A tool this list does not name reads as its own name,
  *  which is the honest fallback and what the far side sent. */
@@ -51,13 +51,13 @@ export function OneTurn(props: { turn: Turn; now: number }) {
         {/* A few records carry no timestamp, and a turn with none prints none
             rather than *unknown* (D5 §4.1). */}
         {stamp ? (
-          <Mono>
+          <Num>
             <time dateTime={stamp.iso} title={stamp.title}>
               {stamp.text}
             </time>
-          </Mono>
+          </Num>
         ) : turn.at !== null ? (
-          <Mono>{turn.at}</Mono>
+          <Num>{turn.at}</Num>
         ) : null}
       </header>
       {/* Text, never Markdown: a parser inside a held budget, an XSS surface on

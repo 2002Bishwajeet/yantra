@@ -9,7 +9,7 @@ import { githubQuery, githubReadinessQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
 import { Copyable, useCopy } from '@/m3/copyable/Copyable'
 import { List, ListItem } from '@/m3/list/List'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { useTick } from '@/useTick'
 import { Sheet } from './Sheet'
 
@@ -144,7 +144,7 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
             <Text render={<p />} scale="body-medium" tone="error" emphasized>
               {login.error.describe()}
             </Text>
-            <Mono className="settings__said">{login.error.said}</Mono>
+            <Text scale="body-small" className="settings__said">{login.error.said}</Text>
           </div>
         ) : null}
         <Text render={<p />} scale="body-small" tone="variant">
@@ -152,7 +152,7 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
         </Text>
         <List aria-label="Scopes">
           {SCOPES.map(([scope, why]) => (
-            <ListItem headline={<Mono>{scope}</Mono>} key={scope} supporting={why} />
+            <ListItem headline={<Text scale="body-small">{scope}</Text>} key={scope} supporting={why} />
           ))}
         </List>
         <Text render={<p />} scale="body-small" tone="variant">

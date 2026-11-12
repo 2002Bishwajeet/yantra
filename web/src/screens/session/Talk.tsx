@@ -4,7 +4,7 @@ import { type ApiError, micError } from '@/api/errors'
 import { useMachineReadiness } from '@/api/hooks'
 import { type Mic, micAddress, type MicState, openMic } from '@/api/mic'
 import { Button } from '@/m3/button/Button'
-import { Mono } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import './Talk.css'
 
 const HOLD_KEYS = new Set([' ', 'Enter'])
@@ -90,7 +90,7 @@ function Hold({ machine }: { machine: string }) {
       </Button>
       <span aria-live="polite" className="talk__status" id={`${id}-status`} role="status">
         {said ? said.describe() : state === 'listening' ? 'Listening' : null}
-        {said && said.kind !== 'insecure' && said.said ? <Mono className="talk__said">{said.said}</Mono> : null}
+        {said && said.kind !== 'insecure' && said.said ? <Text scale="body-small" className="talk__said m3-wrap">{said.said}</Text> : null}
       </span>
     </div>
   )

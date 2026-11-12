@@ -52,6 +52,12 @@ describe('Looked', () => {
     expect(day.parentElement?.textContent).toBe(`looked ${day.textContent}`)
   })
 
+  it('draws an age in the body face with tabular figures, never mono', () => {
+    const { container } = render(<Looked reads={read(4)} />)
+    expect(container.querySelector('time.m3-num')?.textContent).toBe('4s')
+    expect(container.querySelector('.m3-mono')).toBeNull()
+  })
+
   it('keeps the plain age out of the mono face', () => {
     const { container } = render(<Looked plain reads={read(4)} />)
     expect(container.querySelector('.m3-mono')).toBeNull()

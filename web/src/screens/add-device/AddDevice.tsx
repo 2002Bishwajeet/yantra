@@ -19,7 +19,7 @@ import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Stepper, type StepItem, type StepState } from '@/m3/stepper/Stepper'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { useFormFactor } from '@/shell/formFactor'
 import { asEvents } from '@/shell/notifications'
 import { useScreenTitle } from '@/shell/title'
@@ -190,7 +190,7 @@ function JoinKey() {
       <details className="add-device__diagnostics">
         <summary>Diagnostics</summary>
         <Note>
-          The key is at <Mono>{key.path}</Mono> on the appliance.
+          The key is at {key.path} on the appliance.
         </Note>
       </details>
       <Sheet

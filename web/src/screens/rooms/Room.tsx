@@ -19,7 +19,7 @@ import { announce } from '@/m3/live/live'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono } from '@/m3/text/Text'
+import { Num } from '@/m3/text/Text'
 import { useTick } from '@/useTick'
 import { facts } from './facts'
 import './Rooms.css'
@@ -181,7 +181,7 @@ export function Room() {
   return (
     <Page width="reading">
       <PageHeader
-        subtitle={room.data && !lost ? <Mono className="room__facts">{facts(room.data)}</Mono> : undefined}
+        subtitle={room.data && !lost ? <Num className="room__facts">{facts(room.data)}</Num> : undefined}
         title={name}
       />
       {lost ? (

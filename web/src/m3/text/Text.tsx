@@ -45,10 +45,16 @@ export function Text(props: TextProps) {
 
 export type MonoProps = ComponentPropsWithRef<'span'> & { clip?: boolean }
 
-/** IBM Plex Mono for an age, a duration, a count or an amount. */
+/** IBM Plex Mono for code, a command or a key. */
 export function Mono(props: MonoProps) {
   const { clip, className, ...rest } = props
   return <span className={clsx('m3-mono', clip && 'm3-clip', className)} {...rest} />
+}
+
+/** A time, an age, a duration, a count or an amount: the body face, with tabular figures. */
+export function Num(props: MonoProps) {
+  const { clip, className, ...rest } = props
+  return <span className={clsx('m3-num', clip && 'm3-clip', className)} {...rest} />
 }
 
 export type EyebrowProps = useRender.ComponentProps<'span'>

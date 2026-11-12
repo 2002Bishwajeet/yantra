@@ -4,7 +4,7 @@ import type { ApiError } from '@/api/errors'
 import { Button } from '../button/Button'
 import { announce } from '../live/live'
 import { State } from '../mark/Mark'
-import { Eyebrow, Mono } from '../text/Text'
+import { Eyebrow, Text } from '../text/Text'
 import './ErrorSurface.css'
 
 /** What a surface needs of an error: `api/errors.ts` gives exactly this, and
@@ -74,9 +74,9 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
         <h2 className="m3-error__title">{heading}</h2>
         <p className="m3-error__sentence">{error.describe()}</p>
         {!page && !fold && error.said ? (
-          <Mono className="m3-error__said m3-wrap">
+          <Text scale="body-small" className="m3-error__said m3-wrap">
             {error.said}
-          </Mono>
+          </Text>
         ) : null}
       </div>
       {page ? (
@@ -95,9 +95,9 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
               </Button>
               {open ? (
                 <div className="m3-error__details" id={detailsId}>
-                  {error.said ? <Mono className="m3-error__said m3-wrap">{error.said}</Mono> : null}
+                  {error.said ? <Text scale="body-small" className="m3-error__said m3-wrap">{error.said}</Text> : null}
                   {unknowns?.length ? <Unknowns items={unknowns} /> : null}
-                  {meta ? <Mono className="m3-error__meta">{meta}</Mono> : null}
+                  {meta ? <Text scale="body-small" className="m3-error__meta m3-wrap">{meta}</Text> : null}
                 </div>
               ) : null}
             </>
@@ -106,7 +106,7 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
       ) : (
         <>
           {unknowns?.length ? <Unknowns items={unknowns} /> : null}
-          {meta ? <Mono className="m3-error__meta">{meta}</Mono> : null}
+          {meta ? <Text scale="body-small" className="m3-error__meta m3-wrap">{meta}</Text> : null}
           {retry || action || fold ? (
             <div className="m3-error__actions">
               {retry ? <Button onClick={reset}>Try again</Button> : null}
@@ -126,7 +126,7 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
           ) : null}
           {fold && open ? (
             <div className="m3-error__details" id={detailsId}>
-              <Mono className="m3-error__said m3-wrap">{error.said}</Mono>
+              <Text scale="body-small" className="m3-error__said m3-wrap">{error.said}</Text>
             </div>
           ) : null}
         </>
