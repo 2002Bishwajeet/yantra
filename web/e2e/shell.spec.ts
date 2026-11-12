@@ -2,7 +2,7 @@ import type { Locator, Page } from '@playwright/test'
 import type { Scenario } from './lib/scenario'
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { at } from './lib/sizes'
-import { scrollTo } from './lib/scroller'
+import { endGap, scrollTo } from './lib/scroller'
 
 /** The shell (Y-345): the four destinations at three widths, the palette,
  *  the bell, on the busy fleet. The screens under it are stubs until their
@@ -582,8 +582,8 @@ test('the tablet and desktop shells still scroll the document', async ({ page, s
   expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-shell]')!).overflow)).toBe('visible')
 })
 
-/** Y-673: the scroller ends above the FAB, so nothing the reader can use or read sits under it. */
-test.describe('the FAB on the phone never covers content', () => {
+/** Y-673, Y-738: the FAB floats over the page as M3 draws it; scrolled to the end, nothing the reader can use or read sits under it. */
+test.describe('the FAB on the phone leaves the end of the page clear', () => {
   const routes: [string, string, Scenario][] = [
     ['Dashboard', '/', 'busy'],
     ['Fleet', '/fleet', 'busy'],
@@ -591,15 +591,16 @@ test.describe('the FAB on the phone never covers content', () => {
     ['Dashboard with Finish setup', '/', 'nogrant'],
   ]
   for (const [name, path, kind] of routes) {
-    test(`never lays the FAB over a control or text: ${name}`, async ({ page, size }) => {
+    test(`lays the FAB over no control or text at the end: ${name}`, async ({ page, size }) => {
       test.skip(size !== 'phone', 'the FAB floats over the page only on a phone')
       await scenario(page, kind)
       await page.goto(path)
       await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
       await expect(page.locator('.shell__fab')).toBeVisible()
 
-      for (const y of [0, 300, 600]) {
-        await scrollTo(page, y)
+      await expect(async () => {
+        await scrollTo(page, 'end')
+        expect(await endGap(page)).toBe(0)
         const offenders = await page.evaluate(() => {
           const main = document.querySelector('.shell__main')!
           const box = main.getBoundingClientRect()
@@ -625,10 +626,29 @@ test.describe('the FAB on the phone never covers content', () => {
             })
             .map(({ text }) => text.slice(0, 40))
         })
-        expect(offenders, `under the FAB at scroll ${y}`).toEqual([])
-      }
+        expect(offenders, `under the FAB at the end of the page`).toEqual([])
+      }).toPass()
     })
   }
+
+  test('collapses to the icon on scroll down, keeps its name, and expands at the top', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the FAB floats over the page only on a phone')
+    await scenario(page, 'busy')
+    await page.goto('/')
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    const fab = page.locator('.shell__fab')
+    await expect(fab).toBeVisible()
+    const name = await fab.getAttribute('aria-label')
+    expect(name).toContain('New session')
+    const wide = (await fab.boundingBox())!.width
+    await scrollTo(page, 300)
+    await expect.poll(() => page.locator('.shell__main').evaluate((el) => el.scrollTop)).toBeGreaterThan(100)
+    await expect.poll(async () => (await fab.boundingBox())!.width).toBeLessThan(60)
+    await expect(fab).toHaveAttribute('aria-label', name!)
+    await scrollTo(page, 0)
+    await expect.poll(() => page.locator('.shell__main').evaluate((el) => el.scrollTop)).toBe(0)
+    await expect.poll(async () => (await fab.boundingBox())!.width).toBeGreaterThanOrEqual(wide - 1)
+  })
 })
 
 /** Y-689: the palette finds a thread by its title, from the store, on a machine that is offline. */
