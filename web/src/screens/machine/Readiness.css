@@ -193,3 +193,8 @@
     min-width: 48px;
   }
 }
+
+/* Primary text on the amber container is 4.25:1; the container's own text colour passes axe. */
+.readiness[data-surface="secondary"] .m3-button[data-variant="text"]:not([data-tone="error"]) {
+  color: inherit;
+}
