@@ -582,7 +582,7 @@ test('the tablet and desktop shells still scroll the document', async ({ page, s
   expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-shell]')!).overflow)).toBe('visible')
 })
 
-/** Y-673, Y-735: the FAB floats over the page as M3 draws it; scrolled to the end, nothing the reader can use or read sits under it. */
+/** Y-673, Y-738: the FAB floats over the page as M3 draws it; scrolled to the end, nothing the reader can use or read sits under it. */
 test.describe('the FAB on the phone leaves the end of the page clear', () => {
   const routes: [string, string, Scenario][] = [
     ['Dashboard', '/', 'busy'],

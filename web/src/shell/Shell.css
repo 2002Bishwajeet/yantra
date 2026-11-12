@@ -226,7 +226,7 @@
     max(var(--m3-gutter), var(--m3-safe-left));
 }
 
-/* Y-735: the FAB floats over `main`, as M3 draws it, and the content scrolls under it. The padding lets the
+/* Y-738: the FAB floats over `main`, as M3 draws it, and the content scrolls under it. The padding lets the
    last row stop above it: 64 bar + 16 gap + 56 FAB + 16 air. */
 [data-shell="phone"]:has(> .shell__fab) .shell__main {
   scroll-padding-bottom: calc(152px + env(safe-area-inset-bottom, 0px));
