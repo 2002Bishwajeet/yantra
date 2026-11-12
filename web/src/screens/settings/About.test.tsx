@@ -88,6 +88,23 @@ describe('About', () => {
       await waitFor(() => expect(screen.queryByText('Looking up the latest Nightly release.')).toBeNull())
     })
 
+    it('draws no release of the old channel while the switch waits on the daemon (Y-743)', async () => {
+      let answerPut: (reply: Answer) => void = () => {}
+      mountSettings('desktop', '/settings/about', {
+        'PUT /api/update/channel': () => new Promise<Answer>((resolve) => (answerPut = resolve)),
+      })
+      await screen.findByRole('link', { name: 'v0.4.0 is out' })
+      expect(screen.getByRole('button', { name: 'Update to v0.4.0' })).toBeTruthy()
+      const group = screen.getByRole('radiogroup', { name: 'Release channel' })
+      fireEvent.click(within(group).getByRole('radio', { name: 'Nightly' }))
+      await screen.findByText('Looking up the latest Nightly release.')
+      expect(screen.queryByRole('link', { name: 'v0.4.0 is out' })).toBeNull()
+      expect(screen.queryByRole('button', { name: /^Update to/ })).toBeNull()
+      expect(screen.getByText('Published').closest('.settings__fact')?.querySelector('.m3-skeleton')).toBeTruthy()
+      answerPut([204])
+      expect(await screen.findByRole('link', { name: 'v0.4.0 is out' })).toBeTruthy()
+    })
+
     it('draws a refused switch and keeps the channel it had', async () => {
       mountSettings('desktop', '/settings/about', {
         'PUT /api/update/channel': [409, 'could not write /etc/yantra/channel: Permission denied'],

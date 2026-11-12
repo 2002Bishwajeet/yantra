@@ -152,7 +152,8 @@ describe('/fleet on the phone', () => {
 describe('/fleet when GitHub has no grant', () => {
   it('names the reason and links to Providers', async () => {
     mount('desktop', '/fleet', scenario('nogrant'))
-    await screen.findByText('GitHub cannot be asked', {}, { timeout: 2000 })
+    await screen.findByText('GitHub is not signed in', {}, { timeout: 2000 })
+    expect(screen.queryByText(/yantra github login/)).toBeNull()
     expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/settings/providers')
   })
 })

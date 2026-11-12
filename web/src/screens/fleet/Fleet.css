@@ -302,12 +302,14 @@
 }
 
 .github__error {
-  padding: 8px 12px;
-  border-radius: var(--md-sys-shape-corner-small);
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: var(--md-sys-typescale-body-small-line-height);
-  white-space: pre-wrap;
+  margin: 0;
   overflow-wrap: anywhere;
+}
+
+.github__code {
+  padding: 1px 6px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  font-size: 0.9em;
   background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 60%, transparent);
 }
 

@@ -322,7 +322,7 @@ function Catalogue() {
             <Text scale="body-medium">surface-container-low, level 1</Text>
           </Card>
           <Card surface="error">
-            <State state="failed">GitHub cannot be asked</State>
+            <State state="failed">GitHub could not be read</State>
           </Card>
         </div>
       </Section>

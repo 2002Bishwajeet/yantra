@@ -44,6 +44,9 @@ export function About() {
   const [asked, setAsked] = useState<string | null>(null)
   const about = useQuery({ ...aboutQuery(), ...(asked === null ? {} : { refetchInterval: UPDATE_POLL_MS }) })
   const facts = about.data
+  const set = useSetChannel()
+  // Y-743: while the switch waits on the look, the release held is the old channel's.
+  const published = set.isPending ? undefined : facts?.published
   // Y-612: a page opened mid-update follows it as if it had asked.
   if (asked === null && facts?.update && facts.update.step !== 'failed') setAsked(facts.version)
   // The restart is a moment with no daemon; the facts already drawn stay.
@@ -76,27 +79,27 @@ export function About() {
             wide
           />
           <Fact label="Reached at" value={<Mono>{location.host}</Mono>} />
-          {facts?.published.looked === 'failed' ? null : (
+          {published?.looked === 'failed' ? null : (
             <Fact
               label="Published"
-              value={facts ? <Release channel={facts.channel} published={facts.published} /> : null}
+              value={facts && published ? <Release channel={facts.channel} published={published} /> : null}
             />
           )}
         </dl>
-        {facts?.published.looked === 'failed' ? (
+        {published?.looked === 'failed' ? (
           <ErrorSurface.Inline
-            error={fromReading(facts.published)!}
+            error={fromReading(published)!}
             eyebrow="Published"
             title="The newest release could not be read"
           />
         ) : null}
-        {facts ? <ChannelSwitch channel={facts.channel} /> : null}
+        {facts ? <ChannelSwitch channel={facts.channel} set={set} /> : null}
         {facts ? (
           <Update
             asked={asked}
             onAsked={setAsked}
             progress={facts.update ?? null}
-            published={facts.published}
+            published={published ?? NOT_SHOWN}
             running={facts.version}
           />
         ) : null}
@@ -174,15 +177,17 @@ function Release(props: {
   )
 }
 
+/** Keeps an update in progress drawn and offers none while the switch waits. */
+const NOT_SHOWN: Looked<Published> = { looked: 'never' }
+
 function isChannel(value: string): value is Channel {
   return value === 'stable' || value === 'nightly'
 }
 
 /** Y-662: the daemon rewrites the channel the update unit reads. Switching
  *  installs nothing; the next update does, and it never goes back a version. */
-function ChannelSwitch(props: { channel: Channel | null }) {
-  const { channel } = props
-  const set = useSetChannel()
+function ChannelSwitch(props: { channel: Channel | null; set: ReturnType<typeof useSetChannel> }) {
+  const { channel, set } = props
   const shown = set.isPending ? set.variables : channel
   return (
     <div className="settings__channel">
