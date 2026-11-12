@@ -128,6 +128,8 @@ describe('About', () => {
       })
       const link = await screen.findByRole('link', { name: 'v0.4.1-nightly.20261110143205.abc1234 is out' })
       expect(link.getAttribute('href')).toBe('https://github.com/2002Bishwajeet/yantra/releases/tag/nightly')
+      // Y-743: the nightly version ran past a 390 px card when the button named it too.
+      expect(screen.getByRole('button', { name: 'Update to the latest Nightly' })).toBeTruthy()
     })
 
     it('says so when the channel file names no channel', async () => {

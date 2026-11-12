@@ -97,6 +97,7 @@ export function About() {
         {facts ? (
           <Update
             asked={asked}
+            channel={facts.channel}
             onAsked={setAsked}
             progress={facts.update ?? null}
             published={published ?? NOT_SHOWN}
@@ -227,13 +228,14 @@ function ChannelSwitch(props: { channel: Channel | null; set: ReturnType<typeof 
  *  page learns the result from `version` on its next read, and offers a
  *  reload, because its chunks belong to the old build. */
 function Update(props: {
+  channel: Channel | null
   running: string
   published: Looked<Published>
   asked: string | null
   onAsked: (running: string) => void
   progress: UpdateProgress | null
 }) {
-  const { running, published, asked, onAsked, progress } = props
+  const { channel, running, published, asked, onAsked, progress } = props
   const [open, setOpen] = useState(false)
   const update = useApplyUpdate()
 
@@ -265,8 +267,9 @@ function Update(props: {
   return (
     <div className="settings__update">
       {failed}
+      {/* A nightly version is wider than a phone; the Published line above names it. */}
       <Button onClick={() => setOpen(true)} variant="tonal">
-        Update to v{version}
+        {channel === 'nightly' ? 'Update to the latest Nightly' : `Update to v${version}`}
       </Button>
       <Sheet
         actions={
