@@ -503,3 +503,4 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-12** — Row Y-805 now moves every Node pin to the 26 LTS (owner). yantra-box already runs Node 26 and passes the gate's probe, so it can take web gates as it is.
 - **2026-11-12** — The owner answered Y-782's three questions (ADR-0045 note): a new thread takes its repository from the clone record, an old thread binds on first use, and the `yantra pr` CLI stays unbound.
 - **2026-11-12** — The owner accepted ADR-0037 (continue is a handoff) as written, so Y-520 to Y-526 may be built; ADR-0011 has its launch-prompt note. ADR-0040 stays parked ("not now"). Y-741 is done: the dashboard offers passkeys for `yantra.cloudx.run`. Row Y-806 added: the menus still stutter when they open on the phone.
+- **2026-11-12** — Y-742 is done: the owner updated `yantra-agent` on the Mac and cachyos-g14, and cachyos-g14 runs one agent unit.
