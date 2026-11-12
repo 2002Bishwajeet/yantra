@@ -52,8 +52,10 @@ fi
 
 # header_up replaces X-Forwarded-For: the daemon refuses more than one address (ADR-0017).
 # resolvers: the challenge must be checked on public DNS, not through split DNS.
+# admin off: any account on the box can drive the admin API on :2019 and so act as this proxy.
 cat >/etc/caddy/Caddyfile <<CFG
 {
+    admin off
     auto_https disable_redirects
 }
 

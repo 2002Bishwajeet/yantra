@@ -52,6 +52,7 @@ pub fn router() -> Router<Fleet> {
         .route("/machines/{name}/readiness", get(machine_readiness))
         .route("/attention", get(attention))
         .route("/readiness/github", get(github))
+        .route("/readiness/proxy", get(proxy))
         .route("/about", get(about))
         .route("/ssh-identity", get(ssh_identity))
         .route("/notifications", get(notifications))
@@ -474,7 +475,18 @@ async fn machine_readiness(
 /// *unknown*, so the only two answers are the reading and nobody having looked.
 async fn github(State(model): State<Model>) -> impl IntoResponse {
     let snapshot = model.read().await.clone();
-    Json(match snapshot.github.as_deref() {
+    host_check(snapshot.github.as_deref())
+}
+
+/// The other reading about **this** machine (Y-777): whether the proxy's admin API is closed
+/// while the daemon trusts a proxy account. The same two answers as [`github`].
+async fn proxy(State(model): State<Model>) -> impl IntoResponse {
+    let snapshot = model.read().await.clone();
+    host_check(snapshot.proxy_admin.as_deref())
+}
+
+fn host_check(reading: Option<&Reading<doctor::Check>>) -> Json<Answer<doctor::Check>> {
+    Json(match reading {
         Some(reading) => Answer::Ok {
             age_seconds: reading.age().as_secs(),
             data: reading.value().clone(),
@@ -1404,6 +1416,7 @@ pub(crate) mod tests {
             "/machines/cachyos-g14/readiness",
             "/attention",
             "/readiness/github",
+            "/readiness/proxy",
             "/repos",
             "/repos/hidden",
         ] {
@@ -2404,7 +2417,7 @@ pub(crate) mod tests {
         assert_eq!(served["pending"], false, "{served}");
     }
 
-    /// The check that is about this host, served under its own name and its own
+    /// A check that is about this host, served under its own name and its own
     /// age — it is nowhere in the per-machine reports, because no ssh session
     /// asked it.
     #[tokio::test]

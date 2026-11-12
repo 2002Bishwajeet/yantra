@@ -130,6 +130,15 @@ asked. Two answers are *absent* and both are earned — no grant, and a grant Gi
 could not be reached says nothing about the grant. It has no `failed`: a look it could not take is
 already *unknown* inside the check. `doctor::github` is a pure mapper over `GET /user`'s answer, and
 `refresh.rs` is what asks — on the slow clock, since it spends the owner's quota like the inbox does.
+
+**`GET /api/readiness/proxy` is the second check about this host** (Y-777). Caddy's admin API
+answers every local account on `127.0.0.1:2019`, and an account that changes Caddy's config there
+speaks to the socket as the proxy account the daemon trusts. `refresh.rs` connects to that port on
+the fleet's interval, with a 2 s limit, only while `main.rs` resolved a proxy account.
+`doctor::proxy_admin` maps the answer: a connection is *absent*, a refusal or no proxy account is
+*present*, and a timeout or any other error is *unknown*. The journal has a warning each time the
+port is found open. No dashboard screen reads the route yet. It asks that one address only, so an
+admin API on another port or on `::1` is not found.
 An unreachable GitHub is read again after 5 s, doubling up to the normal interval, and an answer of
 any kind waits the full interval (Y-731).
 The look logs each change between accepted and refused, with the login and never the token (Y-648).
@@ -1061,6 +1070,7 @@ the peer's uid is the gate.
 - **The account `YANTRA_PROXY_ACCOUNT` names gets exactly uid 0's rules** (ADR-0042, amended
   2026-11-11, Y-727), so Caddy can proxy to the socket. `main.rs` resolves the name once at start;
   unset, empty or unknown trusts nobody. A join script that a proxy fetched does not name the socket.
+  The proxy's admin API must be off, and `GET /api/readiness/proxy` says when it is not (Y-777).
 - **The daemon's own uid, or a member of the group `yantra`, is this machine.** The caller is `whois`
   of the first bound address. The header is ignored. Membership is the primary gid or the group's
   member list, read with `nix` on a blocking thread (I-13); a lookup that fails refuses.

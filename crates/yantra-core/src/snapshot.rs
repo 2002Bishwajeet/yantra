@@ -81,10 +81,12 @@ pub type Readiness = Reading<Result<Vec<doctor::Report>, doctor::Error>>;
 /// tailnet, so it is the only one whose age is bounded by someone else's quota
 /// rather than by what a look costs here.
 pub type Attention = Reading<Result<attention::Attention, attention::Error>>;
-/// The one check that is about the host this process runs on rather than about
+/// A check that is about the host this process runs on rather than about
 /// the fleet ([`crate::doctor::github`]). No [`Result`]: the check carries a look
 /// it could not take as [`doctor::State::Unknown`], which is the whole of R-23.
 pub type Github = Reading<doctor::Check>;
+/// The other check about this host ([`crate::doctor::proxy_admin`]).
+pub type ProxyAdmin = Reading<doctor::Check>;
 /// Every repository the grant can see (ADR-0023). Off the tailnet like
 /// [`Attention`], and on the same slow clock for the same reason.
 pub type Repos = Reading<Result<Vec<github::Repo>, github::Error>>;
@@ -111,6 +113,7 @@ pub struct Snapshot {
     pub checks: BTreeMap<String, Arc<Reading<doctor::Report>>>,
     pub attention: Option<Arc<Attention>>,
     pub github: Option<Arc<Github>>,
+    pub proxy_admin: Option<Arc<ProxyAdmin>>,
     pub repos: Option<Arc<Repos>>,
     /// `None` while the repository list failed, because it is then read without one.
     pub hidden: Option<Arc<Hidden>>,
@@ -153,6 +156,7 @@ mod tests {
         assert!(snapshot.checks.is_empty());
         assert!(snapshot.attention.is_none());
         assert!(snapshot.github.is_none());
+        assert!(snapshot.proxy_admin.is_none());
         assert!(snapshot.repos.is_none());
         assert!(snapshot.hidden.is_none());
         assert!(snapshot.release.is_none());

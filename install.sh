@@ -797,6 +797,51 @@ name_the_origin() {
 }
 name_the_origin "$DAEMON_ENV" /etc/caddy/Caddyfile
 
+# Y-777: Caddy's admin API answers every account on this box at 127.0.0.1:2019. An account that
+# changes Caddy's config there speaks to the socket as the proxy yantrad trusts (ADR-0042).
+# $1 is the Caddyfile. Caddy reloads through that API, so the change needs a restart.
+close_the_admin_api() {
+    [ -e "$1" ] && as_root grep -qF 'unix//run/yantra/yantrad.sock' "$1" || return 0
+    as_root grep -qE '^[[:space:]]*admin[[:space:]]+off([[:space:]]|$)' "$1" && return 0
+    if as_root grep -qE '^[[:space:]]*admin([[:space:]]|$)' "$1"; then
+        echo "install: $1 sets Caddy's admin API itself, so it is not changed. Any account on this box can use that API to act as yantrad's proxy; \"admin off\" closes it."
+        return 0
+    fi
+    # The first line that holds only "{" opens the global block. A snippet can stand before the
+    # block, and a comment or a CR can follow the brace.
+    local closed adapted
+    closed=$(as_root cat "$1" | awk '
+        { line[NR] = $0 }
+        !at && /^[ \t]*[{]([ \t]+#.*)?[ \t\r]*$/ { at = NR }
+        END {
+            if (!at) printf "{\n    admin off\n}\n\n"
+            for (i = 1; i <= NR; i++) {
+                print line[i]
+                if (i == at) print "    admin off" (line[i] ~ /\r$/ ? "\r" : "")
+            }
+        }')
+    # Caddy judges a copy before the file changes: a file that Caddy refuses stops the proxy.
+    # The copy is beside the file for its import paths, and cp -p gives it the same owner and mode.
+    as_root cp -p "$1" "$1.admin-off"
+    printf '%s\n' "$closed" | as_root tee "$1.admin-off" >/dev/null
+    adapted=$(as_root caddy adapt --config "$1.admin-off" --adapter caddyfile 2>/dev/null) || true
+    as_root rm -f "$1.admin-off"
+    case "$adapted" in
+    *'"admin":{"disabled":true'*) ;;
+    *)
+        echo "install: $1 is not changed. \"caddy adapt\" did not read a copy with \"admin off\" added as a config with the admin API off. Any account on this box can use that API to act as yantrad's proxy. Put \"admin off\" in the global options block, then run: sudo systemctl restart caddy.service"
+        return 0
+        ;;
+    esac
+    printf '%s\n' "$closed" | as_root tee "$1" >/dev/null
+    if as_root systemctl try-restart caddy.service; then
+        echo "install: Caddy's admin API is now off in $1. Any account on this box could use it to act as yantrad's proxy."
+    else
+        echo "install: $1 now says \"admin off\", but Caddy did not restart. Run: sudo systemctl restart caddy.service"
+    fi
+}
+close_the_admin_api /etc/caddy/Caddyfile
+
 if [ -n "$address" ]; then
     running=no
     if systemctl is-active --quiet yantrad.service ||

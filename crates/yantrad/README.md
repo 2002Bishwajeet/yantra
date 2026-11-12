@@ -23,6 +23,7 @@ API the CLI cannot reach.
 | `GET /api/machines/{name}/readiness` | `yantra doctor <machine>` |
 | `GET /api/attention` | `yantra ls attention` |
 | `GET /api/readiness/github` | `yantra github status` |
+| `GET /api/readiness/proxy` | — |
 | `GET /api/github` | `yantra github status` |
 | `POST /api/github/login` | `yantra github login` |
 | `DELETE /api/github` | `yantra github logout` |
@@ -175,7 +176,7 @@ draw on the same token. GitHub asks for it directly: `/notifications` answers `X
 so the fleet's interval would poll it at twice the rate its own server requests.
 An unreachable GitHub is read again after 5 s, doubling up to the normal interval, and an answer of
 any kind waits the full interval (Y-731).
-`GET /api/readiness/github` is the check about **this** host (Y-175, Y-342): whether the grant the
+`GET /api/readiness/github` is a check about **this** host (Y-175, Y-342): whether the grant the
 daemon holds is present and still accepted. It is a route of its own rather than a tenth check on
 every report, since an answer about this machine copied onto each machine's card claims something no
 ssh session asked. Two of its answers are earned — no grant, and a grant GitHub refused — and every
@@ -186,6 +187,11 @@ other failure is *unknown*, because a GitHub that could not be reached says noth
  "data": {"check": "github", "state": "present",
           "detail": "GitHub accepts the grant, signed in as octocat"}}
 ```
+
+`GET /api/readiness/proxy` is the second check about this host (Y-777), with the same shape and
+the name `proxy-admin`. It is *absent* when Caddy's admin API answers on `127.0.0.1:2019` while the
+daemon trusts a proxy account, because any account on the box can then act as that proxy. The detail
+names the fix: `admin off` in the Caddyfile's global block, and a restart of Caddy.
 
 Every answer names which of three states it is in, so an empty list is never mistaken for a fault:
 

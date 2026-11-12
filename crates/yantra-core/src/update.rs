@@ -294,21 +294,20 @@ fn judge(code: Option<i32>, said: &str) -> Result<(), Error> {
 mod tests {
     use super::*;
 
-    /// `install.sh`'s `name_the_origin`, run with `sh` on two files in `dir`.
-    fn name_the_origin(dir: &Path, env: &str, caddy: Option<&str>) -> String {
+    /// One function of `install.sh`, run with `sh`, and what it printed. `$dir` is `dir`.
+    /// `systemctl` only writes its arguments to `$dir/systemctl`, so no test restarts a unit here.
+    fn install_sh(dir: &Path, function: &str, args: &str) -> String {
         const SCRIPT: &str = include_str!("../../../install.sh");
         let start = SCRIPT
-            .find("name_the_origin() {")
-            .expect("install.sh has name_the_origin");
+            .find(&format!("{function}() {{"))
+            .expect("install.sh has the function");
         let end = start + SCRIPT[start..].find("\n}\n").expect("it ends") + 3;
-        std::fs::write(dir.join("daemon.env"), env).expect("written");
-        if let Some(caddy) = caddy {
-            std::fs::write(dir.join("Caddyfile"), caddy).expect("written");
-        }
         let out = std::process::Command::new("sh")
             .arg("-c")
             .arg(format!(
-                "as_root() {{ \"$@\"; }}\n{}\nname_the_origin \"$1/daemon.env\" \"$1/Caddyfile\"",
+                "dir=$1\nas_root() {{ \"$@\"; }}\nsystemctl() {{ echo \"$*\" >>\"$dir/systemctl\"; }}\n\
+                 caddy() {{ [ -e \"$dir/refused\" ] || echo '{{\"admin\":{{\"disabled\":true}}}}'; }}\n\
+                 {}\n{function} {args}",
                 &SCRIPT[start..end]
             ))
             .arg("sh")
@@ -320,7 +319,34 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    fn name_the_origin(dir: &Path, env: &str, caddy: Option<&str>) -> String {
+        std::fs::write(dir.join("daemon.env"), env).expect("written");
+        if let Some(caddy) = caddy {
+            std::fs::write(dir.join("Caddyfile"), caddy).expect("written");
+        }
+        install_sh(
+            dir,
+            "name_the_origin",
+            "\"$dir/daemon.env\" \"$dir/Caddyfile\"",
+        );
         std::fs::read_to_string(dir.join("daemon.env")).expect("read")
+    }
+
+    /// `close_the_admin_api` on a Caddyfile: the file afterwards, what the run printed, and
+    /// what it asked of `systemctl`. `caddy adapt` accepts the copy unless `refused` is there;
+    /// `tests/caddy_admin.rs` in `yantrad` asks a real Caddy.
+    fn close_the_admin_api(dir: &Path, caddy: &str) -> (String, String, String) {
+        let _ = std::fs::remove_file(dir.join("systemctl"));
+        std::fs::write(dir.join("Caddyfile"), caddy).expect("written");
+        let said = install_sh(dir, "close_the_admin_api", "\"$dir/Caddyfile\"");
+        (
+            std::fs::read_to_string(dir.join("Caddyfile")).expect("read"),
+            said,
+            std::fs::read_to_string(dir.join("systemctl")).unwrap_or_default(),
+        )
     }
 
     const CADDY: &str = "{\n}\n\nhttps://yantra.cloudx.run {\n    bind 100.64.0.1\n    reverse_proxy unix//run/yantra/yantrad.sock {\n    }\n}\n";
@@ -349,6 +375,109 @@ mod tests {
         assert_eq!(name_the_origin(&dir, "A=1\n", None), "A=1\n");
         let other = "https://yantra.cloudx.run {\n    reverse_proxy 100.64.0.1:7717\n}\n";
         assert_eq!(name_the_origin(&dir, "A=1\n", Some(other)), "A=1\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    const RESTART: &str = "try-restart caddy.service\n";
+
+    /// Y-777: a Caddyfile from before this row gets `admin off` in the global block it has,
+    /// Caddy restarts once, and a second run does neither.
+    #[test]
+    fn an_update_closes_the_admin_api_in_the_global_block_once() {
+        let dir = scratch("admin-off");
+        let closed = CADDY.replacen("{\n", "{\n    admin off\n", 1);
+
+        let (file, said, asked) = close_the_admin_api(&dir, CADDY);
+        assert_eq!(file, closed);
+        assert!(said.contains("admin API is now off"), "{said}");
+        assert_eq!(asked, RESTART);
+
+        assert_eq!(
+            close_the_admin_api(&dir, &closed),
+            (closed, String::new(), String::new()),
+            "a second run changes nothing and restarts nothing"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Caddyfile with no global block gets one before everything, its comments included.
+    #[test]
+    fn an_update_adds_a_global_block_when_the_caddyfile_has_none() {
+        let dir = scratch("admin-none");
+        let old = CADDY.replacen("{\n}\n", "# the dashboard\n", 1);
+        let (file, _, asked) = close_the_admin_api(&dir, &old);
+        assert_eq!(file, format!("{{\n    admin off\n}}\n\n{old}"));
+        assert_eq!(asked, RESTART);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The global block is the first line that holds only `{`: a comment or a CR can follow
+    /// the brace, and a snippet can stand before the block.
+    #[test]
+    fn an_update_finds_a_global_block_that_is_not_a_bare_brace_on_line_one() {
+        let dir = scratch("admin-shapes");
+        let commented = CADDY.replacen("{\n", "{ # global options\n", 1);
+        let (file, _, asked) = close_the_admin_api(&dir, &commented);
+        assert_eq!(
+            file,
+            commented.replacen('\n', "\n    admin off\n", 1),
+            "a comment after the brace"
+        );
+        assert_eq!(asked, RESTART);
+
+        let crlf = CADDY.replace('\n', "\r\n");
+        let (file, ..) = close_the_admin_api(&dir, &crlf);
+        assert_eq!(
+            file,
+            crlf.replacen("{\r\n", "{\r\n    admin off\r\n", 1),
+            "CRLF line ends"
+        );
+
+        let snippet = format!("(common) {{\n    encode gzip\n}}\n\n{CADDY}");
+        let (file, ..) = close_the_admin_api(&dir, &snippet);
+        assert_eq!(
+            file,
+            snippet.replacen("\n{\n", "\n{\n    admin off\n", 1),
+            "a snippet before the block"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A copy that `caddy adapt` does not read as a config with the admin API off is not
+    /// written: the Caddyfile stays, Caddy is not restarted, and each run says so.
+    #[test]
+    fn an_update_leaves_a_caddyfile_that_caddy_refuses_with_admin_off() {
+        let dir = scratch("admin-refused");
+        std::fs::write(dir.join("refused"), "").expect("written");
+        for run in ["the first run", "the second run"] {
+            let (file, said, asked) = close_the_admin_api(&dir, CADDY);
+            assert_eq!(file, CADDY, "{run}");
+            assert!(said.contains("is not changed"), "{run}: {said}");
+            assert_eq!(asked, "", "{run}");
+        }
+        assert!(
+            !dir.join("Caddyfile.admin-off").exists(),
+            "the copy is gone"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An `admin` line the owner wrote stays, and the run says what it costs. A Caddyfile
+    /// that does not proxy to the socket is not Yantra's to change.
+    #[test]
+    fn an_update_leaves_an_admin_line_and_another_caddyfile_alone() {
+        let dir = scratch("admin-kept");
+        let own = CADDY.replacen("{\n", "{\n    admin localhost:2020\n", 1);
+        let (file, said, asked) = close_the_admin_api(&dir, &own);
+        assert_eq!(file, own);
+        assert!(said.contains("is not changed"), "{said}");
+        assert_eq!(asked, "");
+
+        let other = "{\n}\n\nhttps://yantra.cloudx.run {\n    reverse_proxy 100.64.0.1:7717\n}\n";
+        assert_eq!(
+            close_the_admin_api(&dir, other),
+            (other.to_owned(), String::new(), String::new())
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

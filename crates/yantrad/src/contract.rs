@@ -361,6 +361,8 @@ async fn fleet() -> Fleet {
         github: Some(Arc::new(Reading::new(doctor::github(Some(&Ok(
             "2002Bishwajeet".into(),
         )))))),
+        // No screen reads this check, so the fixture has no answer for it (Y-777).
+        proxy_admin: None,
         // `/about` is built by hand in `api::answers` for its build date, and
         // its `published` fact is spelled there.
         release: None,

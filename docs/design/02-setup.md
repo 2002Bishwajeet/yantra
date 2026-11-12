@@ -192,6 +192,14 @@ The daemon asks that at most once an hour per machine, because each refused `sud
 auth-log line, and a sweep every 30 s would write 2,880 a day. The dashboard warns and does not
 block a session. The list is now fourteen names.
 
+**2026-11-12, [Y-777](../../tracker.md#3-task-board): `proxy-admin` is the second check about the
+host, and this table does not grow.** Caddy's admin API answers every local account on
+`127.0.0.1:2019`, and an account that changes Caddy's config there acts as the proxy account the
+daemon trusts. While the daemon trusts a proxy account, it connects to that port every 30 seconds
+and serves the answer at `GET /api/readiness/proxy`. A connection is *absent*, and the detail names
+`admin off` and the restart. A refusal is *present*, and so is a daemon that trusts no proxy
+account. A timeout or any other error is *unknown* (R-23). No dashboard screen shows it yet.
+
 ### 3.2 What it must not do
 
 `doctor` is a **read**. It changes nothing, installs nothing, and logs no credential. `yantra doctor

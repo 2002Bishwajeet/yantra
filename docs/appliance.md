@@ -145,9 +145,14 @@ package runs Caddy as `caddy`. On the box,
    or says that no proxy account is set. A name that does not resolve is a warning, and the daemon
    then trusts no account but root. A bad `YANTRA_ORIGIN` stops the daemon, and the journal names
    the variable.
-3. Point the site block at the socket, and keep `bind` on the box's tailnet address:
+3. Turn Caddy's admin API off in the global block. Point the site block at the socket, and keep
+   `bind` on the box's tailnet address:
 
    ```caddyfile
+   {
+       admin off
+   }
+
    yantra.example.com {
        bind 100.x.x.x
        reverse_proxy unix//run/yantra/yantrad.sock {
@@ -156,17 +161,36 @@ package runs Caddy as `caddy`. On the box,
    }
    ```
 
-4. Reload Caddy: `sudo systemctl reload caddy`.
+4. Restart Caddy: `sudo systemctl restart caddy`. A reload goes through the admin API, so it fails
+   once `admin off` is set.
 
 **A box that `domain-setup.sh` named before the passkey gets its origin on its next update.** When
 `/etc/caddy/Caddyfile` proxies to the socket and `daemon.env` names no `YANTRA_ORIGIN`, `install.sh`
 adds `YANTRA_ORIGIN=https://<the Caddyfile's name>` and says so. The update then restarts the
 daemon, and the owner enrols the phone with `yantra passkey code`.
 
+**An update turns the admin API off in a Caddyfile that has it on.** When `/etc/caddy/Caddyfile`
+proxies to the socket and has no `admin` line, `install.sh` adds `admin off` to the global block,
+restarts Caddy once and says so. It does not change a file that has its own `admin` line, and it
+prints that the API can still be open.
+
+**Caddy checks the new file before the update writes it.** `install.sh` adds the line to a copy and
+runs `caddy adapt` on that copy. It writes the Caddyfile only when the result has the admin API
+off. A file that Caddy refuses stops the proxy at the restart. Otherwise the Caddyfile stays as it
+was and Caddy is not restarted. Each update then prints that the API can still be open, and you
+add the line as step 3 shows. This also happens when `caddy` is not on root's `PATH`.
+
 **The cost: any process that runs as `caddy` can name a caller.** It writes the one address that the
 daemon judges. A local process that reaches Caddy is still refused, because Caddy then forwards
 this box's own address. Caddy's `X-Forwarded-For` must hold one address, as the line in step 3
 makes it.
+
+**The admin API must be off, or every account on the box has that power.** By default Caddy
+listens on `127.0.0.1:2019` and asks for no credential. An account that reaches that port can
+change Caddy's config, and Caddy then sends what that account chooses to the socket as the proxy
+that the daemon trusts. `yantrad` looks at that port every 30 seconds while it trusts a proxy
+account. When the port answers, `GET /api/readiness/proxy` says *absent* and the journal has a
+warning with the fix.
 
 ### Run it again to update
 
@@ -174,7 +198,9 @@ makes it.
 restart. It touches no configuration ([D2](design/02-setup.md) §1): an existing `agent.env` or `daemon.env` stays as it
 is, and it does not run `tailscale up` or `tailscale serve` again. **One exception**: a serve on
 port 8443 that still proxies to `http://<address>:7717` is pointed at the socket in the same run,
-because `yantrad` now refuses this box's own address over TCP (ADR-0042). It replaces the binaries
+because `yantrad` now refuses this box's own address over TCP (ADR-0042). On a box with a custom
+name, the run also names the origin and turns Caddy's admin API off
+([behind Caddy](#behind-caddy-on-a-name-you-own)). It replaces the binaries
 and the units, and it ends on the same URL. **A run at a terminal or with `--yes` also repeats step 9**, which
 adds a key or a `Host` block only if it is missing. `yantra-update` runs with neither, so an update
 never runs step 9.

@@ -53,6 +53,8 @@ pub const HEARTBEAT: &str = "heartbeat";
 /// Not one of the checks above: it names a fact about the host this process runs
 /// on rather than about a machine being asked — see [`github`].
 pub const GITHUB: &str = "github";
+/// The second fact about this host — see [`proxy_admin`].
+pub const PROXY_ADMIN: &str = "proxy-admin";
 
 /// Everything ssh has to answer for. Listed so an unreachable machine still
 /// reports every check rather than a short list a consumer has to interpret.
@@ -1373,6 +1375,34 @@ pub fn github(asked: Option<&Result<String, github::Error>>) -> Check {
     }
 }
 
+/// Whether the proxy's admin API is closed on **this** host (Y-777). Caddy's listens on
+/// `127.0.0.1:2019` and asks for no credential, and an account that changes the config there
+/// speaks to the socket as the proxy account the daemon trusts ([ADR-0042]). `None` is no proxy
+/// account trusted; the `Result` is the caller's TCP connect to that port.
+///
+/// **Only a connection is *absent*.** A refusal is *present*, and a timeout or any other error
+/// is *unknown* (R-23).
+///
+/// [ADR-0042]: ../../../docs/adr/0042-the-proxy-hop-is-proved-by-the-kernel.md
+pub fn proxy_admin(asked: Option<&std::io::Result<()>>) -> Check {
+    match asked {
+        None => present(PROXY_ADMIN, "the daemon trusts no proxy account"),
+        Some(Ok(())) => absent(
+            PROXY_ADMIN,
+            "the proxy's admin API answers on 127.0.0.1:2019, so any account on this host can \
+             act as the proxy the daemon trusts — put `admin off` in the Caddyfile's global \
+             block, then run `sudo systemctl restart caddy`",
+        ),
+        Some(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+            present(PROXY_ADMIN, "nothing answers on 127.0.0.1:2019")
+        }
+        Some(Err(error)) => unknown(
+            PROXY_ADMIN,
+            format!("127.0.0.1:2019 could not be asked: {error}"),
+        ),
+    }
+}
+
 /// Every check as [`State::Unknown`], for a machine nothing could be asked of.
 fn nothing_asked(because: &str) -> Vec<Check> {
     let mut checks = vec![unknown(REACHABLE, because), unknown(SSHD, because)];
@@ -1842,7 +1872,7 @@ mod tests {
         assert_eq!(folder_access(&Broken).await.state, State::Unknown);
     }
 
-    /// R-23 on the one check that is about this host: no grant and a refused
+    /// R-23 on the `github` check, which is about this host: no grant and a refused
     /// grant are earned, and a GitHub that could not be reached is neither —
     /// an *absent* there would send someone to sign in on a box that already
     /// has.
@@ -1879,6 +1909,32 @@ mod tests {
             github(Some(&Ok("octocat".to_owned())))
                 .detail
                 .contains("octocat")
+        );
+    }
+
+    /// Y-777: an open admin port is the one *absent*. No proxy account and a refusal are
+    /// *present*, and a look that got no answer is *unknown* (R-23).
+    #[test]
+    fn only_an_admin_api_that_answers_a_trusted_proxy_is_absent() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(proxy_admin(None).state, State::Present);
+        assert_eq!(
+            proxy_admin(Some(&Err(Error::from(ErrorKind::ConnectionRefused)))).state,
+            State::Present
+        );
+        assert_eq!(
+            proxy_admin(Some(&Err(Error::from(ErrorKind::TimedOut)))).state,
+            State::Unknown
+        );
+
+        let open = proxy_admin(Some(&Ok(())));
+        assert_eq!(open.check, "proxy-admin");
+        assert_eq!(open.state, State::Absent);
+        assert!(open.detail.contains("`admin off`"), "{}", open.detail);
+        assert!(
+            open.detail.contains("systemctl restart caddy"),
+            "a reload uses the admin API, so the fix is a restart: {}",
+            open.detail
         );
     }
 
