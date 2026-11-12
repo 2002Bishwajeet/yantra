@@ -66,3 +66,5 @@ Caddy proxies to the daemon's socket. The script names `caddy` as the proxy acco
 ([behind Caddy](../docs/appliance.md#behind-caddy-on-a-name-you-own)). A second run does not add the
 lines again, and it restarts `yantrad` only when it changes one. A new `DOMAIN` costs every passkey.
 A box named before the passkey gets its `YANTRA_ORIGIN` from the Caddyfile on its next update.
+The Caddyfile says `admin off`, because any account on the box can use Caddy's admin API to act as
+that proxy. A box whose Caddyfile lacks the line gets it on its next update, with one Caddy restart.

@@ -797,6 +797,36 @@ name_the_origin() {
 }
 name_the_origin "$DAEMON_ENV" /etc/caddy/Caddyfile
 
+# Y-777: Caddy's admin API answers every account on this box at 127.0.0.1:2019. An account that
+# changes Caddy's config there speaks to the socket as the proxy yantrad trusts (ADR-0042).
+# $1 is the Caddyfile. Caddy reloads through that API, so the change needs a restart.
+close_the_admin_api() {
+    [ -e "$1" ] && as_root grep -qF 'unix//run/yantra/yantrad.sock' "$1" || return 0
+    as_root grep -qE '^[[:space:]]*admin[[:space:]]+off([[:space:]]|$)' "$1" && return 0
+    if as_root grep -qE '^[[:space:]]*admin([[:space:]]|$)' "$1"; then
+        echo "install: $1 sets Caddy's admin API itself, so it is not changed. Any account on this box can use that API to act as yantrad's proxy; \"admin off\" closes it."
+        return 0
+    fi
+    local closed
+    closed=$(as_root cat "$1" | awk '
+        seen { print; next }
+        /^[ \t]*(#|$)/ { held = held $0 "\n"; next }
+        {
+            seen = 1
+            if ($0 ~ /^[{][ \t]*$/) printf "%s%s\n    admin off\n", held, $0
+            else printf "{\n    admin off\n}\n\n%s%s\n", held, $0
+        }')
+    # Empty when only a comment names the socket; an empty file must not be written.
+    [ -n "$closed" ] || return 0
+    printf '%s\n' "$closed" | as_root tee "$1" >/dev/null
+    if as_root systemctl try-restart caddy.service; then
+        echo "install: Caddy's admin API is now off in $1. Any account on this box could use it to act as yantrad's proxy."
+    else
+        echo "install: $1 now says \"admin off\", but Caddy did not restart. Run: sudo systemctl restart caddy.service"
+    fi
+}
+close_the_admin_api /etc/caddy/Caddyfile
+
 if [ -n "$address" ]; then
     running=no
     if systemctl is-active --quiet yantrad.service ||

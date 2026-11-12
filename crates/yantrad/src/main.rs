@@ -326,6 +326,7 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         fleet.github.clone(),
         relay,
         pulls_relay,
+        proxy.is_some(),
     );
     let closing = fleet.closing.clone();
     tokio::spawn(async move {

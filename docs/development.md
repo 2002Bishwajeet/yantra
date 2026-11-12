@@ -369,7 +369,7 @@ as an unprivileged account through `sudo`, against a release served from inside
 the container by `tests/fixture/release.sh` — `/etc/hosts` points github.com and
 api.github.com at a local HTTPS server the container trusts, which is how a *corrupted* archive gets
 served and refused. Both skip and label themselves the same way. `update.rs` uses the
-same container, and so does `own_box.rs`, which also needs the `yantra` binary that a workspace run builds. One `installer.rs` test (Y-473) runs the script in a bare `debian:trixie`, which has no `curl`. `release.yml` runs its last test against the x86_64 archive it built (Y-483). What no
+same container, and so does `own_box.rs`, which also needs the `yantra` binary that a workspace run builds. `caddy_admin.rs` (Y-777) starts Fedora's Caddy there and asks its admin port as an account that is not `caddy`. One `installer.rs` test (Y-473) runs the script in a bare `debian:trixie`, which has no `curl`. `release.yml` runs its last test against the x86_64 archive it built (Y-483). What no
 container can show is the boot ordering against a real `tailscaled`.
 
 ## Cross-compiling for the appliance

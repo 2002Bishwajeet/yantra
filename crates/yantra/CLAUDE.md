@@ -48,7 +48,7 @@ Someone will put these in a shell script, so they are behaviour, not cosmetics.
 | `update` on a box with no `/usr/local/bin/yantra-update` | 1 | `just appliance-install` leaves none, and the error names `install.sh` |
 | `tokens` on a session that has spent nothing | **0** | it reports a measurement rather than a state, and zero is one — the transcript was read |
 | `edit --machine` when that machine cannot be reached | 1 | it cannot be *known* that no session is being stranded, and a check that cannot know must refuse rather than allow (R-23) |
-| `github status`, unless GitHub accepts the grant | 1 | `doctor`'s rule on the one check about this host, so an installer can loop on it. No grant in this shell is 1 and names `YANTRA_GITHUB_TOKEN` |
+| `github status`, unless GitHub accepts the grant | 1 | `doctor`'s rule on the `github` check about this host, so an installer can loop on it. No grant in this shell is 1 and names `YANTRA_GITHUB_TOKEN` |
 | `github logout` when no grant line is there | **0** | absence is the state asked for — `down`'s rule |
 | `github client-id --clear` when no client id line is there | **0** | absence is the state asked for — `down`'s rule |
 | `ssh-identity --machine m --user u` when ssh logs in to `m` as someone else | 1 | a block already in the config, or an owner's `Host *` above the new one, wins, so the verb did not do what it says. It names the account that wins, and it rewrites nothing (ADR-0009, ADR-0029) |

@@ -3,6 +3,7 @@
 //! Nothing here awaits ssh on behalf of a request: the tasks below look on
 //! their own schedule and write into the snapshot, and a handler reads memory.
 
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -53,6 +54,12 @@ const RELEASE: Duration = Duration::from_secs(3600);
 /// interval. Any answer, a refusal included, waits the full interval.
 const RETRY: Duration = Duration::from_secs(5);
 
+/// Where Caddy's admin API listens unless the Caddyfile says `admin off` (Y-777).
+const PROXY_ADMIN: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 2019);
+
+/// Loopback answers or refuses at once, so a connect this slow is not an answer.
+const PROXY_ADMIN_LIMIT: Duration = Duration::from_secs(2);
+
 pub type Model = Arc<RwLock<Snapshot>>;
 
 /// One task per class. A fleet-wide session query costs a full `ConnectTimeout`
@@ -71,12 +78,15 @@ pub type Model = Arc<RwLock<Snapshot>>;
 /// ones not on `EVERY` — see [`ATTENTION`] for why. **They also wake when the
 /// grant changes**, so a sign-in shows its repositories now and a logout
 /// empties them now, rather than at the next tick.
+///
+/// `proxied` is whether the daemon trusts a proxy account on the socket.
 pub fn spawn<I: Inventory + Send + Sync + 'static>(
     fleet: &Fleet,
     inventory: I,
     grant: Grant,
     relay: Option<Relay>,
     pulls_relay: Option<Relay>,
+    proxied: bool,
 ) {
     let model = &fleet.model;
     let viewers = fleet.viewers.clone();
@@ -123,6 +133,15 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     tokio::spawn(async move {
         loop {
             look_at_readiness(&readiness).await;
+            tokio::time::sleep(EVERY).await;
+        }
+    });
+
+    let proxy_admin = model.clone();
+    tokio::spawn(async move {
+        let mut open = false;
+        loop {
+            look_at_proxy_admin(&proxy_admin, proxied, PROXY_ADMIN, &mut open).await;
             tokio::time::sleep(EVERY).await;
         }
     });
@@ -415,6 +434,29 @@ async fn look_at_github(
 enum Verdict {
     Accepted(String),
     Refused,
+}
+
+/// Y-777: whether the proxy's admin API answers on this host while the daemon trusts a proxy
+/// account. One loopback connect and no ssh, so it has its own task for the reason
+/// [`look_at_github`] has. The journal has one warning each time the port turns open.
+async fn look_at_proxy_admin(model: &Model, proxied: bool, address: SocketAddr, open: &mut bool) {
+    let asked = if proxied {
+        let connect = tokio::net::TcpStream::connect(address);
+        Some(
+            match tokio::time::timeout(PROXY_ADMIN_LIMIT, connect).await {
+                Ok(answer) => answer.map(drop),
+                Err(slow) => Err(slow.into()),
+            },
+        )
+    } else {
+        None
+    };
+    let check = doctor::proxy_admin(asked.as_ref());
+    let was_open = std::mem::replace(open, check.state == doctor::State::Absent);
+    if *open && !was_open {
+        tracing::warn!("{}", check.detail);
+    }
+    model.write().await.proxy_admin = Some(Arc::new(Reading::new(check)));
 }
 
 /// Every repository the grant can see, for New session to search **in the
@@ -938,6 +980,35 @@ mod tests {
         assert!(reading.value().detail.contains("yantra github login"));
         assert_eq!(last, None);
         assert!(capture.0.lock().expect("the log").is_empty());
+    }
+
+    /// Y-777, the row's readiness test: an admin port that answers while a proxy account is
+    /// trusted is *absent* on `GET /readiness/proxy`, and the journal says so once.
+    #[tokio::test]
+    async fn an_open_admin_port_fails_the_proxy_check_only_when_a_proxy_is_trusted() {
+        let (capture, _logging) = logged();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("its address");
+        let fleet = Fleet::default();
+        let served = || crate::api::tests::get_json(fleet.clone(), "/readiness/proxy");
+        let mut open = false;
+
+        for _ in 0..2 {
+            look_at_proxy_admin(&fleet.model, true, address, &mut open).await;
+        }
+        let body = served().await;
+        assert_eq!(body["data"]["check"], "proxy-admin", "{body}");
+        assert_eq!(body["data"]["state"], "absent", "{body}");
+        assert!(body["age_seconds"].as_u64().is_some(), "{body}");
+        let log = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+        assert_eq!(log.matches("admin off").count(), 1, "{log}");
+
+        look_at_proxy_admin(&fleet.model, false, address, &mut open).await;
+        assert_eq!(served().await["data"]["state"], "present");
+
+        drop(listener);
+        look_at_proxy_admin(&fleet.model, true, address, &mut open).await;
+        assert_eq!(served().await["data"]["state"], "present");
     }
 
     fn logged() -> (
