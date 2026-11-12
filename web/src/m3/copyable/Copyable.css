@@ -35,3 +35,14 @@
 .m3-copyable__hint:empty {
   margin-top: 0;
 }
+
+/* The button is 40px tall; this grows its hit area to the 48px touch target. */
+.m3-copyable__row .m3-button {
+  position: relative;
+}
+
+.m3-copyable__row .m3-button::after {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}

@@ -43,6 +43,33 @@ function declined(cause: unknown): ApiError {
   })
 }
 
+/** The page is not under the name the hub's passkeys belong to, so the browser
+ *  would refuse with a bare SecurityError. `line` is what the owner adds to
+ *  `daemon.env`. */
+export class OriginMismatch extends ApiError {
+  readonly line: string
+
+  constructor(page: string, rpId: string) {
+    super('refused', '', {
+      sentence:
+        `This page is at ${page}, but this hub's passkeys belong to ${rpId}. ` +
+        `Open the dashboard at ${rpId}. ` +
+        'Or add the line below to /etc/yantra/daemon.env on the hub, then run sudo systemctl restart yantrad. ' +
+        'Every device then sets up its passkey again.',
+    })
+    this.line = `YANTRA_ORIGIN=${page}`
+  }
+}
+
+/** A relying party id fits when the page's host is that name or sits under it. */
+function mismatch(options: unknown): OriginMismatch | undefined {
+  const o = options as { rpId?: string; rp?: { id?: string } }
+  const rpId = o.rpId ?? o.rp?.id
+  const { hostname, origin } = window.location
+  if (!rpId || hostname === rpId || hostname.endsWith(`.${rpId}`)) return undefined
+  return new OriginMismatch(origin, rpId)
+}
+
 async function ceremony<T, C>(
   start: string,
   finish: string,
@@ -50,6 +77,8 @@ async function ceremony<T, C>(
   ask: (options: T) => Promise<C>,
 ): Promise<void> {
   const begun = await fetchJson<Begun<T>>(start, { method: 'POST', ...json(body) }, fields('ceremony', 'options'))
+  const wrong = mismatch(begun.options.publicKey)
+  if (wrong) throw wrong
   let credential: C
   try {
     credential = await ask(begun.options.publicKey)
