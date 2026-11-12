@@ -1,0 +1,77 @@
+/* Floats over `main`, so the page under it does not move. It takes no pointer:
+   it is a word, and what is under it stays in reach. */
+.reconnecting {
+  position: fixed;
+  /* Under the 64 px bar the phone and the desktop draw. */
+  top: calc(var(--m3-safe-top) + 72px);
+  left: 50%;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 32px;
+  padding: 0 16px 0 12px;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  white-space: nowrap;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-high);
+  box-shadow: var(--md-sys-elevation-level2);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  translate: -50% 0;
+  transition:
+    opacity 180ms var(--md-sys-motion-spring-fast-effects),
+    translate 180ms var(--md-sys-motion-easing-emphasized-decelerate),
+    display 180ms allow-discrete;
+}
+
+[data-shell="tablet"] .reconnecting {
+  top: calc(var(--m3-safe-top) + 16px);
+}
+
+/* It leaves faster than it came: the daemon is back, and the page is the news. */
+.reconnecting[hidden] {
+  display: none;
+  opacity: 0;
+  translate: -50% -8px;
+  transition-duration: 120ms;
+}
+
+@starting-style {
+  .reconnecting {
+    opacity: 0;
+    translate: -50% -8px;
+  }
+}
+
+.reconnecting__spinner {
+  flex: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--md-sys-shape-corner-full);
+  animation: reconnecting-spin 800ms linear infinite;
+}
+
+@keyframes reconnecting-spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+/* The open ring still says "working" in one frame. */
+@media (prefers-reduced-motion: reduce) {
+  .reconnecting {
+    transition: none;
+  }
+
+  .reconnecting__spinner {
+    animation: none;
+  }
+}

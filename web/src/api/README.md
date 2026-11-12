@@ -34,6 +34,9 @@ frame, each with a microphone sentence from `mic.ts`.
 A `looked: failed` reading is **data, not an error** (R-23): the section draws it in place.
 `fromReading()` turns one into an `ApiError` for a surface that wants a boundary instead.
 
+A polled read that keeps its reading rejects with `Unanswered`, a `network` error (Y-744). `held()`
+in `client.ts` throws it for at most `HOLD_MS`, and only the shell reads it, for the *Reconnecting* mark.
+
 Errors stay in `error` by default. A route component under `ErrorBoundary` wraps its options in
 `queryOptionsThrowing()`, and spreads `useResetOnRouteChange()` onto the boundary so a navigation
 clears both the boundary and Query's own error state.

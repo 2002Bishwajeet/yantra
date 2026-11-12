@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query'
+import { type QueryFunction, QueryClient } from '@tanstack/react-query'
 import type { Looked } from '@/api'
 import { ApiError, isApiError } from '@/api/errors'
 import { signedOut } from '@/api/signedIn'
@@ -122,7 +122,16 @@ export const json = (body: unknown): RequestInit => ({
 export const failed = (error: string) =>
   ({ looked: 'failed', age_seconds: 0, error }) as const
 
-const notReached = (why: string) => failed(`${NOT_REACHED}: ${why}`)
+/** The failed looks that no answer from the daemon stands behind. `held`
+ *  reads the mark and never the words, since a status read keeps its own. */
+const lost = new WeakSet<ReturnType<typeof failed>>()
+
+export function unreached(reading: ReturnType<typeof failed>) {
+  lost.add(reading)
+  return reading
+}
+
+const notReached = (why: string) => unreached(failed(`${NOT_REACHED}: ${why}`))
 
 /** A read's status other than 2xx and 401. Only the daemon answers 403, with
  *  its reason; anything else came from between this browser and the daemon. */
@@ -162,9 +171,9 @@ export async function envelope<T>(
 }
 
 /** Never throws: a dead daemon becomes the same `failed` envelope the daemon
- *  itself produces, so the page has one failure path rather than two — and
- *  Query's own `isError` is therefore a state the fleet pages cannot reach
- *  (R-23: a look that failed is data about the fleet, not an exception). */
+ *  itself produces, so the page has one failure path rather than two (R-23: a
+ *  look that failed is data about the fleet, not an exception). `held` is what
+ *  throws, and only while the page has a reading to keep. */
 export async function look<T>(
   path: string,
   signal: AbortSignal,
@@ -209,6 +218,42 @@ export const ATTENTION_SWEEP_MS = 300_000
 /** The daemon refreshes every 30 s, so polling faster buys no fresher data —
  *  it keeps the age on screen ticking. */
 export const POLL_MS = 5_000
+
+/** How long a page keeps its reading while the daemon does not answer: three
+ *  polls. A wake from sleep or a daemon restart is shorter than this. */
+export const HOLD_MS = 15_000
+
+/** A polled read the daemon did not answer, thrown so Query keeps the reading
+ *  it holds. `since` is when the run of them began. */
+export class Unanswered extends ApiError {
+  readonly since: number
+
+  constructor(said: string, since: number) {
+    super('network', said)
+    this.since = since
+  }
+}
+
+/** Y-744: one unanswered poll does not take a reading off the page. While the
+ *  cache holds a reading that is not a failure, an unanswered `read` throws
+ *  `Unanswered`: Query keeps `data` and `dataUpdatedAt`, and the shell marks
+ *  the page. After `HOLD_MS` of them the failed look is the answer, and the
+ *  page draws it. `every` is the read's poll. Two polls with no read are a
+ *  hidden tab or a sleeping laptop, so the run starts again after them. */
+export function held<T>(read: QueryFunction<T>, every = POLL_MS): QueryFunction<T> {
+  return async (context) => {
+    const answer = await read(context)
+    const failure = answer as ReturnType<typeof failed>
+    if (!lost.has(failure)) return answer
+    const state = context.client.getQueryState<{ looked?: unknown }>(context.queryKey)
+    if (state?.data === undefined || state.data.looked === 'failed') return answer
+    const now = Date.now()
+    const { error, errorUpdatedAt } = state
+    const since = error instanceof Unanswered && now - errorUpdatedAt <= 2 * every ? error.since : now
+    if (now - since >= Math.max(HOLD_MS, every)) return answer
+    throw new Unanswered(failure.error, since)
+  }
+}
 
 /** How many more times a `retryable` kind is asked, and how long between. */
 export const RETRIES = 2

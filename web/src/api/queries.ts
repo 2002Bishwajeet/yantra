@@ -29,6 +29,7 @@ import {
   failed,
   fetchJson,
   fields,
+  held,
   json,
   look,
   NOT_REACHED,
@@ -36,6 +37,7 @@ import {
   SWEEP_MS,
   type Shape,
   unanswered,
+  unreached,
 } from '@/api/client'
 import { type ApiError, isApiError } from '@/api/errors'
 import { keys, type Window } from '@/api/keys'
@@ -47,6 +49,11 @@ const workspace = (name: string, tail: string) =>
 const machine = (name: string, tail: string) =>
   `/api/machines/${encodeURIComponent(name)}/${tail}`
 
+/** What every `held` read sets. The poll is the retry, so a dead daemon is
+ *  asked on one clock. A tab that is seen again asks at once, whatever the
+ *  age of its reading, because the reads it missed are the ones that fail. */
+const polled = { retry: false, refetchOnWindowFocus: 'always' } as const
+
 /** A class the daemon sweeps: served from its snapshot, polled to keep the age
  *  ticking, and fresh for as long as the sweep that made it. */
 function swept<T>(
@@ -57,9 +64,10 @@ function swept<T>(
 ) {
   return queryOptions({
     queryKey,
-    queryFn: ({ signal }) => look<T>(path, signal),
+    queryFn: held(({ signal }) => look<T>(path, signal), refetchInterval),
     staleTime,
     refetchInterval,
+    ...polled,
   })
 }
 
@@ -95,7 +103,7 @@ export const machineReadinessQuery = (name: string) =>
   queryOptions({
     // Widened as `swept` widens it, so `useReading` takes it.
     queryKey: keys.readiness(name) as readonly unknown[],
-    queryFn: async ({ signal }): Promise<Looked<Readiness>> => {
+    queryFn: held(async ({ signal }): Promise<Looked<Readiness>> => {
       const path = machine(name, 'readiness')
       try {
         const response = await fetch(path, { signal })
@@ -104,11 +112,12 @@ export const machineReadinessQuery = (name: string) =>
         return await envelope<Readiness>(response, path)
       } catch (cause) {
         if (signal.aborted) throw cause
-        return failed(`${NOT_REACHED}: ${String(cause)}`)
+        return unreached(failed(`${NOT_REACHED}: ${String(cause)}`))
       }
-    },
+    }),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
+    ...polled,
   })
 /** On the daemon's 300 s clock rather than the 30 s sweep, which is why the
  *  band that draws it stamps itself (D6 §2). */
@@ -127,20 +136,21 @@ async function lookAtAgent(
   try {
     const response = await fetch(path, { signal })
     if (response.status === 404) return MISSING
-    if (!response.ok) return failed(`${path} answered ${response.status}`)
+    if (!response.ok) return unreached(failed(`${path} answered ${response.status}`))
     return await envelope<WorkspaceStatus>(response, path)
   } catch (cause) {
     if (signal.aborted) throw cause
-    return failed(String(cause))
+    return unreached(failed(String(cause)))
   }
 }
 
 export const statusQuery = (name: string) =>
   queryOptions({
     queryKey: keys.status(name),
-    queryFn: ({ signal }) => lookAtAgent(workspace(name, 'status'), signal),
+    queryFn: held(({ signal }) => lookAtAgent(workspace(name, 'status'), signal)),
     staleTime: SWEEP_MS,
     refetchInterval: POLL_MS,
+    ...polled,
   })
 
 /** Try again, from any surface: every read is asked again, and so is a status
@@ -152,7 +162,8 @@ export async function readAgain(client: QueryClient) {
   const listed = client.getQueryData(workspacesQuery().queryKey)
   if (listed?.looked !== 'ok') return
   const names = listed.data.map((one) => one.name)
-  await Promise.all(names.map((name) => client.fetchQuery(statusQuery(name))))
+  // A held read rejects, and the reading it keeps is the answer.
+  await Promise.all(names.map((name) => client.fetchQuery(statusQuery(name)).catch(() => undefined)))
   const failed = names.filter((name) => {
     const answer = client.getQueryData(statusQuery(name).queryKey)
     return answer !== undefined && answer !== MISSING && answer.looked === 'failed'

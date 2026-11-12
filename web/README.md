@@ -911,6 +911,7 @@ src/
                      one set of notifications, at three widths
     formFactor.ts    phone / tablet / desktop, from three media queries
     UpdateNotice.tsx a banner on every page but About when a newer release is out; Dismiss is a pref
+    Reconnecting.tsx the mark a page wears while it keeps its readings and the daemon does not answer (Y-744)
     prefs.ts         `localStorage` under one versioned key (ADR-0024 §5)
   screens/
     dashboard/       `/` — the bands, the status strip, and the first run
@@ -998,12 +999,21 @@ router, [CLAUDE.md](../CLAUDE.md) §B1. Every read is a `queryOptions` in
 it.** `api.ts`'s three variants say *nobody looked*, *a look failed* and *a
 machine did not answer*, and R-23 is the whole reason they are three things.
 Query's `isLoading` and `isError` are a second, weaker vocabulary for the first
-two, so a swept read never uses them:
+two, so a surface never reads them from a swept read:
 
-- **A swept read's query function never throws**, except to re-raise an abort. A
+- **A swept read's `look` never throws**, except to re-raise an abort. A
   non-200 becomes `failed` inside it, because every fleet state answers 200 — so
   a status code is a fact about this browser reaching the daemon, never about the
   fleet — and the page keeps **one** failure path.
+- **`held` throws only to keep a reading (Y-744).** It wraps every polled read.
+  When the daemon does not answer and the cache holds a reading that is not a
+  failure, it throws `Unanswered`, so Query keeps `data` and its age. It does
+  this for at most `HOLD_MS`, which is 15 s or three polls. After that the
+  failed look is the answer, and the page draws it. The shell reads the error
+  and draws the *Reconnecting* mark
+  ([`shell/Reconnecting.tsx`](src/shell/Reconnecting.tsx)). A refusal and a
+  failure the daemon reported are never held. These reads are not retried,
+  because the poll is the retry, and a tab that becomes visible asks at once.
 - **`data === undefined` is `{looked: 'never'}`**, which is the same sentence the
   daemon sends before its first sweep. Nothing distinguishes them, and nothing
   should: neither is a reading.
