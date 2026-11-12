@@ -34,6 +34,7 @@ use crate::github;
 use crate::inventory::{self, MachineInfo};
 use crate::sessions::{self, MachineSessions};
 use crate::status::{self, Fleet};
+use crate::update;
 use crate::workspace::{self, Listing};
 
 /// One look, and the moment it finished.
@@ -113,7 +114,9 @@ pub struct Snapshot {
     pub repos: Option<Arc<Repos>>,
     /// `None` while the repository list failed, because it is then read without one.
     pub hidden: Option<Arc<Hidden>>,
-    pub release: Option<Arc<Release>>,
+    /// With the channel it was looked up on, so About never pairs one
+    /// channel's release with another (Y-735).
+    pub release: Option<(update::Channel, Arc<Release>)>,
 }
 
 impl Snapshot {

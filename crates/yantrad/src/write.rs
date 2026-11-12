@@ -1711,9 +1711,10 @@ struct Rechannel {
 }
 
 /// Settings' channel switch (Y-662). The daemon writes one word to the file
-/// the root unit reads, and names no version, then wakes the release look so
-/// About compares against the new channel within seconds. A box whose updater
-/// has not yet made the file is a **409**.
+/// the root unit reads, and names no version, then wakes the release look.
+/// It answers once the look holds the new channel's release, because the page
+/// reads About again on this answer (Y-735). A box whose updater has not yet
+/// made the file is a **409**.
 async fn rechannel<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
@@ -1735,8 +1736,31 @@ async fn rechannel<I: Inventory + Clone + Send + Sync + 'static>(
     })?;
     tracing::info!("update channel set to {} by {}", asked.channel, caller.node);
     fleet.look_at_release.notify_one();
+    let looked = async {
+        while fleet
+            .model
+            .read()
+            .await
+            .release
+            .as_ref()
+            .is_none_or(|(on, _)| *on != asked.channel)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    };
+    // A look that has not answered by then leaves About saying `never`, not
+    // the old channel's release.
+    if tokio::time::timeout(RELEASE_LOOK, looked).await.is_err() {
+        tracing::warn!(
+            "the release look did not read the {} channel in time",
+            asked.channel
+        );
+    }
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// One GitHub call's own timeout, and some more for a look already in flight.
+const RELEASE_LOOK: std::time::Duration = std::time::Duration::from_secs(20);
 
 fn from_update(error: &update::Error) -> StatusCode {
     match error {
@@ -7692,12 +7716,28 @@ mod tests {
     }
 
     /// Y-662: the owner's node writes one word, and the release look wakes.
+    /// Y-735: the 204 waits for that look, so the About read it triggers
+    /// finds the nightly release and not the stable one still held.
     #[tokio::test]
-    async fn the_owner_switches_the_channel_and_the_release_look_wakes() {
+    async fn the_owner_switches_the_channel_and_the_answer_waits_for_the_look() {
         let (fleet, channel) = channel_fleet("owner", true);
-        let woken = fleet.look_at_release.clone();
+        let held = |channel, tag| {
+            let release = github::Release::parse(tag).expect("a version");
+            Some((
+                channel,
+                Arc::new(yantra_core::snapshot::Reading::new(Ok(release))),
+            ))
+        };
+        fleet.model.write().await.release = held(update::Channel::Stable, "0.12.0");
+        let (woken, model) = (fleet.look_at_release.clone(), fleet.model.clone());
+        let looker = tokio::spawn(async move {
+            woken.notified().await;
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            model.write().await.release = held(update::Channel::Nightly, "0.12.1");
+        });
 
         let owner = direct(tailnet(vec![(address(9), caller(ME, &[]))]));
+        let model = fleet.model.clone();
         let (status, body) = switch(owner, fleet, r#"{"channel":"nightly"}"#).await;
 
         assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
@@ -7705,9 +7745,9 @@ mod tests {
             std::fs::read_to_string(&channel).expect("the channel"),
             "nightly\n"
         );
-        tokio::time::timeout(std::time::Duration::from_secs(1), woken.notified())
-            .await
-            .expect("the release look was woken");
+        let (on, _) = model.read().await.release.clone().expect("looked");
+        assert_eq!(on, update::Channel::Nightly, "answered before the look");
+        looker.await.expect("the look ran");
     }
 
     #[tokio::test]

@@ -282,7 +282,8 @@ export function useApplyUpdate() {
 }
 
 /** Y-662: `PUT /api/update/channel` → 204. The daemon rewrites the channel the
- *  update unit reads and wakes its release look, so About is read again. A 409
+ *  update unit reads and answers once its release look has read that channel
+ *  (Y-735), so the About read that follows matches the switch. A 409
  *  is a box whose updater has not yet made the channel file. */
 export function useSetChannel() {
   const client = useQueryClient()
