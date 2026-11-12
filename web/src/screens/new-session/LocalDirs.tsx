@@ -10,7 +10,7 @@ import { Button } from '@/m3/button/Button'
 import { FilterChip } from '@/m3/chip/Chip'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { usePrefs } from '@/shell/prefs'
 import { under, useNoAccess } from './dirs'
@@ -321,7 +321,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
 
       {source ? (
         <p className="ns__chosen">
-          <Mono>{tilde(source.path, root)}</Mono>
+          <Text scale="body-small">{tilde(source.path, root)}</Text>
           <Text scale="body-small" tone={source.checked === 'no' ? 'error' : 'variant'}>
             {source.checked === 'no'
               ? `${machine} has no directory at ${tilde(source.path, root)}. Make it there, or choose another.`
@@ -331,7 +331,7 @@ export function LocalDirs(props: { form: SessionForm; values: Values }) {
                   ? slug(source.origin)
                   : 'not a git repository — fine, if that is what you meant'}
           </Text>
-          {source.because ? <Mono className="ns__because">{source.because}</Mono> : null}
+          {source.because ? <Text scale="body-small" className="ns__because m3-wrap">{source.because}</Text> : null}
         </p>
       ) : null}
     </div>

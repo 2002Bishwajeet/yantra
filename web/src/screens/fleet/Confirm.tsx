@@ -6,7 +6,6 @@ import { Button } from '@/m3/button/Button'
 import { Dialog, DialogClose, DialogPopup, DialogTrigger } from '@/m3/dialog/Dialog'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Row, RowText } from '@/m3/row/Row'
-import { Mono } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import './Confirm.css'
@@ -197,7 +196,7 @@ export function DeleteWorkspace(props: DeleteWorkspaceProps) {
       }
       body={
         <>
-          This removes the workspace file from <Mono>~/.config/yantra/workspaces</Mono> on the machine that runs yantrad; the
+          This removes the workspace file from ~/.config/yantra/workspaces on the machine that runs yantrad; the
           repository and the tmux session stay.
         </>
       }

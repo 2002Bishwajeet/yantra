@@ -10,7 +10,7 @@
   padding: 0 4px;
 }
 
-.fleet__eyebrow > .m3-mono {
+.fleet__eyebrow > .m3-num {
   font-size: var(--md-sys-typescale-body-small-size);
   line-height: var(--md-sys-typescale-body-small-line-height);
 }

@@ -144,7 +144,7 @@ export function ConnectSheet(props: { open: boolean; onOpenChange: (open: boolea
             <Text render={<p />} scale="body-medium" tone="error" emphasized>
               {login.error.describe()}
             </Text>
-            <Mono className="settings__said">{login.error.said}</Mono>
+            <Text scale="body-small" className="settings__said">{login.error.said}</Text>
           </div>
         ) : null}
         <Text render={<p />} scale="body-small" tone="variant">

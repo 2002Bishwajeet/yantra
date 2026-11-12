@@ -5,7 +5,7 @@ import { useSetRelay } from '@/api/mutations'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { IconButton } from '@/m3/icon-button/IconButton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { RestartNow } from './RestartNow'
 import { Sheet } from './Sheet'
@@ -182,7 +182,7 @@ export function PushSetup(props: { open: boolean; onOpenChange: (open: boolean) 
                   </Text>
                   {/* The daemon's own words: they name the file or what the relay
                       said, and never the topic or the token. */}
-                  <Mono className="settings__said">{relay.error.said}</Mono>
+                  <Text scale="body-small" className="settings__said">{relay.error.said}</Text>
                   {relay.error.status === 502 ? <RestartNow key={saves} /> : null}
                 </>
               ) : null}

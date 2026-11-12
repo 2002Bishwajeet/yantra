@@ -25,7 +25,7 @@ import { Pill } from '@/m3/pill/Pill'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { answerFailure, reachWords } from '@/lib/checks'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Mono, Num, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { type Band, daemonCouldNotRead, speaks, unreachable, work, type WorkRow } from '@/work'
@@ -220,7 +220,7 @@ function Group(props: {
         <Eyebrow render={<h2 />} id={`fleet-${band}`}>
           {title}
         </Eyebrow>
-        {count > 0 ? <Mono>{count}</Mono> : null}
+        {count > 0 ? <Num>{count}</Num> : null}
         {note ? (
           <Text scale="body-small" tone="variant">
             {note}
@@ -257,7 +257,7 @@ function Idle(props: { rows: WorkRow[]; sessions: Sessions; limit: number; pendi
         <Eyebrow render={<h2 />} id="fleet-idle">
           Idle
         </Eyebrow>
-        {rows.length > 0 ? <Mono>{rows.length}</Mono> : null}
+        {rows.length > 0 ? <Num>{rows.length}</Num> : null}
         <Text scale="body-small" tone="variant">
           {limit === 0 ? 'nothing running' : 'nothing running, most recent first'}
         </Text>

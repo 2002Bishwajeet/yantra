@@ -18,7 +18,7 @@ import { State, type MarkState } from '@/m3/mark/Mark'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Mono, Num, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { useFab } from '@/shell/primary'
 import { PrimaryAction } from '@/shell/PrimaryAction'
@@ -339,10 +339,10 @@ export function Setup() {
       <PageHeader
         stamp={
           machines.looked !== 'pending' && read ? (
-            <Mono>
+            <Num>
               as of {ago(read.age, now).text}
               {read.late.map((one) => ` · ${one.name} ${ago(one.age, now).text}`)}
-            </Mono>
+            </Num>
           ) : undefined
         }
         title="Set up Yantra"
@@ -372,9 +372,9 @@ export function Setup() {
         <>
           <div className="setup__progress">
             <div className="setup__count">
-              <Mono>
+              <Num>
                 {done} of {REQUIRED} done
-              </Mono>
+              </Num>
             </div>
             <Track className="setup__track" label={`${done} of ${REQUIRED} steps done`} value={done / REQUIRED} />
           </div>

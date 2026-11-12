@@ -37,7 +37,7 @@ import { PageHeader } from '@/m3/page/PageHeader'
 import { Pill } from '@/m3/pill/Pill'
 import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Mono, Num, Text } from '@/m3/text/Text'
 import { IconTile, Tile } from '@/m3/tile/Tile'
 import { Track } from '@/m3/track/Track'
 import { useFormFactor } from '@/shell/formFactor'
@@ -85,10 +85,10 @@ function Stamp(props: { reads: Parameters<typeof stamp>[0]; now: number; classNa
   const read = stamp(reads)
   if (!read) return null
   return (
-    <Mono className={className ?? 'dash__stamp'}>
+    <Num className={className ?? 'dash__stamp'}>
       as of {ago(read.age, now).text}
       {read.late.map((one) => ` · ${one.name} ${ago(one.age, now).text}`)}
-    </Mono>
+    </Num>
   )
 }
 
@@ -198,7 +198,7 @@ function GithubRow(props: { item: Item; kind: 'review' | 'issue'; now: number })
         supporting={
           <>
             {item.title}
-            {age ? <> · <Mono className="dash__when">{age.text}</Mono></> : null}
+            {age ? <> · <Num className="dash__when">{age.text}</Num></> : null}
           </>
         }
       />
@@ -224,7 +224,7 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
           headline={`${row.name} will not load`}
           supporting={
             <State size="small" state="failed">
-              <Mono>{row.error}</Mono>
+              <Mono className="m3-wrap">{row.error}</Mono>
             </State>
           }
         />
@@ -251,10 +251,10 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
                 <>
                   {' '}
                   · asked{' '}
-                  <Mono className="dash__when">
+                  <Num className="dash__when">
                     {ago(now / 1000 - asked.at, now).text}
                     {isAge(now / 1000 - asked.at) ? ' ago' : null}
-                  </Mono>{' '}
+                  </Num>{' '}
                   · {asked.said}
                 </>
               ) : null}
@@ -400,7 +400,7 @@ function RunningRow(props: {
             </State>
           }
         />
-        <Mono className="dash__elapsed dash__when">{seconds === null ? '' : elapsed(seconds)}</Mono>
+        <Num className="dash__elapsed dash__when">{seconds === null ? '' : elapsed(seconds)}</Num>
       </div>
       {seconds === null ? null : (
         <Track
@@ -439,7 +439,7 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
             {longest > 0 ? (
               <>
                 {' '}
-                · longest <Mono className="dash__when">{elapsed(longest)}</Mono>
+                · longest <Num className="dash__when">{elapsed(longest)}</Num>
               </>
             ) : null}
           </>
@@ -511,7 +511,7 @@ function Worth(props: {
             const age = ago(now / 1000 - session.created_at, now).text
             const supporting = (
               <>
-                {machine} · {plural(session.windows, 'window')} · <Mono className="dash__when">{age}</Mono>
+                {machine} · {plural(session.windows, 'window')} · <Num className="dash__when">{age}</Num>
               </>
             )
             return (
@@ -569,7 +569,7 @@ function IdleRow(props: { row: Extract<WorkRow, { kind: 'workspace' }>; sessions
         <State size="small" state={mark}>
           {words}
         </State>
-        {started === null ? null : <Mono className="dash__age dash__when">{ago(now / 1000 - started, now).text}</Mono>}
+        {started === null ? null : <Num className="dash__age dash__when">{ago(now / 1000 - started, now).text}</Num>}
       </Row>
     </li>
   )
@@ -683,7 +683,7 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
                 <State className="dash__recent-words" size="small" state={one.mark}>
                   {one.words} · {one.machine}
                 </State>
-                <Mono className="dash__age dash__when">{ago(now / 1000 - one.at, now).text}</Mono>
+                <Num className="dash__age dash__when">{ago(now / 1000 - one.at, now).text}</Num>
               </Row>
             </li>
           ))}

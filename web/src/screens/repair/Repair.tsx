@@ -13,7 +13,7 @@ import { Mark, State } from '@/m3/mark/Mark'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Mono, Num, Text } from '@/m3/text/Text'
 import { errorLine, shortError } from './line'
 import './Repair.css'
 
@@ -111,7 +111,7 @@ function Editor(props: {
             <label className="m3-eyebrow" htmlFor={`${id}-text`}>
               The file
             </label>
-            <Mono className="repair__count">{count} lines</Mono>
+            <Num className="repair__count">{count} lines</Num>
           </div>
           <Text scale="body-small" tone="variant">
             TOML. Three keys load: <Mono>machine</Mono>, <Mono>repo</Mono>, <Mono>startup</Mono>.
@@ -192,7 +192,7 @@ export function Repair() {
 
   const heading = (
     <PageHeader
-      stamp={opened.data ? <Mono title="the file as it is on the machine running the daemon">{opened.data.path}</Mono> : null}
+      stamp={opened.data ? <Text scale="body-small" title="the file as it is on the machine running the daemon">{opened.data.path}</Text> : null}
       title={`Repair ${name}`}
     />
   )

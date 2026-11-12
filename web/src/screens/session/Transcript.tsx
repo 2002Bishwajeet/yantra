@@ -4,7 +4,7 @@ import type { AgentState, Workspace } from '@/api'
 import { LINES, type Said } from '@/api/hooks'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
-import { Mono, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 import { count } from './format'
 import { Turns, Waiting } from './Turns'
 
@@ -45,7 +45,7 @@ export function Transcript(props: TranscriptProps) {
             <>
               {' '}
               · the last {count(said.asked)} of {count(said.total)} records · read{' '}
-              <Mono>
+              <Num>
                 {read ? (
                   <time dateTime={read.iso} title={read.title}>
                     {read.text}
@@ -53,7 +53,7 @@ export function Transcript(props: TranscriptProps) {
                 ) : (
                   said.at
                 )}
-              </Mono>{' '}
+              </Num>{' '}
               ago
             </>
           ) : null}

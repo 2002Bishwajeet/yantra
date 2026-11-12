@@ -16,7 +16,7 @@ export function Badge(props: BadgeProps) {
   const large = count !== undefined
   return (
     <span
-      className={clsx('m3-badge', large && 'm3-mono', className)}
+      className={clsx('m3-badge', large && 'm3-num', className)}
       data-size={large ? 'large' : 'small'}
       {...rest}
     >

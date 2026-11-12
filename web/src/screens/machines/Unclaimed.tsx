@@ -3,7 +3,7 @@ import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { State } from '@/m3/mark/Mark'
 import { Row } from '@/m3/row/Row'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Text } from '@/m3/text/Text'
 import { SinceAgo } from '@/screens/fleet/age'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { openedByHand } from '@/work'
@@ -68,10 +68,10 @@ export function Unclaimed(props: { held: Held[]; pending: boolean }) {
                         <State state="unknown">unclaimed</State>
                         <span className="machines__text">
                           <span className="machines__name">{session.name}</span>
-                          <Mono className="machines__where">
+                          <Text scale="body-small" className="machines__where">
                             {machine} · {session.windows} window
                             {session.windows === 1 ? '' : 's'}
-                          </Mono>
+                          </Text>
                         </span>
                       </Row>
                     }

@@ -7,7 +7,7 @@ import { Button } from '@/m3/button/Button'
 import { State } from '@/m3/mark/Mark'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Mono, Num, Text } from '@/m3/text/Text'
 import { IconTile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { Ago } from './age'
@@ -38,9 +38,9 @@ export function Github(props: { attention: Reading<Attention> }) {
         ) : null}
         {attention.looked === 'ok' || attention.looked === 'failed' ? (
           // On the daemon's 300 s clock, so the block stamps itself (D6 §2).
-          <Mono className="github__age">
+          <Num className="github__age">
             as of <Ago seconds={attention.age_seconds} /> · read every 5 min
-          </Mono>
+          </Num>
         ) : null}
       </div>
 
@@ -112,7 +112,7 @@ function Group(props: { items: Item[]; title: string; verb: string; why: string 
         <Text render={<h4 />} scale="body-small" tone="variant">
           {title}
         </Text>
-        <Mono className="github__count">{items.length}</Mono>
+        <Num className="github__count">{items.length}</Num>
       </div>
       <ul className="github__list">
         {items.map((item) => {
@@ -131,7 +131,7 @@ function Group(props: { items: Item[]; title: string; verb: string; why: string 
                     </Mono>
                     <span className="github__why">{why}</span>
                     {/* GitHub's age, which is the item's rather than the answer's. */}
-                    <Mono className="github__when">{clock?.text ?? item.updated_at}</Mono>
+                    <Num className="github__when">{clock?.text ?? item.updated_at}</Num>
                   </span>
                   <span className="github__title">{item.title}</span>
                 </div>

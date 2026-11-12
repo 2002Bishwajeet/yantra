@@ -214,7 +214,7 @@ describe('beat 2, joined', () => {
     expect(await screen.findByText(/The command adds this key: ed25519 · SHA256:<fingerprint>/)).toBeTruthy()
     const diagnostics = screen.getByText('Diagnostics').closest('details')!
     expect(diagnostics.open).toBe(false)
-    expect(within(diagnostics).getByText('/home/<user>/.ssh/id_yantra')).toBeTruthy()
+    expect(within(diagnostics).getByText(/The key is at \/home\/<user>\/\.ssh\/id_yantra on the appliance/)).toBeTruthy()
     expect(screen.queryByText(/ssh-ed25519 AAAA/)).toBeNull()
   })
 

@@ -13,7 +13,7 @@ import type { Workspace } from '@/api'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { anchorOf, commentBlock, quotedLines, rangeLabel } from './comment'
 import type { DiffData } from './data'
 import { DiffComment } from './DiffComment'
@@ -70,7 +70,7 @@ function FileSection(props: {
     <section aria-labelledby={id} className="diff__file" data-path={entry.path}>
       <header className="diff__file-head">
         <h3 className="diff__file-name" id={id} ref={heading} tabIndex={-1}>
-          <Mono>{entry.path}</Mono>
+          <Text scale="body-small">{entry.path}</Text>
           {entry.from === undefined ? null : <span className="diff__from">renamed from {entry.from}</span>}
           <span className="diff__counts">{counts}</span>
         </h3>

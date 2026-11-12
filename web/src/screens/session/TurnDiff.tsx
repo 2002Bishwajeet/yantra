@@ -4,7 +4,7 @@ import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Dialog, DialogClose, DialogPopup, DialogTrigger } from '@/m3/dialog/Dialog'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Num, Text } from '@/m3/text/Text'
 import type { Workspace } from '@/api'
 import type { DiffState } from './diff/data'
 import { DiffSheet } from './diff/DiffSheet'
@@ -90,7 +90,7 @@ export function TurnDiff(props: {
         summary={
           <span className="chat__diff-summary">
             {/* The spaces keep the words apart in the trigger's name. */}
-            <Eyebrow>Changed files</Eyebrow> <Mono>{files.length}</Mono>{' '}
+            <Eyebrow>Changed files</Eyebrow> <Num>{files.length}</Num>{' '}
             {diff.reverted ? <span className="chat__diff-reverted">Reverted</span> : null}
           </span>
         }
@@ -98,7 +98,7 @@ export function TurnDiff(props: {
         <ul aria-label="Changed files" className="chat__diff-files">
           {files.map((file) => (
             <li key={file}>
-              <Mono>{file}</Mono>
+              <Text scale="body-small">{file}</Text>
             </li>
           ))}
         </ul>
