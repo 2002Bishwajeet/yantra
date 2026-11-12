@@ -31,9 +31,11 @@ that address. `write::gate` sits over the whole `/api` nest and asks `presented`
 socket's peer uid (ADR-0042), a `__Host-yantra_session` cookie from a passkey sign-in, or a
 `Bearer` agent token minted for one Chat turn. No cookie is a 401; a write whose `Origin` is not the
 dashboard's is a 403; an agent token reaches only `write::agent_may`. `write::unchecked` is the
-short list that answers with neither, and a new route belongs on it only if a signed-out browser
-must reach it. `passkey.rs` keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and
-never a token.
+short list that answers with neither, and a new route belongs on it only if a caller the daemon
+cannot name must reach it. The four ceremony routes are not on it: `write::owner_node` runs
+ADR-0016's predicate on them with no cookie, so only the owner's own node starts a sign-in (Y-789).
+Wrong codes count for each caller node, and a node holds at most 16 open ceremonies. `passkey.rs`
+keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and never a token.
 
 **The dashboard's origin is `https://<MagicDNS>:8443` unless `YANTRA_ORIGIN` names one** (ADR-0044,
 amended 2026-11-12). `main.rs` reads it from `/etc/yantra/daemon.env` once at start, and
@@ -1005,13 +1007,19 @@ the wait and the wakes.
 - **A room may have a definition** (Y-550, [ADR-0039](../../docs/adr/0039-a-room-is-a-shared-project.md)
   decision 2): `~/.config/yantra/rooms/<name>.toml`, through
   [`room_file`](../yantra-core/src/room_file.rs). `POST /api/rooms` takes
-  `{name, workspace, brief?, base?}` as application/json only, and answers **201** with the summary.
-  A bad field is **400**, a workspace that does not load **404**, an existing file **409**, and a
+  `{name, workspace, brief?, base?, workspaces?}` as application/json only, and answers **201** with
+  the summary. A bad field is **400**, a workspace or a listed workspace that does not load **404**, an existing file **409**, and a
   file that cannot be written **500**. `PATCH /api/rooms/{room}` takes `{brief}`, where `null`
   clears it, and an undefined room is **404**. `DELETE /api/rooms/{room}` answers
   `200 {"removed": bool}`, as the workspace delete does. Each writes the file first and then
-  changes memory, under the store's lock. A defined room never expires. A room an agent makes with
-  `room_send` stays in memory only.
+  changes memory, under the store's lock. A defined room never expires.
+- **An agent token reaches a room only when the room's definition names its workspace** (Y-784,
+  ADR-0044 decision 12): as `workspace`, or on `workspaces`, which only the owner writes. Every
+  other room tool call is **403**, a room that does not exist too, so a token makes no room and
+  learns no name. The owner can still make a room with no definition; it stays in memory only.
+  **The store asks again under its lock with each act**, and on each pass of a `room_read` wait
+  (`Rooms::scoped`). The owner can end a room, or define its name for another workspace, while a
+  token's call waits. That call then makes and joins no room, and ends with a tool error.
 - **A restart reloads each definition with one system message** that says when yantrad restarted.
   It spends no budget and wakes no thread. Every message, member, cursor, count, pause and queued
   wake is lost, and so is every room with no definition. A file that does not load is logged by

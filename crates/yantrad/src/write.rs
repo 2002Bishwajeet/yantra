@@ -209,14 +209,14 @@ impl<I: Inventory> Authoriser<I> {
     }
 
     /// ADR-0042 decisions 3 to 5, and ADR-0017 §3 for the header's shape.
-    /// `signed_in` is a live session cookie, which names the person, so a
-    /// `serve` hop from this machine's own address passes with it (ADR-0044
-    /// decision 5).
+    /// `admits_own` lets a `serve` hop from this machine's own address pass: a
+    /// live session cookie names the person (ADR-0044 decision 5), and
+    /// [`owner_node`] is how the owner on the hub gets one.
     fn caller_address(
         &self,
         hop: &Hop,
         headers: &HeaderMap,
-        signed_in: bool,
+        admits_own: bool,
     ) -> Result<IpAddr, Refused> {
         match hop {
             Hop::Tcp(from) if self.bound.contains(from) => {
@@ -226,7 +226,7 @@ impl<I: Inventory> Authoriser<I> {
             Hop::Serve => {
                 let from =
                     forwarded(headers)?.ok_or(Refused::Hop("the proxy forwarded no address"))?;
-                if self.bound.contains(&from) && !signed_in {
+                if self.bound.contains(&from) && !admits_own {
                     return Err(Refused::Hop(
                         "the proxy forwarded this machine's own address, so the account that called is unknown",
                     ));
@@ -293,9 +293,9 @@ impl<I: Inventory> Authoriser<I> {
         &self,
         hop: &Hop,
         headers: &HeaderMap,
-        signed_in: bool,
+        admits_own: bool,
     ) -> Result<Caller, Refused> {
-        let from = self.caller_address(hop, headers, signed_in)?;
+        let from = self.caller_address(hop, headers, admits_own)?;
         let caller = self
             .inventory
             .whois(from)
@@ -562,6 +562,19 @@ pub(crate) async fn joining<I: Inventory>(
     authoriser.judge(&hop, headers, false).await
 }
 
+/// ADR-0016's predicate alone, with no cookie, for the four ceremony routes
+/// (ADR-0044 decision 8, amended 2026-11-12). The `serve` hop from this
+/// machine's own address passes: the owner on the hub signs in through it
+/// before any cookie exists.
+pub(crate) async fn owner_node<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    peer: &Peer,
+    headers: &HeaderMap,
+) -> Result<Caller, Refused> {
+    let hop = authoriser.hop(peer).await;
+    authoriser.judge(&hop, headers, true).await
+}
+
 /// [`allowed`] for a WebSocket upgrade, with the receiver that turns `true`
 /// when the caller's session is revoked (ADR-0044 decision 9).
 pub(crate) async fn allowed_socket<I: Inventory>(
@@ -648,12 +661,11 @@ async fn passes<I: Inventory>(
     if unchecked(method, path) || (join_code(headers).is_some() && readiness(method, path)) {
         return Ok(());
     }
-    let who = identify(
-        &gate.authoriser,
-        &peer.ok_or(Refused::Account(None))?,
-        headers,
-    )
-    .await?;
+    let peer = peer.ok_or(Refused::Account(None))?;
+    if ceremony(method, path) {
+        return owner_node(&gate.authoriser, &peer, headers).await.map(drop);
+    }
+    let who = identify(&gate.authoriser, &peer, headers).await?;
     let writes = !matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD)
         || headers.contains_key(axum::http::header::UPGRADE);
     if writes && let Some(origin) = headers.get(axum::http::header::ORIGIN) {
@@ -687,24 +699,28 @@ pub(crate) async fn dashboard_origin<I>(
 }
 
 /// The routes under `/api` that check their caller themselves, or need none:
-/// About (decision 8), the join and its last step, which need a code or the
-/// socket (decision 13), and the four halves of the two ceremonies
-/// (decisions 1, 2).
+/// About (decision 8), and the join and its last step, which need a code or
+/// the socket (decision 13).
 fn unchecked(method: &axum::http::Method, path: &str) -> bool {
     use axum::http::Method;
     match *method {
         Method::GET => path == "/about",
-        Method::POST => matches!(
+        Method::POST => matches!(path, "/join" | "/join/forget-host-key"),
+        _ => false,
+    }
+}
+
+/// The four halves of the two ceremonies (ADR-0044 decisions 1, 2). A browser
+/// with no cookie must reach them, so the gate asks [`owner_node`] and no more.
+fn ceremony(method: &axum::http::Method, path: &str) -> bool {
+    *method == axum::http::Method::POST
+        && matches!(
             path,
-            "/join"
-                | "/join/forget-host-key"
-                | "/passkey/register/start"
+            "/passkey/register/start"
                 | "/passkey/register/finish"
                 | "/passkey/login/start"
                 | "/passkey/login/finish"
-        ),
-        _ => false,
-    }
+        )
 }
 
 /// The join script's code on its login test, which [`recheck`] checks.
@@ -4956,19 +4972,120 @@ mod tests {
         }
     }
 
+    const CEREMONIES: [&str; 4] = [
+        "/passkey/register/start",
+        "/passkey/register/finish",
+        "/passkey/login/start",
+        "/passkey/login/finish",
+    ];
+
     #[test]
-    fn only_about_the_join_and_the_ceremonies_skip_the_gate() {
+    fn only_about_and_the_join_skip_the_gate() {
         use axum::http::Method;
 
         assert!(unchecked(&Method::GET, "/about"));
         assert!(unchecked(&Method::POST, "/join"));
-        assert!(unchecked(&Method::POST, "/passkey/login/finish"));
         assert!(
             !unchecked(&Method::GET, "/join"),
             "GET /join is outside /api"
         );
         assert!(!unchecked(&Method::POST, "/passkey/code"));
         assert!(!unchecked(&Method::POST, "/about"));
+        for path in CEREMONIES {
+            assert!(!unchecked(&Method::POST, path), "{path}");
+            assert!(ceremony(&Method::POST, path), "{path}");
+            assert!(!ceremony(&Method::GET, path), "{path}");
+        }
+        assert!(!ceremony(&Method::POST, "/passkey/code"));
+    }
+
+    /// No cookie, and no trusting store: the store in [`direct`] passes every
+    /// request, so these build their own.
+    fn signed_out(fake: Fake, bound: &[SocketAddr]) -> Authoriser<Fake> {
+        Authoriser::new(
+            fake,
+            bound,
+            std::path::Path::new("/run/yantra/yantrad.sock"),
+            Passkeys::memory(),
+        )
+    }
+
+    /// ADR-0044 decision 8, amended 2026-11-12: the owner's own node starts a
+    /// ceremony with no cookie, and the gate asks nothing else of it.
+    #[tokio::test]
+    async fn the_owners_node_reaches_a_ceremony_with_no_cookie() {
+        let gate = Gate {
+            authoriser: signed_out(mine(2), &[]),
+            fleet: Fleet::default(),
+        };
+        let post = axum::http::Method::POST;
+
+        let caller = owner_node(&gate.authoriser, &tcp(address(2)), &HeaderMap::new()).await;
+        assert!(caller.is_ok(), "{caller:?}");
+        for path in CEREMONIES {
+            let passed = passes(&gate, &post, path, &HeaderMap::new(), Some(tcp(address(2)))).await;
+            assert!(passed.is_ok(), "{path}: {passed:?}");
+        }
+        let other = passes(
+            &gate,
+            &post,
+            "/passkey/code",
+            &HeaderMap::new(),
+            Some(tcp(address(2))),
+        )
+        .await;
+        assert!(matches!(other, Err(Refused::SignIn)), "{other:?}");
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_is_not_the_owners_node_reaches_no_ceremony() {
+        let fake = tailnet(vec![
+            (address(3), caller(ME + 1, &[])),
+            (address(4), caller(ME, &["tag:ci"])),
+        ]);
+        let authoriser = signed_out(fake, &[]);
+        let refusal = async |last| {
+            owner_node(&authoriser, &tcp(address(last)), &HeaderMap::new())
+                .await
+                .expect_err("not the owner's node")
+        };
+
+        let (nobody, theirs, tagged) = (refusal(9).await, refusal(3).await, refusal(4).await);
+        assert!(matches!(nobody, Refused::NotAPeer(_)), "{nobody:?}");
+        assert!(matches!(theirs, Refused::NotYours(_)), "{theirs:?}");
+        assert!(matches!(tagged, Refused::Tagged(_)), "{tagged:?}");
+        for refused in [nobody, theirs, tagged] {
+            assert_eq!(refused.into_response().status(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    /// The owner on the hub signs in through `serve`, which forwards this
+    /// machine's own address. Any other way in from this machine stays shut
+    /// (ADR-0042).
+    #[tokio::test]
+    async fn a_ceremony_from_this_machine_comes_through_serve_or_the_owners_account() {
+        let authoriser = signed_out(mine(1), &[SocketAddr::new(address(1), 7717)]);
+
+        let served = owner_node(&authoriser, &SERVE, &forwarded(&["100.64.0.1"])).await;
+        assert!(served.is_ok(), "{served:?}");
+
+        let direct = owner_node(&authoriser, &tcp(address(1)), &HeaderMap::new())
+            .await
+            .expect_err("any account here could have opened it");
+        assert!(matches!(direct, Refused::OwnAddress(_)), "{direct:?}");
+        assert_eq!(direct.into_response().status(), StatusCode::FORBIDDEN);
+
+        let karigar = authoriser
+            .judge(&Hop::Other("karigar".to_owned()), &HeaderMap::new(), true)
+            .await
+            .expect_err("another account on the socket");
+        assert!(matches!(karigar, Refused::Account(Some(_))), "{karigar:?}");
+        assert_eq!(karigar.into_response().status(), StatusCode::FORBIDDEN);
+
+        let unnamed = owner_node(&authoriser, &Peer::Unix(None), &HeaderMap::new())
+            .await
+            .expect_err("no credentials");
+        assert!(matches!(unnamed, Refused::Account(None)), "{unnamed:?}");
     }
 
     #[tokio::test]

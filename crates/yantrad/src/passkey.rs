@@ -7,7 +7,7 @@
 //! memory only. Every change to the file is written whole and renamed into
 //! place, as `layout.rs` does, at mode `0600` (decision 7).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -28,7 +28,7 @@ use webauthn_rs::prelude::{
 use yantra_core::inventory::Inventory;
 
 use crate::heartbeat::Fleet;
-use crate::write::{Authoriser, Peer, Refused, Who, allowed, chain, identify};
+use crate::write::{Authoriser, Peer, Refused, Who, allowed, chain, identify, owner_node};
 
 /// The one cookie (decision 4). `__Host-` makes the browser refuse it without
 /// `Secure` and `Path=/`, or with a `Domain`.
@@ -39,8 +39,12 @@ pub const SESSION_LIFE: u64 = 30 * 24 * 60 * 60;
 const CODE_LIFE: u64 = 10 * 60;
 /// The ceremony state stays 5 minutes (decision 1).
 const CEREMONY_LIFE: u64 = 5 * 60;
-/// Five wrong codes in a row void every open code (decision 2).
+/// Five wrong codes in a row from one node void every open code for that
+/// node (decision 2, and decision 8's 2026-11-12 note).
 const WRONG_LIMIT: u32 = 5;
+/// The ceremonies one node may have open. The cap is for each node, so one
+/// machine cannot stop a sign-in on another.
+const CEREMONY_LIMIT: usize = 16;
 /// No 0, O, 1, I or L, so a code read off a screen is typed right.
 const ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 const CODE_LENGTH: usize = 8;
@@ -59,6 +63,11 @@ pub enum Error {
     WrongCode,
     #[error("the sign-in took longer than 5 minutes, or it already finished. Start again.")]
     NoCeremony,
+    #[error(
+        "this device started {limit} passkey prompts and finished none. Finish one, or wait 5 minutes.",
+        limit = CEREMONY_LIMIT
+    )]
+    TooMany,
     #[error("a passkey named {0} is already enrolled. Remove it first, or pick another name.")]
     Taken(String),
     #[error("a device name is 1 to 40 characters and no control character")]
@@ -100,44 +109,66 @@ struct Saved {
     sessions: Vec<Session>,
 }
 
+/// One open code.
+#[derive(Debug)]
+struct Open {
+    code: String,
+    ends: u64,
+    /// The nodes whose wrong codes voided this one.
+    void_for: HashSet<String>,
+}
+
 /// The open codes of one kind: enrolment or join.
 #[derive(Debug, Default)]
 struct Codes {
-    open: Vec<(String, u64)>,
-    wrong: u32,
+    open: Vec<Open>,
+    /// The wrong codes in a row from each caller node.
+    wrong: HashMap<String, u32>,
 }
 
 impl Codes {
     fn make(&mut self, now: u64, life: u64) -> String {
         let code = code();
-        self.open.retain(|(_, ends)| *ends > now);
-        self.open.push((code.clone(), now + life));
+        self.open.retain(|open| open.ends > now);
+        self.open.push(Open {
+            code: code.clone(),
+            ends: now + life,
+            void_for: HashSet::new(),
+        });
         code
     }
 
-    /// Whether `code` is open. A wrong one counts toward [`WRONG_LIMIT`].
-    fn check(&mut self, code: &str, now: u64) -> bool {
-        self.open.retain(|(_, ends)| *ends > now);
+    /// Whether `code` is open for `node`. A wrong one counts toward that
+    /// node's [`WRONG_LIMIT`], and no other node's.
+    fn check(&mut self, code: &str, node: &str, now: u64) -> bool {
+        self.open.retain(|open| open.ends > now);
         let code = normal(code);
-        if self.open.iter().any(|(open, _)| *open == code) {
-            self.wrong = 0;
+        if self
+            .open
+            .iter()
+            .any(|open| open.code == code && !open.void_for.contains(node))
+        {
+            self.wrong.remove(node);
             return true;
         }
-        self.wrong += 1;
-        if self.wrong >= WRONG_LIMIT {
-            self.open.clear();
-            self.wrong = 0;
+        let wrong = self.wrong.entry(node.to_owned()).or_default();
+        *wrong += 1;
+        if *wrong >= WRONG_LIMIT {
+            self.wrong.remove(node);
+            for open in &mut self.open {
+                open.void_for.insert(node.to_owned());
+            }
         }
         false
     }
 
     /// Uses `code` once.
-    fn take(&mut self, code: &str, now: u64) -> bool {
-        if !self.check(code, now) {
+    fn take(&mut self, code: &str, node: &str, now: u64) -> bool {
+        if !self.check(code, node, now) {
             return false;
         }
         let code = normal(code);
-        self.open.retain(|(open, _)| *open != code);
+        self.open.retain(|open| open.code != code);
         true
     }
 }
@@ -171,7 +202,8 @@ struct Held {
     join: Codes,
     /// Join codes taken, with the node that took each and when it would end.
     joined: Vec<(String, String, u64)>,
-    ceremonies: HashMap<String, (u64, Ceremony)>,
+    /// Each open ceremony, with when it started and the node that started it.
+    ceremonies: HashMap<String, (u64, String, Ceremony)>,
     /// Agent token hash to its workspace (decision 12).
     agents: HashMap<String, String>,
     /// A sender per session with an open WebSocket; a revoke sends `true`.
@@ -369,7 +401,7 @@ impl Passkeys {
         let now = now();
         let life = self.0.code_life;
         let mut state = self.lock();
-        if !state.join.take(code, now) {
+        if !state.join.take(code, node, now) {
             return false;
         }
         state.joined.retain(|(_, _, ends)| *ends > now);
@@ -493,18 +525,20 @@ impl Passkeys {
         Ok(ended)
     }
 
-    /// The first half of an enrolment: the code must be open, and is used at
-    /// the finish, so a cancelled prompt does not spend it.
+    /// The first half of an enrolment, from the caller whose node is `node`:
+    /// the code must be open, and is used at the finish, so a cancelled prompt
+    /// does not spend it.
     pub fn enrol_start(
         &self,
         relying: &Relying,
         code: &str,
         name: &str,
+        node: &str,
     ) -> Result<(String, CreationChallengeResponse), Error> {
         let name = device_name(name)?;
         let now = now();
         let mut state = self.lock();
-        if !state.enrol.check(code, now) {
+        if !state.enrol.check(code, node, now) {
             return Err(Error::WrongCode);
         }
         if state.saved.passkeys.iter().any(|key| key.name == name) {
@@ -517,13 +551,14 @@ impl Passkeys {
         let id = ceremony(
             &mut state,
             now,
+            node,
             Ceremony::Enrol {
                 code: normal(code),
                 name,
                 relying: relying.id.clone(),
                 state: registration,
             },
-        );
+        )?;
         Ok((id, challenge))
     }
 
@@ -536,12 +571,15 @@ impl Passkeys {
     ) -> Result<(String, Session), Error> {
         let now = now();
         let mut state = self.lock();
-        let Some(Ceremony::Enrol {
-            code,
-            name,
-            relying: made_for,
-            state: registration,
-        }) = take_ceremony(&mut state, id, now)
+        let Some((
+            node,
+            Ceremony::Enrol {
+                code,
+                name,
+                relying: made_for,
+                state: registration,
+            },
+        )) = take_ceremony(&mut state, id, now)
         else {
             return Err(Error::NoCeremony);
         };
@@ -552,7 +590,7 @@ impl Passkeys {
             .webauthn
             .finish_passkey_registration(credential, &registration)
             .map_err(Error::Webauthn)?;
-        if !state.enrol.take(&code, now) {
+        if !state.enrol.take(&code, &node, now) {
             return Err(Error::WrongCode);
         }
         if state
@@ -573,11 +611,13 @@ impl Passkeys {
         Ok(signed)
     }
 
-    /// The first half of a sign-in, with every enrolled passkey allowed.
+    /// The first half of a sign-in from the caller whose node is `node`, with
+    /// every enrolled passkey allowed.
     pub fn sign_in_start(
         &self,
         relying: &Relying,
         device: Option<&str>,
+        node: &str,
     ) -> Result<(String, RequestChallengeResponse), Error> {
         let device = device.map(device_name).transpose()?;
         let now = now();
@@ -593,12 +633,13 @@ impl Passkeys {
         let id = ceremony(
             &mut state,
             now,
+            node,
             Ceremony::SignIn {
                 device,
                 relying: relying.id.clone(),
                 state: authentication,
             },
-        );
+        )?;
         Ok((id, challenge))
     }
 
@@ -611,11 +652,14 @@ impl Passkeys {
     ) -> Result<(String, Session), Error> {
         let now = now();
         let mut state = self.lock();
-        let Some(Ceremony::SignIn {
-            device,
-            relying: made_for,
-            state: authentication,
-        }) = take_ceremony(&mut state, id, now)
+        let Some((
+            _,
+            Ceremony::SignIn {
+                device,
+                relying: made_for,
+                state: authentication,
+            },
+        )) = take_ceremony(&mut state, id, now)
         else {
             return Err(Error::NoCeremony);
         };
@@ -707,18 +751,30 @@ fn end(state: &mut Held, id: &str) {
     }
 }
 
-fn ceremony(state: &mut Held, now: u64, ceremony: Ceremony) -> String {
+/// Opens a ceremony for `node`, unless it has [`CEREMONY_LIMIT`] open.
+fn ceremony(state: &mut Held, now: u64, node: &str, ceremony: Ceremony) -> Result<String, Error> {
     state
         .ceremonies
-        .retain(|_, (made, _)| *made + CEREMONY_LIFE > now);
+        .retain(|_, (made, ..)| *made + CEREMONY_LIFE > now);
+    let open = state
+        .ceremonies
+        .values()
+        .filter(|(_, by, _)| by == node)
+        .count();
+    if open >= CEREMONY_LIMIT {
+        return Err(Error::TooMany);
+    }
     let id = id();
-    state.ceremonies.insert(id.clone(), (now, ceremony));
-    id
+    state
+        .ceremonies
+        .insert(id.clone(), (now, node.to_owned(), ceremony));
+    Ok(id)
 }
 
-fn take_ceremony(state: &mut Held, id: &str, now: u64) -> Option<Ceremony> {
-    let (made, ceremony) = state.ceremonies.remove(id)?;
-    (made + CEREMONY_LIFE > now).then_some(ceremony)
+/// The ceremony `id` and the node that started it.
+fn take_ceremony(state: &mut Held, id: &str, now: u64) -> Option<(String, Ceremony)> {
+    let (made, node, ceremony) = state.ceremonies.remove(id)?;
+    (made + CEREMONY_LIFE > now).then_some((node, ceremony))
 }
 
 fn device_name(name: &str) -> Result<String, Error> {
@@ -811,8 +867,9 @@ pub fn bearer(headers: &axum::http::HeaderMap) -> Option<&str> {
 }
 
 /// The sign-in routes (decisions 1 to 4, 9 and 13). The gate in `write.rs`
-/// lets the four ceremony halves through unchecked; every other route here
-/// needs the owner.
+/// asks only [`owner_node`] of the four ceremony halves, so the owner's own
+/// node reaches them with no cookie (decision 8, amended 2026-11-12); every
+/// other route here needs the owner.
 pub fn router<I, S>(authoriser: Authoriser<I>, fleet: Fleet) -> Router<S>
 where
     I: Inventory + Clone + Send + Sync + 'static,
@@ -863,6 +920,7 @@ fn refused(error: Error) -> Refused {
         Error::WrongCode | Error::Unknown => StatusCode::UNAUTHORIZED,
         Error::NoCeremony | Error::BadName | Error::Webauthn(_) => StatusCode::BAD_REQUEST,
         Error::Taken(_) => StatusCode::CONFLICT,
+        Error::TooMany => StatusCode::TOO_MANY_REQUESTS,
         Error::Relying(_) => StatusCode::SERVICE_UNAVAILABLE,
         Error::Unwritable(..) => StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -966,12 +1024,15 @@ impl Shown {
 
 async fn register_start<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
     Json(asked): Json<EnrolStart>,
 ) -> Result<Json<Begun<CreationChallengeResponse>>, Refused> {
+    let caller = owner_node(&state.authoriser, &from, &headers).await?;
     let relying = state.relying().await?;
     let (ceremony, options) = state
         .passkeys()
-        .enrol_start(&relying, &asked.code, &asked.device)
+        .enrol_start(&relying, &asked.code, &asked.device, &caller.node)
         .map_err(refused)?;
     Ok(Json(Begun { ceremony, options }))
 }
@@ -991,13 +1052,16 @@ async fn register_finish<I: Inventory + Clone + Send + Sync + 'static>(
 
 async fn login_start<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
     asked: Option<Json<SignInStart>>,
 ) -> Result<Json<Begun<RequestChallengeResponse>>, Refused> {
+    let caller = owner_node(&state.authoriser, &from, &headers).await?;
     let relying = state.relying().await?;
     let asked = asked.map(|Json(asked)| asked).unwrap_or_default();
     let (ceremony, options) = state
         .passkeys()
-        .sign_in_start(&relying, asked.device.as_deref())
+        .sign_in_start(&relying, asked.device.as_deref(), &caller.node)
         .map_err(refused)?;
     Ok(Json(Begun { ceremony, options }))
 }
@@ -1122,6 +1186,8 @@ pub(crate) mod tests {
     use webauthn_authenticator_rs::softpasskey::SoftPasskey;
 
     pub(crate) const HUB: &str = "hub.example.ts.net";
+    /// The node the tests call from, unless a test names another.
+    pub(crate) const NODE: &str = "nPHONE";
 
     pub(crate) fn origin() -> Url {
         Url::parse(&format!("https://{HUB}:8443")).expect("an origin")
@@ -1139,7 +1205,7 @@ pub(crate) mod tests {
         let relying = passkeys.relying(origin().as_str()).expect("a usable name");
         let code = passkeys.enrol_code();
         let (id, challenge) = passkeys
-            .enrol_start(&relying, &code, name)
+            .enrol_start(&relying, &code, name, NODE)
             .expect("an open code");
         let mut soft = SoftPasskey::new(true);
         let credential = soft
@@ -1187,7 +1253,7 @@ pub(crate) mod tests {
         let relying = passkeys.relying(origin().as_str()).expect("a usable name");
 
         let (id, challenge) = passkeys
-            .sign_in_start(&relying, Some("Mac"))
+            .sign_in_start(&relying, Some("Mac"), NODE)
             .expect("a passkey is enrolled");
         let answer = soft
             .do_authentication(origin(), challenge)
@@ -1216,7 +1282,7 @@ pub(crate) mod tests {
 
         let code = passkeys.enrol_code();
         let (id, challenge) = passkeys
-            .enrol_start(&relying, &code, "iPhone")
+            .enrol_start(&relying, &code, "iPhone", NODE)
             .expect("an open code");
         let mut soft = SoftPasskey::new(true);
         let url = Url::parse(own).expect("an origin");
@@ -1228,7 +1294,7 @@ pub(crate) mod tests {
             .expect("the passkey verifies");
 
         let (id, challenge) = passkeys
-            .sign_in_start(&relying, Some("Mac"))
+            .sign_in_start(&relying, Some("Mac"), NODE)
             .expect("a passkey is enrolled");
         let answer = soft
             .do_authentication(url, challenge)
@@ -1272,8 +1338,11 @@ pub(crate) mod tests {
 
         assert_eq!(code.len(), CODE_LENGTH);
         assert!(code.bytes().all(|byte| ALPHABET.contains(&byte)));
-        assert!(codes.take(&code.to_lowercase(), 1), "case does not matter");
-        assert!(!codes.take(&code, 2));
+        assert!(
+            codes.take(&code.to_lowercase(), NODE, 1),
+            "case does not matter"
+        );
+        assert!(!codes.take(&code, NODE, 2));
     }
 
     #[test]
@@ -1281,24 +1350,57 @@ pub(crate) mod tests {
         let mut codes = Codes::default();
         let code = codes.make(0, CODE_LIFE);
 
-        assert!(codes.check(&code, CODE_LIFE - 1));
-        assert!(!codes.take(&code, CODE_LIFE));
+        assert!(codes.check(&code, NODE, CODE_LIFE - 1));
+        assert!(!codes.take(&code, NODE, CODE_LIFE));
     }
 
+    /// Decision 8's 2026-11-12 note: one node's wrong codes void no other
+    /// node's open code.
     #[test]
-    fn five_wrong_codes_in_a_row_void_every_open_code() {
+    fn five_wrong_codes_in_a_row_void_every_open_code_for_that_node_alone() {
         let mut codes = Codes::default();
         let (one, two) = (codes.make(0, CODE_LIFE), codes.make(0, CODE_LIFE));
         for _ in 0..4 {
-            assert!(!codes.check("WRONGONE", 1));
+            assert!(!codes.check("WRONGONE", "nA", 1));
         }
-        assert!(codes.check(&one, 1), "four wrong do not");
+        assert!(codes.check(&one, "nA", 1), "four wrong do not");
+        for _ in 0..4 {
+            assert!(!codes.check("WRONGONE", "nA", 1));
+        }
+        assert!(!codes.check("WRONGONE", "nB", 1), "B's count is its own");
+        assert!(codes.check(&one, "nA", 1), "so A is still at four");
         for _ in 0..5 {
-            assert!(!codes.check("WRONGONE", 1));
+            assert!(!codes.check("WRONGONE", "nA", 1));
         }
 
-        assert!(!codes.take(&one, 1));
-        assert!(!codes.take(&two, 1));
+        assert!(!codes.take(&one, "nA", 1));
+        assert!(!codes.check(&two, "nA", 1));
+        let later = codes.make(1, CODE_LIFE);
+        assert!(codes.take(&later, "nA", 1), "a code made later is open");
+        assert!(codes.take(&one, "nB", 1), "B's code is still open");
+        assert!(codes.take(&two, "nB", 1));
+    }
+
+    #[test]
+    fn a_node_opens_sixteen_ceremonies_and_no_more() {
+        let passkeys = Passkeys::memory();
+        let (mut soft, ..) = enrolled(&passkeys, "iPhone");
+        let relying = passkeys.relying(origin().as_str()).expect("a usable name");
+        let start = |node: &str| passkeys.sign_in_start(&relying, None, node);
+
+        let (id, challenge) = start("nA").expect("the first");
+        for _ in 1..CEREMONY_LIMIT {
+            start("nA").expect("under the cap");
+        }
+        assert!(matches!(start("nA"), Err(Error::TooMany)));
+        assert!(start("nB").is_ok(), "the cap is for each node");
+
+        let answer = soft.do_authentication(origin(), challenge).expect("signs");
+        passkeys
+            .sign_in_finish(&relying, &id, &answer)
+            .expect("the assertion verifies");
+        assert!(start("nA").is_ok(), "a finished ceremony frees a slot");
+        assert!(matches!(start("nA"), Err(Error::TooMany)));
     }
 
     #[test]
@@ -1323,7 +1425,7 @@ pub(crate) mod tests {
         let relying = passkeys.relying(origin().as_str()).expect("a usable name");
 
         assert!(matches!(
-            passkeys.enrol_start(&relying, "AAAAAAAA", "iPhone"),
+            passkeys.enrol_start(&relying, "AAAAAAAA", "iPhone", NODE),
             Err(Error::WrongCode)
         ));
     }
@@ -1345,7 +1447,9 @@ pub(crate) mod tests {
         let passkeys = Passkeys::memory();
         let (mut soft, here, kept) = enrolled(&passkeys, "iPhone");
         let relying = passkeys.relying(origin().as_str()).expect("name");
-        let (id, challenge) = passkeys.sign_in_start(&relying, None).expect("enrolled");
+        let (id, challenge) = passkeys
+            .sign_in_start(&relying, None, NODE)
+            .expect("enrolled");
         let answer = soft.do_authentication(origin(), challenge).expect("signs");
         let (there, _) = passkeys.sign_in_finish(&relying, &id, &answer).expect("ok");
 

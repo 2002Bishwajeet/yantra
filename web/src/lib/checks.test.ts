@@ -92,7 +92,7 @@ describe('the check name table', () => {
   /** Y-713: api.rs `behind`'s sentences for an older agent, word for word. */
   it('gives an older agent the command in its detail, and an absent one the join text', () => {
     const NIGHTLY = '0.11.1-nightly.20261111000000.abc1234'
-    const LINUX = 'curl -fsSL https://raw.githubusercontent.com/2002Bishwajeet/yantra/main/install.sh | bash -s -- --agent --channel nightly'
+    const LINUX = 'curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/download/nightly/install.sh | bash -s -- --agent --channel nightly'
     const older = `yantra-agent here is v0.3.2 and yantrad is v${NIGHTLY}. Update it on laptop: \`${LINUX}\``
     expect(olderAgent({ check: 'heartbeat', detail: older })).toEqual({ agent: '0.3.2', daemon: NIGHTLY })
     expect(fixOf({ check: 'heartbeat', detail: older }, 'laptop')).toEqual({ by: 'command', command: LINUX, where: 'machine' })
