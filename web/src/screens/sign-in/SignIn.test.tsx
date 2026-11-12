@@ -10,7 +10,7 @@ vi.mock('@simplewebauthn/browser', () => ({
 }))
 
 const SAID = 'sign in from the dashboard, or run this on the hub'
-const OPTIONS = { publicKey: { challenge: 'Y2hhbGxlbmdl', rpId: 'hub.example.ts.net' } }
+const OPTIONS = { publicKey: { challenge: 'Y2hhbGxlbmdl', rpId: 'localhost' } }
 
 afterEach(() => {
   cleanup()
@@ -123,5 +123,41 @@ describe('the sign-in screen', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('the hub does not know its MagicDNS name yet')
+  })
+
+  it('names the fix when the page is not under the hub’s passkey name, and never starts the browser', async () => {
+    const asked = hub({
+      'POST /api/passkey/login/start': [
+        200,
+        { ceremony: 'c1', options: { publicKey: { challenge: 'Y2hhbGxlbmdl', rpId: 'yantra-box.tailc8a53d.ts.net' } } },
+      ],
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with a passkey' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain(`This page is at ${window.location.origin}, but this hub's passkeys belong to yantra-box.tailc8a53d.ts.net.`)
+    expect(alert.textContent).toContain('Open the dashboard at yantra-box.tailc8a53d.ts.net.')
+    expect(alert.textContent).toContain('/etc/yantra/daemon.env')
+    expect(alert.textContent).toContain(`YANTRA_ORIGIN=${window.location.origin}`)
+    expect(alert.textContent).not.toContain('SecurityError')
+    expect(startAuthentication).not.toHaveBeenCalled()
+    expect(asked).not.toContain('POST /api/passkey/login/finish')
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it('checks the id a registration carries under rp as well', async () => {
+    hub({
+      'POST /api/passkey/register/start': [
+        200,
+        { ceremony: 'c2', options: { publicKey: { challenge: 'Y2hhbGxlbmdl', rp: { id: 'other.example.net' } } } },
+      ],
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Set up this device with a code' }))
+    fireEvent.change(screen.getByLabelText('Code'), { target: { value: 'ABCD2345' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set up this device' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('belong to other.example.net')
+    expect(startRegistration).not.toHaveBeenCalled()
   })
 })

@@ -138,7 +138,7 @@ package runs Caddy as `caddy`. On the box,
 
    `YANTRA_ORIGIN` is the name the passkey belongs to, and the only `Origin` a write may send
    ([ADR-0044](adr/0044-a-write-needs-the-owners-passkey.md), amended 2026-11-12). It holds one
-   https origin with no path. **Changing it costs every passkey**: each device enrols again.
+   https origin with no path. Without it, a page at your own name cannot sign in, and the sign-in screen says so and shows this line. **Changing it costs every passkey**: each device enrols again.
 
 2. Restart the daemon: `sudo systemctl restart yantrad`. The journal names the account and its uid,
    or says that no proxy account is set. A name that does not resolve is a warning, and the daemon

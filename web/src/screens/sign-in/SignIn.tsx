@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { KeyRound, Smartphone } from 'lucide-react'
-import { useSignIn } from '@/api/passkey'
+import { OriginMismatch, useSignIn } from '@/api/passkey'
 import { Button } from '@/m3/button/Button'
+import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
@@ -118,9 +119,13 @@ export function SignIn() {
             title={enrolling ? 'This device is not set up' : 'This device is not signed in'}
             error={sign.error}
             action={
-              <Button variant="tonal" onClick={() => go(enrolling)}>
-                Try again
-              </Button>
+              sign.error instanceof OriginMismatch ? (
+                <Copyable text={sign.error.line} what="the YANTRA_ORIGIN line" line />
+              ) : (
+                <Button variant="tonal" onClick={() => go(enrolling)}>
+                  Try again
+                </Button>
+              )
             }
           />
         ) : null}
