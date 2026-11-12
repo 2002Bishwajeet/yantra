@@ -11,8 +11,9 @@ test('a daemon that stops answering leaves the page drawn and marks it', async (
   await expect(machine).toBeVisible()
   await expect(mark).toBeHidden()
 
+  // The mark comes and goes on the 5 s poll, which is as long as `expect` waits.
   await scenario(page, 'down')
-  await expect(mark).toBeVisible()
+  await expect(mark).toBeVisible({ timeout: 15_000 })
   const box = (await mark.boundingBox())!
   const view = page.viewportSize()!
   expect(box.x).toBeGreaterThanOrEqual(0)
@@ -24,6 +25,6 @@ test('a daemon that stops answering leaves the page drawn and marks it', async (
   await axe(page)
 
   await scenario(page, 'busy')
-  await expect(mark).toBeHidden()
+  await expect(mark).toBeHidden({ timeout: 15_000 })
   await expect(machine).toBeVisible()
 })
