@@ -75,8 +75,9 @@ account. The script says so first, because the dashboard cannot exist before the
    With no terminal it draws nothing, so piped output is unchanged.
 2. It resolves the current release from
    `api.github.com/repos/2002Bishwajeet/yantra/releases/latest`, and fetches the `aarch64` or
-   `x86_64` musl archive, `SHA256SUMS` and `SHA256SUMS.sig`. It checks the owner's signature on
-   `SHA256SUMS` ([Sign a release](#sign-a-release)), and then the archive against `SHA256SUMS`.
+   `x86_64` musl archive, `SHA256SUMS` and `SHA256SUMS.sig`. It checks the release workflow's
+   signature on `SHA256SUMS` ([Sign a release](#sign-a-release)), and then the archive against
+   `SHA256SUMS`.
    **A missing or wrong signature, or a mismatch, stops the run before anything is installed** —
    Tailscale included.
 3. **If Tailscale is not installed**, it asks *"Install Tailscale, log this box in and turn on
@@ -237,8 +238,8 @@ same thing, and `yantra update --check` only says whether one exists.
 - `yantra-update.service` runs as root. It removes the file, runs `yantra-update` with no terminal,
   and then runs `systemctl try-restart yantrad.service yantra-agent.service`.
 - **The request carries no version.** The unit installs the current release or nothing.
-- **The unit installs no nightly.** It passes no flag, and only a run that names
-  `--channel nightly` installs one ([Stable and nightly](#stable-and-nightly)).
+- **The unit follows the channel that the box keeps.** It passes no flag, and it reads
+  `/etc/yantra/channel` ([Stable and nightly](#stable-and-nightly)).
 - **A second request changes nothing.** One made while the unit runs is removed before the restart.
   A run that installs the release already on disk keeps `.prev` as it was.
 - **A failed install restarts nothing.** The restart is `ExecStartPost=`, and a missing or wrong
@@ -248,31 +249,33 @@ same thing, and `yantra update --check` only says whether one exists.
 
 ### Stable and nightly
 
-**[Y-662](../tracker.md) and [Y-780](../tracker.md), ADR-0027's 2026-11-10 and 2026-11-12
+**[Y-662](../tracker.md) and [Y-803](../tracker.md), ADR-0027's 2026-11-10 and 2026-11-12
 amendments.** There are two channels:
 
-- **stable**, the default: each `v*` tag, read through `/releases/latest`. The owner signs it
-  ([Sign a release](#sign-a-release)).
+- **stable**, the default: each `v*` tag, read through `/releases/latest`.
 - **nightly**: the build of the latest merge to `main`. It is one rolling pre-release, tagged
   `nightly`, with the two Linux archives and its own copy of `install.sh`. Its version reads like
-  `0.10.4-nightly.20261110143205.abc1234`. **Nobody signs it**, and the build loop merges to `main`
-  with no owner review.
+  `0.10.4-nightly.20261110143205.abc1234`. The build loop merges to `main` with no owner review.
 
-**Only a person at a terminal installs a nightly, and names it each time:**
+**CI signs each channel with its own key** ([Sign a release](#sign-a-release)). The script checks
+the rolling `nightly` release with the nightly key, and each `v*` release with the stable key. A
+nightly signature therefore never installs as stable.
+
+**A person names the nightly once, and the box keeps it:**
 
 ```bash
 curl -fsSL https://github.com/2002Bishwajeet/yantra/releases/download/nightly/install.sh | bash -s -- --channel nightly
 sudo yantra-update --channel nightly      # on a box that has Yantra
+sudo yantra update --channel nightly      # the same, through the root unit
 yantra update --check --channel nightly   # says what is published, and installs nothing
 ```
 
 - The choice is one word in `/etc/yantra/channel`, mode `0644` and owned by `yantra`, so Settings
-  can rewrite it. A box with no file is on stable. Later updates follow a kept `stable`.
-- **A kept `nightly` installs nothing by itself.** `yantrad`'s account can write that file, so a
-  run that does not name `--channel nightly` refuses it and prints the command above. The root
-  unit passes no flag, so Settings → About and `yantra update` install no nightly. This includes
-  `sudo yantra update --channel nightly`, which writes the file and then starts the unit. About
-  and the CLI show the unit's refusal.
+  can rewrite it. A box with no file is on stable. Later updates follow the kept channel.
+- **A kept `nightly` updates as stable does.** The root unit passes no flag and reads the file. So
+  Settings → About and `yantra update` install the current nightly.
+- **A nightly with no signature, or with the stable key's signature, installs nothing.** About and
+  the CLI show the unit's refusal.
 - **The unit never goes back a version.** `install.sh` records what it installed in
   `/var/lib/yantra/installed`. A switch from nightly to stable therefore waits for a newer stable
   release. To go back now, run the script by hand: `sudo yantra-update --channel stable`.
@@ -308,8 +311,10 @@ with the one `/api/about` now reports, and offers a reload.
 
 [`crates/yantrad/tests/update.rs`](../crates/yantrad/tests/update.rs) proves this against a real
 systemd, a real sshd and a real tmux: the session's processes survive, the socket reopens within the
-browser's reconnect budget, and a corrupted archive restarts nothing. The unit refuses a nightly and
-a release with no signature, and it replaces and restarts nothing. [`release.yml`](../.github/workflows/release.yml)
+browser's reconnect budget, and a corrupted archive restarts nothing. From a channel file that
+`yantra` wrote, the unit installs a nightly that the nightly key signed and restarts the daemon. It
+refuses a nightly that the stable key signed, and a nightly or a release with no signature. A
+refusal replaces and restarts nothing. [`release.yml`](../.github/workflows/release.yml)
 runs the same test against the x86_64 archive it built, and a failure there publishes nothing (Y-483).
 
 ### Roll back
@@ -386,10 +391,13 @@ nothing new.
 served from inside it. **With no terminal**: an edited `agent.env` and an edited `daemon.env`
 survive a second run, `daemon.env` is `600 yantra`, the binaries replace while one of them is
 executing, each replaced binary is kept as `.prev`, the updater is the archive's own `install.sh`, and
-a corrupted archive installs nothing. A release with no `SHA256SUMS.sig`, with another key's
-signature, or with a `SHA256SUMS` that changed after the signature installs nothing. The fixture
-signs with its own key and writes that key into its copy of the script, so the tests do not prove
-the owner's key. **At a terminal**, through a pty: a yes logs
+a corrupted archive installs nothing. A release with no `SHA256SUMS.sig`, with a stranger's
+signature, with the other channel's signature, or with a `SHA256SUMS` that changed after the
+signature installs nothing. A signed nightly installs by name, and from the kept channel with no
+flag. The fixture signs with its own two keys and writes them into its copy of the script, so the
+tests do not prove CI's keys. A test that reads `release.yml` as text proves that only the `sign`
+job names a secret or an environment, and that it names no build tool. The first nightly after a
+change to that job is the first proof of the real keys. **At a terminal**, through a pty: a yes logs
 in, turns on `serve`, writes the address into an absent `agent.env`, enables both units and ends on
 the URL; a second run asks nothing but the restart and changes no file; a rerun with both units
 running leaves them on a no and restarts both on a yes; with a `qrencode` stub installed, the URL
@@ -420,43 +428,53 @@ link are proved only on real hardware.
 
 **It is written in the script.** The version and the commit it replaced were a person's choice in a
 reviewed commit; `SHA256SUMS` still proves the archive arrived intact from the release it names
-([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) §4). For a stable release, the owner's
-signature on `SHA256SUMS` proves that the owner approved it ([Sign a release](#sign-a-release)).
-For the nightly, nothing proves that. `/releases/latest` skips drafts and
+([ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) §4). On both channels, the signature
+on `SHA256SUMS` proves that this repository's release workflow built the release
+([Sign a release](#sign-a-release)). It does not prove that a person read the code.
+`/releases/latest` skips drafts and
 pre-releases, so a `v0.3.0-rc.1` tag never installs itself. A call GitHub refuses — `403`, since 60
 an hour per IP is what an unauthenticated one gets — stops the run and says so.
 
 ### Sign a release
 
-**[ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) decision 4, amended 2026-11-12
-([Y-780](../tracker.md)).** A checksum proves that an archive is whole. It does not prove who made
-it. So the owner signs `SHA256SUMS` with an ssh key that stays offline. The release job holds no
-key and signs nothing.
+**[ADR-0027](adr/0027-the-appliance-pulls-its-own-update.md) decision 4, amended twice on
+2026-11-12 ([Y-780](../tracker.md), [Y-803](../tracker.md)).** A checksum proves that an archive is
+whole. It does not prove who made it. So CI signs `SHA256SUMS`, and nobody signs by hand.
 
-When the release job has published `v<V>` and the owner approves it, the owner runs this on the
-machine that holds the key:
+- **The `sign` job of [`release.yml`](../.github/workflows/release.yml) signs.** It downloads the
+  archives that the `build` job made, writes `SHA256SUMS`, and runs `ssh-keygen -Y sign`. It runs no
+  cargo, no npm and no code from the repository. The `build` job never holds a key.
+- **The keys are in the GitHub environment `release`.** The environment admits only the branch
+  `main` and tags that match `v*`. A pull request or another branch cannot read them.
+- **Each channel has its own key.** `YANTRA_STABLE_SIGNING_KEY` signs a `v*` tag, and
+  `YANTRA_NIGHTLY_SIGNING_KEY` signs a nightly. A `workflow_dispatch` on a branch signs nothing.
+- **The job checks its own signature** against the public key in the `install.sh` that it
+  publishes. A secret that does not match that key fails the job, and nothing is published.
+- `install.sh` carries the two public keys in `STABLE_KEY` and `NIGHTLY_KEY`. It runs
+  `ssh-keygen -Y verify` on `SHA256SUMS` before `sha256sum -c`, and it refuses to install on a
+  machine with no `ssh-keygen`. `SHA256SUMS` covers the archive, and the archive holds the updater
+  and the units.
+- `SHA256SUMS` also covers `install.sh`, the copy that the release publishes
+  ([Y-787](../tracker.md)). One signature covers the script and the archives.
+- **With no signature, or with another key's signature, the script installs nothing.** The root
+  unit runs the same script, so the dashboard's update has the same rule. The script has no mode
+  that skips the check.
 
-```bash
-gh release download v<V> --repo 2002Bishwajeet/yantra --pattern SHA256SUMS
-ssh-keygen -Y sign -f <the offline key> -n file SHA256SUMS
-gh release upload v<V> --repo 2002Bishwajeet/yantra SHA256SUMS.sig
-```
+**The honest limit.** A signature proves that this repository's release workflow built the
+archive. It does not prove that a person read the code; the merge gate does that work. Whoever
+controls the owner's GitHub account can change the environment, so that account is the root of
+trust. The ADR also asks for a rule that lets only the release workflow create a `v*` tag. That
+rule does not exist yet.
 
-- `install.sh` carries the public key in `RELEASE_KEY`. It runs `ssh-keygen -Y verify` on
-  `SHA256SUMS` before `sha256sum -c`, and it refuses to install on a machine with no `ssh-keygen`.
-  `SHA256SUMS` covers the archive, and the archive holds the updater and the units.
-- From the first release after v0.12.0, `SHA256SUMS` also covers `install.sh`, the copy that the
-  release publishes ([Y-787](../tracker.md)). One signature then covers the script and the archives.
-- **A script that carries a key installs a release only after `SHA256SUMS.sig` is uploaded.** With
-  no signature, or with another key's signature, it installs nothing. The root unit runs the same
-  script, so the dashboard's update waits for the signature too.
-- **A script that carries no key says so.** `RELEASE_KEY` is empty until [Y-798](../tracker.md)
-  puts the owner's public key on `main`. A release's copy carries the key from the first release
-  cut after that. A script with no key prints
-  `this installer carries no release key, so no signature was checked` and checks the checksum
-  alone. The v0.12.0 copy is older than this check ([Y-780](../tracker.md)): it checks the
-  checksum alone and prints nothing about a signature.
-- The nightly has no signature ([Stable and nightly](#stable-and-nightly)).
+**The cut-over.** v0.12.0 and every older release carry no `SHA256SUMS.sig`.
+
+- A script from this change refuses those releases. To install one, use the script of its own tag,
+  as the commands at the top of this page do.
+- A box whose updater is older than this change checks no signature on its next update. That
+  update installs the new updater, which checks every release.
+- Such a box updates from the dashboard as before, with one exception. An updater from a nightly of
+  2026-11-12 refuses a kept `nightly`. Run `sudo yantra-update --channel nightly` on that box one
+  more time.
 
 ### Where the units come from
 

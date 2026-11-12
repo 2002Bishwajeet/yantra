@@ -684,13 +684,13 @@ impl Release {
         let script = std::fs::read_to_string(install_sh())?;
         let carried = script
             .lines()
-            .find(|line| line.starts_with("RELEASE_KEY="))
-            .context("install.sh assigns no RELEASE_KEY")?;
+            .find(|line| line.starts_with("STABLE_KEY="))
+            .context("install.sh assigns no STABLE_KEY")?;
         std::fs::write(
             root.join("install.sh"),
             script.replacen(
                 &format!("\n{carried}\n"),
-                &format!("\nRELEASE_KEY='{}'\n", public.join(" ")),
+                &format!("\nSTABLE_KEY='{}'\n", public.join(" ")),
                 1,
             ),
         )?;
@@ -821,7 +821,7 @@ fn install_sh_installs_the_agent_on_a_mac() -> Result<()> {
         said(&nightly)
     );
 
-    // Y-780: a release the owner has not signed installs nothing.
+    // Y-780: a release with no signature installs nothing.
     let signature = release.root.join("release/SHA256SUMS.sig");
     let signed = std::fs::read(&signature)?;
     std::fs::remove_file(&signature)?;

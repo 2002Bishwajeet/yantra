@@ -38,6 +38,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::process::{Command, Output};
 
 use anyhow::{Context, Result, bail};
@@ -422,14 +423,100 @@ fn the_fixtures_archive_is_shaped_the_way_release_yml_stages_one() -> Result<()>
         "release.yml no longer stages install.sh, so no box could leave an updater behind"
     );
     // Y-787: the first install fetches the release's own copy of install.sh,
-    // so the release and the nightly each list it in the file the owner signs.
+    // so the one file that `sign` signs lists it. Y-803: no publishing job
+    // writes a SHA256SUMS of its own.
     assert_eq!(
         workflow
             .matches("{ cat *.sha256; sha256sum install.sh; } | sort -k2 > SHA256SUMS")
             .count(),
-        2,
-        "release.yml no longer lists install.sh in SHA256SUMS in both publishing jobs"
+        1,
+        "release.yml no longer lists install.sh in the one SHA256SUMS that the sign job signs"
     );
+    Ok(())
+}
+
+/// release.yml's jobs as text, without their comments. The test above reads
+/// the file as text too.
+fn release_yml_jobs(workflow: &str) -> BTreeMap<&str, String> {
+    let mut jobs: BTreeMap<&str, String> = BTreeMap::new();
+    let mut job = None;
+    for line in workflow.lines().skip_while(|line| *line != "jobs:").skip(1) {
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+        // A job's name is the one key at two spaces.
+        if let Some(name) = line
+            .strip_prefix("  ")
+            .and_then(|key| key.strip_suffix(':'))
+            && !name.starts_with(' ')
+        {
+            job = Some(name);
+        }
+        if let Some(job) = job {
+            let body = jobs.entry(job).or_default();
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    jobs
+}
+
+/// Y-803, ADR-0027 decision 4: one job holds the signing keys, and that job
+/// builds nothing. A key in a job that runs npm or cargo is a key that every
+/// dependency can read.
+#[test]
+fn only_the_sign_job_in_release_yml_holds_a_key_and_it_builds_nothing() -> Result<()> {
+    let workflow = std::fs::read_to_string(repo_root().join(".github/workflows/release.yml"))?;
+    let jobs = release_yml_jobs(&workflow);
+    assert_eq!(
+        jobs.keys().copied().collect::<Vec<_>>(),
+        ["build", "meta", "nightly", "rehearse", "release", "sign"],
+        "release.yml's jobs changed, so say here which of them may hold a key"
+    );
+
+    let sign = &jobs["sign"];
+    assert!(
+        sign.contains("\n    environment: release\n"),
+        "the sign job is not in the environment that holds the keys"
+    );
+    for key in ["YANTRA_STABLE_SIGNING_KEY", "YANTRA_NIGHTLY_SIGNING_KEY"] {
+        assert_eq!(
+            sign.matches(&format!("secrets.{key}")).count(),
+            1,
+            "the sign job must name {key} in one step alone"
+        );
+    }
+    for builder in ["cargo", "npm", "setup-rust", "setup-node", "zig", "mold"] {
+        assert!(
+            !sign.contains(builder),
+            "the sign job names {builder}, so the job that holds a key builds something"
+        );
+    }
+
+    let preamble = workflow
+        .split_once("\njobs:\n")
+        .context("release.yml has no jobs")?
+        .0;
+    assert!(
+        !preamble.contains("secrets."),
+        "release.yml gives a secret to every job"
+    );
+    for (name, body) in jobs.iter().filter(|(name, _)| **name != "sign") {
+        assert!(
+            !body.contains("environment:") && !body.contains("secrets."),
+            "the {name} job can read a secret, and only sign may"
+        );
+    }
+    for publisher in ["release", "nightly"] {
+        let needs = jobs[publisher]
+            .lines()
+            .find(|line| line.starts_with("    needs:"))
+            .with_context(|| format!("the {publisher} job needs nothing"))?;
+        assert!(
+            needs.contains("sign"),
+            "the {publisher} job publishes without the sign job: {needs}"
+        );
+    }
     Ok(())
 }
 
@@ -722,6 +809,8 @@ fn a_corrupted_archive_is_refused_and_nothing_is_installed() -> Result<()> {
 
 /// Y-780, ADR-0027 decision 4: a checksum proves the archive is whole, not who
 /// made it. Only a release whose `SHA256SUMS` the carried key signed installs.
+/// Y-803: a stable release takes the stable key, so the nightly key's
+/// signature installs nothing.
 #[test]
 fn only_a_release_the_key_signed_is_installed() -> Result<()> {
     let Some(fixture) = Installer::start()? else {
@@ -749,14 +838,19 @@ fn only_a_release_the_key_signed_is_installed() -> Result<()> {
     )?;
     refused(
         "stranger",
-        "is not the release key's signature",
+        "is not the stable key's signature",
         "another key signed it",
+    )?;
+    refused(
+        "cross",
+        "is not the stable key's signature",
+        "the nightly key signed it",
     )?;
     // The checksum passes here, so only the signature refuses it.
     refused(
         "forge",
-        "is not the release key's signature",
-        "SHA256SUMS changed after the owner signed it",
+        "is not the stable key's signature",
+        "SHA256SUMS changed after the sign job signed it",
     )?;
 
     fixture.publish(VERSION, "signed")?;
@@ -766,34 +860,7 @@ fn only_a_release_the_key_signed_is_installed() -> Result<()> {
         out.status.success(),
         "a signed release did not install: {stderr}"
     );
-    assert!(
-        !stderr.contains("no signature was checked"),
-        "the fixture's installer carries no key:\n{stderr}"
-    );
     assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), VERSION);
-
-    // Until Y-798 sets the key, the published installer carries none. It says so and
-    // checks the checksum alone.
-    fixture.publish(NEXT_VERSION, "keyless")?;
-    fixture.release(&["unsign", &fixture.repo, NEXT_VERSION])?;
-    let keyless = fixture.systemd.exec_as(
-        UNPRIVILEGED,
-        &[
-            "bash",
-            "-c",
-            "sed \"s|^RELEASE_KEY=.*|RELEASE_KEY=''|\" /fixture/install.sh | bash",
-        ],
-    )?;
-    let stderr = String::from_utf8_lossy(&keyless.stderr);
-    assert!(keyless.status.success(), "{stderr}");
-    assert!(
-        stderr.contains("carries no release key, so no signature was checked"),
-        "a run that checked no signature must say so:\n{stderr}"
-    );
-    assert_eq!(
-        fixture.sh("cat /var/lib/yantra/installed")?.trim(),
-        NEXT_VERSION
-    );
     Ok(())
 }
 
@@ -957,7 +1024,8 @@ fn a_release_whose_archive_carries_no_updater_installs_without_one() -> Result<(
 /// Y-662: `--channel nightly` installs the rolling nightly and keeps the
 /// choice for yantrad's account to rewrite. The unit then refuses to go back
 /// to an older stable release, and a person running the script does not.
-/// Y-780: the nightly is not signed, so only a run that names it installs it.
+/// Y-803: the nightly key signs the nightly, so the unit installs a kept
+/// nightly. One with no signature, or with the stable key's, installs nothing.
 #[test]
 fn a_nightly_install_keeps_its_channel_and_only_a_person_goes_back() -> Result<()> {
     let Some(fixture) = Installer::start()? else {
@@ -998,30 +1066,40 @@ fn a_nightly_install_keeps_its_channel_and_only_a_person_goes_back() -> Result<(
         );
     }
 
-    // A newer nightly, and the kept channel names it. A run that names no
-    // channel installs nothing and gives the command that does.
+    // A newer nightly, and the kept channel names it. With no signature, a run
+    // that names no channel installs nothing.
     fixture.publish(NEWER, "newer")?;
     fixture.release(&["nightly", &fixture.repo, NEWER])?;
-    let unnamed = fixture.install()?;
-    let stderr = String::from_utf8_lossy(&unnamed.stderr);
+    fixture.release(&["unsign", &fixture.repo, "nightly"])?;
+    let unsigned = fixture.install()?;
+    let stderr = String::from_utf8_lossy(&unsigned.stderr);
+    assert!(!unsigned.status.success(), "an unsigned nightly installed");
     assert!(
-        !unnamed.status.success(),
-        "a run that named no channel installed the nightly"
-    );
-    assert!(
-        stderr.contains("the nightly is not signed")
-            && stderr.contains("sudo yantra-update --channel nightly"),
+        stderr.contains("carries no SHA256SUMS.sig") && stderr.contains("nothing was installed"),
         "{stderr}"
     );
+    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), NIGHTLY);
 
-    // The unit, which RUNTIME_DIRECTORY marks, passes no flag.
+    // The unit, which RUNTIME_DIRECTORY marks, passes no flag. The stable
+    // key's signature is not the nightly's.
     let as_the_unit = "install -d /run/fake-update && \
          RUNTIME_DIRECTORY=/run/fake-update bash /fixture/install.sh; echo \"exit=$?\"; \
          cat /run/fake-update/said";
+    fixture.release(&["cross", &fixture.repo, "nightly"])?;
     let unit = fixture.sh(as_the_unit)?;
     assert!(unit.contains("exit=1"), "{unit}");
-    assert!(unit.contains("the nightly is not signed"), "{unit}");
+    assert!(
+        unit.contains("is not the nightly key's signature")
+            && unit.contains("nothing was installed"),
+        "{unit}"
+    );
     assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), NIGHTLY);
+
+    // Under the nightly key's signature, the unit installs it from the kept channel.
+    fixture.release(&["nightly", &fixture.repo, NEWER])?;
+    let unit = fixture.sh(as_the_unit)?;
+    assert!(unit.contains("exit=0"), "{unit}");
+    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), NEWER);
 
     // Settings switched back to stable, whose release is older than the
     // nightly. The unit installs nothing.
@@ -1030,10 +1108,10 @@ fn a_nightly_install_keeps_its_channel_and_only_a_person_goes_back() -> Result<(
     let unit = fixture.sh(as_the_unit)?;
     assert!(unit.contains("exit=1"), "{unit}");
     assert!(
-        unit.contains(&format!("v{VERSION} is older than v{NIGHTLY}")),
+        unit.contains(&format!("v{VERSION} is older than v{NEWER}")),
         "{unit}"
     );
-    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), NIGHTLY);
+    assert_eq!(fixture.sh("cat /var/lib/yantra/installed")?.trim(), NEWER);
 
     // A person may go back.
     let back = fixture.install_ok()?;
