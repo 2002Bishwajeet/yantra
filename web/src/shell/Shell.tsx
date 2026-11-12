@@ -3,6 +3,7 @@ import { HeadContent, Link, Outlet, useRouter, useRouterState } from '@tanstack/
 import { ArrowLeft, Download, Plus, User } from 'lucide-react'
 import { useGithub, useGithubReadiness, useResetOnRouteChange, useViewing } from '@/api/hooks'
 import { grant, REFUSED } from '@/lib/github'
+import { useIdle } from '@/lib/useIdle'
 import { Badge } from '@/m3/badge/Badge'
 import { Button } from '@/m3/button/Button'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
@@ -40,8 +41,9 @@ import { paintThemeColor, syncThemeColor } from './themeColor'
 import './Shell.css'
 
 // The menu, the popover and the sheet's list carry Base UI's popup machinery
-// and the list's code. Each loads on the first press of its trigger, or on the
-// pointer or focus reaching it, never with the shell (Y-375).
+// and the list's code. The list loads on the first press of its trigger, or on
+// the pointer or focus reaching it. The avatar's menu and the bell's popover
+// load once the page is idle, never with the shell (Y-375, Y-736, Y-765).
 const loadAccount = () => import('./Account')
 const loadBellPopover = () => import('./BellPopover')
 const loadList = () => import('./Notifications')
@@ -171,6 +173,8 @@ function AccountButton() {
   const ref = useRef<HTMLButtonElement>(null)
   const [armed, setArmed] = useState(false)
   const [open, setOpen] = useState(false)
+  // Y-765: a menu first mounted by the click opens after React's 300 ms lazy reveal.
+  const idle = useIdle(loadAccount)
   return (
     <>
       <IconButton
@@ -191,7 +195,7 @@ function AccountButton() {
           <User />
         </Avatar>
       </IconButton>
-      {armed ? (
+      {armed || idle ? (
         <Guarded title="Account could not be drawn">
           <Suspense fallback={null}>
             <AccountMenu anchor={ref} onOpenChange={setOpen} open={open} refused={refused} />
@@ -209,15 +213,7 @@ function BellButton() {
   const [open, setOpen] = useState(false)
   // React holds a lazy Suspense reveal back for 300 ms after the fallback, so a
   // popup first mounted by the click opens late. Mount it closed once idle, after the chunk is in.
-  useEffect(() => {
-    const arm = () => void loadBellPopover().then(() => setArmed(true), () => {})
-    if (!('requestIdleCallback' in window)) {
-      const id = setTimeout(arm, 1000)
-      return () => clearTimeout(id)
-    }
-    const id = requestIdleCallback(arm, { timeout: 3000 })
-    return () => cancelIdleCallback(id)
-  }, [])
+  const idle = useIdle(loadBellPopover)
   return (
     <>
       <Bell
@@ -231,7 +227,7 @@ function BellButton() {
         onPointerEnter={warmBell}
         ref={ref}
       />
-      {armed ? (
+      {armed || idle ? (
         <Guarded title="Notifications could not be drawn">
           <Suspense fallback={null}>
             <BellPopup anchor={ref} onOpenChange={setOpen} open={open} />

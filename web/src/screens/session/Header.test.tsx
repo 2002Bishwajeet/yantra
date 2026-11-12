@@ -86,6 +86,15 @@ describe('the session header actions (Y-717)', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy()
   })
 
+  it('mounts the menu closed once idle, so the first tap only opens it (Y-765)', async () => {
+    await show('running')
+    const more = await screen.findByRole('button', { name: 'More actions' })
+    await waitFor(() => expect(document.body.querySelector('.m3-menu')).toBeTruthy(), { timeout: 4000 })
+    expect(screen.queryByRole('menu')).toBeNull()
+    fireEvent.click(more)
+    expect(screen.getByRole('menu')).toBeTruthy()
+  })
+
   it('opens the Delete confirm from the menu, and returns focus to the menu trigger when it closes', async () => {
     await show('running')
     const more = await screen.findByRole('button', { name: 'More actions' })
