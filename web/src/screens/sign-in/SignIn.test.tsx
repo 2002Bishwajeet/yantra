@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
+import * as contract from '@/contract.gen'
 import { signedIn } from '@/api/signedIn'
 import { mountSettings, sent, unmountSettings, type Answer, type Answers } from '@/screens/settings/harness'
 
@@ -10,7 +11,7 @@ vi.mock('@simplewebauthn/browser', () => ({
 }))
 
 const SAID = 'sign in from the dashboard, or run this on the hub'
-const OPTIONS = { publicKey: { challenge: 'Y2hhbGxlbmdl', rpId: 'hub.example.ts.net' } }
+const OPTIONS = { publicKey: { challenge: 'Y2hhbGxlbmdl', rpId: 'localhost' } }
 
 afterEach(() => {
   cleanup()
@@ -123,5 +124,61 @@ describe('the sign-in screen', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('the hub does not know its MagicDNS name yet')
+  })
+
+  it('names two fixes when the page is not under the hub’s passkey name, and never starts the browser', async () => {
+    const asked = hub({
+      'GET /api/about': [200, { ...contract.about, https: 'https://yantra-box.tailc8a53d.ts.net:8443' }],
+      'POST /api/passkey/login/start': [
+        200,
+        { ceremony: 'c1', options: { publicKey: { challenge: 'Y2hhbGxlbmdl', rpId: 'yantra-box.tailc8a53d.ts.net' } } },
+      ],
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with a passkey' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain(
+      `This page is at ${window.location.origin}, but this hub's passkeys belong to yantra-box.tailc8a53d.ts.net.`,
+    )
+    expect(alert.textContent).not.toContain('SecurityError')
+    const link = await within(alert).findByRole('link', { name: 'https://yantra-box.tailc8a53d.ts.net:8443' })
+    expect(link.getAttribute('href')).toBe('https://yantra-box.tailc8a53d.ts.net:8443')
+    expect(within(alert).getByText(/Option 1/)).toBeTruthy()
+    expect(within(alert).getByText(/Option 2/)).toBeTruthy()
+    expect(within(alert).getByLabelText('the YANTRA_ORIGIN line').textContent).toBe(`YANTRA_ORIGIN=${window.location.origin}`)
+    expect(within(alert).getByLabelText('the restart command').textContent).toBe('sudo systemctl restart yantrad')
+    expect(startAuthentication).not.toHaveBeenCalled()
+    expect(asked).not.toContain('POST /api/passkey/login/finish')
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  })
+
+  it('links the bare host when the daemon names another origin', async () => {
+    hub({
+      'POST /api/passkey/login/start': [
+        200,
+        { ceremony: 'c1', options: { publicKey: { challenge: 'Y2hhbGxlbmdl', rpId: 'hub.example.net' } } },
+      ],
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in with a passkey' }))
+
+    const alert = await screen.findByRole('alert')
+    const link = await within(alert).findByRole('link')
+    expect(link.getAttribute('href')).toBe('https://hub.example.net')
+  })
+
+  it('checks the id a registration carries under rp as well', async () => {
+    hub({
+      'POST /api/passkey/register/start': [
+        200,
+        { ceremony: 'c2', options: { publicKey: { challenge: 'Y2hhbGxlbmdl', rp: { id: 'other.example.net' } } } },
+      ],
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Set up this device with a code' }))
+    fireEvent.change(screen.getByLabelText('Code'), { target: { value: 'ABCD2345' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Set up this device' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('belong to other.example.net')
+    expect(startRegistration).not.toHaveBeenCalled()
   })
 })

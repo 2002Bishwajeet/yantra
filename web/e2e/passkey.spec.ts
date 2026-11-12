@@ -21,12 +21,12 @@ test.beforeEach(({}, info) => {
 
 /** The hub's origin, on the scenario `selected` names; the fixture reads the
  *  host it binds the passkey to from `x-forwarded-host`. */
-async function serve(context: BrowserContext, selected: string) {
+async function serve(context: BrowserContext, selected: string, forwardedHost = 'hub.test') {
   await context.route(/^https:\/\/hub\.test:8443\//, async (route) => {
     const url = new URL(route.request().url())
     const response = await route.fetch({
       url: `${PREVIEW}${url.pathname}${url.search}`,
-      headers: { ...route.request().headers(), 'x-fixture-scenario': selected, 'x-forwarded-host': 'hub.test' },
+      headers: { ...route.request().headers(), 'x-fixture-scenario': selected, 'x-forwarded-host': forwardedHost },
     })
     return route.fulfill({ response })
   })
@@ -84,6 +84,23 @@ test('a wrong code says the daemon’s words and signs nothing in', async ({ pag
   await expect(page.getByRole('alert')).toContainText('that code is wrong, used, or expired')
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible()
   await expect(signIn(page)).toBeVisible()
+})
+
+test('a page under another name fits the phone and keeps both fixes in reach', async ({ page }) => {
+  await serve(page.context(), await scenario(page, 'signedout'), 'other.test')
+  await page.goto(`${HUB}/`)
+
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).tap()
+
+  const alert = page.getByRole('alert')
+  await expect(alert).toContainText("this hub's passkeys belong to other.test")
+  const line = page.getByRole('group', { name: 'the YANTRA_ORIGIN line' })
+  await expect(line).toBeVisible()
+  const fits = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  expect(fits).toBe(true)
+  const copy = line.locator('xpath=..').getByRole('button').first()
+  const box = await copy.boundingBox()
+  expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width)
 })
 
 test('this device signs out, and its passkey signs it back in', async ({ page }) => {

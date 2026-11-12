@@ -21,6 +21,7 @@
   flex-direction: column;
   gap: var(--m3-gutter);
   width: 100%;
+  min-width: 0;
   max-width: var(--m3-measure);
   padding: 32px 24px;
   border-radius: var(--md-sys-shape-corner-extra-large);
@@ -71,5 +72,44 @@
 .sign-in__actions .m3-button,
 .sign-in__enrol .m3-button {
   width: 100%;
+  touch-action: manipulation;
+}
+
+/* The fix is a block under the sentence, and shrinks to the card: a long line
+   scrolls inside its Copyable instead of widening the page. */
+.sign-in__card .m3-error__actions {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.sign-in__fix {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1 1 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sign-in__fix li {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sign-in__fix .m3-copyable {
+  min-width: 0;
+}
+
+.sign-in__fix-link {
+  height: auto;
+  min-height: 48px;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
   touch-action: manipulation;
 }
