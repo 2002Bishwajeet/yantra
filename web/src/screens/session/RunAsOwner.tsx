@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -87,15 +88,18 @@ export function RunAsOwner(props: { machine: string; sudo: Sudo }) {
       <Button className="run-owner__button" disabled={machine === ''} onClick={start} ref={opener} variant="tonal">
         Run in owner terminal
       </Button>
-      <OwnerSheet
-        admin={openAs ?? ''}
-        ask={openAs === null ? <Ask machine={machine} onOpen={setOpenAs} /> : undefined}
-        machine={machine}
-        onClose={close}
-        open={asking || openAs !== null}
-        opener={opener}
-        typeIn={sudo.command}
-      />
+      {createPortal(
+        <OwnerSheet
+          admin={openAs ?? ''}
+          ask={openAs === null ? <Ask machine={machine} onOpen={setOpenAs} /> : undefined}
+          machine={machine}
+          onClose={close}
+          open={asking || openAs !== null}
+          opener={opener}
+          typeIn={sudo.command}
+        />,
+        document.body,
+      )}
     </div>
   )
 }

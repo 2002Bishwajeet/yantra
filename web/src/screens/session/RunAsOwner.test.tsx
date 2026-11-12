@@ -6,9 +6,8 @@ import { renderInApp } from '@/test/inApp'
 import type { Tool } from './timeline'
 import { WorkLog } from './WorkLog'
 
-/* Y-702. A sudo command in the Chat is offered to the owner's own shell. The
-   terminal is `Terminal.test.tsx`'s, against a real socket; here it records the
-   target and the text it was told to type. */
+/* Y-702. A sudo command is offered to the owner's own shell. Terminal.test.tsx
+   covers the socket; here the terminal records its target and typed text. */
 
 const opened: { target: Target; typeIn?: string }[] = []
 
@@ -90,6 +89,16 @@ describe('Run in owner terminal', () => {
       target: { machine: 'pi', owner: 'biswa' },
       typeIn: 'sudo systemctl restart sshd',
     })
+  })
+
+  it('stays visible when the work log shuts under it', async () => {
+    localStorage.setItem('yantra.owner.pi', 'biswa')
+    await draw('sudo ls')
+    fireEvent.click(run()!)
+    const sheet = await screen.findByRole('complementary', { name: 'biswa on pi' })
+    fireEvent.click(screen.getByRole('button', { name: /Worked/ }))
+    expect(document.querySelector('.chat__work-body')!.hasAttribute('hidden')).toBe(true)
+    expect(sheet.closest('[hidden]')).toBeNull()
   })
 
   it('asks for the admin name first, refuses a bad one, then opens and remembers it', async () => {
