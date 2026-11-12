@@ -216,3 +216,90 @@ test('Checks lists each check and comment, and Fix with agent fills the composer
   await expect(page.getByRole('button', { name: 'Send' })).toBeEnabled()
   await axe(page)
 })
+
+/** Y-497: the whole loop on one thread, from an inbox issue to a merged PR whose worktree is gone. */
+test('an inbox issue is walked to a merged PR and its worktree is removed', async ({ page }) => {
+  await scenario(page, 'loop')
+  await page.goto(route('fleet').path)
+  await page.getByRole('button', { name: `Start session on ${ISSUE}` }).click()
+  await page
+    .getByRole('dialog', { name: `Start a session on ${ISSUE}` })
+    .getByRole('list', { name: 'Workspaces that hold this repository' })
+    .getByRole('button', { name: 'yantra-web' })
+    .click()
+  await expect(page).toHaveURL(new RegExp(`/w/yantra-web\\?.*thread=${THREAD}`))
+  const composer = page.getByLabel('Message Claude in yantra-web', { exact: true })
+  await expect(composer).toHaveValue(/^Work on /)
+
+  const turn = async () => {
+    await page.getByRole('button', { name: 'Send' }).click()
+    await page.getByRole('button', { name: 'Approve', exact: true }).click()
+    await expect(page.getByRole('status')).toHaveText('Claude finished.')
+  }
+  await turn()
+
+  // The owner reads the branch and sends a line comment back as the next turn.
+  const diff = page.getByRole('button', { name: 'Diff', exact: true })
+  await diff.click()
+  await page
+    .getByRole('region', { name: 'Branch diff' })
+    .locator('[data-path="src/new.rs"] [data-line-type="change-addition"][data-column-number="3"]')
+    .click()
+  const box = page.getByRole('textbox', { name: 'Comment on src/new.rs L3' })
+  await expect(box).toBeFocused()
+  // Pierre's light theme draws string and keyword tokens under 4.5:1 on the add and delete tints.
+  await axe(page, { known: ['color-contrast'] })
+  await box.fill('name the greeting')
+  await box.press('ControlOrMeta+Enter')
+  await expect(composer).toHaveValue('> src/new.rs:L3\n> +    println!("hello {name}");\n\nname the greeting\n')
+  await diff.click()
+  await turn()
+
+  const bar = page.locator('.chat__header')
+  await gitMenu(page, 'Commit')
+  const commit = page.getByRole('dialog', { name: 'Commit this thread' })
+  await expect(commit.getByLabel('Commit message')).toHaveValue(/^Add the commit and push verbs/)
+  await axe(page)
+  await commit.getByRole('button', { name: 'Commit', exact: true }).click()
+  await expect(commit).toBeHidden()
+  await expect(bar.getByText('Committed: Add the commit and push verbs')).toBeVisible()
+  await gitMenu(page, 'Push')
+  await expect(bar.getByText('Pushed origin/yantra/492-0a1b2c3d4e5f6a7b')).toBeVisible()
+  await gitMenu(page, 'Open PR')
+  await expect(bar.getByRole('link', { name: 'PR #497' })).toBeVisible()
+
+  const checks = page.getByRole('dialog', { name: 'Checks on PR #497' })
+  await bar.getByRole('button', { name: 'Checks' }).click()
+  await expect(checks.getByText('1 of 2 failing')).toBeVisible()
+  await axe(page)
+  await checks.getByRole('button', { name: 'Fix with agent' }).click()
+  await expect(checks).toBeHidden()
+  await expect(composer).toHaveValue(/^Fix PR #497:/)
+  await turn()
+  // The first push's line can still be on the bar, so the wait is on the second push itself.
+  const pushed = page.waitForResponse((one) => one.request().method() === 'POST' && one.url().endsWith('/push'))
+  await gitMenu(page, 'Push')
+  expect((await pushed).ok()).toBe(true)
+
+  // The ntfy message for the green head opens the thread again, as a tap on it does.
+  await page.goto(ATTACHED)
+  await expect(page.getByText('Is the core crate green?')).toBeVisible()
+  await bar.getByRole('button', { name: 'Checks' }).click()
+  await expect(checks.getByText('All checks passed')).toBeVisible()
+  await axe(page)
+  await page.keyboard.press('Escape')
+  await expect(checks).toBeHidden()
+
+  await gitMenu(page, 'Merge PR #497')
+  const confirm = page.getByRole('dialog', { name: 'Merge PR #497' })
+  await fitsTheScreen(page, confirm)
+  await axe(page)
+  await confirm.getByRole('button', { name: 'Merge', exact: true }).click()
+  await expect(confirm).toBeHidden()
+  const offer = page.getByRole('dialog', { name: 'PR #497 merged' })
+  await fitsTheScreen(page, offer)
+  await axe(page)
+  await offer.getByRole('button', { name: 'Remove worktree' }).click()
+  await expect(offer).toBeHidden()
+  await expect(page).toHaveURL(/\/w\/yantra-web\?view=chat$/)
+})
