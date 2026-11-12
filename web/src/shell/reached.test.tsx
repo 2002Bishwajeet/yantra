@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { NOT_REACHED, REFUSED } from '@/api/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { HOLD_MS, NOT_REACHED, POLL_MS, REFUSED } from '@/api/client'
 import { looked } from '@/api/fixtures'
 import * as contract from '@/contract.gen'
+import type { FormFactor } from './formFactor'
 import { mount, unmount } from './harness'
 import { NotReached, causeOf } from './NotReached'
 import { notReached } from './reached'
@@ -107,6 +108,116 @@ describe('the screen a dead daemon draws', () => {
     await screen.findByRole('heading', { level: 1, name: 'Dashboard' })
     expect(screen.queryByText('yantrad is not answering')).toBeNull()
     expect(screen.getByRole('complementary', { name: 'Sessions' })).toBeTruthy()
+  })
+})
+
+/** Y-744: a page that has its content keeps it while the daemon does not
+ *  answer, and wears one mark. The board waits for `HOLD_MS` of silence. */
+describe('a daemon that stops answering under a page that drew its fleet', () => {
+  const DEAD = { status: 502, body: '' }
+  const NAME = contract.machines.data[0].name
+  const CLASSES = ['GET /api/machines', 'GET /api/workspaces', 'GET /api/sessions']
+  let wire: { status: number; body?: unknown } | undefined
+
+  // `held` reads `Date.now()`, and the polls are timers: both are faked, and
+  // real time still moves them so a `findBy` can wait for a lazy chunk.
+  beforeEach(() => {
+    wire = undefined
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    focusManager.setFocused(undefined)
+  })
+
+  const pass = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms))
+  const marked = () => !screen.getByText('Reconnecting').hidden
+  const open = async (size: FormFactor = 'desktop') => {
+    const asked = mount(size, '/machines', { wire: () => wire })
+    await screen.findByRole('heading', { name: NAME })
+    return asked
+  }
+
+  it.each(['phone', 'tablet', 'desktop'] as const)('keeps the %s page through one failed poll, and marks it', async (size) => {
+    await open(size)
+    expect(marked()).toBe(false)
+
+    wire = DEAD
+    await pass(POLL_MS)
+    expect(screen.getByRole('heading', { name: NAME })).toBeTruthy()
+    expect(marked()).toBe(true)
+    expect(screen.queryAllByRole('alert')).toHaveLength(0)
+    expect(screen.queryByText('yantrad is not answering')).toBeNull()
+
+    wire = undefined
+    await pass(POLL_MS)
+    expect(marked()).toBe(false)
+    expect(screen.getByRole('heading', { name: NAME })).toBeTruthy()
+  })
+
+  /** A reading stays fresh for 30 s, and a tab hidden for less than that used
+   *  to wait for the next poll. */
+  it('asks at once when the tab is seen again, however fresh its readings are', async () => {
+    const asked = await open()
+    act(() => focusManager.setFocused(false))
+    const before = asked.length
+    act(() => focusManager.setFocused(true))
+    await pass(50)
+    expect(asked.slice(before)).toEqual(expect.arrayContaining(CLASSES))
+  })
+
+  /** The owner's screenshot: the tab sat hidden, and the first reads after it
+   *  came back met 502s. Nothing was asked while it was hidden, so the silence
+   *  starts when the tab is seen again, and the tab asks at once. */
+  it('keeps the page through a burst of failures after the tab was hidden', async () => {
+    const asked = await open()
+    wire = DEAD
+    await pass(POLL_MS)
+    expect(marked()).toBe(true)
+
+    act(() => focusManager.setFocused(false))
+    await pass(10 * 60_000)
+    const before = asked.length
+    act(() => focusManager.setFocused(true))
+    await pass(50)
+    expect(asked.slice(before)).toEqual(expect.arrayContaining(CLASSES))
+    expect(screen.getByRole('heading', { name: NAME })).toBeTruthy()
+    expect(marked()).toBe(true)
+    expect(screen.queryAllByRole('alert')).toHaveLength(0)
+
+    wire = undefined
+    await pass(POLL_MS)
+    expect(marked()).toBe(false)
+  })
+
+  it('draws the one board only after the daemon has failed for the set time', async () => {
+    await open()
+    wire = DEAD
+    await pass(HOLD_MS - POLL_MS)
+    expect(screen.getByRole('heading', { name: NAME })).toBeTruthy()
+    expect(marked()).toBe(true)
+    expect(screen.queryAllByRole('alert')).toHaveLength(0)
+
+    await pass(3 * POLL_MS)
+    const alert = screen.getByRole('alert')
+    expect(within(alert).getByRole('heading', { name: 'yantrad is not answering' })).toBeTruthy()
+    expect(screen.queryByText(NAME)).toBeNull()
+    expect(marked()).toBe(false)
+
+    wire = undefined
+    await pass(POLL_MS)
+    expect(await screen.findByRole('heading', { name: NAME })).toBeTruthy()
+    expect(screen.queryAllByRole('alert')).toHaveLength(0)
+    expect(marked()).toBe(false)
+  })
+
+  it('draws a refusal at once, because the daemon answered', async () => {
+    await open()
+    wire = { status: 403, body: 'the account x may only join itself' }
+    await pass(POLL_MS)
+    expect(within(screen.getByRole('alert')).getByRole('heading', { name: 'Yantra refused this device' })).toBeTruthy()
+    expect(screen.queryByText(NAME)).toBeNull()
+    expect(marked()).toBe(false)
   })
 })
 

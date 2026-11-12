@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient } from '@tanstack/react-query'
 import { answer } from '../test/daemon'
 import { ApiError, asApiError, dictateError, isApiError, isDictateKind, type Kind, micError } from './errors'
 import { attention, machines, notLooked, opened, spend } from './fixtures'
@@ -129,16 +130,17 @@ describe('what an error says', () => {
 })
 
 /** Every query the layer exports, and what each may do when the daemon
- *  answers badly. The swept ones never reject (R-23: a failed look is data);
- *  the rest reject with an `ApiError` and nothing else. */
+ *  answers badly. The swept ones never reject on a first read (R-23: a failed
+ *  look is data); the rest reject with an `ApiError` and nothing else. */
 const signal = new AbortController().signal
 const call = (options: { queryFn?: unknown; queryKey: readonly unknown[] }) =>
   (
     options.queryFn as (context: {
       signal: AbortSignal
       queryKey: readonly unknown[]
+      client: QueryClient
     }) => Promise<unknown>
-  )({ signal, queryKey: options.queryKey })
+  )({ signal, queryKey: options.queryKey, client: new QueryClient() })
 
 const swept = [
   ['machines', machinesQuery()],

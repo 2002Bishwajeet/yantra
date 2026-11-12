@@ -31,6 +31,7 @@ import { Palette } from './Palette'
 import { usePrefs } from './prefs'
 import { keyOf, usePrimary, usePublishDrawn, usePublishRoute, useRouteAction, type Primary } from './primary'
 import { NotReached } from './NotReached'
+import { Reconnecting } from './Reconnecting'
 import { UpdateNotice } from './UpdateNotice'
 import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
@@ -76,7 +77,7 @@ function RouteAction() {
 
 /** The outlet, under one boundary that a navigation resets — or, when nothing
  *  reached the daemon, the one screen that says so in its place. */
-function Main({ down }: { down: ReactNode }) {
+function Main({ down, reconnecting }: { down: ReactNode; reconnecting: boolean }) {
   return (
     // Focusable, not tabbable: where focus lands when a focused FAB goes away.
     <main className="shell__main" data-scroll-restoration-id="main" tabIndex={-1}>
@@ -93,6 +94,7 @@ function Main({ down }: { down: ReactNode }) {
           </>
         )}
       </ErrorBoundary>
+      <Reconnecting on={reconnecting} />
     </main>
   )
 }
@@ -435,7 +437,7 @@ export function Shell() {
   if (open && !armed) setArmed(true)
   // One screen, owned here: the daemon is down for Settings as much as for the
   // fleet, and seven inline surfaces saying so are seven copies of one fact.
-  const { why, since } = useReached()
+  const { why, since, reconnecting } = useReached()
 
   // index.html applied these before the first paint; this keeps them live
   // when Appearance writes. The colour engine loads for a seed other than brass
@@ -483,7 +485,7 @@ export function Shell() {
               {pathname === '/' || pathname === '/new' ? <HomeRail /> : <SessionsRail />}
             </Guarded>
           ) : null}
-          <Main down={down} />
+          <Main down={down} reconnecting={reconnecting} />
         </div>
         {factor === 'tablet' ? (
           <SideSheet className="shell__sheet" id={SHEET} onClose={() => setOpen(false)} open={open} title="Notifications">
