@@ -473,3 +473,4 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-12** — Rows Y-751 to Y-775 added from the M3 Expressive audit (Y-747): 43 findings in 25 rows, two of them owner rows.
 - **2026-11-12** — **Y-758 answered:** the owner keeps the uppercase section labels. Y-716 drops its sentence-case clause, so it no longer needs an ADR-0024 amendment.
 - **2026-11-12** — Rows Y-776 to Y-797 added from the security audit: 1 critical, 3 high, 10 medium and 11 low findings in 21 rows, five of them owner rows. One more row holds the 11 suspicions.
+- **2026-11-12:** [Y-737](../tracker.md#3-task-board) is in review. A Settings category change now fades the detail pane alone and leaves the list, bar and rail still. `settingsCategory` is a child of `settings`, so the screen no longer remounts. A phone keeps the slide.

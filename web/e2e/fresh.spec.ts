@@ -136,7 +136,8 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     ...SETTINGS_NAV,
     'Sign out': text('Sign in to Yantra'),
     'Sign out every other device': text('iPhone', 'Mac'),
-    Remove: text('A code for one new device', 'iPhone'),
+    // The fixture holds one passkey, so removing it leaves the first-device prompt.
+    Remove: text('A code for the first device', 'iPhone'),
     'Make a code': text('ABCD2345'),
   },
   'settings-about': {
