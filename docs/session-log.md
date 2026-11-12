@@ -498,3 +498,4 @@ Append-only. Newest last. One line per working session. Entries from M0 and M1 (
 - **2026-11-12** — **[Y-787](../tracker.md#3-task-board) is in review.** The first boot and the docs now fetch `install.sh` from a release, never from a branch. The release lists the script in `SHA256SUMS`. A test fails if any script or doc names a branch URL.
 - **2026-11-12** — Row Y-802 added: on the nightly channel, About shows the hand-install command instead of an update button that the signed-release check always refuses.
 - **2026-11-12** — The owner chose CI signing for stable and nightly (ADR-0027, second note of the day). Row Y-803 builds it, Y-798 makes the keys, Y-802 lets the dashboard install the nightly.
+- **2026-11-12** — **Y-798 is done.** The lead made the stable and nightly signing keys straight into the GitHub environment `release`, which admits only `main` and `v*` tags. The public halves are in the row, for Y-803.
