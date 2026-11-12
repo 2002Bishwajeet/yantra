@@ -80,7 +80,7 @@ describe('a row on the machine page', () => {
     )
     expect(rows.filter(toFix)).toHaveLength(4)
     expect(rowMark(check('tmux', 'present'))).toBe('done')
-    expect(rowWord(check('hooks', 'absent'))).toBe('missing')
+    expect(rowWord(check('hooks', 'absent'))).toBe('to fix')
   })
 
   /** Y-740: each of these is installed or reports, so none reads as missing. */
@@ -92,6 +92,14 @@ describe('a row on the machine page', () => {
     expect(said('agent-cli', 'claude is installed at /usr/local/bin/claude, but this account cannot run it.')).toBe('closed')
     expect(said('agent-cli', 'claude is not on PATH or in any of: /usr/bin')).toBe('missing')
     expect(said('folder-access', 'macOS blocks the folders')).toBe('blocked')
+    // A sign-in, the hooks, sudo and sshd are faults in something that is there.
+    for (const id of ['reachable', 'sshd', 'provider-auth', 'login-session', 'hooks', 'no-sudo']) {
+      expect(rowWord(check(id, 'absent'))).toBe('to fix')
+    }
+    // Only a binary or a terminfo entry can be missing.
+    for (const id of ['tmux', 'git', 'provider-cli', 'terminfo']) {
+      expect(rowWord(check(id, 'absent'))).toBe('missing')
+    }
   })
 })
 

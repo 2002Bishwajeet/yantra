@@ -227,6 +227,8 @@ test.describe('the problems on a machine page', () => {
     const ready = card(page, 'Readiness')
     const rows = ready.locator('.machine__check')
     await expect(rows.first()).toBeVisible({ timeout: 15_000 })
+    // Y-740: gh, the agent, the hooks and sudo are all on macbook, so no row says missing.
+    await expect(ready).not.toContainText('missing')
     for (const row of await rows.all()) {
       const cause = row.locator('.machine__cause')
       const words = ((await cause.textContent()) ?? '').trim().split(/\s+/).length

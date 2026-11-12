@@ -201,6 +201,8 @@ test.describe('the problems on a machine card', () => {
     await expect(closed.getByRole('button', { name: 'Install' })).toBeVisible()
     await expect(closed).not.toContainText(/missing|not found/)
     await expect(mac.getByText('installed; update it')).toBeVisible()
+    // Every tool on macbook is installed: gh, the hooks and sudo are faults, not gaps.
+    await expect(mac).not.toContainText(/missing|not found/)
     for (const row of [...(await rows.all()), ...(await closed.locator('.machines__check').all())]) {
       const cause = row.locator('.machines__detail')
       const words = ((await cause.textContent()) ?? '').trim().split(/\s+/).length

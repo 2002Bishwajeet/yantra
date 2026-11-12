@@ -171,7 +171,7 @@ describe("a ready machine with gaps (Y-714)", () => {
 
   it("lists the failing checks and none that pass", async () => {
     renderCard(aMachine(), checks);
-    await screen.findByText(/to fix/);
+    await screen.findByText("ready · 2 to fix");
     expect(screen.queryByText("ssh")).toBeNull();
     expect(screen.queryByText("tmux")).toBeNull();
     expect(screen.queryByText("terminfo")).toBeNull();
@@ -181,7 +181,7 @@ describe("a ready machine with gaps (Y-714)", () => {
 
   it("shows the sudo gap once, in its note, and keeps the other gaps as lines", async () => {
     renderCard(aMachine(), checks);
-    await screen.findByText(/to fix/);
+    await screen.findByText("ready · 2 to fix");
     expect(screen.queryByText(/wheel group/)).toBeNull();
     const said = screen.getAllByText("Agents here can use sudo");
     expect(said).toHaveLength(1);
