@@ -177,6 +177,11 @@ async fn answers() -> Vec<(&'static str, &'static str, Value)> {
             "Looked<Attention>",
             read(&fleet, "/attention").await,
         ),
+        (
+            "attentionRetrying",
+            "Looked<Attention>",
+            read(&retrying(), "/attention").await,
+        ),
         ("repos", "Looked<Repo[]>", read(&fleet, "/repos").await),
         (
             "hiddenOrgs",
@@ -552,6 +557,21 @@ fn refused() -> Fleet {
         github: Some(Arc::new(Reading::new(doctor::github(Some(&Err(
             yantra_core::github::Error::Refused,
         )))))),
+        ..Snapshot::default()
+    })
+}
+
+/// Y-745: the inbox kept through one read that did not reach GitHub.
+fn retrying() -> Fleet {
+    let kept = Reading::new(Ok(attention()));
+    kept.outlive(
+        &yantra_core::github::Error::Unreachable {
+            reason: "failed to lookup address information".into(),
+        }
+        .to_string(),
+    );
+    holding(Snapshot {
+        attention: Some(Arc::new(kept)),
         ..Snapshot::default()
     })
 }

@@ -4,7 +4,8 @@
 import type { SlashCommand } from './api/thread'
 
 export type Looked<T> =
-  | { looked: 'ok'; age_seconds: number; data: T }
+  /** `retrying` (Y-745): the newest look failed with this reason, and `data` is the look before it. */
+  | { looked: 'ok'; age_seconds: number; retrying?: string; data: T }
   | { looked: 'failed'; age_seconds: number; error: string }
   | { looked: 'never' }
 

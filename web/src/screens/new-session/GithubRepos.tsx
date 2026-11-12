@@ -18,6 +18,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { IconTile } from '@/m3/tile/Tile'
+import { KeptReading } from '@/screens/fleet/KeptReading'
 import { useTick } from '@/useTick'
 import { CloneFolder } from './CloneFolder'
 import { rememberCloneFolder, useCloneFolder } from './clonePath'
@@ -250,7 +251,10 @@ export function GithubRepos(props: { form: SessionForm; values: Values }) {
           <Skeleton />
         </div>
       ) : repos.looked === 'ok' ? (
-        <Rows form={form} query={deferred} repos={repos.data} values={values} />
+        <>
+          <KeptReading reading={repos} />
+          <Rows form={form} query={deferred} repos={repos.data} values={values} />
+        </>
       ) : (
         <ErrorSurface.Inline
           error={{

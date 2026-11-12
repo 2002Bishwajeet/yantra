@@ -190,6 +190,13 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+/* The age of a kept reading takes the stamp's place (Y-745). */
+.github__head > .github__kept {
+  align-self: center;
+  margin-left: auto;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
 .github__groups {
   display: flex;
   flex-direction: column;
@@ -421,6 +428,11 @@
 
 [data-shell="phone"] .github__head {
   flex-wrap: wrap;
+}
+
+/* The stamp is hidden on the phone. This mark is not: it says the reading is old. */
+[data-shell="phone"] .github__head > .github__kept {
+  margin-left: 0;
 }
 
 /* Y-489: the Start session picker. */

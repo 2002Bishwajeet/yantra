@@ -47,6 +47,7 @@ import { usePrefs } from '@/shell/prefs'
 import { useTick } from '@/useTick'
 import { daemonCouldNotRead, openedByHand, unclaimed, unreachable, waiting, work, type WorkRow } from '@/work'
 import { elapsed, isAge } from '@/screens/fleet/clock'
+import { KeptReading } from '@/screens/fleet/KeptReading'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
 import { runsSessions } from '@/lib/platform'
@@ -339,6 +340,7 @@ function Hero(props: {
               when an agent asks for trust or a review is requested, it appears here first
             </Text>
           </div>
+          <KeptReading reading={attention} />
           <div>
             <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant={carried ? 'tonal' : 'filled'}>
               New session
@@ -363,6 +365,7 @@ function Hero(props: {
                   {plural(attention.data.notifications, 'unread notification')} on GitHub →
                 </a>
               ) : null}
+              <KeptReading reading={attention} />
             </>
           ) : attention.looked === 'failed' ? (
             <ErrorSurface.Inline error={fromReading(attention)!} reset={retry} title="GitHub could not be read" />

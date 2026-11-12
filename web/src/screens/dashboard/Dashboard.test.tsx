@@ -55,6 +55,60 @@ describe('the Dashboard on a busy fleet', () => {
     expect(hero.getByText(/Review requested: yantra#245/)).toBeTruthy()
     expect(hero.getByText(/Issue assigned: yantra#118/)).toBeTruthy()
     expect(hero.queryByText(/cargo-zig/)).toBeNull()
+    expect(hero.queryByRole('button', { name: /retrying/ })).toBeNull()
+  })
+
+  /** Y-745: one failed read is not a failure. The rows stay, and an age under them says the reading is old. */
+  it('keeps the GitHub rows of a reading whose last read failed, and marks it as old under them', async () => {
+    const state = scenario('busy')
+    state.attention = { ...state.attention!, age_seconds: 372, retrying: contract.attentionRetrying.retrying } as never
+    mount('desktop', '/', state)
+    const stamp = await screen.findByRole('button', { name: 'as of 6m · retrying' })
+    const hero = region('Needs you')
+    expect(hero.getByText('6')).toBeTruthy()
+    const review = hero.getByText(/Review requested: yantra#245/)
+    const issue = hero.getByText(/Issue assigned: yantra#118/)
+    // What needs the owner comes first.
+    expect(review.compareDocumentPosition(stamp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(issue.compareDocumentPosition(stamp) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // Nothing is announced, and no failure is in the hero.
+    expect(hero.queryByRole('status')).toBeNull()
+    expect(hero.queryByRole('alert')).toBeNull()
+    expect(reads('Needs you')).not.toMatch(/failed|could not be/)
+    expect(reads('Needs you')).not.toContain(contract.attentionRetrying.retrying)
+  })
+
+  it('gives the reason of the failed read when the stamp is pressed', async () => {
+    const state = scenario('busy')
+    state.attention = { ...state.attention!, age_seconds: 372, retrying: contract.attentionRetrying.retrying } as never
+    mount('phone', '/', state)
+    fireEvent.click(await screen.findByRole('button', { name: 'as of 6m · retrying' }))
+    const why = await screen.findByRole('dialog', { name: 'The last GitHub read failed' })
+    expect(within(why).getByText(contract.attentionRetrying.retrying)).toBeTruthy()
+  })
+
+  it('draws a GitHub read that keeps failing as a failure, with the reason', async () => {
+    const state = scenario('busy')
+    state.attention = { looked: 'failed', age_seconds: 5, error: contract.attentionRetrying.retrying } as never
+    mount('desktop', '/', state)
+    await drawn()
+    const hero = region('Needs you')
+    expect(hero.getByText('GitHub could not be read')).toBeTruthy()
+    expect(reads('Needs you')).toContain(contract.attentionRetrying.retrying)
+    expect(hero.queryByRole('button', { name: /retrying/ })).toBeNull()
+    expect(hero.queryByText(/Review requested/)).toBeNull()
+  })
+
+  it('draws a grant that is gone as a failure at once, with what the daemon said', async () => {
+    const state = scenario('busy')
+    state.attention = { looked: 'failed', age_seconds: 0, error: 'no GitHub grant — run `yantra github login`' } as never
+    mount('desktop', '/', state)
+    await drawn()
+    const hero = region('Needs you')
+    expect(hero.getByText('GitHub could not be read')).toBeTruthy()
+    expect(reads('Needs you')).toContain('no GitHub grant')
+    expect(hero.queryByRole('button', { name: /retrying/ })).toBeNull()
+    expect(hero.queryByText(/Review requested/)).toBeNull()
   })
 
   it('moves the hero count when a band changes, while the row stays held', async () => {
@@ -295,6 +349,18 @@ describe('the Dashboard on an empty fleet', () => {
     )
     expect(screen.getByText('No workspaces yet')).toBeTruthy()
     expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0)
+  })
+
+  /** Y-745: "nothing" from an old reading says that it is old. */
+  it('marks Nothing needs you as old when the empty GitHub reading is a kept one', async () => {
+    const state = keyed(scenario('empty'))
+    state.attention = { ...state.attention!, age_seconds: 372, retrying: contract.attentionRetrying.retrying } as never
+    mount('phone', '/', state)
+    const stamp = await screen.findByRole('button', { name: 'as of 6m · retrying' })
+    const hero = region('Needs you')
+    expect(hero.getByText('Nothing needs you')).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Needs you' }).contains(stamp)).toBe(true)
+    expect(reads('Needs you')).not.toMatch(/failed|could not be/)
   })
 
   it('offers New in the compact Idle card on the phone', async () => {

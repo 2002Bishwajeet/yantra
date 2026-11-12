@@ -312,6 +312,28 @@ describe('step 2, where the code comes from', () => {
     expect(screen.getAllByText(contract.github.login as string)).toHaveLength(1)
     expect(screen.queryByText(/signed in to Yantra/)).toBeNull()
     expect(screen.queryByText(/Use another account/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /retrying/ })).toBeNull()
+  })
+
+  /** Y-745: one failed read is not a failure. The list stays usable and an age says it is old. */
+  it('keeps the repositories of a list whose last read failed, and marks it as old and not as failed', async () => {
+    mountNew('desktop', '/new', {
+      'GET /api/repos': [
+        200,
+        { ...contract.repos, age_seconds: 372, retrying: 'GitHub answered 502 to the repository list' },
+      ],
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'New session' })
+    press('cachyos-g14')
+    press('Continue')
+    await screen.findByRole('list', { name: 'Repositories' })
+    expect(screen.getByRole('button', { name: /2002Bishwajeet\/yantra/ })).toBeTruthy()
+    const stamp = screen.getByRole('button', { name: 'as of 6m · retrying' })
+    expect(dialog.textContent).not.toMatch(/failed|could not be|502/)
+
+    fireEvent.click(stamp)
+    const why = await screen.findByRole('dialog', { name: 'The last GitHub read failed' })
+    expect(within(why).getByText('GitHub answered 502 to the repository list')).toBeTruthy()
   })
 
   it('does not tell anyone to choose from a list that failed to load', async () => {
@@ -322,6 +344,7 @@ describe('step 2, where the code comes from', () => {
     press('cachyos-g14')
     press('Continue')
     expect(await screen.findByText('The repositories could not be read.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /retrying/ })).toBeNull()
     expect(screen.getByRole('status').textContent).toBe('')
     expect(screen.getByRole('button', { name: 'Continue' })).toHaveProperty('disabled', true)
   })

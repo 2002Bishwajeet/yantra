@@ -1,0 +1,40 @@
+/* No colour: the mark takes the colour of the surface it sits on, which is
+   the hero's primary container on the Dashboard. */
+.kept {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-full);
+  font: var(--md-sys-typescale-body-small);
+  letter-spacing: var(--md-sys-typescale-body-small-tracking);
+  white-space: nowrap;
+  color: inherit;
+  background: none;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The words stay on the edge of their column; the state layer goes past them. */
+.kept.m3-interactive::before {
+  inset: -2px -8px;
+}
+
+.kept > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.m3-popover.kept__why {
+  width: var(--m3-menu-width);
+}
+
+.kept__why > p {
+  margin: 0;
+  padding: 0 12px 4px;
+  overflow-wrap: anywhere;
+}

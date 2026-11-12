@@ -11,6 +11,7 @@ import { Mono, Num, Text } from '@/m3/text/Text'
 import { IconTile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { Ago } from './age'
+import { KeptReading } from './KeptReading'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { StartSession } from './StartSession'
 
@@ -36,7 +37,9 @@ export function Github(props: { attention: Reading<Attention> }) {
             <ArrowUpRight aria-hidden="true" />
           </a>
         ) : null}
-        {attention.looked === 'ok' || attention.looked === 'failed' ? (
+        {attention.looked === 'ok' && attention.retrying ? (
+          <KeptReading className="github__kept" reading={attention} />
+        ) : attention.looked === 'ok' || attention.looked === 'failed' ? (
           // On the daemon's 300 s clock, so the block stamps itself (D6 §2).
           <Num className="github__age">
             as of <Ago seconds={attention.age_seconds} /> · read every 5 min
