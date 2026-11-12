@@ -9,9 +9,11 @@ import {
 } from '@/api/passkey'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
+import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
+import { Skeleton } from '@/m3/skeleton/Skeleton'
 import type { ApiError } from '@/api/errors'
 import { day } from '@/lib/time'
 import { Group } from './Group'
@@ -24,6 +26,18 @@ function Failed(props: { title: string; error: ApiError }) {
   return (
     <li className="devices__failed">
       <ErrorSurface.Inline error={props.error} folded title={props.title} />
+    </li>
+  )
+}
+
+/** An empty group's one row, so the group still reads as a list with nothing
+ *  in it rather than a label over a caption. */
+function Empty(props: { title: string; children: string }) {
+  return (
+    <li>
+      <EmptyState compact title={props.title}>
+        {props.children}
+      </EmptyState>
     </li>
   )
 }
@@ -76,7 +90,7 @@ function Passkey(props: { name: string; made: number }) {
   )
 }
 
-function NewDevice() {
+function NewDevice(props: { first: boolean }) {
   const code = useEnrolCode()
   return (
     <Group
@@ -84,7 +98,7 @@ function NewDevice() {
       note="On the new device, open the dashboard, choose Set up this device with a code, and type the code. It works once, within 10 minutes."
     >
       <ListItem
-        headline="A code for one new device"
+        headline={props.first ? 'A code for the first device' : 'A code for one new device'}
         leading={
           <Lead tone="primary">
             <Plus />
@@ -118,14 +132,37 @@ export function Devices() {
       />
     )
   }
-  const passkeys = devices.data?.passkeys ?? []
-  const sessions = devices.data?.sessions ?? []
+  if (!devices.data) {
+    return (
+      <Group label="Passkeys">
+        <li aria-busy="true">
+          <Skeleton shape="row" />
+        </li>
+      </Group>
+    )
+  }
+  const { passkeys, sessions, relying_party } = devices.data
+  const at = relying_party ? `Passkeys work at ${relying_party}.` : undefined
+  // Y-687: with no passkey the one thing to do is enrol the first device, so
+  // it leads and the groups that cannot have rows yet stay out of the way.
+  if (passkeys.length === 0) {
+    return (
+      <>
+        <NewDevice first />
+        <Group label="Passkeys" note={at}>
+          <Empty title="No passkey yet">Make a code to enrol the first device.</Empty>
+        </Group>
+      </>
+    )
+  }
   return (
     <>
-      <Group label="Signed in" note={devices.data?.relying_party ? `Passkeys work at ${devices.data.relying_party}.` : undefined}>
-        {sessions.map((session) => (
-          <Session key={session.id} session={session} />
-        ))}
+      <Group label="Signed in" note={at}>
+        {sessions.length === 0 ? (
+          <Empty title="No device is signed in">A device signs in when it uses its passkey here.</Empty>
+        ) : (
+          sessions.map((session) => <Session key={session.id} session={session} />)
+        )}
       </Group>
       {sessions.some((one) => !one.this_device) ? (
         <Button
@@ -146,7 +183,7 @@ export function Devices() {
           <Passkey key={one.name} name={one.name} made={one.made} />
         ))}
       </Group>
-      <NewDevice />
+      <NewDevice first={false} />
     </>
   )
 }

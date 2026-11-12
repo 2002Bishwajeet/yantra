@@ -28,6 +28,30 @@ describe('Devices', () => {
     expect(screen.getByText(/^enrolled /)).toBeTruthy()
   })
 
+  it('leads with Add a device and says the list is empty when there is no passkey', async () => {
+    mountSettings('desktop', '/settings/devices', {
+      'GET /api/passkey': [200, { relying_party: 'hub.example.ts.net', passkeys: [], sessions: [] }],
+    })
+    expect(await screen.findByText('No passkey yet')).toBeTruthy()
+    expect(screen.getByText('Make a code to enrol the first device.')).toBeTruthy()
+    expect(screen.getByText('A code for the first device')).toBeTruthy()
+    const groups = screen.getAllByRole('heading', { level: 3 }).map((one) => one.textContent)
+    expect(groups).toEqual(['Add a device', 'Passkeys'])
+    const passkeys = screen.getByRole('region', { name: 'Passkeys' })
+    expect(within(passkeys).getByText('Passkeys work at hub.example.ts.net.')).toBeTruthy()
+    expect(screen.queryByText('Removing a passkey signs out every device it signed in.')).toBeNull()
+  })
+
+  it('says no device is signed in when a passkey has signed none in', async () => {
+    mountSettings('desktop', '/settings/devices', {
+      'GET /api/passkey': [200, { ...DEVICES, sessions: [] }],
+    })
+    const signedIn = await screen.findByRole('region', { name: 'Signed in' })
+    expect(within(signedIn).getByText('No device is signed in')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Sign out every other device' })).toBeNull()
+    expect(screen.getByText('A code for one new device')).toBeTruthy()
+  })
+
   it('signs one device out by its session id', async () => {
     const asked = mountSettings('desktop', '/settings/devices', {
       'GET /api/passkey': [200, DEVICES],
