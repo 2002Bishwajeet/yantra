@@ -161,3 +161,20 @@ Accessed 2026-11-09.
 > **ADR-0045, decision 2, 2026-11-10 (Y-698):** a home thread's row has no workspace, no
 > branch and no worktree path. Those three fields may be empty, and the machine names the thread
 > ([ADR-0046](0046-the-owner-types-sudo-in-an-owner-terminal.md) decision 1).
+
+> **ADR-0045, decisions 2 and 4, 2026-11-12 ([Y-782](../../tracker.md), owner):** a thread's row
+> also holds the GitHub repository, `owner/repo`. The security audit (F-06) found that the PR verbs
+> act on the repository named in git config, which an agent in the worktree can rewrite. The owner
+> decided:
+>
+> 1. **A new thread takes its repository from where the workspace was cloned from**, as Yantra
+>    recorded it at clone time. An agent cannot change that record. A folder that Yantra did not
+>    clone falls back to the remote at creation.
+> 2. **A row with no repository binds on first use.** The first PR verb on a thread made before
+>    this note stores the repository it reads then. The owner accepted the small window this leaves.
+> 3. **The store wins for the repository** (decision 4). `open_pr`, `pending_pr` and `merge_pr`
+>    refuse a remote that names another repository, and the dialog names both.
+> 4. **The `yantra pr` CLI stays unbound** (ADR-0012). A person types it in the folder they see.
+>
+> **What changed upstream of the reasoning:** the build loop runs agents in the owner's worktrees,
+> and the 2026-11-12 audit showed one could redirect a merge.
