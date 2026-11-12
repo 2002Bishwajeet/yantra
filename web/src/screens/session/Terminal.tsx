@@ -136,7 +136,8 @@ export type TerminalProps = {
  *
  *  **A step target is a one-off terminal** (Y-394): it runs a command an
  *  install left, ends when the command does, and is never reopened, because
- *  reopening would run the command again. */
+ *  reopening would run the command again. An owner target is one too (Y-701):
+ *  it ends when its shell does. */
 export function Terminal(props: TerminalProps) {
   const { target, height, label, onExit, onEnd, statusIn, children } = props
   const host = useRef<HTMLDivElement>(null)
@@ -150,7 +151,8 @@ export function Terminal(props: TerminalProps) {
   const escape = useRef<HTMLParagraphElement>(null)
   const hint = useId()
   const url = terminalAddress(target)
-  const once = 'step' in target
+  // An owner terminal ends with its shell, and a step with its command.
+  const once = 'step' in target || 'owner' in target
   const refused = end.ended === 'yes' ? end.refused : null
 
   // The socket outlives any one render, so the newest callback is read at the
@@ -289,6 +291,14 @@ export function Terminal(props: TerminalProps) {
           reset={again}
           title={`${label} has no terminal to attach to`}
         />
+      ) : 'owner' in target ? (
+        <p className="terminal__over">
+          The owner terminal on{' '}
+          <Link className="m3-hit" params={{ machine: target.machine }} to="/m/$machine">
+            {target.machine}
+          </Link>{' '}
+          closed before its shell ended. Nothing reopens it on its own.
+        </p>
       ) : once ? (
         <p className="terminal__over">
           The terminal on{' '}

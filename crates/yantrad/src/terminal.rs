@@ -1,6 +1,7 @@
 //! `GET /api/workspaces/{name}/terminal`,
-//! `GET /api/machines/{machine}/sessions/{session}/terminal` and
-//! `GET /api/machines/{machine}/install/{index}/terminal` —
+//! `GET /api/machines/{machine}/sessions/{session}/terminal`,
+//! `GET /api/machines/{machine}/install/{index}/terminal` and
+//! `GET /api/machines/{machine}/owner/terminal?as=<admin>` —
 //! [`yantra_core::pty::Terminal`] on a WebSocket.
 //!
 //! **Two addresses, one bridge.** A workspace is read for the machine and the
@@ -14,6 +15,10 @@
 //! index** ([ADR-0030]). An install whose sudo wanted a password left the
 //! command; the socket names its place in what the daemon remembers, never the
 //! command itself, and the terminal ends when the command does, saying how.
+//!
+//! **The fourth is the owner terminal, and it runs no command** ([ADR-0046]
+//! §2). It is the login shell of the owner's admin account, so it needs the
+//! owner's live session cookie, and it ends as the third does.
 //!
 //! **An upgrade is a `GET`, so it does not inherit the write check, and this is
 //! the route that most needs one.** [`crate::write::allowed`] is called by name
@@ -56,6 +61,7 @@
 //! stream, so Q5's line above still holds — nothing reads what is on it.
 //!
 //! [ADR-0030]: ../../../docs/adr/0030-a-one-off-terminal-runs-only-a-command-an-install-left.md
+//! [ADR-0046]: ../../../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md
 
 use std::time::Duration;
 
@@ -67,12 +73,13 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::Response;
 use axum::routing::get;
 use tokio::time::MissedTickBehavior;
-use yantra_core::install;
 use yantra_core::inventory::Inventory;
 use yantra_core::pty;
+use yantra_core::{identity, install};
 
 use crate::write::{
-    Authoriser, Left, Missed, Peer, Refused, allowed_socket, chain, left_command, until_revoked,
+    Authoriser, Left, Missed, Peer, Refused, allowed_socket, chain, left_command, signed_in_socket,
+    until_revoked,
 };
 
 /// Long enough that a socket nobody is typing at costs one frame a browser
@@ -109,6 +116,7 @@ where
             "/machines/{machine}/sessions/{session}/terminal",
             get(tap::<I>),
         )
+        .route("/machines/{machine}/owner/terminal", get(owner::<I>))
         .with_state(authoriser)
         .merge(once)
 }
@@ -189,11 +197,46 @@ async fn step<I: Inventory + Clone + Send + Sync + 'static>(
 /// The install a caller read its step from, as `?at=` its event's time.
 /// Read by hand, as `write.rs` reads `?force=true`.
 fn read_at(uri: &Uri) -> Option<u64> {
+    query(uri, "at=")?.parse().ok()
+}
+
+fn query<'a>(uri: &'a Uri, key: &str) -> Option<&'a str> {
     uri.query()?
         .split('&')
-        .find_map(|pair| pair.strip_prefix("at="))?
-        .parse()
-        .ok()
+        .find_map(|pair| pair.strip_prefix(key))
+}
+
+/// Y-701, [ADR-0046] §2: the admin account's login shell. Both names reach
+/// `ssh`'s argv (I-63), so each is checked before the upgrade. The account
+/// name is read as sent: a name that needs decoding is not one sshd takes.
+///
+/// [ADR-0046]: ../../../docs/adr/0046-the-owner-types-sudo-in-an-owner-terminal.md
+async fn owner<I: Inventory + Clone + Send + Sync + 'static>(
+    State(authoriser): State<Authoriser<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Path(machine): Path<String>,
+    uri: Uri,
+    upgrade: WebSocketUpgrade,
+) -> Result<Response, Refused> {
+    let (caller, revoked) = signed_in_socket(&authoriser, &from, &headers).await?;
+    install::check_machine(&machine).map_err(|error| Refused::Verb {
+        status: StatusCode::BAD_REQUEST,
+        said: error.to_string(),
+    })?;
+    let user = query(&uri, "as=")
+        .filter(|user| identity::usable_user(user))
+        .ok_or_else(|| Refused::Verb {
+            status: StatusCode::BAD_REQUEST,
+            said: "an owner terminal names the admin account as ?as=: letters, digits, `.`, `_` \
+                   and `-`, at most 32, not starting with `-` or `.`"
+                .to_owned(),
+        })?
+        .to_owned();
+    let target = Target::Owner { machine, user };
+    tracing::info!("terminal {target} for {}", caller.node);
+
+    Ok(upgrade.on_upgrade(move |socket| until_revoked(Some(revoked), bridge(socket, target))))
 }
 
 /// What a socket attaches to: a workspace this daemon looks up, a machine and a
@@ -209,6 +252,10 @@ enum Target {
         index: usize,
         at: u64,
         left: Left,
+    },
+    Owner {
+        machine: String,
+        user: String,
     },
 }
 
@@ -238,13 +285,14 @@ impl Target {
                     })?;
                 pty::run(machine, &command, term, size).await?
             }
+            Self::Owner { machine, user } => pty::login(machine, user, term, size).await?,
         })
     }
 
-    /// A one-off terminal ends when its command does, and says how; the other
-    /// two end when the person leaves.
+    /// A one-off terminal ends when its command or shell does, and says how;
+    /// the other two end when the person leaves.
     fn reports_exit(&self) -> bool {
-        matches!(self, Self::Step { .. })
+        matches!(self, Self::Step { .. } | Self::Owner { .. })
     }
 }
 
@@ -256,6 +304,7 @@ impl std::fmt::Display for Target {
             Self::Workspace(name) => write!(f, "{name}"),
             Self::Session { machine, session } => write!(f, "{session} on {machine}"),
             Self::Step { machine, index, .. } => write!(f, "install step {index} on {machine}"),
+            Self::Owner { machine, user } => write!(f, "owner terminal as {user} on {machine}"),
         }
     }
 }
@@ -603,15 +652,16 @@ pub(crate) mod tests {
 
     /// Past the handshake and onto the frames, which is where a ping is.
     async fn upgraded(authoriser: Authoriser<Fake>) -> BufReader<TcpStream> {
-        upgraded_at(authoriser, Left::default(), WORKSPACE).await
+        upgraded_at(authoriser, Left::default(), WORKSPACE, "").await
     }
 
     async fn upgraded_at(
         authoriser: Authoriser<Fake>,
         left: Left,
         path: &str,
+        headers: &str,
     ) -> BufReader<TcpStream> {
-        let mut socket = connect_with(authoriser, left, path, "").await;
+        let mut socket = connect_with(authoriser, left, path, headers).await;
         let mut line = String::new();
         loop {
             line.clear();
@@ -747,6 +797,7 @@ pub(crate) mod tests {
             direct(Some(caller(ME, &[]))),
             left("fixture", &["sudo apk add tmux"]),
             path,
+            "",
         )
         .await;
         send(&mut socket, TEXT, WINDOW.as_bytes()).await;
@@ -843,6 +894,7 @@ pub(crate) mod tests {
             direct(Some(caller(ME, &[]))),
             left("nowhere.invalid", &["sudo apk add tmux"]),
             "/api/machines/nowhere.invalid/install/0/terminal?at=100",
+            "",
         )
         .await;
         send(&mut socket, TEXT, WINDOW.as_bytes()).await;
@@ -953,6 +1005,134 @@ pub(crate) mod tests {
             unanswered.ok(),
             Some(MISSES),
             "a socket nobody answered outlived its pings"
+        );
+    }
+
+    const OWNER: &str = "/api/machines/fixture/owner/terminal?as=owner";
+
+    /// The owner's untagged node on a store that checks cookies, and the
+    /// header of one live session in it.
+    fn signed_in() -> (Authoriser<Fake>, String) {
+        let passkeys = crate::passkey::Passkeys::memory();
+        let (_, token, _) = crate::passkey::tests::enrolled(&passkeys, "iPhone");
+        let authoriser = Authoriser::new(
+            tailnet(vec![(LOCAL, caller(ME, &[]))]),
+            &[],
+            std::path::Path::new("yantrad.sock"),
+            passkeys,
+        );
+        (
+            authoriser,
+            format!("Cookie: {}={token}\r\n", crate::passkey::COOKIE),
+        )
+    }
+
+    /// ADR-0046 §2.6: the owner terminal is an admin shell, so the owner's own
+    /// node with no cookie is 401 and an agent's token is 403.
+    #[tokio::test]
+    async fn the_owner_terminal_needs_a_live_cookie_and_refuses_an_agent() {
+        let (authoriser, _) = signed_in();
+        let bare = handshake(authoriser.clone(), OWNER, "").await;
+        assert!(bare.starts_with("HTTP/1.1 401"), "{bare}");
+
+        let agent = authoriser.passkeys().mint_agent("api");
+        let bearer = format!("Authorization: Bearer {}\r\n", agent.token);
+        let refused = handshake(authoriser, OWNER, &bearer).await;
+        assert!(refused.starts_with("HTTP/1.1 403"), "{refused}");
+    }
+
+    /// The other half, so the refusal above cannot pass by refusing everyone.
+    #[tokio::test]
+    async fn the_owner_terminal_upgrades_for_a_live_cookie() {
+        let (authoriser, cookie) = signed_in();
+        let status = handshake(authoriser, OWNER, &cookie).await;
+        assert!(status.starts_with("HTTP/1.1 101"), "{status}");
+    }
+
+    /// I-63: both names reach `ssh`'s argv, so a name `ssh` could read as an
+    /// option or a token is a 400 before any upgrade, as is no name.
+    #[tokio::test]
+    async fn a_bad_machine_or_account_is_refused_before_the_upgrade() {
+        let (authoriser, cookie) = signed_in();
+        let too_long = format!("as={}", "a".repeat(33));
+        for query in [
+            "", "as=", "as=-x", "as=a%20b", "as=a+b", "as=%25h", &too_long,
+        ] {
+            let path = format!("/api/machines/fixture/owner/terminal?{query}");
+            let status = handshake(authoriser.clone(), &path, &cookie).await;
+            assert!(status.starts_with("HTTP/1.1 400"), "{query}: {status}");
+        }
+        let status = handshake(
+            authoriser,
+            "/api/machines/-oProxyCommand=id/owner/terminal?as=owner",
+            &cookie,
+        )
+        .await;
+        assert!(status.starts_with("HTTP/1.1 400"), "{status}");
+    }
+
+    /// **Q5 on the route a sudo password is typed into.** As the one-off test
+    /// above: a real `ssh` to a name that cannot resolve, whose printed and
+    /// typed bytes reach no log line. The password half is
+    /// `yantra-core/tests/owner_terminal.rs`'s.
+    #[tokio::test]
+    async fn the_owner_terminal_logs_its_lifecycle_and_never_its_stream() {
+        let capture = Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+
+        let (authoriser, cookie) = signed_in();
+        let mut socket = upgraded_at(
+            authoriser,
+            Left::default(),
+            "/api/machines/nowhere.invalid/owner/terminal?as=owner",
+            &cookie,
+        )
+        .await;
+        send(&mut socket, TEXT, WINDOW.as_bytes()).await;
+        send(&mut socket, BINARY, b"typed-as-keystrokes\r").await;
+
+        let mut printed = Vec::new();
+        let exit = loop {
+            let (opcode, payload) = timeout(Duration::from_secs(30), frame(&mut socket))
+                .await
+                .expect("the terminal ends")
+                .expect("a frame");
+            match opcode {
+                PING => pong(&mut socket).await,
+                BINARY => printed.extend_from_slice(&payload),
+                _ => {
+                    assert_eq!(opcode, TEXT, "the terminal ends on its exit frame");
+                    break String::from_utf8_lossy(&payload).into_owned();
+                }
+            }
+        };
+        assert_eq!(exit, r#"{"exit":255}"#, "ssh's own status");
+
+        let printed = String::from_utf8_lossy(&printed).into_owned();
+        let logged = String::from_utf8_lossy(&capture.0.lock().expect("the log")).into_owned();
+        assert!(
+            logged.contains("owner terminal as owner on nowhere.invalid"),
+            "{logged}"
+        );
+        assert!(logged.contains("exited 255"), "{logged}");
+        assert!(
+            !logged.contains("typed-as-keystrokes"),
+            "what was typed was logged: {logged}"
+        );
+        let line = printed
+            .lines()
+            .find(|line| line.contains("nowhere.invalid"))
+            .unwrap_or_default()
+            .trim();
+        assert!(
+            !line.is_empty() && !logged.contains(line),
+            "what was printed was logged: {logged}"
         );
     }
 
