@@ -204,16 +204,23 @@ live.
 ## Delegating from Claude Code
 
 `yantra mcp` lets Claude Code, the main agent, hand a task to another harness on a fleet machine
-([ADR-0033](adr/0033-other-harnesses-speak-acp-and-claude-delegates.md), Y-435). Register it once on
-the machine where you run `claude`:
+([ADR-0033](adr/0033-other-harnesses-speak-acp-and-claude-delegates.md), Y-435). It works only inside
+a Chat turn that `yantrad` started. The daemon mints an agent token for each turn and puts it in the
+turn's environment as `YANTRA_AGENT_TOKEN`, and `yantra mcp` sends it as a `Bearer` header
+([ADR-0044](adr/0044-a-write-needs-the-owners-passkey.md) decision 12, Y-687). Register it once, as
+the account that runs the Chat turns on that machine:
 
 ```bash
 claude mcp add yantra -- yantra mcp --daemon http://<appliance>:7717
 ```
 
-Use the appliance's tailnet name or address. `yantrad` authorises the call by Tailscale identity, so
-the machine must be your own untagged node. The tools are `start_task`, `task_status`, `list_tasks`,
-`steer_task`, `wait_task`, `cancel_task` and `remove_task`. `steer_task` cancels a running turn and
+Use the appliance's tailnet name or address. The token grants the task and room tools for the
+turn's workspace and nothing else. `start_task` starts a task only on that workspace's machine, and
+the other task tools see only the tasks that workspace started; anything else is 403. Outside a Chat
+turn, `yantra mcp` has no cookie and no token, so every tool answers 401 on every machine
+(decision 11). On the hub, a call to the hub's own address is refused before that.
+
+The tools are `start_task`, `task_status`, `list_tasks`, `steer_task`, `wait_task`, `cancel_task` and `remove_task`. `steer_task` cancels a running turn and
 sends its prompt as the next turn, and `wait_task` waits up to `timeoutMs` for the task to end. Each task runs in a new worktree at `~/.yantra/worktrees/<id>` on a
 branch `yantra/<id>`, and `remove_task` deletes both. A task answers its agent's permission requests
 with "allow once". The harness must already be logged in on that machine. The daemon keeps tasks in
