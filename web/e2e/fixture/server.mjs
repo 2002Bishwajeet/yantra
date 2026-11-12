@@ -1109,6 +1109,8 @@ function ownerShell(state, request, socket, head, machine, admin) {
       }
       if (!binary) return
       for (const key of data.toString()) {
+        // A lone Escape (the spec presses one) must not eat the next key as xterm's ESC s.
+        if (key === '\x1b') continue
         if (key !== '\r') {
           line += key
           if (!password) ws.send(Buffer.from(key), { binary: true })

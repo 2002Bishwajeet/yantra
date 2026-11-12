@@ -9,7 +9,7 @@ import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { SideSheet } from '@/m3/side-sheet/SideSheet'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Text } from '@/m3/text/Text'
+import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
 import { adminProblem, problemWords, rememberAdmin, rememberedAdmin } from './owner'
@@ -124,15 +124,18 @@ function KeyLine(props: { machine: string; admin: string }) {
   if (key === undefined) return <Skeleton shape="text" style={{ width: '72%' }} />
   if (key === null) {
     return (
-      <Text render={<p />} className="owner-terminal__note" scale="body-medium">
-        The hub has no ssh key yet. Run <Mono>yantra ssh-identity</Mono> on the hub, and the line to add shows here.
-      </Text>
+      <div className="owner-terminal__key">
+        <Text render={<p />} className="owner-terminal__note" scale="body-medium">
+          The hub has no ssh key yet. Run this on the hub, and the line to add shows here.
+        </Text>
+        <Copyable text="yantra ssh-identity" what="the command" />
+      </div>
     )
   }
   return (
     <div className="owner-terminal__key">
       <Text render={<p />} className="owner-terminal__note" scale="body-medium">
-        Add this line once to <Mono className="owner-terminal__path">~{admin || '<admin>'}/.ssh/authorized_keys</Mono>{' '}
+        Add this line once to <strong className="owner-terminal__path">~{admin || '<admin>'}/.ssh/authorized_keys</strong>{' '}
         on {machine}. It lets the hub's key in from the hub's own address.
       </Text>
       <Copyable text={key.owner_line} what="the authorized_keys line" />
