@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { NOT_REACHED, REFUSED, type Reading } from '@/api/client'
-import { useSessions, useWorkspaces } from '@/api/hooks'
-import { machinesQuery } from '@/api/queries'
+import { NOT_REACHED, REFUSED, type Reading, Unanswered } from '@/api/client'
+import { machinesQuery, sessionsQuery, workspacesQuery } from '@/api/queries'
 import { unreachable } from '@/work'
 
 /** D3 §7.2 raised to the shell. `unreachable` collapses N identical failures
@@ -18,15 +17,17 @@ export function notReached(reads: Reading<unknown>[]): string | null {
  *  the last good look landed — which is all the board can say about the age of
  *  the fleet it is refusing to draw.
  *
- *  The machines class is read through `useQuery` rather than `useMachines` for
- *  `dataUpdatedAt`: Query already holds that instant, so the render reads no
- *  clock of its own. */
+ *  They are read through `useQuery` rather than the reading hooks. Query holds
+ *  `dataUpdatedAt`, so the render reads no clock of its own. Query also holds
+ *  the `Unanswered` of a read that kept its reading (Y-744): `reconnecting` is
+ *  a page still drawn from readings the daemon has stopped renewing. */
 export function useReached() {
   const machines = useQuery(machinesQuery())
-  const reading: Reading<unknown> = machines.data ?? { looked: 'pending' }
-  const why = notReached([reading, useWorkspaces(), useSessions()])
+  const reads = [machines, useQuery(workspacesQuery()), useQuery(sessionsQuery())]
+  const why = notReached(reads.map((one): Reading<unknown> => one.data ?? { looked: 'pending' }))
+  const reconnecting = why === null && reads.some((one) => one.error instanceof Unanswered)
   const [since, setSince] = useState<number | null>(null)
-  const at = reading.looked === 'ok' ? machines.dataUpdatedAt : null
+  const at = machines.data?.looked === 'ok' ? machines.dataUpdatedAt : null
   if (at !== null && at !== since) setSince(at)
-  return { why, since }
+  return { why, since, reconnecting }
 }
