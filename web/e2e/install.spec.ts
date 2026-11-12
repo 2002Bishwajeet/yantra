@@ -48,6 +48,12 @@ test.describe('install from the machine page', () => {
     ).toBeVisible()
     await expect(ready(page).getByRole('button', { name: 'Copy the command for nas' })).toBeVisible()
     await expect(ready(page).getByRole('button', { name: 'Install again' })).toBeVisible()
+    // Y-748: primary on the amber hero is 4.25:1, so a text button takes the hero's own text colour.
+    // The screenshot threshold cannot see that change, so the colour is asked here.
+    const ink = await ready(page).evaluate((el) => getComputedStyle(el).color)
+    for (const name of ['Check again', 'Copy the command for nas']) {
+      await expect(ready(page).getByRole('button', { name })).toHaveCSS('color', ink)
+    }
     await axe(page)
     await screenshot(page, 'machine-install-stopped', 'install', size)
   })

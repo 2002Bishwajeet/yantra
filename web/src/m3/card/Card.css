@@ -63,6 +63,7 @@
 
 /* A tinted card's eyebrow takes the card's own text colour. */
 .m3-card[data-surface="primary"] .m3-eyebrow,
+.m3-card[data-surface="secondary"] .m3-eyebrow,
 .m3-card[data-surface="tertiary"] .m3-eyebrow,
 .m3-card[data-surface="error"] .m3-eyebrow {
   color: inherit;

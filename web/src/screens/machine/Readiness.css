@@ -1,16 +1,48 @@
+/* The hero: a tinted container with the expressive large radius. Inside it,
+   inner radius = outer radius - padding. */
+.readiness {
+  --m3-card-radius: var(--md-sys-shape-corner-extra-large-increased);
+  --m3-list-radius: var(--md-sys-shape-corner-medium);
+  gap: 16px;
+  padding: 20px;
+  transition:
+    background-color var(--md-sys-motion-duration-default-effects) var(--md-sys-motion-spring-effects),
+    color var(--md-sys-motion-duration-default-effects) var(--md-sys-motion-spring-effects);
+}
+
 .readiness__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 4px;
+  gap: 12px 16px;
+}
+
+.readiness__badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-lowest);
+}
+
+.readiness__badge .m3-mark {
+  transform: scale(1.9);
 }
 
 .readiness__titles {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  flex: 1 1 12rem;
+  gap: 4px;
   min-width: 0;
+}
+
+.readiness__head > .m3-button {
+  flex: none;
+  margin-inline-start: auto;
 }
 
 .readiness__title {
@@ -20,11 +52,22 @@
   overflow-wrap: anywhere;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .readiness {
+    transition: none;
+  }
+}
+
 .readiness__count {
   font-variant-numeric: tabular-nums;
-  font-size: var(--md-sys-typescale-body-small-size);
-  line-height: var(--md-sys-typescale-body-small-line-height);
+  font-size: var(--md-sys-typescale-body-medium-size);
+  line-height: var(--md-sys-typescale-body-medium-line-height);
   color: var(--md-sys-color-on-surface-variant);
+}
+
+/* The on-surface-variant text has no contrast on a tinted container; its own pair does. */
+.readiness:not([data-surface='high']) :is(.readiness__count, .readiness__said, .readiness__line) {
+  color: inherit;
 }
 
 .readiness__said,
@@ -90,31 +133,27 @@
   }
 }
 
+/* One action area at the hero's foot: the microphone option, then Install and its companions. */
 .readiness__actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
 }
 
 .readiness__mic {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  margin-inline-end: auto;
-  cursor: pointer;
-}
-
-.readiness__mic input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--md-sys-color-primary);
+  flex: 1 1 100%;
 }
 
 .readiness__actions:empty {
   display: none;
+}
+
+@media (pointer: coarse) {
+  .readiness__actions .m3-button {
+    min-height: 48px;
+  }
 }
 
 /* D7 §4.3: the card's action is full width at its foot on the phone. */
@@ -129,4 +168,33 @@
   z-index: 20;
   max-width: var(--m3-measure);
   margin-inline: auto;
+}
+
+/* Y-748: a fold is a row of the same list as the checks, not an outlined pill. */
+.readiness__fold.m3-disclosure {
+  border: 0;
+  border-radius: var(--md-sys-shape-corner-medium);
+  background: var(--md-sys-color-surface-container-lowest);
+  color: var(--md-sys-color-on-surface);
+}
+
+.readiness__fold .m3-disclosure__row {
+  min-height: 56px;
+  padding: 0 8px 0 16px;
+}
+
+.readiness__fold .m3-disclosure__content {
+  padding: 0 16px 12px;
+}
+
+@media (max-width: 599px) {
+  .readiness__fold .m3-disclosure__trigger {
+    height: 48px;
+    min-width: 48px;
+  }
+}
+
+/* Primary text on the amber container is 4.25:1; the container's own text colour passes axe. */
+.readiness[data-surface="secondary"] .m3-button[data-variant="text"]:not([data-tone="error"]) {
+  color: inherit;
 }

@@ -440,6 +440,8 @@ export const sshIdentityQuery = () =>
       }
     },
     staleTime: Infinity,
+    // One read mounts with the machine page, which a page-level Try again has just revived.
+    retry: 1,
     refetchInterval: (query) => (query.state.data === null ? POLL_MS : false),
   })
 

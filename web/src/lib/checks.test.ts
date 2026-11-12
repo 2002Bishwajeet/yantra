@@ -70,7 +70,7 @@ describe('the check name table', () => {
     expect(fixOf({ check: 'agent-cli' }, 'pi')).toEqual({ by: 'install' })
     expect(fixOf({ check: 'terminfo' }, 'pi')).toEqual({ by: 'command', command: 'yantra fix-terminfo pi', where: 'appliance' })
     expect(fixOf({ check: 'provider-auth' }, 'pi')).toEqual({ by: 'command', command: 'gh auth login', where: 'machine' })
-    expect(fixOf({ check: 'mic' }, 'pi')).toEqual({ by: 'hand', words: 'Run Install with Microphone ticked.' })
+    expect(fixOf({ check: 'mic' }, 'pi')).toEqual({ by: 'hand', words: 'Turn on Also set up the microphone, then press Install.' })
     expect(fixOf({ check: 'folder-access' }, 'mbp')).toEqual({
       by: 'hand',
       words:

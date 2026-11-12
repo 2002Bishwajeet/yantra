@@ -86,12 +86,14 @@ test.describe('one machine on a busy fleet', () => {
     expect(cut).toBeLessThanOrEqual(1)
   })
 
-  /* Y-580: one value column on the desktop; on the phone each value drops under its label. */
-  test('starts every About value at one left edge', async ({ page, size }) => {
+  /* Y-748: the address and the tailnet name are list items, and their values share a left edge. */
+  test('starts the About list values at one left edge', async ({ page, size }) => {
     const about = card(page, 'About')
     if (size === 'phone') await about.getByRole('button', { name: /^Show/ }).click()
-    const edges = await about.locator('dd').evaluateAll((all) => all.map((el) => Math.round(el.getBoundingClientRect().left)))
-    expect(edges.length).toBeGreaterThan(3)
+    const edges = await about
+      .locator('.m3-list-item__supporting')
+      .evaluateAll((all) => all.map((el) => Math.round(el.getBoundingClientRect().left)))
+    expect(edges).toHaveLength(2)
     expect(new Set(edges).size).toBe(1)
   })
 
@@ -151,6 +153,24 @@ test.describe('one machine missing a basic', () => {
     await expect(ready.getByRole('link', { name: 'New session' })).toHaveCount(0)
     await expect(card(page, 'Workspaces on this machine').getByRole('link', { name: 'New session' })).toHaveCount(0)
     await fits(page)
+  })
+})
+
+/* Y-748: the hero leads the page, and nothing is wider than the screen. */
+test.describe('the machine hero', () => {
+  test('is the first card, and the page fits', async ({ page, size }) => {
+    await scenario(page, 'busy')
+    await page.goto('/m/cachyos-g14')
+    const ready = card(page, 'Readiness')
+    await expect(ready.getByRole('heading', { level: 2 })).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.machine__columns > :first-child')).toHaveClass(/readiness/)
+    await expect(ready).toHaveAttribute('data-surface', 'primary')
+    const [scroll, client] = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth])
+    expect(scroll).toBeLessThanOrEqual(client)
+    if (size === 'phone') {
+      const action = await ready.getByRole('link', { name: 'New session' }).boundingBox()
+      expect(action!.height).toBeGreaterThanOrEqual(48)
+    }
   })
 })
 
@@ -221,7 +241,7 @@ test.describe('a machine page on a phone', () => {
 
 /* Y-733: a problem is one short line, and its fix opens on press. */
 test.describe('the problems on a machine page', () => {
-  test('draws each failing row on one line, opens a fix with Copy, and scrolls a long command', async ({ page, size }) => {
+  test('draws each failing row as a list item, opens a fix with Copy, and scrolls a long command', async ({ page, size }) => {
     await scenario(page, 'problems')
     await page.goto('/m/macbook')
     const ready = card(page, 'Readiness')
@@ -233,12 +253,10 @@ test.describe('the problems on a machine page', () => {
       const cause = row.locator('.machine__cause')
       const words = ((await cause.textContent()) ?? '').trim().split(/\s+/).length
       expect(words).toBeLessThanOrEqual(8)
-      expect((await cause.boundingBox())!.height).toBeLessThanOrEqual(24)
+      // Y-748: the cause wraps rather than being cut, and the row has a status mark.
       const [client, scroll] = await cause.evaluate((el) => [el.clientWidth, el.scrollWidth])
       expect(scroll).toBeLessThanOrEqual(client)
-      // The name does not wrap either: one line of label-small is under 24 px.
-      expect((await row.locator('.m3-state').boundingBox())!.height).toBeLessThanOrEqual(24)
-      expect((await row.boundingBox())!.height).toBeLessThanOrEqual(56)
+      await expect(row.locator('.m3-state .m3-mark')).toHaveCount(1)
     }
     // Y-714: only the first fix is offered, so one Fix is closed and the rest have none.
     const fix = ready.getByRole('button', { name: /^Fix/ })
@@ -259,7 +277,7 @@ test.describe('the problems on a machine page', () => {
   })
 
   /* Y-740: a claude that is there is never called missing, and Install is its fix. */
-  test('says an installed claude this account cannot run is installed, on one uncut line', async ({ page, size }) => {
+  test('says an installed claude this account cannot run is installed, on an uncut line', async ({ page, size }) => {
     await scenario(page, 'problems')
     await page.goto('/m/hetzner-1')
     const ready = card(page, 'Readiness')
@@ -267,7 +285,6 @@ test.describe('the problems on a machine page', () => {
     const cause = ready.locator('.machine__check', { hasText: 'claude' }).first().locator('.machine__cause')
     await expect(cause).toHaveText('installed, no access; Install')
     // Beside the Fix button the line is at its narrowest, and it is still whole.
-    expect((await cause.boundingBox())!.height).toBeLessThanOrEqual(24)
     const [client, scroll] = await cause.evaluate((el) => [el.clientWidth, el.scrollWidth])
     expect(scroll).toBeLessThanOrEqual(client)
     await expect(ready.getByText('Install puts claude in this account’s home on hetzner-1, with the vendor’s installer.')).toBeVisible()

@@ -45,7 +45,7 @@ export function Sessions(props: {
   if (rows.length === 0 && !failure && sessions.looked !== 'pending' && sessions.looked !== 'failed') return null
 
   return (
-    <Card aria-labelledby="machine-sessions" className="machine__card">
+    <Card aria-labelledby="machine-sessions" className="machine__card" surface="container">
       <div className="machine__head">
         <Text render={<h2 />} emphasized id="machine-sessions" scale="title-large">
           Sessions

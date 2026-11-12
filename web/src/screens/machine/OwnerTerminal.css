@@ -15,12 +15,43 @@
   min-width: 0;
 }
 
-.owner-terminal__actions {
+/* The key line sits in a highest container; its radius is the card's less the card's padding. */
+.owner-terminal__code {
+  padding: 8px;
+  border-radius: var(--md-sys-shape-corner-large-increased);
+  background: var(--md-sys-color-surface-container-highest);
+}
+
+.owner-terminal__code .m3-copyable__text {
+  background: transparent;
+  overflow-wrap: anywhere;
+}
+
+/* The field and the button are one row; the button waits at the field's top line, under the label. */
+.owner-terminal__row {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.owner-terminal__row > :first-child {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.owner-terminal__row > .m3-button {
+  flex: none;
+  margin-top: 4px;
+}
+
+@media (pointer: coarse) {
+  .owner-terminal__row > .m3-button {
+    min-height: 48px;
+  }
 }
 
 /* D7 §4.3: the card's action is full width at its foot on the phone. */
-[data-shell='phone'] .owner-terminal__actions > * {
+[data-shell='phone'] .owner-terminal__row > .m3-button {
   flex: 1 1 100%;
 }
