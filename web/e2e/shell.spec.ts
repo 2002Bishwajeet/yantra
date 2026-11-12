@@ -582,8 +582,8 @@ test('the tablet and desktop shells still scroll the document', async ({ page, s
   expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-shell]')!).overflow)).toBe('visible')
 })
 
-/** Y-673: the scroller ends above the FAB, so nothing the reader can use or read sits under it. */
-test.describe('the FAB on the phone never covers content', () => {
+/** Y-673, Y-735: the FAB floats over the page as M3 draws it; scrolled to the end, nothing the reader can use or read sits under it. */
+test.describe('the FAB on the phone leaves the end of the page clear', () => {
   const routes: [string, string, Scenario][] = [
     ['Dashboard', '/', 'busy'],
     ['Fleet', '/fleet', 'busy'],
@@ -591,44 +591,58 @@ test.describe('the FAB on the phone never covers content', () => {
     ['Dashboard with Finish setup', '/', 'nogrant'],
   ]
   for (const [name, path, kind] of routes) {
-    test(`never lays the FAB over a control or text: ${name}`, async ({ page, size }) => {
+    test(`lays the FAB over no control or text at the end: ${name}`, async ({ page, size }) => {
       test.skip(size !== 'phone', 'the FAB floats over the page only on a phone')
       await scenario(page, kind)
       await page.goto(path)
       await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
       await expect(page.locator('.shell__fab')).toBeVisible()
 
-      for (const y of [0, 300, 600]) {
-        await scrollTo(page, y)
-        const offenders = await page.evaluate(() => {
-          const main = document.querySelector('.shell__main')!
-          const box = main.getBoundingClientRect()
-          const fab = document.querySelector('.shell__fab')!
-          const f = fab.getBoundingClientRect()
-          const rects: { text: string; r: DOMRect }[] = []
-          for (const el of main.querySelectorAll('a, button')) {
-            if (fab.contains(el)) continue
-            rects.push({ text: (el.textContent ?? '').trim() || el.tagName, r: el.getBoundingClientRect() })
-          }
-          const walk = document.createTreeWalker(main, NodeFilter.SHOW_TEXT)
-          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
-            if (!n.textContent?.trim() || fab.contains(n)) continue
-            const range = document.createRange()
-            range.selectNodeContents(n)
-            for (const r of range.getClientRects()) rects.push({ text: n.textContent.trim(), r })
-          }
-          return rects
-            .filter(({ r }) => {
-              const w = Math.min(r.right, box.right, f.right) - Math.max(r.left, box.left, f.left)
-              const h = Math.min(r.bottom, box.bottom, f.bottom) - Math.max(r.top, box.top, f.top)
-              return w > 0 && h > 0
-            })
-            .map(({ text }) => text.slice(0, 40))
-        })
-        expect(offenders, `under the FAB at scroll ${y}`).toEqual([])
-      }
+      await scrollTo(page, 'end')
+      const offenders = await page.evaluate(() => {
+        const main = document.querySelector('.shell__main')!
+        const box = main.getBoundingClientRect()
+        const fab = document.querySelector('.shell__fab')!
+        const f = fab.getBoundingClientRect()
+        const rects: { text: string; r: DOMRect }[] = []
+        for (const el of main.querySelectorAll('a, button')) {
+          if (fab.contains(el)) continue
+          rects.push({ text: (el.textContent ?? '').trim() || el.tagName, r: el.getBoundingClientRect() })
+        }
+        const walk = document.createTreeWalker(main, NodeFilter.SHOW_TEXT)
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+          if (!n.textContent?.trim() || fab.contains(n)) continue
+          const range = document.createRange()
+          range.selectNodeContents(n)
+          for (const r of range.getClientRects()) rects.push({ text: n.textContent.trim(), r })
+        }
+        return rects
+          .filter(({ r }) => {
+            const w = Math.min(r.right, box.right, f.right) - Math.max(r.left, box.left, f.left)
+            const h = Math.min(r.bottom, box.bottom, f.bottom) - Math.max(r.top, box.top, f.top)
+            return w > 0 && h > 0
+          })
+          .map(({ text }) => text.slice(0, 40))
+      })
+      expect(offenders, `under the FAB at the end of the page`).toEqual([])
     })
   }
+
+  test('collapses to the icon on scroll down, keeps its name, and expands at the top', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the FAB floats over the page only on a phone')
+    await scenario(page, 'busy')
+    await page.goto('/')
+    const fab = page.locator('.shell__fab')
+    await expect(fab).toBeVisible()
+    const name = await fab.getAttribute('aria-label')
+    expect(name).toContain('New session')
+    const wide = (await fab.boundingBox())!.width
+    await scrollTo(page, 300)
+    await expect.poll(async () => (await fab.boundingBox())!.width).toBeLessThan(60)
+    await expect(fab).toHaveAttribute('aria-label', name!)
+    await scrollTo(page, 0)
+    await expect.poll(async () => (await fab.boundingBox())!.width).toBeGreaterThanOrEqual(wide - 1)
+  })
 })
 
 /** Y-689: the palette finds a thread by its title, from the store, on a machine that is offline. */

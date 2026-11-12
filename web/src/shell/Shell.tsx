@@ -22,6 +22,7 @@ import { useSetupHome } from '@/screens/setup/progress'
 import { StatusAnnouncer } from './Announce'
 import { DESTINATIONS, isDestination, isRailed } from './destinations'
 import { useFabFocus, type FabFocus } from './fabFocus'
+import { useFabCollapse } from './useFabCollapse'
 import { useFormFactor } from './formFactor'
 import { useKeyboardInset } from './useKeyboardInset'
 import { Avatar } from './Avatar'
@@ -457,6 +458,7 @@ export function Shell() {
   const primary = usePrimary()
   const fab = down === null && (factor === 'tablet' || (factor === 'phone' && top)) ? primary : null
   usePublishDrawn(fab !== null)
+  useFabCollapse(factor === 'phone' && fab !== null, pathname)
   const key = keyOf(fab)
   const focus = useFabFocus(key)
   const [beat, setBeat] = useState({ key, odd: false })
