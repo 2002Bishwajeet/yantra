@@ -344,9 +344,11 @@ fn which(binary: &str) -> Result<PathBuf> {
         .with_context(|| format!("no {binary} on PATH"))
 }
 
-/// One HTTP/1.1 request from `from`, so `whois` sees that address.
+/// One HTTP/1.1 request from `from`, so `whois` sees that address, with
+/// the agent token a turn on that machine holds (ADR-0044 decision 12).
 async fn http(
     from: &str,
+    token: Option<&str>,
     method: &str,
     path: &str,
     thread: Option<&str>,
@@ -354,11 +356,17 @@ async fn http(
 ) -> Result<(u16, String)> {
     let socket = TcpSocket::new_v4()?;
     socket.bind(SocketAddr::new(from.parse()?, 0))?;
+    let mut headers = thread.map_or_else(String::new, |thread| {
+        format!("X-Yantra-Thread: {thread}\r\n")
+    });
+    if let Some(token) = token {
+        headers.push_str(&format!("Authorization: Bearer {token}\r\n"));
+    }
     exchange(
         socket.connect(DAEMON.parse()?).await?,
         method,
         path,
-        thread,
+        &headers,
         body,
     )
     .await
@@ -370,7 +378,7 @@ async fn owner_http(method: &str, path: &str) -> Result<(u16, String)> {
         UnixStream::connect(daemon_socket()).await?,
         method,
         path,
-        None,
+        "",
         None,
     )
     .await
@@ -380,19 +388,16 @@ async fn exchange(
     mut stream: impl AsyncReadExt + AsyncWriteExt + Unpin,
     method: &str,
     path: &str,
-    thread: Option<&str>,
+    headers: &str,
     body: Option<&Value>,
 ) -> Result<(u16, String)> {
     let body = body.map(Value::to_string).unwrap_or_default();
-    let thread = thread.map_or_else(String::new, |thread| {
-        format!("X-Yantra-Thread: {thread}\r\n")
-    });
     stream
         .write_all(
             format!(
                 "{method} {path} HTTP/1.1\r\nHost: yantra\r\nConnection: close\r\n\
                  Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
-                 {thread}Content-Length: {}\r\n\r\n{body}",
+                 {headers}Content-Length: {}\r\n\r\n{body}",
                 body.len()
             )
             .as_bytes(),
@@ -411,11 +416,17 @@ async fn exchange(
     Ok((status, body.to_owned()))
 }
 
-/// A `tools/call` from `from`, and its result.
-async fn tool(from: &str, thread: Option<&str>, name: &str, arguments: Value) -> Result<Value> {
+/// A `tools/call` from `from` with `token`, and its result.
+async fn tool(
+    from: &str,
+    token: &str,
+    thread: Option<&str>,
+    name: &str,
+    arguments: Value,
+) -> Result<Value> {
     let call = json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
                       "params": {"name": name, "arguments": arguments}});
-    let (status, body) = http(from, "POST", "/api/mcp", thread, Some(&call)).await?;
+    let (status, body) = http(from, Some(token), "POST", "/api/mcp", thread, Some(&call)).await?;
     if status != 200 {
         bail!("{name} answered {status}: {body}");
     }
@@ -559,40 +570,117 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     let a = Socket::turn("wa", "supervised").await?;
     let b = Socket::turn("wb", "full-access").await?;
     let (a_header, b_header) = (format!("wa/{a}"), format!("wb/{b}"));
-    for (machine, header) in [(alpha, &a_header), (beta, &b_header)] {
+    let mut tokens = Vec::new();
+    for (machine, workspace, header) in [(alpha, "wa", &a_header), (beta, "wb", &b_header)] {
         let calls = machine.until_calls(1).await?;
         let args = &calls[0].0;
         assert!(args.contains("--mcp-config "), "{args}");
-        assert!(
-            args.contains(r#""url":"http://127.0.0.1:7717/api/mcp""#),
-            "{args}"
+        // ADR-0044 decision 12: the token is in a 0600 file and in no argument.
+        let config = machine.sh(&format!(
+            "stat -c %a /home/yantra/.yantra/keep/{workspace}/*/mcp.json && \
+             cat /home/yantra/.yantra/keep/{workspace}/*/mcp.json"
+        ))?;
+        let (mode, config) = config.split_once('\n').context("a mode and a config")?;
+        assert_eq!(mode.trim(), "600", "{config}");
+        let server: Value = serde_json::from_str(config)?;
+        let server = &server["mcpServers"]["yantra-room"];
+        assert_eq!(server["url"], "http://127.0.0.1:7717/api/mcp", "{config}");
+        assert_eq!(
+            server["headers"]["X-Yantra-Thread"],
+            header.as_str(),
+            "{config}"
         );
+        let token = server["headers"]["Authorization"]
+            .as_str()
+            .and_then(|bearer| bearer.strip_prefix("Bearer "))
+            .context("a bearer token")?
+            .to_owned();
         assert!(
-            args.contains(&format!(r#""X-Yantra-Thread":"{header}""#)),
-            "{args}"
+            !args.contains(&token),
+            "the token is in no argument: {args}"
         );
+        tokens.push(token);
     }
+    let (a_token, b_token) = (tokens[0].as_str(), tokens[1].as_str());
+
+    // 1b. With no token, and with a token for another workspace's thread.
+    let listed = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+    let (status, body) = http(BETA, None, "POST", "/api/mcp", None, Some(&listed)).await?;
+    assert_eq!(status, 401, "{body}");
+    let (status, body) = http(
+        BETA,
+        Some(b_token),
+        "POST",
+        "/api/mcp",
+        Some(&a_header),
+        Some(&listed),
+    )
+    .await?;
+    assert_eq!(status, 403, "{body}");
+
+    // 1c. ADR-0044 decision 12: a token reaches no owner route, and, with no
+    //     thread header, no room another workspace defines.
+    for (method, path) in [
+        ("GET", "/api/workspaces"),
+        ("GET", "/api/repos"),
+        ("GET", "/api/passkey"),
+        ("POST", "/api/passkey/code"),
+        ("POST", "/api/workspaces/wa/up"),
+        ("GET", "/api/rooms"),
+    ] {
+        let (status, body) = http(ALPHA, Some(a_token), method, path, None, None).await?;
+        assert_eq!(status, 403, "{method} {path}: {body}");
+    }
+    let defined = json!({"name": "wb-only", "workspace": "wb"});
+    let (status, body) = exchange(
+        UnixStream::connect(daemon_socket()).await?,
+        "POST",
+        "/api/rooms",
+        "",
+        Some(&defined),
+    )
+    .await?;
+    assert_eq!(status, 201, "{body}");
+    let read = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                      "params": {"name": "room_read", "arguments": {"room": "wb-only"}}});
+    let (status, body) = http(ALPHA, Some(a_token), "POST", "/api/mcp", None, Some(&read)).await?;
+    assert_eq!(status, 403, "{body}");
 
     // 2. Beta speaks MCP, and thread B joins r1.
     let initialize = json!({"jsonrpc": "2.0", "id": 0, "method": "initialize",
                             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
                                        "clientInfo": {"name": "claude-code", "version": "2"}}});
-    let (status, body) = http(BETA, "POST", "/api/mcp", None, Some(&initialize)).await?;
+    let (status, body) = http(
+        BETA,
+        Some(b_token),
+        "POST",
+        "/api/mcp",
+        None,
+        Some(&initialize),
+    )
+    .await?;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains(r#""protocolVersion":"2025-06-18""#), "{body}");
-    let listed = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-    let (status, body) = http(BETA, "POST", "/api/mcp", None, Some(&listed)).await?;
+    let (status, body) = http(BETA, Some(b_token), "POST", "/api/mcp", None, Some(&listed)).await?;
     assert_eq!(status, 200, "{body}");
     assert!(
         body.contains("room_send") && body.contains("room_read"),
         "{body}"
     );
-    let joined = tool(BETA, Some(&b_header), "room_read", json!({"room": "r1"})).await?;
+    let joined = tool(
+        BETA,
+        b_token,
+        Some(&b_header),
+        "room_read",
+        json!({"room": "r1"}),
+    )
+    .await?;
     assert_eq!(joined["isError"], false, "{joined}");
 
     // 3. Thread A sends from alpha.
     let sent = tool(
         ALPHA,
+        a_token,
         Some(&a_header),
         "room_send",
         json!({"room": "r1", "text": "hello from A"}),
@@ -622,15 +710,21 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
 
     // 5. A reader on alpha waits and gets B's reply, and B's reply wakes
     //    thread A without A's own message, which is after A's cursor too.
-    let waiting = tokio::spawn(tool(
-        ALPHA,
-        None,
-        "room_read",
-        json!({"room": "r1", "wait": 20}),
-    ));
+    let reader = a_token.to_owned();
+    let waiting = tokio::spawn(async move {
+        tool(
+            ALPHA,
+            &reader,
+            None,
+            "room_read",
+            json!({"room": "r1", "wait": 20}),
+        )
+        .await
+    });
     tokio::time::sleep(Duration::from_secs(1)).await;
     let replied = tool(
         BETA,
+        b_token,
         Some(&b_header),
         "room_send",
         json!({"room": "r1", "text": "reply from B"}),
@@ -652,6 +746,7 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     for n in 1..=20 {
         let sent = tool(
             ALPHA,
+            a_token,
             None,
             "room_send",
             json!({"room": "r2", "text": format!("m{n}")}),
@@ -661,6 +756,7 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     }
     let refused = tool(
         ALPHA,
+        a_token,
         None,
         "room_send",
         json!({"room": "r2", "text": "m21"}),
@@ -672,6 +768,7 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     assert_eq!(status, 204, "{body}");
     let again = tool(
         ALPHA,
+        a_token,
         None,
         "room_send",
         json!({"room": "r2", "text": "m22"}),
@@ -679,8 +776,16 @@ async fn walk(alpha: &Machine, beta: &Machine) -> Result<()> {
     .await?;
     assert_eq!(again["isError"], false, "{again}");
 
-    // 7. Another user's node is refused.
-    let (status, body) = http(STRANGER, "POST", "/api/mcp", None, Some(&listed)).await?;
+    // 7. Another user's node is refused, with a good token too.
+    let (status, body) = http(
+        STRANGER,
+        Some(a_token),
+        "POST",
+        "/api/mcp",
+        None,
+        Some(&listed),
+    )
+    .await?;
     assert_eq!(status, 403, "{body}");
     Ok(())
 }

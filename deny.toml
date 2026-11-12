@@ -10,14 +10,21 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+# `rsa` arrives with `webauthn-rs` (ADR-0044). The Marvin attack needs a private
+# key, and a passkey sign-in only verifies a signature with a public one.
+# `crypto-glue` 0.2.2 cannot take `rsa` 0.10.0 yet, as of 2026-11-11.
+ignore = [
+  { id = "RUSTSEC-2023-0071", reason = "public-key verification only; no rsa 0.10.0 that crypto-glue accepts" },
+]
 
 # `CDLA-Permissive-2.0` is here for `webpki-roots` and covers **data rather than
 # code**: Mozilla's root certificate list, which a static musl binary has to
 # carry because the appliance image is not promised a system trust store (Y-146).
 # It is the one licence in this list that arrived with a dependency instead of
-# preceding it.
+# preceding it. `MPL-2.0` is here for `webauthn-rs` and `crypto-glue`
+# (ADR-0044): it binds per file, and Yantra changes none of their files.
 [licenses]
-allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "Unicode-3.0", "Zlib"]
+allow = ["MIT", "MPL-2.0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "Unicode-3.0", "Zlib"]
 
 # Build-time only: `sherpa-onnx-sys`'s build script unpacks its prebuilt
 # libraries with `zip`, which brings these two decoders. Neither reaches
@@ -29,3 +36,9 @@ exceptions = [
 
 [bans]
 multiple-versions = "warn"
+# The appliance is a static musl binary, and `webauthn-rs` asks for openssl by
+# default (ADR-0044, Y-687). Any crate that brings it back fails here.
+deny = [
+  { name = "openssl", reason = "the musl appliance build links no C library" },
+  { name = "openssl-sys", reason = "the musl appliance build links no C library" },
+]

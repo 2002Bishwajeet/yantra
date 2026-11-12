@@ -40,6 +40,8 @@ const NO_BROWSER: &str = "the appliance has no browser";
 const CHECK_MODE: &str = "/srv/check-mode";
 /// `listen.py` appends each readiness check and forgotten host key here.
 const ASKED: &str = "/srv/asked";
+/// The code `Add a machine` would show; `listen.py` refuses the login test without one.
+const CODE: &str = "ABCD-EFGH";
 /// Y-628: the account docs/appliance.md says to join, with no sudo.
 const KARIGAR: &str = "karigar";
 const NO_ROOT_AGENT: &str =
@@ -152,7 +154,7 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
     // The appliance's half, made the way `GET /join` makes it.
     let appliance = scratch("appliance")?;
     let prepared = identity::prepare_in(&appliance, &[])?;
-    let script = join::script(DAEMON.parse()?, &prepared.public_key, None)?;
+    let script = join::script(DAEMON.parse()?, &prepared.public_key, None, Some(CODE))?;
     let rendered = appliance.join("join.sh");
     std::fs::write(&rendered, script)?;
 
@@ -287,7 +289,7 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
     let last = reports.lines().last().context("nothing was reported")?;
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(last)?,
-        serde_json::json!({ "user": KARIGAR }),
+        serde_json::json!({ "user": KARIGAR, "code": CODE }),
         "{reports}"
     );
 
@@ -359,13 +361,14 @@ fn a_bare_machine_joined_with_one_paste_is_reached_with_the_config_the_join_wrot
         "the agent runs under a dynamic uid, not {uid}"
     );
 
-    // The report: the account the script ran as, and no machine name.
+    // The report: the account the script ran as, no machine name, and the
+    // code the script was served with (ADR-0044 decision 13).
     let reports = sh(&systemd, &format!("cat {REPORTS}"))?;
     let last = reports.lines().last().context("nothing was reported")?;
     let body: serde_json::Value = serde_json::from_str(last)?;
     assert_eq!(
         body,
-        serde_json::json!({ "user": UNPRIVILEGED }),
+        serde_json::json!({ "user": UNPRIVILEGED, "code": CODE }),
         "{reports}"
     );
 

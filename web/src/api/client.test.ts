@@ -9,6 +9,7 @@ import {
   makeQueryClient,
   NOT_REACHED,
   queryOptionsThrowing,
+  REFUSED,
   RETRIES,
 } from './client'
 import { ApiError } from './errors'
@@ -218,6 +219,18 @@ describe('look', () => {
     const failed = { looked: 'failed', age_seconds: 0, error: `${NOT_REACHED}: HTTP 502` }
     expect(await look('/api/machines', signal)).toEqual(failed)
     expect(await look('/api/workspaces', signal)).toEqual(failed)
+  })
+
+  /** Only the daemon answers 403, so its words come with it and nothing says
+   *  the daemon was not reached. */
+  it('reads a 403 as the daemon refusing this device, in its own words', async () => {
+    const own = "a request from this machine's own address may not act"
+    vi.stubGlobal('fetch', answer(403, own))
+    expect(await look('/api/machines', signal)).toEqual({
+      looked: 'failed',
+      age_seconds: 0,
+      error: `${REFUSED}: ${own}`,
+    })
   })
 
   it('words a fetch that rejected the same way, on every path', async () => {

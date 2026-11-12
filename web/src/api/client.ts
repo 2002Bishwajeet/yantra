@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/react-query'
 import type { Looked } from '@/api'
 import { ApiError, isApiError } from '@/api/errors'
+import { signedOut } from '@/api/signedIn'
 
 const contract = (path: string, missing?: string) =>
   `${path} answered something this dashboard cannot read${missing ? `: no \`${missing}\`` : ''}`
@@ -29,6 +30,10 @@ async function said(response: Response): Promise<string> {
  *  what stopped the page from seeing one broken connection rather than seven
  *  broken classes (D3 §7.2). */
 export const NOT_REACHED = 'yantrad was not reached'
+
+/** A read the daemon itself answered 403: it was reached, and it refused this
+ *  device for the reason that follows. */
+export const REFUSED = 'yantrad refused this device'
 
 /** 502, 503 and 504 have two possible senders. The daemon sends them itself —
  *  a relay that would not take the push, an ssh that could not be made — and
@@ -74,6 +79,10 @@ export async function fetchJson<T>(
     throw new ApiError('network', String(cause))
   }
   const { status } = response
+  if (status === 401) {
+    signedOut()
+    throw new ApiError('unauthenticated', await said(response), { status })
+  }
   if (status === 404) {
     throw new ApiError('missing', await said(response), { status })
   }
@@ -114,6 +123,13 @@ export const failed = (error: string) =>
   ({ looked: 'failed', age_seconds: 0, error }) as const
 
 const notReached = (why: string) => failed(`${NOT_REACHED}: ${why}`)
+
+/** A read's status other than 2xx and 401. Only the daemon answers 403, with
+ *  its reason; anything else came from between this browser and the daemon. */
+export async function unanswered(response: Response) {
+  if (response.status === 403) return failed(`${REFUSED}: ${await said(response)}`)
+  return notReached(`HTTP ${response.status}`)
+}
 
 /** D3 §7.1, the sharpest finding in that document: a question not yet asked was
  *  not answered *never*. `pending` is a fourth state and not a fourth word: it
@@ -158,7 +174,11 @@ export async function look<T>(
     // Every fleet state answers 200 with an envelope, so a status is never
     // news about the fleet: something between this browser and the daemon
     // answered instead of it, and every path hears the same thing.
-    if (!response.ok) return notReached(`HTTP ${response.status}`)
+    if (response.status === 401) {
+      signedOut()
+      return failed('this device is not signed in')
+    }
+    if (!response.ok) return await unanswered(response)
     return await envelope<T>(response, path)
   } catch (cause) {
     if (signal.aborted) throw cause

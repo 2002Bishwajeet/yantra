@@ -5,11 +5,10 @@ import { Plus, Share2 } from 'lucide-react'
 import type { Machine } from '@/api'
 import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
-import { useAbout, useMachines, useNotifications, useReadiness, useSshIdentity, useThisDevice } from '@/api/hooks'
+import { useMachines, useNotifications, useReadiness, useSshIdentity, useThisDevice } from '@/api/hooks'
 import { keys } from '@/api/keys'
 import { useRecheckReadiness } from '@/api/mutations'
 import { machineReadinessQuery } from '@/api/queries'
-import { joinUrl } from '@/lib/join'
 import { asPlatform, guessPlatform, PLATFORMS, platformName, platformOf, type Platform } from '@/lib/platform'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -215,7 +214,6 @@ function JoinKey() {
  *  §3.2), where it is one tap to copy. */
 function JoinHere(props: { platform: Session; name: string | undefined }) {
   const { platform, name } = props
-  const about = useAbout()
   const here = useHere(platform, name)
   const device = name ?? 'the new device'
   if (useFormFactor() === 'phone') {
@@ -235,7 +233,7 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
             Run this once in a terminal on {device}, as karigar. It adds this appliance's key to the account that runs
             it and tells the appliance which account that is.
           </Note>
-          <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
+          <Join machine={name ?? device} what="the join command" />
           <JoinKey />
         </div>
       </div>
@@ -254,7 +252,7 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
           Run this once in a terminal on {device}, as karigar. It adds this appliance's key to the account that runs it
           and tells the appliance which account that is.
         </Note>
-        <Join about={about} url={joinUrl(location, about.data)} what="the join command" />
+        <Join machine={name ?? device} what="the join command" />
         <JoinKey />
         <Note>Or open this on {device}, where the command is one tap to copy:</Note>
         <Copyable text={here} what="this page's address" />

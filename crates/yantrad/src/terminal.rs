@@ -71,7 +71,9 @@ use yantra_core::install;
 use yantra_core::inventory::Inventory;
 use yantra_core::pty;
 
-use crate::write::{Authoriser, Left, Missed, Peer, Refused, allowed, chain, left_command};
+use crate::write::{
+    Authoriser, Left, Missed, Peer, Refused, allowed_socket, chain, left_command, until_revoked,
+};
 
 /// Long enough that a socket nobody is typing at costs one frame a browser
 /// answers in microseconds; short enough that what a vanished peer holds is
@@ -124,11 +126,11 @@ async fn attach<I: Inventory + Clone + Send + Sync + 'static>(
     Path(name): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&authoriser, &from, &headers).await?;
+    let (caller, revoked) = allowed_socket(&authoriser, &from, &headers).await?;
     let target = Target::Workspace(name);
     tracing::info!("terminal {target} for {}", caller.node);
 
-    Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
+    Ok(upgrade.on_upgrade(move |socket| until_revoked(revoked, bridge(socket, target))))
 }
 
 /// The same socket, addressed the way the kill route already is (ADR-0022 §4).
@@ -141,11 +143,11 @@ async fn tap<I: Inventory + Clone + Send + Sync + 'static>(
     Path((machine, session)): Path<(String, String)>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&authoriser, &from, &headers).await?;
+    let (caller, revoked) = allowed_socket(&authoriser, &from, &headers).await?;
     let target = Target::Session { machine, session };
     tracing::info!("terminal {target} for {}", caller.node);
 
-    Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
+    Ok(upgrade.on_upgrade(move |socket| until_revoked(revoked, bridge(socket, target))))
 }
 
 /// Y-394, [ADR-0030] §2: a step an install left, by its place in the list and
@@ -164,7 +166,7 @@ async fn step<I: Inventory + Clone + Send + Sync + 'static>(
     uri: Uri,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let (caller, revoked) = allowed_socket(&state.authoriser, &from, &headers).await?;
     install::check_machine(&machine).map_err(|error| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said: error.to_string(),
@@ -181,7 +183,7 @@ async fn step<I: Inventory + Clone + Send + Sync + 'static>(
     };
     tracing::info!("terminal {target} for {}", caller.node);
 
-    Ok(upgrade.on_upgrade(move |socket| bridge(socket, target)))
+    Ok(upgrade.on_upgrade(move |socket| until_revoked(revoked, bridge(socket, target))))
 }
 
 /// The install a caller read its step from, as `?at=` its event's time.
@@ -521,6 +523,7 @@ pub(crate) mod tests {
             tailnet(caller.map(|caller| (LOCAL, caller)).into_iter().collect()),
             &[],
             std::path::Path::new("yantrad.sock"),
+            crate::passkey::Passkeys::trusting(),
         )
     }
 
@@ -900,6 +903,7 @@ pub(crate) mod tests {
                 tailnet(vec![(LOCAL, caller(ME, &[]))]),
                 &[SocketAddr::new(LOCAL, 7717)],
                 std::path::Path::new("yantrad.sock"),
+                crate::passkey::Passkeys::trusting(),
             )
         };
 

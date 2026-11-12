@@ -294,6 +294,64 @@ fn judge(code: Option<i32>, said: &str) -> Result<(), Error> {
 mod tests {
     use super::*;
 
+    /// `install.sh`'s `name_the_origin`, run with `sh` on two files in `dir`.
+    fn name_the_origin(dir: &Path, env: &str, caddy: Option<&str>) -> String {
+        const SCRIPT: &str = include_str!("../../../install.sh");
+        let start = SCRIPT
+            .find("name_the_origin() {")
+            .expect("install.sh has name_the_origin");
+        let end = start + SCRIPT[start..].find("\n}\n").expect("it ends") + 3;
+        std::fs::write(dir.join("daemon.env"), env).expect("written");
+        if let Some(caddy) = caddy {
+            std::fs::write(dir.join("Caddyfile"), caddy).expect("written");
+        }
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "as_root() {{ \"$@\"; }}\n{}\nname_the_origin \"$1/daemon.env\" \"$1/Caddyfile\"",
+                &SCRIPT[start..end]
+            ))
+            .arg("sh")
+            .arg(dir)
+            .output()
+            .expect("sh is on every machine this builds on");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        std::fs::read_to_string(dir.join("daemon.env")).expect("read")
+    }
+
+    const CADDY: &str = "{\n}\n\nhttps://yantra.cloudx.run {\n    bind 100.64.0.1\n    reverse_proxy unix//run/yantra/yantrad.sock {\n    }\n}\n";
+
+    /// ADR-0044's 2026-11-12 amendment: a box named before the passkey gets
+    /// its name as the origin on its next update, once.
+    #[test]
+    fn an_update_names_the_origin_domain_setup_gave_the_box() {
+        let dir = scratch("origin");
+        let named = name_the_origin(&dir, "YANTRA_PROXY_ACCOUNT=caddy", Some(CADDY));
+        assert_eq!(
+            named,
+            "YANTRA_PROXY_ACCOUNT=caddy\nYANTRA_ORIGIN=https://yantra.cloudx.run\n"
+        );
+        assert_eq!(name_the_origin(&dir, &named, Some(CADDY)), named, "once");
+
+        let kept = "YANTRA_ORIGIN=https://other.example\n";
+        assert_eq!(name_the_origin(&dir, kept, Some(CADDY)), kept);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// No Caddyfile, or one domain-setup.sh did not write, names nothing.
+    #[test]
+    fn an_update_with_no_domain_setup_names_no_origin() {
+        let dir = scratch("no-origin");
+        assert_eq!(name_the_origin(&dir, "A=1\n", None), "A=1\n");
+        let other = "https://yantra.cloudx.run {\n    reverse_proxy 100.64.0.1:7717\n}\n";
+        assert_eq!(name_the_origin(&dir, "A=1\n", Some(other)), "A=1\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn scratch(label: &str) -> PathBuf {
         let dir =
             std::env::temp_dir().join(format!("yantra-update-{label}-{}", std::process::id()));

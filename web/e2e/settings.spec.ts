@@ -11,6 +11,7 @@ const CATEGORIES = [
   { id: 'providers', label: 'Providers', shows: 'GitLab' },
   { id: 'agents', label: 'Agents', shows: 'Claude Code' },
   { id: 'appearance', label: 'Appearance', shows: 'Colour' },
+  { id: 'devices', label: 'Devices', shows: 'A code for one new device' },
   { id: 'about', label: 'About', shows: 'Listens on' },
 ] as const
 

@@ -12,8 +12,9 @@
 //! carries keeps two sessions with no thread on one node apart; the daemon
 //! keeps no list of the ids.
 //!
-//! **Every request passes [`allowed`] first**, so only the owner's own untagged
-//! nodes reach a room in this row. The label comes from identity and never
+//! **Every request passes [`allowed`] or [`identify`] first**, so only the
+//! owner, or an agent token, reaches a room. An agent token never reaches a
+//! room another workspace defines (ADR-0044 decision 12, [`may_call`]). The label comes from identity and never
 //! from the body: the caller's machine is `whois` joined to the tailnet list on
 //! the stable id, as `/api/join` does. `X-Yantra-Thread` only routes, and only
 //! when the workspace it names is on the caller's machine: the workspace's ssh
@@ -42,7 +43,7 @@ use yantra_core::room_file::{self, Definition};
 use yantra_core::workspace;
 
 use crate::room::Rooms;
-use crate::write::{Authoriser, Peer, Refused, allowed};
+use crate::write::{Authoriser, Peer, Refused, Who, allowed, identify};
 
 const THREAD: &str = "x-yantra-thread";
 const SESSION: &str = "mcp-session-id";
@@ -121,7 +122,7 @@ async fn stream<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Response, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    identify(&state.authoriser, &from, &headers).await?;
     Ok((StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "POST")]).into_response())
 }
 
@@ -131,7 +132,13 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let who = identify(&state.authoriser, &from, &headers).await?;
+    if let Who::Agent { workspace, .. } = &who
+        && thread_workspace(&headers).is_some_and(|named| named != workspace)
+    {
+        return Err(Refused::AgentScope);
+    }
+    let caller = who.caller().clone();
     let Ok(message) = serde_json::from_slice::<Value>(&body) else {
         return Ok(refused(&Value::Null, PARSE_ERROR, "Parse error"));
     };
@@ -188,23 +195,28 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
             let arguments = params.get("arguments").unwrap_or(&Value::Null);
             match room::call(name, arguments) {
                 Err(why) => error(id, INVALID_PARAMS, &why),
-                Ok(call) => match machine_of(&state.authoriser, &caller.node).await {
-                    Err(said) => result(id, outcome(Err(said))),
-                    Ok(machine) => {
-                        let thread = thread_of(&headers, &machine, &state).await;
-                        let label = match &thread {
-                            Some(thread) => format!("{} · chat {}", machine.name, thread.thread),
-                            None => machine.name,
-                        };
-                        let session = thread.is_none().then(|| session_of(&headers)).flatten();
-                        let reader = Reader {
-                            node: caller.node,
-                            thread,
-                            session,
-                        };
-                        result(id, tool(&state, &reader, &label, call).await)
+                Ok(call) => {
+                    may_call(&who, &state.rooms, room_named(&call))?;
+                    match machine_of(&state.authoriser, &caller.node).await {
+                        Err(said) => result(id, outcome(Err(said))),
+                        Ok(machine) => {
+                            let thread = thread_of(&headers, &machine, &state).await;
+                            let label = match &thread {
+                                Some(thread) => {
+                                    format!("{} · chat {}", machine.name, thread.thread)
+                                }
+                                None => machine.name,
+                            };
+                            let session = thread.is_none().then(|| session_of(&headers)).flatten();
+                            let reader = Reader {
+                                node: caller.node,
+                                thread,
+                                session,
+                            };
+                            result(id, tool(&state, &reader, &label, call).await)
+                        }
                     }
-                },
+                }
             }
         }
         _ => error(id, METHOD_NOT_FOUND, "Method not found"),
@@ -300,6 +312,59 @@ async fn machine_of<I: Inventory>(
         })
 }
 
+/// The workspace `X-Yantra-Thread` names, if it names one.
+fn thread_workspace(headers: &HeaderMap) -> Option<&str> {
+    let named = headers.get(THREAD)?.to_str().ok()?;
+    Some(
+        named
+            .split_once('/')
+            .map_or(named, |(workspace, _)| workspace),
+    )
+}
+
+/// An agent token reaches a room only when the room is its workspace's
+/// (ADR-0044 decision 12).
+fn may_reach(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
+    let Who::Agent { workspace, .. } = who else {
+        return Ok(());
+    };
+    let home = rooms.view(name).map_err(missing)?.0.workspace;
+    if home.as_deref() == Some(workspace.as_str()) {
+        Ok(())
+    } else {
+        Err(Refused::AgentScope)
+    }
+}
+
+/// An agent token's room tools reach its own workspace's rooms and the rooms
+/// no workspace defines, which agents make and share (ADR-0038 decision 2), and
+/// never a room another workspace defines (ADR-0044 decision 12).
+fn may_call(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
+    let Who::Agent { workspace, .. } = who else {
+        return Ok(());
+    };
+    match rooms.view(name) {
+        Ok((summary, _))
+            if summary
+                .workspace
+                .as_deref()
+                .is_some_and(|home| home != workspace) =>
+        {
+            Err(Refused::AgentScope)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn room_named(call: &Call) -> &str {
+    match call {
+        Call::Send { room, .. }
+        | Call::Read { room, .. }
+        | Call::Info { room }
+        | Call::Status { room, .. } => room,
+    }
+}
+
 /// The header's thread, when its workspace is on the caller's machine.
 async fn thread_of<I>(
     headers: &HeaderMap,
@@ -375,7 +440,9 @@ async fn resume<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<StatusCode, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let who = identify(&state.authoriser, &from, &headers).await?;
+    may_reach(&who, &state.rooms, &name)?;
+    let caller = who.caller();
     state.rooms.resume(&name).map_err(|error| Refused::Verb {
         status: StatusCode::NOT_FOUND,
         said: error.to_string(),
@@ -730,15 +797,19 @@ async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
     Path(name): Path<String>,
     post: Result<Json<Post>, JsonRejection>,
 ) -> Result<Json<RoomPosted>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let who = identify(&state.authoriser, &from, &headers).await?;
+    may_reach(&who, &state.rooms, &name)?;
     let post = json_only(post, "{\"text\": \"...\"}")?;
-    let machine = machine_of(&state.authoriser, &caller.node)
+    let machine = machine_of(&state.authoriser, &who.caller().node)
         .await
         .map_err(|said| Refused::Verb {
             status: StatusCode::SERVICE_UNAVAILABLE,
             said,
         })?;
-    let label = format!("owner on {}", machine.name);
+    let label = match &who {
+        Who::Owner(..) => format!("owner on {}", machine.name),
+        Who::Agent { workspace, .. } => format!("{} · {workspace}", machine.name),
+    };
     let sent = state
         .rooms
         .post(&name, &label, &post.text)
@@ -1019,10 +1090,31 @@ mod tests {
         woke: crate::room::tests::Woken,
         pauses: tokio::sync::mpsc::UnboundedReceiver<yantra_core::notify::Message>,
     ) -> App {
+        serve_keyed(
+            inventory,
+            rooms,
+            woke,
+            pauses,
+            crate::passkey::Passkeys::trusting(),
+        )
+    }
+
+    fn serve_keyed<I: Inventory + Clone + Send + Sync + 'static>(
+        inventory: I,
+        rooms: Rooms,
+        woke: crate::room::tests::Woken,
+        pauses: tokio::sync::mpsc::UnboundedReceiver<yantra_core::notify::Message>,
+        passkeys: crate::passkey::Passkeys,
+    ) -> App {
         let closing = watch::Sender::new(false);
         App {
             router: routes(
-                Authoriser::new(inventory, &[], std::path::Path::new("yantrad.sock")),
+                Authoriser::new(
+                    inventory,
+                    &[],
+                    std::path::Path::new("yantrad.sock"),
+                    passkeys,
+                ),
                 rooms,
                 locate(),
                 resolve(),
@@ -1092,6 +1184,60 @@ mod tests {
 
     fn text(result: &Value) -> &str {
         result["content"][0]["text"].as_str().expect("a text block")
+    }
+
+    /// ADR-0044 decision 12: with no `X-Yantra-Thread`, an agent token still
+    /// never reaches a room another workspace defines. A room no workspace
+    /// defines is the agents' to make and share (ADR-0038 decision 2).
+    #[tokio::test]
+    async fn an_agent_token_calls_tools_only_on_its_own_workspaces_rooms() {
+        let passkeys = crate::passkey::Passkeys::memory();
+        let minted = passkeys.mint_agent("wa");
+        let (rooms, woke, pauses) = rooms();
+        for (name, workspace) in [("home", "wa"), ("away", "wb")] {
+            rooms
+                .create(&Definition {
+                    name: name.to_owned(),
+                    workspace: workspace.to_owned(),
+                    brief: None,
+                    base: None,
+                    made_at: 0,
+                })
+                .expect("defined");
+        }
+        let app = serve_keyed(fake(), rooms.clone(), woke, pauses, passkeys);
+        let call = |name: &str, room: &str| {
+            let body = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                              "params": {"name": name,
+                                         "arguments": {"room": room, "text": "hi", "doing": "x"}}});
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri("/mcp")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {}", minted.token))
+                .body(Body::from(body.to_string()))
+                .expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
+            app.router.clone().oneshot(request)
+        };
+
+        for tool in ["room_send", "room_read", "room_info", "room_status"] {
+            let status = call(tool, "away").await.expect("infallible").status();
+            assert_eq!(status, StatusCode::FORBIDDEN, "{tool} on another workspace");
+        }
+        for room in ["home", "made"] {
+            let response = call("room_send", room).await.expect("infallible");
+            assert_eq!(response.status(), StatusCode::OK, "{room}");
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .expect("in memory");
+            let answer: Value = serde_json::from_slice(&body).expect("JSON");
+            assert_eq!(answer["result"]["isError"], false, "{room}: {answer}");
+        }
+        let made = rooms.view("made").expect("the agent made it").0;
+        assert_eq!(made.workspace, None, "a room no workspace defines");
     }
 
     #[tokio::test]

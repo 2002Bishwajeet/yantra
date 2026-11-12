@@ -16,6 +16,12 @@
 // `api.rs`'s own 404s are JSON `{error}`. A handler answers a string for the
 // first and an object for the second, and the strings are the daemon's own.
 //
+// ADR-0044: every request is signed in unless the scenario says `signedOut`.
+// Then every `/api` route but the open ones answers 401, as `write.rs` does
+// with no cookie, until a sign-in or enrolment finishes. The fixture checks
+// no passkey: it answers each ceremony with options a virtual authenticator
+// accepts and takes whatever credential comes back.
+//
 // Four scenario fields are about the wire rather than the fleet. `down`
 // answers every call, read or write, the way Vite's proxy answers with no
 // daemon behind it: a 502, `text/plain`, and an empty body. `refuse`
@@ -117,6 +123,16 @@ function defaults() {
     sshIdentity: contract.sshIdentity,
     // Y-536: the rooms yantrad holds in memory, by name. The `rooms` scenario fills it.
     rooms: {},
+    // ADR-0044: GET /api/passkey. This browser is the first session.
+    signedOut: false,
+    devices: {
+      relying_party: 'cachyos-g14.tail3a1b.ts.net',
+      passkeys: [{ name: 'iPhone', made: 1788609600 }],
+      sessions: [
+        { id: 'a1b2c3d4e5f60718', passkey: 'iPhone', device: 'iPhone', made: 1788609600, ends: 1791201600, this_device: true },
+        { id: '0f1e2d3c4b5a6978', passkey: 'iPhone', device: 'Mac', made: 1788609600, ends: 1791201600, this_device: false },
+      ],
+    },
     status: Object.fromEntries(
       contract.agents.map((one) => [one.data.workspace, one]),
     ),
@@ -310,7 +326,103 @@ const carried = new Map()
 const strings = (sent) =>
   typeof sent === 'object' && sent !== null && !Array.isArray(sent) && Object.values(sent).every((v) => typeof v === 'string')
 
+// ADR-0044 decision 6 and write.rs `unchecked`: what answers with no cookie.
+const OPEN = new Set([
+  '/api/about',
+  '/api/passkey/register/start',
+  '/api/passkey/register/finish',
+  '/api/passkey/login/start',
+  '/api/passkey/login/finish',
+])
+const SIGN_IN = 'sign in from the dashboard, or run this on the hub'
+const CODE = 'ABCD2345'
+const b64 = (bytes) => Buffer.from(bytes).toString('base64url')
+
+/** What webauthn-rs sends inside `publicKey`, bound to the page's own host. */
+function creation(request, device) {
+  return {
+    rp: { id: hostOf(request), name: 'Yantra' },
+    user: { id: b64('yantra-owner'), name: 'owner', displayName: device },
+    challenge: b64(randomBytes(32)),
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+    timeout: 60000,
+    attestation: 'none',
+    authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
+  }
+}
+
+function assertion(request) {
+  return { challenge: b64(randomBytes(32)), rpId: hostOf(request), timeout: 60000, userVerification: 'required', allowCredentials: [] }
+}
+
+const hostOf = (request) => new URL(`http://${request.headers['x-forwarded-host'] ?? request.headers.host}`).hostname
+
+function finished(state, device) {
+  state.signedOut = false
+  const session = { id: randomBytes(8).toString('hex'), passkey: device, device, made: FIXTURE_NOW, ends: FIXTURE_NOW + 2592000, this_device: true }
+  state.devices.sessions = [...state.devices.sessions.map((one) => ({ ...one, this_device: false })), session]
+  return [200, { session }]
+}
+
 const routes = [
+  ['GET', /^\/api\/passkey$/, (s) => [200, s.devices]],
+  ['POST', /^\/api\/passkey\/code$/, () => [200, { code: CODE, expires_in: 600 }]],
+  [
+    'POST',
+    /^\/api\/join\/code$/,
+    (s) => [
+      200,
+      { code: CODE, expires_in: 600, command: `curl -fsSL 'https://${s.devices.relying_party}:8443/join?code=${CODE}' | sh` },
+    ],
+  ],
+  [
+    'POST',
+    /^\/api\/passkey\/register\/start$/,
+    (s, __, sent, request) => {
+      if (sent.code !== CODE) return [401, 'that code is wrong, used, or expired: run yantra passkey code on the hub for a new one']
+      s.enrolling = sent.device
+      return [200, { ceremony: 'enrol', options: { publicKey: creation(request, sent.device) } }]
+    },
+  ],
+  ['POST', /^\/api\/passkey\/register\/finish$/, (s) => {
+    s.devices.passkeys.push({ name: s.enrolling ?? 'device', made: FIXTURE_NOW })
+    return finished(s, s.enrolling ?? 'device')
+  }],
+  ['POST', /^\/api\/passkey\/login\/start$/, (s, __, sent, request) => {
+    s.signingIn = sent.device ?? 'device'
+    return [200, { ceremony: 'sign-in', options: { publicKey: assertion(request) } }]
+  }],
+  ['POST', /^\/api\/passkey\/login\/finish$/, (s) => finished(s, s.signingIn ?? 'device')],
+  [
+    'DELETE',
+    /^\/api\/passkey\/([^/]+)$/,
+    (s, [name]) => {
+      if (!s.devices.passkeys.some((one) => one.name === name)) return [404, `no passkey is named ${name}`]
+      s.devices.passkeys = s.devices.passkeys.filter((one) => one.name !== name)
+      s.devices.sessions = s.devices.sessions.filter((one) => one.passkey !== name)
+      return [204]
+    },
+  ],
+  [
+    'DELETE',
+    /^\/api\/sessions\/([^/]+)$/,
+    (s, [id]) => {
+      const one = s.devices.sessions.find((session) => session.id === id)
+      if (!one) return [404, `no session has the id ${id}`]
+      s.devices.sessions = s.devices.sessions.filter((session) => session.id !== id)
+      if (one.this_device) s.signedOut = true
+      return [204]
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/sessions\/revoke-others$/,
+    (s) => {
+      const before = s.devices.sessions.length
+      s.devices.sessions = s.devices.sessions.filter((one) => one.this_device)
+      return [200, { revoked: before - s.devices.sessions.length }]
+    },
+  ],
   [
     'POST',
     /^\/api\/carry$/,
@@ -877,6 +989,10 @@ const server = createServer(async (request, response) => {
   }
   if (state.down) {
     response.writeHead(502, { 'content-type': 'text/plain' }).end()
+    return
+  }
+  if (state.signedOut && url.pathname.startsWith('/api/') && !OPEN.has(url.pathname)) {
+    response.writeHead(401, { 'content-type': 'text/plain' }).end(SIGN_IN)
     return
   }
   if (request.method === 'GET' && flakes(state, url.pathname)) {

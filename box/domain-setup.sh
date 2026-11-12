@@ -36,9 +36,15 @@ fi
 chown caddy:caddy /etc/caddy/cloudflare.env
 
 # ADR-0042, amended 2026-11-11: on the socket the daemon trusts the account it is told is its proxy.
-if ! grep -qx 'YANTRA_PROXY_ACCOUNT=caddy' "$daemon_env"; then
-    sed -i '/^YANTRA_PROXY_ACCOUNT=/d' "$daemon_env"
-    echo 'YANTRA_PROXY_ACCOUNT=caddy' >>"$daemon_env"
+# ADR-0044, amended 2026-11-12: the passkey belongs to this name. A new name costs every passkey.
+changed=
+for line in 'YANTRA_PROXY_ACCOUNT=caddy' "YANTRA_ORIGIN=https://$domain"; do
+    grep -qxF "$line" "$daemon_env" && continue
+    sed -i "/^${line%%=*}=/d" "$daemon_env"
+    echo "$line" >>"$daemon_env"
+    changed=1
+done
+if [ -n "$changed" ]; then
     chown yantra:yantra "$daemon_env"
     chmod 600 "$daemon_env"
     systemctl restart yantrad

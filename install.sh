@@ -782,6 +782,21 @@ ENV
     as_root chmod 600 "$DAEMON_ENV"
 fi
 
+# ADR-0044, amended 2026-11-12: a box domain-setup.sh named before the passkey has no
+# YANTRA_ORIGIN, so its passkeys would belong to the MagicDNS name the owner never opens.
+# $1 is the daemon's environment file and $2 the Caddyfile domain-setup.sh wrote.
+name_the_origin() {
+    [ -e "$1" ] && [ -e "$2" ] && grep -qF 'unix//run/yantra/yantrad.sock' "$2" || return 0
+    as_root grep -q '^YANTRA_ORIGIN=' "$1" && return 0
+    local domain
+    domain=$(sed -n 's/^https:\/\/\([A-Za-z0-9.-]*\) {$/\1/p' "$2" | head -n 1)
+    [ -n "$domain" ] || return 0
+    [ -z "$(as_root tail -c 1 "$1")" ] || echo | as_root tee -a "$1" >/dev/null
+    echo "YANTRA_ORIGIN=https://$domain" | as_root tee -a "$1" >/dev/null
+    echo "install: passkeys now belong to https://$domain, the name domain-setup.sh gave this box."
+}
+name_the_origin "$DAEMON_ENV" /etc/caddy/Caddyfile
+
 if [ -n "$address" ]; then
     running=no
     if systemctl is-active --quiet yantrad.service ||

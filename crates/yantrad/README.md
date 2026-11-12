@@ -196,8 +196,17 @@ Every answer names which of three states it is in, so an empty list is never mis
 ```
 
 Run it with `yantrad`. It listens on **port 7717**, on the addresses Tailscale says this machine
-holds, and refuses to start if it cannot learn them. There is no flag to change either — with no
-authentication (Q6, personal-first), where it listens is the whole security model.
+holds, and refuses to start if it cannot learn them. There is no flag to change either: where it
+listens is the first boundary. The second is the owner's passkey
+([ADR-0044](../../docs/adr/0044-a-write-needs-the-owners-passkey.md)). A browser signs in once per
+device and every `/api` request then carries a session cookie; with none it gets a **401**. On the
+hub, `yantra passkey code` makes the code that enrols a device, and `yantra passkey list`,
+`yantra passkey remove` and `yantra session revoke` manage them over the socket.
+
+The passkey belongs to the dashboard's name, `https://<MagicDNS>:8443` by default. To serve it on
+a name you own, set `YANTRA_ORIGIN=https://yantra.example.com` in `/etc/yantra/daemon.env`. It holds
+one https origin with no path, and a bad value stops the daemon at start. **Changing it costs every
+passkey**: each device enrols again on the new name.
 
 `YANTRA_WEB` points it at a directory of built assets. Unset it and the API serves alone and `/`
 says how; point it at a directory with no `index.html` and it refuses to start rather than answering

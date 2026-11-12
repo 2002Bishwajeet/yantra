@@ -5,11 +5,10 @@
 //! running at all ([ADR-0012]).
 //!
 //! It listens **only** on the addresses Tailscale says this machine holds, and
-//! refuses to start when it cannot learn them. Q6 settled that Yantra is
-//! personal-first, so there is no authentication — which makes the bind address
-//! the entire security boundary (R-22), and makes an overridable one a mistake
-//! waiting to be made. There is deliberately no flag for it. Beside them it
-//! listens on a Unix socket, where `tailscale serve` proxies to (ADR-0042).
+//! refuses to start when it cannot learn them. There is deliberately no flag
+//! for it. Beside them it listens on a Unix socket, where `tailscale serve`
+//! proxies to (ADR-0042). Every `/api` route but a few needs the owner: the
+//! socket's own account, or a passkey session on the network (ADR-0044).
 //!
 //! [ADR-0012]: ../../../docs/adr/0012-the-cli-and-the-daemon-are-two-callers-of-one-library.md
 
@@ -41,6 +40,7 @@ mod layout;
 mod mcp;
 mod mic;
 mod notify;
+mod passkey;
 mod placement;
 mod refresh;
 mod room;
@@ -58,6 +58,8 @@ const RUNTIME: &str = "/run/yantra";
 const SOCKET: &str = "yantrad.sock";
 /// systemd loads it from `/etc/yantra/daemon.env`, which `write_relay` leaves alone.
 const PROXY_ACCOUNT: &str = "YANTRA_PROXY_ACCOUNT";
+/// The dashboard's own origin, from the same file (the 2026-11-12 amendment to ADR-0044).
+const ORIGIN: &str = "YANTRA_ORIGIN";
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -83,6 +85,9 @@ enum Error {
 
     #[error("the server stopped unexpectedly")]
     Serve(#[source] std::io::Error),
+
+    #[error("{ORIGIN} must be one https origin, such as https://yantra.cloudx.run")]
+    Origin,
 
     #[error("could not serve the dashboard")]
     Dashboard(#[source] web::NoIndex),
@@ -194,6 +199,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
             "/api",
             api::router()
                 .with_state(fleet.clone())
+                .merge(passkey::router(authoriser.clone(), fleet.clone()))
                 .merge(write::router(authoriser.clone(), fleet.clone()))
                 .merge(chat::router(authoriser.clone(), fleet.chats.clone()))
                 .merge(mcp::router(
@@ -205,7 +211,14 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
                 .merge(layout::router(authoriser.clone()))
                 .merge(carry::router(authoriser.clone(), fleet.carry.clone()))
                 .merge(mic::router(authoriser.clone()))
-                .merge(dictate::router(authoriser)),
+                .merge(dictate::router(authoriser.clone()))
+                .layer(axum::middleware::from_fn_with_state(
+                    write::Gate {
+                        authoriser,
+                        fleet: fleet.clone(),
+                    },
+                    write::gate::<I>,
+                )),
         )
         .merge(heartbeat::router())
         .with_state(fleet)
@@ -213,15 +226,34 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
 }
 
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
+    let origin = match std::env::var(ORIGIN) {
+        Ok(value) if !value.is_empty() => {
+            Some(passkey::configured_origin(&value).ok_or(Error::Origin)?)
+        }
+        _ => None,
+    };
     let addresses = listen_on(inventory).await?;
     let socket =
         Path::new(&std::env::var_os("RUNTIME_DIRECTORY").unwrap_or_else(|| RUNTIME.into()))
             .join(SOCKET);
     // ADR-0042: the set bound here is exactly the set that is this machine, so
     // the authoriser is built from it rather than from anything that could drift.
+    let passkeys = match passkey::path() {
+        Some(file) => {
+            tracing::info!("keeping passkeys in {}", file.display());
+            passkey::Passkeys::open(file)
+        }
+        None => {
+            tracing::warn!(
+                "this account has no config directory, so a restart signs out every device"
+            );
+            passkey::Passkeys::memory()
+        }
+    };
     let proxy = write::proxy_account(std::env::var(PROXY_ACCOUNT).ok().as_deref());
-    let authoriser =
-        write::Authoriser::new(inventory.clone(), &addresses, &socket).proxied_by(proxy);
+    let authoriser = write::Authoriser::new(inventory.clone(), &addresses, &socket, passkeys)
+        .proxied_by(proxy)
+        .served_at(origin.clone());
     let ssh_dir = yantra_core::identity::dir().unwrap_or_else(|error| {
         tracing::warn!("no ssh identity can be served: {error}");
         PathBuf::new()
@@ -238,14 +270,22 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
     })?;
     tracing::info!("keeping threads in {}", threads.display());
     let ips: Vec<IpAddr> = addresses.iter().map(SocketAddr::ip).collect();
-    let base = match inventory.machines().await {
-        Ok(machines) => api::https_of(&machines, &addresses),
-        Err(error) => {
-            tracing::warn!("a chat push carries no link: {error}");
-            None
-        }
+    let base = match &origin {
+        Some(origin) => Some(origin.clone()),
+        None => match inventory.machines().await {
+            Ok(machines) => api::https_of(&machines, &addresses),
+            Err(error) => {
+                tracing::warn!("a chat push carries no link: {error}");
+                None
+            }
+        },
     };
-    let chats = chats(yantra_core::join::daemon_address(&ips).ok(), &store, base);
+    let chats = chats(
+        yantra_core::join::daemon_address(&ips).ok(),
+        &store,
+        base,
+        authoriser.passkeys().clone(),
+    );
     let fleet = heartbeat::Fleet {
         facts: std::sync::Arc::new(heartbeat::Facts {
             started: std::time::Instant::now(),
@@ -388,9 +428,14 @@ async fn listen_on<I: Inventory>(inventory: &I) -> Result<Vec<SocketAddr>, Error
 
 /// The chat registry, whose waits go to the relay when there is one, each
 /// linked to its thread under `base`, and whose Claude turns reach the room
-/// tools at `daemon`. The relay is read again because a `Relay` is not
+/// tools at `daemon` with a token from `passkeys`. The relay is read again because a `Relay` is not
 /// `Clone`, by design.
-fn chats(daemon: Option<SocketAddr>, store: &store::Store, base: Option<String>) -> chat::Registry {
+fn chats(
+    daemon: Option<SocketAddr>,
+    store: &store::Store,
+    base: Option<String>,
+    passkeys: passkey::Passkeys,
+) -> chat::Registry {
     let registry = match yantra_core::notify::from_env() {
         Some(relay) => {
             let (waits, heard) = tokio::sync::mpsc::unbounded_channel();
@@ -401,7 +446,7 @@ fn chats(daemon: Option<SocketAddr>, store: &store::Store, base: Option<String>)
     }
     .storing(store.clone());
     match daemon {
-        Some(daemon) => registry.reaching(daemon),
+        Some(daemon) => registry.reaching(daemon, passkeys),
         None => registry,
     }
 }
@@ -530,19 +575,26 @@ mod tests {
         std::fs::write(dir.join("index.html"), "<title>Yantra</title>").expect("index");
         let app = app(
             heartbeat::Fleet::default(),
-            write::Authoriser::new(Fake::default(), &[], Path::new(SOCKET)),
+            write::Authoriser::new(
+                owner_at(PHONE),
+                &[],
+                Path::new(SOCKET),
+                passkey::Passkeys::trusting(),
+            ),
             dashboard(Some(dir)).expect("a directory with an index"),
         );
 
         let answer = |path: &'static str| {
             let app = app.clone();
             async move {
+                let mut request = Request::get(path)
+                    .body(Body::empty())
+                    .expect("a GET with no body is a valid request");
+                request
+                    .extensions_mut()
+                    .insert(axum::extract::ConnectInfo(write::Peer::from(PHONE)));
                 let response = app
-                    .oneshot(
-                        Request::get(path)
-                            .body(Body::empty())
-                            .expect("a GET with no body is a valid request"),
-                    )
+                    .oneshot(request)
                     .await
                     .expect("the router is infallible");
                 let status = response.status();
@@ -571,6 +623,213 @@ mod tests {
             assert_eq!(status, axum::http::StatusCode::OK, "{path}: {body}");
             assert!(body.contains("Yantra"), "{path}: {body}");
         }
+    }
+
+    const PHONE: SocketAddr =
+        SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(100, 64, 0, 9)), 51000);
+    const HUB: &str = "hub.example.ts.net";
+
+    /// The owner's untagged node at `at`, and this hub named [`HUB`].
+    fn owner_at(at: SocketAddr) -> Fake {
+        Fake {
+            callers: [(
+                at.ip(),
+                yantra_core::inventory::Caller {
+                    node: "nPHONE".to_owned(),
+                    user: 1,
+                    tags: Vec::new(),
+                },
+            )]
+            .into(),
+            owner: 1,
+            ..Fake::default()
+        }
+    }
+
+    /// A fleet whose last tailnet look names this hub [`HUB`] at 100.64.0.1.
+    fn named_hub() -> heartbeat::Fleet {
+        let hub = "100.64.0.1".parse().expect("v4");
+        let fleet = heartbeat::Fleet {
+            facts: std::sync::Arc::new(heartbeat::Facts {
+                started: std::time::Instant::now(),
+                listening_on: vec![SocketAddr::new(hub, PORT)],
+                ssh_dir: PathBuf::new(),
+                ssh_state: PathBuf::new(),
+                relay: false,
+                trigger: PathBuf::new(),
+                updater: PathBuf::new(),
+                progress: PathBuf::new(),
+                channel: PathBuf::new(),
+            }),
+            ..heartbeat::Fleet::default()
+        };
+        let machine = yantra_core::inventory::MachineInfo {
+            id: "nHUB".to_owned(),
+            name: "hub".to_owned(),
+            dns_name: format!("{HUB}."),
+            os: yantra_core::inventory::Os::Linux,
+            online: true,
+            control_lost: false,
+            last_seen: None,
+            expired: false,
+            key_expires: None,
+            addresses: vec![hub],
+            ownership: yantra_core::inventory::Ownership::Yours,
+        };
+        fleet.model.try_write().expect("nothing holds it").machines = Some(std::sync::Arc::new(
+            yantra_core::snapshot::Reading::new(Ok(vec![machine])),
+        ));
+        fleet
+    }
+
+    async fn send(
+        app: &Router,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+    ) -> (axum::http::StatusCode, String) {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let mut request = axum::http::Request::builder().method(method).uri(path);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let mut request = request.body(Body::empty()).expect("a request");
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(write::Peer::from(PHONE)));
+        let response = app.clone().oneshot(request).await.expect("infallible");
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .expect("in memory");
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    fn gated(passkeys: passkey::Passkeys) -> Router {
+        app(
+            named_hub(),
+            write::Authoriser::new(owner_at(PHONE), &[], Path::new(SOCKET), passkeys),
+            web::placeholder(),
+        )
+    }
+
+    /// ADR-0044's first done case: the owner's own node with no cookie gets
+    /// 401 on a read and on a write, and the open routes still answer.
+    #[tokio::test]
+    async fn no_cookie_is_401_on_a_read_and_a_write_and_the_open_routes_answer() {
+        let app = gated(passkey::Passkeys::memory());
+
+        for (method, path) in [
+            ("GET", "/api/workspaces"),
+            ("GET", "/api/repos"),
+            ("GET", "/api/passkey"),
+            ("PUT", "/api/layout"),
+            ("POST", "/api/passkey/code"),
+        ] {
+            let (status, body) = send(&app, method, path, &[]).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::UNAUTHORIZED,
+                "{method} {path}: {body}"
+            );
+            assert!(
+                body.contains("sign in from the dashboard, or run this on the hub"),
+                "{body}"
+            );
+        }
+        for path in ["/healthz", "/api/about"] {
+            let (status, body) = send(&app, "GET", path, &[]).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{path}: {body}");
+        }
+    }
+
+    fn signed_in() -> (passkey::Passkeys, String) {
+        let passkeys = passkey::Passkeys::memory();
+        let (_, token, _) = passkey::tests::enrolled(&passkeys, "iPhone");
+        (passkeys, format!("{}={token}", passkey::COOKIE))
+    }
+
+    #[tokio::test]
+    async fn a_live_cookie_reads_and_a_forged_one_or_the_hash_does_not() {
+        let (passkeys, cookie) = signed_in();
+        let app = gated(passkeys);
+
+        let (status, body) = send(&app, "GET", "/api/passkey", &[("cookie", &cookie)]).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert!(
+            body.contains(HUB) && body.contains("\"this_device\":true"),
+            "{body}"
+        );
+
+        let forged = format!(
+            "{}=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            passkey::COOKIE
+        );
+        let (status, _) = send(&app, "GET", "/api/workspaces", &[("cookie", &forged)]).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED);
+    }
+
+    /// Decision 5: a write with a good cookie from another page's origin.
+    #[tokio::test]
+    async fn a_good_cookie_with_a_foreign_origin_cannot_write() {
+        let (passkeys, cookie) = signed_in();
+        let app = gated(passkeys);
+
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/api/sessions/revoke-others",
+            &[("cookie", &cookie), ("origin", "https://evil.example")],
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{body}");
+
+        let ours = format!("https://{HUB}:8443");
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/api/sessions/revoke-others",
+            &[("cookie", &cookie), ("origin", &ours)],
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+    }
+
+    /// Decision 12: an agent token reaches its tools and no owner route.
+    #[tokio::test]
+    async fn an_agent_token_gets_403_on_every_owner_route() {
+        let passkeys = passkey::Passkeys::memory();
+        let minted = passkeys.mint_agent("web");
+        let app = gated(passkeys);
+        let bearer = format!("Bearer {}", minted.token);
+
+        for (method, path) in [
+            ("GET", "/api/workspaces"),
+            ("GET", "/api/repos"),
+            ("GET", "/api/passkey"),
+            ("POST", "/api/passkey/code"),
+            ("POST", "/api/workspaces/web/up"),
+            ("GET", "/api/rooms"),
+        ] {
+            let (status, body) = send(&app, method, path, &[("authorization", &bearer)]).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::FORBIDDEN,
+                "{method} {path}: {body}"
+            );
+        }
+        let (status, body) = send(&app, "GET", "/api/tasks", &[("authorization", &bearer)]).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+
+        drop(minted);
+        let (status, _) = send(&app, "GET", "/api/tasks", &[("authorization", &bearer)]).await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::UNAUTHORIZED,
+            "an ended token"
+        );
     }
 
     fn nowhere() -> PathBuf {

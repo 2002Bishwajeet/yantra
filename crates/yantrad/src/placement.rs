@@ -391,7 +391,12 @@ mod tests {
             owner: ME,
         };
         let app: Router = routes(
-            Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock")),
+            Authoriser::new(
+                fake,
+                &[],
+                std::path::Path::new("yantrad.sock"),
+                crate::passkey::Passkeys::trusting(),
+            ),
             fleet,
             find,
         );

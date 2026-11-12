@@ -18,12 +18,29 @@ paragraph: it describes M6 onward. **Today the CLI does not go through the daemo
 records what would justify changing that — a client not on the operator's machine, state that must
 not be derived twice, or a placement decision the CLI must also see.
 
-## The bind address is the security boundary
+## The bind address is the first boundary, and a passkey is the second
 
-Q6 settled that Yantra is personal-first, so there is **no authentication**. That makes where the
-daemon listens the entire security model (R-22), and it is why `listen_on` fails closed: every branch
-that cannot prove an address belongs to this machine returns an error, because the only default
+Q6 settled that Yantra is personal-first, so the bind address was once the whole security model
+(R-22). It is still the first boundary, and it is why `listen_on` fails closed: every branch that
+cannot prove an address belongs to this machine returns an error, because the only default
 available is one that listens to the whole world.
+
+**Since [ADR-0044](../../docs/adr/0044-a-write-needs-the-owners-passkey.md) every request also needs
+the owner.** A tailnet address no longer proves it, because an agent account on any machine shares
+that address. `write::gate` sits over the whole `/api` nest and asks `presented` who called: the
+socket's peer uid (ADR-0042), a `__Host-yantra_session` cookie from a passkey sign-in, or a
+`Bearer` agent token minted for one Chat turn. No cookie is a 401; a write whose `Origin` is not the
+dashboard's is a 403; an agent token reaches only `write::agent_may`. `write::unchecked` is the
+short list that answers with neither, and a new route belongs on it only if a signed-out browser
+must reach it. `passkey.rs` keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and
+never a token.
+
+**The dashboard's origin is `https://<MagicDNS>:8443` unless `YANTRA_ORIGIN` names one** (ADR-0044,
+amended 2026-11-12). `main.rs` reads it from `/etc/yantra/daemon.env` once at start, and
+`passkey::configured_origin` accepts exactly one https origin with no path; anything else stops the
+daemon. `write::dashboard_origin` is the one place both are chosen: the relying party id is its host,
+the `Origin` check and the join command use it. **Changing it costs every passkey**, because a
+passkey belongs to its relying party id.
 
 **Do not add a `--bind` flag, a `--port` flag, or a config file for either.** A flag that can expose
 the API is a flag someone eventually passes. The port is a constant with a test asserting it is one.
@@ -416,7 +433,9 @@ both run `ssh-keygen` on one path. **`POST /api/join/forget-host-key` is `yantra
 for the caller** (Y-621). It names the machine as `/api/join` does, so a machine forgets only its own
 line, and it answers `{machine, removed}`. `join.sh` calls it after `tailscale set --ssh=false`,
 because sshd's host key is not Tailscale SSH's. It holds `Fleet::joins` too, and it adds no field to
-`/api/join`'s body. **`GET /join` sits beside
+`/api/join`'s body. **The script's login test sends the code too**, in `X-Yantra-Join-Code` on
+`POST /api/machines/{machine}/readiness`: the `/api` gate lets that request through, and the
+handler accepts the code only for the machine it joined (ADR-0044 decision 13). **`GET /join` sits beside
 `/healthz`, not under `/api`**, because `curl …/join | sh` is what a person types. It is
 `yantra join-script`, authorised like a write, and **the one `GET` that may make the key** — the
 owner ruled that generation is Yantra's and happens on first use. **On the socket another account

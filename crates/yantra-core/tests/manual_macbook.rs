@@ -880,17 +880,25 @@ struct Auth {
 
 /// Boots out Yantra's LaunchAgent and kills its server. KeepAlive restarts a
 /// killed server within a second, so the job goes first (Y-679).
+///
+/// For about 3 s after the bootout, the dying server answers `list-sessions`
+/// with `server exited unexpectedly` (Y-687), so it waits for `no server`.
 async fn no_login_server(ssh: &Ssh, tmux: &Tmux) -> anyhow::Result<()> {
     ssh.exec(&format!(
         "launchctl bootout gui/$(id -u)/{LABEL} 2>/dev/null; {} kill-server 2>/dev/null; true",
         tmux.command()
     ))
     .await?;
-    anyhow::ensure!(
-        !tmux.running(ssh).await?,
-        "Yantra's server outlived the bootout"
-    );
-    Ok(())
+    let started = Instant::now();
+    loop {
+        match tmux.running(ssh).await {
+            Ok(false) => return Ok(()),
+            answer if started.elapsed() > Duration::from_secs(15) => {
+                anyhow::bail!("Yantra's server outlived the bootout: {answer:?}")
+            }
+            _ => tokio::time::sleep(Duration::from_millis(500)).await,
+        }
+    }
 }
 
 /// A fresh v4 id per run, so the file the readings come from is this run's

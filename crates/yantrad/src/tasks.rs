@@ -27,24 +27,30 @@ use yantra_core::delegate::{self, Progress, Task};
 use yantra_core::install;
 use yantra_core::inventory::Inventory;
 use yantra_core::ssh::{self, Machine, Ssh};
+use yantra_core::workspace;
 
-use crate::write::{Authoriser, Peer, Refused, allowed, chain};
+use crate::write::{Authoriser, Peer, Refused, Who, chain, identify};
 
 struct Entry {
     machine: String,
     harness: &'static str,
     task: Arc<Task>,
+    /// The workspace of the agent token that started it, if one did.
+    workspace: Option<String>,
 }
 
 type Tasks = Arc<Mutex<BTreeMap<String, Arc<Entry>>>>;
 /// Turns a machine's name into where ssh goes. A test points it at its fixture.
 type Locate = Arc<dyn Fn(&str) -> Option<Machine> + Send + Sync>;
+/// Turns a workspace's name into its machine's. A test names its own.
+type Home = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 #[derive(Clone)]
 struct Delegates<I> {
     authoriser: Authoriser<I>,
     tasks: Tasks,
     locate: Locate,
+    home: Home,
     /// [`crate::heartbeat::Fleet::closing`].
     closing: watch::Sender<bool>,
 }
@@ -54,12 +60,14 @@ where
     I: Inventory + Clone + Send + Sync + 'static,
     S: Clone + Send + Sync + 'static,
 {
-    routes(authoriser, Arc::new(ssh::machine_at), closing)
+    let home: Home = Arc::new(|name| workspace::load(name).ok().map(|w| w.machine));
+    routes(authoriser, Arc::new(ssh::machine_at), home, closing)
 }
 
 fn routes<I, S>(
     authoriser: Authoriser<I>,
     locate: Locate,
+    home: Home,
     closing: watch::Sender<bool>,
 ) -> Router<S>
 where
@@ -76,6 +84,7 @@ where
             authoriser,
             tasks: Tasks::default(),
             locate,
+            home,
             closing,
         })
 }
@@ -186,8 +195,10 @@ fn read_out(id: &str, entry: &Entry) -> Read {
     }
 }
 
-fn find(tasks: &Tasks, id: &str) -> Result<Arc<Entry>, Refused> {
-    tasks
+/// Task `id`, which an agent reaches only when its own token started it
+/// (ADR-0044 decision 12).
+fn find(tasks: &Tasks, id: &str, scope: Option<&str>) -> Result<Arc<Entry>, Refused> {
+    let entry = tasks
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .get(id)
@@ -195,7 +206,23 @@ fn find(tasks: &Tasks, id: &str) -> Result<Arc<Entry>, Refused> {
         .ok_or_else(|| Refused::Verb {
             status: StatusCode::NOT_FOUND,
             said: format!("no task `{id}`: it was removed, or the daemon has restarted since"),
-        })
+        })?;
+    if scope.is_some_and(|scope| entry.workspace.as_deref() != Some(scope)) {
+        return Err(Refused::AgentScope);
+    }
+    Ok(entry)
+}
+
+/// The caller, and the workspace an agent caller is bound to.
+async fn scoped<I: Inventory>(
+    state: &Delegates<I>,
+    from: &Peer,
+    headers: &HeaderMap,
+) -> Result<(String, Option<String>), Refused> {
+    Ok(match identify(&state.authoriser, from, headers).await? {
+        Who::Owner(caller, _) => (caller.node, None),
+        Who::Agent { caller, workspace } => (caller.node, Some(workspace)),
+    })
 }
 
 fn bad(said: String) -> Refused {
@@ -233,9 +260,14 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Json(asked): Json<Start>,
 ) -> Result<(StatusCode, Json<Started>), Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let (node, scope) = scoped(&state, &from, &headers).await?;
     // The name reaches `ssh`'s argv (ADR-0009).
     install::check_machine(&asked.machine).map_err(|error| bad(error.to_string()))?;
+    if let Some(scope) = &scope
+        && (state.home)(scope).as_deref() != Some(asked.machine.as_str())
+    {
+        return Err(Refused::AgentScope);
+    }
     let harness: Harness = asked.harness.parse().map_err(bad)?;
     let harness_name = harness.name();
     let machine = (state.locate)(&asked.machine).ok_or_else(|| Refused::Verb {
@@ -243,11 +275,7 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
         said: "this daemon has no directory for its ssh sockets".to_owned(),
     })?;
     let ssh = Ssh::new(machine).map_err(|error| refused(&error.into()))?;
-    tracing::info!(
-        "delegate to {harness_name} on {} for {}",
-        asked.machine,
-        caller.node
-    );
+    tracing::info!("delegate to {harness_name} on {} for {node}", asked.machine,);
 
     // Spawned, so a caller that hangs up mid-prepare still leaves a task that
     // `DELETE` can find, rather than a worktree no task records.
@@ -259,6 +287,7 @@ async fn start<I: Inventory + Clone + Send + Sync + 'static>(
             machine: asked.machine,
             harness: harness_name,
             task: Arc::new(task),
+            workspace: scope,
         });
         let answer = started(&id, &entry);
         tasks
@@ -281,11 +310,12 @@ async fn list<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<Listed>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    let (_, scope) = scoped(&state, &from, &headers).await?;
     let tasks = state.tasks.lock().unwrap_or_else(PoisonError::into_inner);
     Ok(Json(
         tasks
             .iter()
+            .filter(|(_, entry)| scope.is_none() || entry.workspace == scope)
             .map(|(id, entry)| Listed {
                 task: started(id, entry),
                 state: self::state(&entry.task.progress()).0,
@@ -300,8 +330,8 @@ async fn read<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Read>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
-    let entry = find(&state.tasks, &id)?;
+    let (_, scope) = scoped(&state, &from, &headers).await?;
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
     Ok(Json(read_out(&id, &entry)))
 }
 
@@ -311,9 +341,9 @@ async fn stop<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Read>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
-    let entry = find(&state.tasks, &id)?;
-    tracing::info!("stop task {id} for {}", caller.node);
+    let (node, scope) = scoped(&state, &from, &headers).await?;
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
+    tracing::info!("stop task {id} for {node}");
     if let Err(error) = entry.task.stop().await {
         tracing::warn!("task {id} has no fresh summary: {}", chain(&error));
     }
@@ -327,12 +357,12 @@ async fn steer<I: Inventory + Clone + Send + Sync + 'static>(
     Path(id): Path<String>,
     Json(asked): Json<Steer>,
 ) -> Result<Json<Read>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let (node, scope) = scoped(&state, &from, &headers).await?;
     if asked.prompt.trim().is_empty() {
         return Err(bad("a steer needs a prompt".to_owned()));
     }
-    let entry = find(&state.tasks, &id)?;
-    tracing::info!("steer task {id} for {}", caller.node);
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
+    tracing::info!("steer task {id} for {node}");
     entry
         .task
         .steer(&asked.prompt)
@@ -347,9 +377,9 @@ async fn wait<I: Inventory + Clone + Send + Sync + 'static>(
     Path(id): Path<String>,
     RawQuery(query): RawQuery,
 ) -> Result<Json<Waited>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    let (_, scope) = scoped(&state, &from, &headers).await?;
     let limit = limit(query.as_deref()).map_err(bad)?;
-    let entry = find(&state.tasks, &id)?;
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
     let settled = until_closing(&state.closing, entry.task.wait(limit))
         .await
         .ok_or_else(|| Refused::Verb {
@@ -405,9 +435,9 @@ async fn remove<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Removed>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
-    let entry = find(&state.tasks, &id)?;
-    tracing::info!("remove task {id} for {}", caller.node);
+    let (node, scope) = scoped(&state, &from, &headers).await?;
+    let entry = find(&state.tasks, &id, scope.as_deref())?;
+    tracing::info!("remove task {id} for {node}");
     // Kept on failure, so the caller can try the removal again.
     entry.task.remove().await.map_err(|error| refused(&error))?;
     state
@@ -443,6 +473,15 @@ mod tests {
     }
 
     fn app_at(locate: Locate) -> Router {
+        app_with(
+            locate,
+            crate::passkey::Passkeys::trusting(),
+            Arc::new(|_| None),
+        )
+    }
+
+    /// `home` names each workspace's machine, as `workspace.toml` would.
+    fn app_with(locate: Locate, passkeys: crate::passkey::Passkeys, home: Home) -> Router {
         let caller = Caller {
             node: "nSOME000000011CNTRL".to_owned(),
             user: ME,
@@ -455,8 +494,9 @@ mod tests {
             owner: ME,
         };
         routes(
-            Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock")),
+            Authoriser::new(fake, &[], std::path::Path::new("yantrad.sock"), passkeys),
             locate,
+            home,
             watch::Sender::new(false),
         )
     }
@@ -477,7 +517,22 @@ mod tests {
         body: Option<serde_json::Value>,
         from: [u8; 4],
     ) -> (StatusCode, String) {
+        send_as(app, method, path, body, from, None).await
+    }
+
+    /// As [`send_to`], with `token` as a `Bearer` agent token (ADR-0044 decision 12).
+    async fn send_as(
+        app: Router,
+        method: Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+        from: [u8; 4],
+        token: Option<&str>,
+    ) -> (StatusCode, String) {
         let mut request = Request::builder().method(method).uri(path);
+        if let Some(token) = token {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
         if body.is_some() {
             request = request.header(header::CONTENT_TYPE, "application/json");
         }
@@ -628,6 +683,45 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "{hostile}: {said}");
         }
+    }
+
+    /// ADR-0044 decision 12: an agent token starts a task only on its own
+    /// workspace's machine. Each refusal comes before ssh, as above.
+    #[tokio::test]
+    async fn an_agent_token_starts_no_task_off_its_workspace_machine() {
+        let passkeys = crate::passkey::Passkeys::memory();
+        let web = passkeys.mint_agent("web");
+        let gone = passkeys.mint_agent("gone");
+        let app = app_with(
+            Arc::new(ssh::machine_at),
+            passkeys,
+            Arc::new(|name| (name == "web").then(|| "pi".to_owned())),
+        );
+
+        for (token, machine) in [(&web.token, "box"), (&gone.token, "pi")] {
+            let (status, said) = send_as(
+                app.clone(),
+                Method::POST,
+                "/tasks",
+                Some(body(machine, "opencode")),
+                MINE,
+                Some(token),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{machine}: {said}");
+        }
+        let (status, said) = send_as(
+            app.clone(),
+            Method::GET,
+            "/tasks",
+            None,
+            MINE,
+            Some(&web.token),
+        )
+        .await;
+        assert_eq!((status, said.as_str()), (StatusCode::OK, "[]"));
+        let (status, _) = send_as(app, Method::GET, "/tasks", None, MINE, Some("forged")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
@@ -962,6 +1056,100 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT, "{said}");
 
         let (status, said) = call(Method::DELETE, format!("/tasks/{id}"), None).await;
+        assert_eq!(
+            (status, said.as_str()),
+            (StatusCode::OK, r#"{"removed":true}"#)
+        );
+        let after = fixture
+            .run(&format!(
+                "test -e {worktree} && echo there; git -C {REPO} branch --list 'yantra/*'"
+            ))
+            .expect("the machine answers");
+        assert!(after.trim().is_empty(), "{after}");
+
+        drop(fixture);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ADR-0044's done test: a session token from decision 12 starts a task on
+    /// its own workspace, against a real sshd and `opencode acp` (§B3). Another
+    /// workspace's token does not list the task and gets 403 on each of its routes.
+    #[tokio::test]
+    async fn an_agent_token_starts_a_task_on_its_workspace_and_no_other_reaches_it() {
+        const REPO: &str = "/home/yantra/scoped";
+        let patience = std::time::Duration::from_secs(120);
+        let Some(fixture) = common::SshFixture::start().expect("the fixture starts") else {
+            return;
+        };
+        let dir = std::path::PathBuf::from(format!("/tmp/yx-agt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a state directory");
+        let machine = Machine {
+            host: fixture.host().to_owned(),
+            user: Some(common::USER.to_owned()),
+            port: Some(fixture.port()),
+            identity: Some(fixture.key_path()),
+            state_dir: dir.clone(),
+        };
+        let passkeys = crate::passkey::Passkeys::memory();
+        let web = passkeys.mint_agent("web");
+        let api = passkeys.mint_agent("api");
+        let app = app_with(
+            Arc::new(move |name: &str| (name == "fixture").then(|| machine.clone())),
+            passkeys,
+            Arc::new(|name| ["web", "api"].contains(&name).then(|| "fixture".to_owned())),
+        );
+        fixture
+            .run(&format!(
+                "mkdir -p {REPO} && cd {REPO} && git init -q && echo one > README \
+                 && git add README && git -c user.name=t -c user.email=t@example.com \
+                 commit -qm one"
+            ))
+            .expect("a repository");
+        let json = |said: &str| -> serde_json::Value {
+            serde_json::from_str(said).expect("the daemon answers JSON")
+        };
+        let call = |token: &str, method: Method, path: String, body: Option<serde_json::Value>| {
+            let app = app.clone();
+            let token = token.to_owned();
+            async move {
+                tokio::time::timeout(
+                    patience,
+                    send_as(app, method, &path, body, MINE, Some(&token)),
+                )
+                .await
+                .expect("the daemon answers in time")
+            }
+        };
+
+        let asked = serde_json::json!({"machine": "fixture", "harness": "opencode",
+                                       "repo": REPO, "prompt": "Say hello."});
+        let (status, said) = call(&web.token, Method::POST, "/tasks".to_owned(), Some(asked)).await;
+        assert_eq!(status, StatusCode::CREATED, "{said}");
+        let started = json(&said);
+        let id = started["id"].as_str().expect("an id").to_owned();
+        let worktree = started["worktree"].as_str().expect("a worktree").to_owned();
+
+        let (status, said) = call(&web.token, Method::GET, "/tasks".to_owned(), None).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert_eq!(json(&said)[0]["id"], id.as_str(), "{said}");
+        let (status, said) = call(&web.token, Method::GET, format!("/tasks/{id}"), None).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+
+        let (status, said) = call(&api.token, Method::GET, "/tasks".to_owned(), None).await;
+        assert_eq!((status, said.as_str()), (StatusCode::OK, "[]"));
+        for (method, path, body) in [
+            (Method::GET, format!("/tasks/{id}"), None),
+            (Method::POST, format!("/tasks/{id}/stop"), None),
+            (Method::POST, format!("/tasks/{id}/steer"), Some(steered())),
+            (Method::GET, format!("/tasks/{id}/wait?timeoutMs=1"), None),
+            (Method::DELETE, format!("/tasks/{id}"), None),
+        ] {
+            let (status, said) = call(&api.token, method.clone(), path.clone(), body).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {said}");
+        }
+
+        let (status, said) = call(&web.token, Method::DELETE, format!("/tasks/{id}"), None).await;
         assert_eq!(
             (status, said.as_str()),
             (StatusCode::OK, r#"{"removed":true}"#)

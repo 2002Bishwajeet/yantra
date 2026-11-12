@@ -322,7 +322,12 @@ struct Daemon {
     base: String,
     agent: ureq::Agent,
     session: String,
+    /// The agent token the daemon gave this session (ADR-0044 decision 12).
+    token: Option<String>,
 }
+
+/// Where a session the daemon started finds its agent token.
+const TOKEN_ENV: &str = "YANTRA_AGENT_TOKEN";
 
 impl Daemon {
     fn new(base: &str) -> Self {
@@ -335,6 +340,16 @@ impl Daemon {
             base: base.trim_end_matches('/').to_owned(),
             agent,
             session: room::session_id().unwrap_or_default(),
+            token: std::env::var(TOKEN_ENV)
+                .ok()
+                .filter(|token| !token.is_empty()),
+        }
+    }
+
+    fn authed<B>(&self, request: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+        match &self.token {
+            Some(token) => request.header("authorization", format!("Bearer {token}")),
+            None => request,
         }
     }
 
@@ -359,29 +374,25 @@ impl Daemon {
     fn send(&self, method: Method, path: &str) -> Result<String, String> {
         let url = format!("{}{path}", self.base);
         let sent = match method {
-            Method::Get => self.agent.get(&url).call(),
+            Method::Get => self.authed(self.agent.get(&url)).call(),
             Method::Wait => self
-                .agent
-                .get(&url)
+                .authed(self.agent.get(&url))
                 .config()
                 .timeout_global(Some(delegate::WAIT_LIMIT + WAIT_SLACK))
                 .build()
                 .call(),
-            Method::Delete => self.agent.delete(&url).call(),
-            Method::Post(None) => self.agent.post(&url).send_empty(),
+            Method::Delete => self.authed(self.agent.delete(&url)).call(),
+            Method::Post(None) => self.authed(self.agent.post(&url)).send_empty(),
             Method::Post(Some(body)) => self
-                .agent
-                .post(&url)
+                .authed(self.agent.post(&url))
                 .header("content-type", "application/json")
                 .send(body.to_string()),
             Method::Patch(body) => self
-                .agent
-                .patch(&url)
+                .authed(self.agent.patch(&url))
                 .header("content-type", "application/json")
                 .send(body.to_string()),
             Method::Mcp(body) => self
-                .agent
-                .post(&url)
+                .authed(self.agent.post(&url))
                 .header("content-type", "application/json")
                 .header("mcp-session-id", &self.session)
                 .send(body.to_string()),
@@ -477,7 +488,8 @@ mod tests {
                 "/api/mcp",
                 post(|headers: axum::http::HeaderMap, axum::Json(body): axum::Json<Value>| async move {
                     let session = headers.get("mcp-session-id").and_then(|id| id.to_str().ok());
-                    let said = json!({"heard": body, "session": session}).to_string();
+                    let auth = headers.get("authorization").and_then(|value| value.to_str().ok());
+                    let said = json!({"heard": body, "session": session, "auth": auth}).to_string();
                     axum::Json(json!({"jsonrpc": "2.0", "id": body["id"], "result":
                         {"content": [{"type": "text", "text": said}], "isError": false}}))
                 }),
@@ -1097,5 +1109,33 @@ mod tests {
             said[1],
             Err("yantrad answered 404: no thread 9z".to_owned())
         );
+    }
+
+    /// ADR-0044 decision 12: a session's token rides every request as a
+    /// bearer header, and a session with none sends none.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_agent_token_is_sent_as_a_bearer_header() {
+        let base = fake_daemon().await;
+        let params = json!({"name": "room_info", "arguments": {}});
+        let heard = |token: Option<&str>| {
+            let mut daemon = Daemon::new(&base);
+            daemon.token = token.map(str::to_owned);
+            let params = params.clone();
+            std::thread::spawn(move || daemon.forward(&params))
+                .join()
+                .expect("the call ends")
+                .expect("an answer")
+        };
+
+        let with = heard(Some("tok1"));
+        let said: Value =
+            serde_json::from_str(with["content"][0]["text"].as_str().expect("text")).expect("JSON");
+        assert_eq!(said["auth"], "Bearer tok1");
+
+        let without = heard(None);
+        let said: Value =
+            serde_json::from_str(without["content"][0]["text"].as_str().expect("text"))
+                .expect("JSON");
+        assert!(said["auth"].is_null(), "{said}");
     }
 }

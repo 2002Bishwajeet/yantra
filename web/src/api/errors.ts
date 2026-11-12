@@ -1,4 +1,4 @@
-/** The one error anything under `api/` rejects with. Seventeen kinds, each from a
+/** The one error anything under `api/` rejects with. Eighteen kinds, each from a
  *  different place: what a surface draws is `describe()`, and `said` — the
  *  daemon's own words, verbatim — goes beneath it in mono, as every form
  *  already does (D3 §8.1). */
@@ -11,6 +11,9 @@ export type Kind =
   | 'refused'
   // 404: a name the daemon does not know.
   | 'missing'
+  // 401: this device holds no live passkey session (ADR-0044). The shell
+  // draws the sign-in screen instead of the page that asked.
+  | 'unauthenticated'
   // A body this dashboard cannot read — not JSON, or not the envelope.
   | 'contract'
   // A terminal socket's text frame: why the pty could not be opened.
@@ -63,6 +66,7 @@ const sentences: Record<Kind, string> = {
   network: 'The daemon did not answer.',
   refused: 'The daemon refused.',
   missing: 'The daemon knows nothing by that name.',
+  unauthenticated: 'This device is not signed in.',
   contract: 'The daemon answered something this dashboard cannot read.',
   socket: 'The terminal could not be opened.',
   insecure: 'The microphone works only on the HTTPS address, on port 8443.',

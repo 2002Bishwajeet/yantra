@@ -20,6 +20,7 @@ const CATEGORIES = [
   ['providers', 'Providers'],
   ['agents', 'Agents'],
   ['appearance', 'Appearance'],
+  ['devices', 'Devices'],
   ['about', 'About'],
 ] as const
 
@@ -126,6 +127,14 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     Clean: pressed,
     Compact: pressed,
     ...Object.fromEntries(['brass', 'sage', 'beige', 'terracotta', 'slate', 'plum', 'charcoal'].map((n) => [n, pressed])),
+  },
+  // The fixture signs this browser in as the iPhone, beside a Mac; the first Sign out is this device's.
+  'settings-devices': {
+    ...SETTINGS_NAV,
+    'Sign out': text('Sign in to Yantra'),
+    'Sign out every other device': text('iPhone', 'Mac'),
+    Remove: text('A code for one new device', 'iPhone'),
+    'Make a code': text('ABCD2345'),
   },
   'settings-about': {
     ...SETTINGS_NAV,

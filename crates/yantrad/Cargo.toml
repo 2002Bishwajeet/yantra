@@ -17,8 +17,11 @@ embed-dashboard = ["dep:include_dir"]
 
 [dependencies]
 axum.workspace = true
+# A session token is 32 random bytes in URL-safe base64 (ADR-0044 decision 4).
+base64.workspace = true
 # `state_dir()` for the thread store's path (ADR-0045 decision 1).
 etcetera.workspace = true
+getrandom.workspace = true
 include_dir = { workspace = true, optional = true }
 # The socket's peer account and the `yantra` group (ADR-0042), since
 # `unsafe_code = forbid` rules out libc. 0.28 is already in the lock.
@@ -26,7 +29,11 @@ nix = { version = "0.28", default-features = false, features = ["user"] }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# The daemon keeps SHA-256 of each token, never the token (ADR-0044 decision 6).
+sha2 = "0.11"
 thiserror.workspace = true
+# passkeys.toml (ADR-0044 decision 7).
+toml.workspace = true
 # A spend window's start arrives as an RFC 3339 instant (Y-354).
 time.workspace = true
 tokio.workspace = true
@@ -35,6 +42,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 # The one HTTP client in the tree, for `yantra-stt` (ADR-0043).
 ureq.workspace = true
+# The passkey ceremonies (ADR-0044 decision 1), default features, no `danger-*`.
+webauthn-rs = "0.6.2"
 yantra-core.workspace = true
 
 # `tower` is axum's own; it is here only so a test can drive the router
@@ -47,3 +56,5 @@ tower.workspace = true
 # A paused clock, as yantra-core has, for the chat's connect timeout, and
 # `net` for `tests/chat_keeper.rs`'s WebSocket client.
 tokio = { workspace = true, features = ["test-util", "net"] }
+# A soft authenticator for the passkey tests; it pulls no openssl.
+webauthn-authenticator-rs = { version = "0.6.2", default-features = false, features = ["softpasskey"] }

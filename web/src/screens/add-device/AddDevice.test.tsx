@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { Event, Machine, Readiness } from '@/api'
 import { aMachine, looked } from '@/api/fixtures'
-import { mountSettings, unmountSettings, type Answers } from '@/screens/settings/harness'
+import { JOIN, mountSettings, unmountSettings, type Answers } from '@/screens/settings/harness'
 
 /* The flow mounted whole, over a fleet with one device mid-flow. The
    settings harness is the app with its fleet answered; `/machines/add` is its
    path. */
 
-const COMMAND = 'curl -fsSL http://100.64.0.1:7717/join | sh'
+const COMMAND = JOIN
 const HERE = 'http://localhost:3000/machines/add?platform=linux&machine=laptop'
 const laptop = aMachine({ name: 'laptop', os: 'linux', online: true })
 const at = (query: string) => `/machines/add?${query}`

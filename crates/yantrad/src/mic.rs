@@ -36,7 +36,7 @@ use yantra_core::inventory::Inventory;
 use yantra_core::mic::{self, Stream};
 
 use crate::terminal::{MISSES, PING_EVERY};
-use crate::write::{Authoriser, Peer, Refused, allowed, chain};
+use crate::write::{Authoriser, Peer, Refused, allowed_socket, chain, until_revoked};
 
 /// What starts the writer for a machine: [`mic::open_at`], or a pipe in a test.
 type Open = Arc<dyn Fn(&str) -> Result<Stream, mic::Error> + Send + Sync>;
@@ -72,7 +72,7 @@ async fn talk<I: Inventory + Clone + Send + Sync + 'static>(
     Path(machine): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let (caller, revoked) = allowed_socket(&state.authoriser, &from, &headers).await?;
     install::check_machine(&machine).map_err(|error| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said: error.to_string(),
@@ -82,7 +82,7 @@ async fn talk<I: Inventory + Clone + Send + Sync + 'static>(
     Ok(upgrade.on_upgrade(move |socket| async move {
         // At once, so the pipe holds the first frames while ssh connects.
         let opened = (state.open)(&machine);
-        bridge(socket, &machine, opened).await;
+        until_revoked(revoked, bridge(socket, &machine, opened)).await;
     }))
 }
 
@@ -267,6 +267,7 @@ mod tests {
             tailnet(vec![(LOCAL, caller(ME, &[]))]),
             &[SocketAddr::new(LOCAL, 7717)],
             std::path::Path::new("yantrad.sock"),
+            crate::passkey::Passkeys::trusting(),
         );
         let said = status(real(ours), MIC, "X-Forwarded-For: 100.64.0.2\r\n").await;
         assert!(said.starts_with("HTTP/1.1 403"), "{said}");
@@ -321,6 +322,39 @@ mod tests {
             .expect("the close gave the writer EOF")
             .expect("a read");
         assert_eq!(heard, frames.concat());
+    }
+
+    /// ADR-0044 decision 9: a revoked session's open socket closes, and its
+    /// writer sees EOF, without waiting for the next request.
+    #[tokio::test]
+    async fn a_revoked_session_closes_its_open_mic() {
+        let passkeys = crate::passkey::Passkeys::memory();
+        let (_, token, session) = crate::passkey::tests::enrolled(&passkeys, "iPhone");
+        let authoriser = Authoriser::new(
+            tailnet(vec![(LOCAL, caller(ME, &[]))]),
+            &[],
+            std::path::Path::new("yantrad.sock"),
+            passkeys.clone(),
+        );
+        let (api, mut reader) = piped(authoriser);
+        let cookie = format!("Cookie: {}={token}\r\n", crate::passkey::COOKIE);
+        let mut socket = connect_to(api, MIC, &cookie).await;
+        let mut line = String::new();
+        socket.read_line(&mut line).await.expect("a status line");
+        assert!(line.starts_with("HTTP/1.1 101"), "{line}");
+
+        assert!(passkeys.revoke(&session.id).expect("the file is written"));
+
+        let mut heard = Vec::new();
+        timeout(Duration::from_secs(5), reader.read_to_end(&mut heard))
+            .await
+            .expect("the revoke gave the writer EOF")
+            .expect("a read");
+        let mut rest = Vec::new();
+        timeout(Duration::from_secs(5), socket.read_to_end(&mut rest))
+            .await
+            .expect("the revoke closed the socket")
+            .expect("a read");
     }
 
     /// **Q5 on the route that carries a voice.** The lifecycle is logged; a

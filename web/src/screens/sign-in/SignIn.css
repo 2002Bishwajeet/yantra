@@ -1,0 +1,75 @@
+/* ADR-0044's sign-in. One card on the surface, padded clear of the notch and
+   the home indicator; the phone gets the whole width less the 16px gutter. */
+
+.sign-in {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding:
+    calc(24px + env(safe-area-inset-top, 0px))
+    calc(16px + env(safe-area-inset-right, 0px))
+    calc(24px + env(safe-area-inset-bottom, 0px))
+    calc(16px + env(safe-area-inset-left, 0px));
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+}
+
+.sign-in__card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--m3-gutter);
+  width: 100%;
+  max-width: var(--m3-measure);
+  padding: 32px 24px;
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.sign-in__mark {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--md-sys-shape-corner-large);
+  color: var(--md-sys-color-on-primary-container);
+  background: var(--md-sys-color-primary-container);
+}
+
+.sign-in__mark svg {
+  width: 28px;
+  height: 28px;
+}
+
+.sign-in__title {
+  margin: 0;
+  font: var(--md-sys-typescale-emphasized-headline-medium);
+  letter-spacing: var(--md-sys-typescale-emphasized-headline-medium-tracking);
+}
+
+.sign-in__lead {
+  margin: -8px 0 0;
+}
+
+.sign-in__actions,
+.sign-in__enrol {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sign-in__enrol {
+  gap: 12px;
+}
+
+.sign-in__code input {
+  font-family: var(--md-ref-typeface-mono);
+  letter-spacing: 0.2em;
+}
+
+.sign-in__actions .m3-button,
+.sign-in__enrol .m3-button {
+  width: 100%;
+  touch-action: manipulation;
+}

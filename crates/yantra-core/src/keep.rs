@@ -126,6 +126,12 @@ impl Keeper {
         )
     }
 
+    /// The `0600` MCP config a Chat turn writes with its agent token
+    /// (ADR-0044 decision 12), as a word the far shell expands.
+    pub(crate) fn mcp_config(&self) -> String {
+        format!("{}/mcp.json", self.dir())
+    }
+
     /// Where the chat's images land, as a word the far shell expands.
     pub(crate) fn images(&self) -> String {
         format!("{}/images", self.dir())

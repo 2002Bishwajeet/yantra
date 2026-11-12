@@ -6,7 +6,6 @@ import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
 import { forgetHostKey, joinFixes, reachWords } from '@/lib/checks'
-import { joinUrl } from '@/lib/join'
 import { apart, notYours, platformOf } from '@/lib/platform'
 import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
@@ -128,8 +127,8 @@ function hubWords(said: Line, name: string): string {
 }
 
 /** Y-628: a line's join command names karigar, with the commands that make it. */
-function JoinAs(props: { machine: Machine; url: string | null; about: { error: Error | null; data: unknown } }) {
-  const { machine, url, about } = props
+function JoinAs(props: { machine: Machine }) {
+  const { machine } = props
   return (
     <>
       <Disclosure
@@ -139,7 +138,7 @@ function JoinAs(props: { machine: Machine; url: string | null; about: { error: E
       >
         <AgentAccount platform={platformOf(machine) === 'macos' ? 'macos' : 'linux'} />
       </Disclosure>
-      <Join about={about} url={url} what={`the join command for ${machine.name}`} />
+      <Join machine={machine.name} what={`the join command for ${machine.name}`} />
     </>
   )
 }
@@ -298,7 +297,7 @@ export function Setup() {
   const now = useTick(true)
   const strangers = useId()
   const later = useId()
-  const { about, identity, machines, sweep, notifications, events, all, hub, guests, steps, later: optional, githubGrant, done, next, target } =
+  const { identity, machines, sweep, notifications, events, all, hub, guests, steps, later: optional, githubGrant, done, next, target } =
     useChecklist(now)
   const carried = useFab() !== null
   const presses = useRef(new Map<string, Presses>())
@@ -329,7 +328,6 @@ export function Setup() {
 
   // Y-404: listed with the reason, never counted.
   const foreign = all.filter((one) => one.ownership !== 'yours' && !one.hub)
-  const join = joinUrl(location, about.data)
   const read = stamp([
     { name: 'machines', reading: machines },
     { name: 'readiness', reading: sweep },
@@ -483,7 +481,7 @@ export function Setup() {
                   {guests.map((one) => (
                     <MachineLine
                       events={events}
-                      join={<JoinAs about={about} machine={one.machine} url={join} />}
+                      join={<JoinAs machine={one.machine} />}
                       key={one.machine.name}
                       line={one.line}
                       machine={one.machine}

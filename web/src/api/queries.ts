@@ -35,6 +35,7 @@ import {
   POLL_MS,
   SWEEP_MS,
   type Shape,
+  unanswered,
 } from '@/api/client'
 import { type ApiError, isApiError } from '@/api/errors'
 import { keys, type Window } from '@/api/keys'
@@ -99,7 +100,7 @@ export const machineReadinessQuery = (name: string) =>
       try {
         const response = await fetch(path, { signal })
         if (response.status === 404) return { looked: 'never' }
-        if (!response.ok) return failed(`${NOT_REACHED}: HTTP ${response.status}`)
+        if (!response.ok) return await unanswered(response)
         return await envelope<Readiness>(response, path)
       } catch (cause) {
         if (signal.aborted) throw cause

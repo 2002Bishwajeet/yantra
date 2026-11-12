@@ -1,8 +1,9 @@
 import type { ComponentType, ReactNode } from 'react'
-import { Bell, Bot, Info, Palette, Plug, SlidersHorizontal } from 'lucide-react'
+import { Bell, Bot, Info, KeyRound, Palette, Plug, SlidersHorizontal } from 'lucide-react'
 import { About } from './About'
 import { Agents } from './Agents'
 import { Appearance } from './Appearance'
+import { Devices } from './Devices'
 import { General } from './General'
 import { Notifications } from './Notifications'
 import { Providers } from './Providers'
@@ -17,7 +18,7 @@ export type Category = {
   Screen: ComponentType
 }
 
-/** The register's six categories, in the boards' order. */
+/** The register's seven categories, in the boards' order; Devices is ADR-0044's. */
 export const CATEGORIES: readonly Category[] = [
   {
     id: 'general',
@@ -58,6 +59,14 @@ export const CATEGORIES: readonly Category[] = [
     icon: <Palette />,
     blurb: 'how the dashboard looks on this device',
     Screen: Appearance,
+  },
+  {
+    id: 'devices',
+    label: 'Devices',
+    group: 'Appliance',
+    icon: <KeyRound />,
+    blurb: 'The passkeys that open Yantra, and the devices they signed in.',
+    Screen: Devices,
   },
   {
     id: 'about',

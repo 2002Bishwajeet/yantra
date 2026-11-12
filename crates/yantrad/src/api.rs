@@ -107,7 +107,7 @@ fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
 
 /// The port `tailscale serve` terminates TLS on; install.sh and `just https`
 /// set it up, and the daemon cannot see whether they did (Y-652).
-const HTTPS_PORT: u16 = 8443;
+pub(crate) const HTTPS_PORT: u16 = 8443;
 
 /// Where the microphone works: a browser needs a secure context (ADR-0031 §4).
 fn https(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
@@ -126,7 +126,10 @@ pub(crate) fn https_of(
     Some(format!("https://{name}:{HTTPS_PORT}"))
 }
 
-fn this_node_name<'a>(snapshot: &'a Snapshot, listening_on: &[SocketAddr]) -> Option<&'a str> {
+pub(crate) fn this_node_name<'a>(
+    snapshot: &'a Snapshot,
+    listening_on: &[SocketAddr],
+) -> Option<&'a str> {
     node_name(
         snapshot.machines.as_deref()?.value().as_ref().ok()?,
         listening_on,

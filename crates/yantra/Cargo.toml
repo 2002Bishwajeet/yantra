@@ -13,6 +13,8 @@ clap.workspace = true
 ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# `yantra passkey list` prints dates (ADR-0044).
+time.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 ureq.workspace = true

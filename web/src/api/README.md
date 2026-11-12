@@ -5,7 +5,7 @@
 the two terminal sockets. `mic.ts` is push-to-talk ([ADR-0031](../../../docs/adr/0031-the-microphone-reaches-a-machine-as-a-virtual-source.md)
 §4–6): `openMic` opens the microphone, an AudioWorklet (`mic.worklet.ts`) and the socket on a press,
 `toPcm16` resamples to 16 kHz mono s16le in 640-byte frames, and `close` is the release. With `onText` the same press is dictation ([ADR-0043](../../../docs/adr/0043-dictation-runs-a-local-speech-model.md) §4) on `dictateAddress`: the release sends `end` and waits for the one text frame. `dictationQuery` is §6's health read, through the daemon, asked again each time the Chat opens; while the box does not answer the button is `aria-disabled` and a press asks again. `client.ts` holds `fetchJson`, the `Looked` envelope, and the
-`QueryClient` defaults. `chat.ts` is the chat socket, and its `diff()` asks for a thread's branch diff (Y-491); the editor links read the thread list through `useThreads`. `useDraftMessage`, `useCommit`, `usePush` and `useOpenPr` are the four git verbs on a thread (Y-493); each is a POST a person asks for and none polls. `useThreadSearch` is the palette's thread search, a `GET /api/threads?q=` that reads the daemon's store and asks no machine (Y-689). `fixtures.ts` is for tests only.
+`QueryClient` defaults. `chat.ts` is the chat socket, and its `diff()` asks for a thread's branch diff (Y-491); the editor links read the thread list through `useThreads`. `useDraftMessage`, `useCommit`, `usePush` and `useOpenPr` are the four git verbs on a thread (Y-493); each is a POST a person asks for and none polls. `useThreadSearch` is the palette's thread search, a `GET /api/threads?q=` that reads the daemon's store and asks no machine (Y-689). `passkey.ts` is ADR-0044's sign-in, enrolment and Devices calls, with `@simplewebauthn/browser` for the two ceremonies; `signedIn.ts` holds whether the daemon last said 401, which `App` reads to draw the sign-in screen. `fixtures.ts` is for tests only.
 
 ## Errors
 
@@ -16,8 +16,9 @@ beneath it in mono. `error.status` is there where a code arrived.
 | kind | from | draw |
 | --- | --- | --- |
 | `network` | `fetch` rejected; nothing answered | "The daemon did not answer." Asked again twice, with backoff. |
-| `refused` | a non-2xx with the daemon's bare-string body (403, 503, 409, 400…) | the status sentence; the body under it, verbatim. A 403 whose body starts with the own-address text (`isOwnAddress`) names the proxy instead, with a `headline` |
+| `refused` | a non-2xx with the daemon's bare-string body (403, 503, 409, 400…); a `look` answers a 403 as a failed reading that starts with `REFUSED`, never as not reached | the status sentence; the body under it, verbatim, or behind Details on a `folded` row. A 403 whose body starts with the own-address text (`isOwnAddress`) names the proxy instead, with a `headline`, and the shell's board says to open the HTTPS address |
 | `missing` | 404 | "The daemon knows nothing by that name." |
+| `unauthenticated` | 401: no passkey session (ADR-0044); a `look` answers it as a failed reading | "This device is not signed in." The sign-in screen takes the page. |
 | `contract` | a body that is not JSON, or not the envelope | "The daemon answered something this dashboard cannot read." |
 | `socket` | a terminal socket's text frame | "The terminal could not be opened."; the frame under it |
 | `insecure` | the microphone on a page that is not a secure context (`:7717`) | "The microphone works only on the HTTPS address, on port 8443." |

@@ -31,6 +31,7 @@ describe('what an error says', () => {
       network: new ApiError('network', 'TypeError: Failed to fetch').describe(),
       refused: new ApiError('refused', 'no').describe(),
       missing: new ApiError('missing', 'no such', { status: 404 }).describe(),
+      unauthenticated: new ApiError('unauthenticated', 'sign in from the dashboard', { status: 401 }).describe(),
       contract: new ApiError('contract', 'Unexpected token <').describe(),
       socket: new ApiError('socket', "can't find session").describe(),
       insecure: new ApiError('insecure', 'http://pi:7717').describe(),
@@ -54,6 +55,7 @@ describe('what an error says', () => {
     expect(sentences.network).toBe('The daemon did not answer.')
     expect(sentences.missing).toBe('The daemon knows nothing by that name.')
     expect(sentences.socket).toBe('The terminal could not be opened.')
+    expect(sentences.unauthenticated).toBe('This device is not signed in.')
     expect(sentences.busy).toBe('Another app is using the microphone.')
     expect(sentences.allowed).toBe('The browser now allows the microphone. Hold the button again to talk.')
   })
