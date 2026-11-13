@@ -51,3 +51,8 @@ The Chat has per-turn diffs as plain text (Y-448). ADR-0026 said Yantra ships no
 - `@pierre/diffs` is a 1.x package that T3 patches. If its chunk is too heavy on a phone, the
   fallback is Yantra's own `TurnDiff.tsx` with a file list.
 - On acceptance, ADR-0023 and ADR-0026 each get a dated blockquote that points here (§B5).
+
+> **Agent tasks push from the hub, recorded 2026-11-13 (Y-693).** For a task that an agent caller
+> starts, decision 2 does not hold: the task's account holds no git credential, so the daemon pushes from
+> the hub. The token still never crosses ssh:
+> [ADR-0040](0040-an-agent-caller-is-scoped-and-the-owner-approves-each-task.md).

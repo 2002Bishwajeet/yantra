@@ -146,3 +146,8 @@ its environment either way, so the move is an installer change.
 > write access to the owner's repositories, so whoever reads `daemon.env` can also push to them and
 > merge in them. The scope does not widen. The owner ruled that the daemon uses that write access to
 > open, read and merge PRs: [ADR-0034](0034-the-coding-loop-writes-to-github.md).
+
+> **Agent tasks push from the hub, recorded 2026-11-13 (Y-693).** For a task that an agent caller
+> starts, the daemon copies the task's commits to the hub and pushes them there with this grant, because the
+> task's account holds no git credential. The token still never crosses ssh:
+> [ADR-0040](0040-an-agent-caller-is-scoped-and-the-owner-approves-each-task.md).
