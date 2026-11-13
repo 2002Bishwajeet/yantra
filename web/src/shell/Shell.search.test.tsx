@@ -39,6 +39,19 @@ describe.each<FormFactor>(['phone', 'tablet'])('the search button on %s', (size)
   })
 })
 
+describe('the back button of the phone search view', () => {
+  it('closes the view and gives the focus back to the search button', async () => {
+    await drawn('phone')
+    const button = screen.getByRole('button', { name: 'Search' })
+    press(button)
+    await screen.findByRole('dialog', { name: 'Search' })
+    const back = await screen.findByRole('button', { name: 'Close search' })
+    press(back)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(button))
+  })
+})
+
 describe('the search button on the desktop', () => {
   it('is not drawn; the pill is', async () => {
     await drawn('desktop')

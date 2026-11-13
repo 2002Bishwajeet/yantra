@@ -253,12 +253,17 @@ test.describe('the shell on busy', () => {
 
   test('opens the palette with ⌘K, finds landing, and runs no verb for a place', async ({ page, size }) => {
     test.skip(size !== 'desktop', 'only the desktop board draws a search; the rest list everything')
+    const pill = (await page.getByRole('button', { name: /Search anything/ }).boundingBox())!
     await page.keyboard.press('ControlOrMeta+k')
     const dialog = page.getByRole('dialog', { name: 'Search' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('combobox').fill('lan')
     await expect(dialog.getByRole('option', { name: /^landing running/ })).toBeVisible()
-    await expect(dialog.getByText('Finds a place or a thread by its title, or runs a step of the coding loop.')).toBeVisible()
+    // Y-746: the docked view opens where the bar is, in the right half, with no key footer.
+    await expect.poll(async () => (await dialog.boundingBox())!.y).toBeLessThanOrEqual(pill.y + pill.height)
+    const view = (await dialog.boundingBox())!
+    expect(view.x + view.width / 2).toBeGreaterThan((page.viewportSize()!.width) / 2)
+    await expect(dialog.getByText('Finds a place or a thread by its title, or runs a step of the coding loop.')).toHaveCount(0)
     // The palette is a surface over the page: a full-page shot scrolls the
     // page under it and sometimes catches the dashboard alone.
     await screenshot(page, 'shell-palette', 'busy', size, { overlay: true })
@@ -748,7 +753,12 @@ test.describe('the palette on a phone finds a thread', () => {
     const row = dialog.getByRole('option', { name: /Keep a thread store/ })
     await expect(row).toBeVisible()
     await expect(row).toContainText('cargo-zig · thinkpad · offline')
-    await expect(dialog.getByText('Finds a place or a thread by its title, or runs a step of the coding loop.')).toBeVisible()
+    // Y-746: a full-screen view whose header is the input, with a 44 px back button.
+    const viewport = page.viewportSize()!
+    await expect.poll(async () => await dialog.boundingBox()).toEqual({ x: 0, y: 0, width: viewport.width, height: viewport.height })
+    const back = (await dialog.getByRole('button', { name: 'Close search' }).boundingBox())!
+    expect(back.width).toBeGreaterThanOrEqual(44)
+    expect(back.height).toBeGreaterThanOrEqual(44)
     const fits = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
     expect(fits).toBe(true)
     await axe(page)

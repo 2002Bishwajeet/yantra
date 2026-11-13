@@ -1,16 +1,14 @@
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
-import { Cpu, FileText, MessageSquare, Play, Search } from 'lucide-react'
+import { Cpu, FileText, MessageSquare, Play, TriangleAlert } from 'lucide-react'
 import type { Item } from '@/api'
 import { useThreadSearch } from '@/api/queries'
 import { loaded, useAgents, useAttention, useMachines, useWorkspaces, type Reading } from '@/api/hooks'
-import { Dialog, DialogPopup } from '@/m3/dialog/Dialog'
 import { Kbd } from '@/m3/kbd/Kbd'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Row, RowText } from '@/m3/row/Row'
-import { Eyebrow } from '@/m3/text/Text'
-import { TextField } from '@/m3/text-field/TextField'
+import { SearchView } from '@/m3/search-view/SearchView'
 import { IconTile, Tile } from '@/m3/tile/Tile'
 import { StartSession } from '@/screens/fleet/StartSession'
 import { useTick } from '@/useTick'
@@ -294,7 +292,28 @@ export function PalettePopup(props: {
 
   return (
     <>
-      <Dialog
+      <SearchView
+        finalFocus={() => opener.current ?? true}
+        input={{
+          'aria-activedescendant': flat.length ? `${listId}-${current}` : undefined,
+          'aria-controls': listId,
+          'aria-describedby': legendId,
+          'aria-expanded': true,
+          autoFocus: true,
+          onKeyDown: (event) => {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setActive((was) => Math.min(was + 1, flat.length - 1))
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setActive((was) => Math.max(was - 1, 0))
+            } else if (event.key === 'Enter' && flat[current]) {
+              event.preventDefault()
+              choose(flat[current])
+            }
+          },
+          role: 'combobox',
+        }}
         onOpenChange={onOpenChange}
         onOpenChangeComplete={(now) => {
           if (now || !after.current) return
@@ -302,107 +321,87 @@ export function PalettePopup(props: {
           after.current = null
           run()
         }}
+        onValueChange={(value) => {
+          setQuery(value)
+          setActive(0)
+        }}
         open={open}
+        value={query}
       >
-        <DialogPopup className="palette" finalFocus={() => opener.current ?? true} title="Search">
-          <TextField
-            aria-activedescendant={flat.length ? `${listId}-${current}` : undefined}
-            aria-controls={listId}
-            aria-describedby={legendId}
-            aria-expanded="true"
-            autoFocus
-            label="Search anything"
-            leading={<Search />}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                setActive((was) => Math.min(was + 1, flat.length - 1))
-              } else if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                setActive((was) => Math.max(was - 1, 0))
-              } else if (event.key === 'Enter' && flat[current]) {
-                event.preventDefault()
-                choose(flat[current])
-              }
-            }}
-            onValueChange={(value) => {
-              setQuery(String(value))
-              setActive(0)
-            }}
-            role="combobox"
-            trailing={<Kbd>Esc</Kbd>}
-            value={query}
-          />
-          <div className="palette__list" id={listId} role="listbox" aria-label="Places">
-            {groups.map((group) => (
-              <div key={group.label} role="group" aria-label={group.label}>
-                <Eyebrow className="palette__label">{group.label}</Eyebrow>
-                {group.entries.map((entry) => {
-                  const index = flat.indexOf(entry)
-                  return (
-                    <Row
-                      aria-selected={index === current}
-                      className="palette__row"
-                      id={`${listId}-${index}`}
-                      key={entry.key}
-                      onClick={() => choose(entry)}
-                      onMouseEnter={() => setActive(index)}
-                      // 4.1.2: the cursor is `aria-activedescendant` on the
-                      // field, so Tab must not walk the list as well.
-                      aria-disabled={entry.off ? true : undefined}
-                      render={<button type="button" role="option" tabIndex={-1} />}
-                      tone={index === current ? 'selected' : 'plain'}
-                    >
-                      {entry.key.startsWith('w:') ? (
-                        <Tile name={entry.label} />
-                      ) : (
-                        <IconTile>
-                          {entry.key.startsWith('m:') ? (
-                            <Cpu />
-                          ) : entry.key.startsWith('t:') ? (
-                            <MessageSquare />
-                          ) : entry.key.startsWith('c:') ? (
-                            <Play />
-                          ) : (
-                            <FileText />
-                          )}
-                        </IconTile>
-                      )}
-                      <RowText
-                        headline={<Highlight query={query} text={entry.label} />}
-                        supporting={
-                          entry.supporting ? (
-                            entry.mark ? (
-                              <State size="small" state={entry.mark}>
-                                {entry.supporting}
-                              </State>
-                            ) : (
-                              entry.supporting
-                            )
-                          ) : undefined
-                        }
-                      />
-                      {entry.chord ? <Kbd>{entry.chord}</Kbd> : null}
-                      {index === current && !entry.off ? <Kbd aria-hidden="true">Enter</Kbd> : null}
-                    </Row>
-                  )
-                })}
+        <span className="m3-sr-only" id={legendId}>
+          Up and down arrows move, Enter open, Esc close.
+        </span>
+        {notes.map((note) => (
+          <div className="palette__note" key={note} role="note">
+            <TriangleAlert aria-hidden="true" />
+            {note}
+          </div>
+        ))}
+        <div className="palette__list" id={listId} role="listbox" aria-label="Places">
+          {groups.map((group) => (
+            <div key={group.label} role="group" aria-label={group.label}>
+              <div aria-hidden="true" className="palette__label">
+                {group.label}
               </div>
-            ))}
-            {flat.length === 0 ? <EmptyState title="Nothing matches" /> : null}
-          </div>
-          <div className="palette__foot">
-            <span>
-              {notes.length ? notes.join(' ') : 'Finds a place or a thread by its title, or runs a step of the coding loop.'}
-            </span>
-            <span className="palette__legend" id={legendId}>
-              <Kbd aria-hidden="true">↑↓</Kbd>
-              <span className="m3-sr-only">Up and down arrows</span> move <Kbd>Enter</Kbd> open{' '}
-              <Kbd>Esc</Kbd> close
-            </span>
-          </div>
-        </DialogPopup>
-      </Dialog>
+              {group.entries.map((entry) => {
+                const index = flat.indexOf(entry)
+                return (
+                  <Row
+                    aria-selected={index === current}
+                    className="palette__row"
+                    id={`${listId}-${index}`}
+                    key={entry.key}
+                    onClick={() => choose(entry)}
+                    onMouseEnter={() => setActive(index)}
+                    // 4.1.2: the cursor is `aria-activedescendant` on the
+                    // field, so Tab must not walk the list as well.
+                    aria-disabled={entry.off ? true : undefined}
+                    render={<button type="button" role="option" tabIndex={-1} />}
+                    tone={index === current ? 'selected' : 'plain'}
+                  >
+                    {entry.key.startsWith('w:') ? (
+                      <Tile name={entry.label} />
+                    ) : (
+                      <IconTile>
+                        {entry.key.startsWith('m:') ? (
+                          <Cpu />
+                        ) : entry.key.startsWith('t:') ? (
+                          <MessageSquare />
+                        ) : entry.key.startsWith('c:') ? (
+                          <Play />
+                        ) : (
+                          <FileText />
+                        )}
+                      </IconTile>
+                    )}
+                    <RowText
+                      headline={<Highlight query={query} text={entry.label} />}
+                      supporting={
+                        entry.supporting ? (
+                          entry.mark ? (
+                            <State size="small" state={entry.mark}>
+                              {entry.supporting}
+                            </State>
+                          ) : (
+                            entry.supporting
+                          )
+                        ) : undefined
+                      }
+                    />
+                    {entry.chord ? <Kbd className="palette__hint">{entry.chord}</Kbd> : null}
+                    {index === current && !entry.off ? (
+                      <Kbd aria-hidden="true" className="palette__hint">
+                        Enter
+                      </Kbd>
+                    ) : null}
+                  </Row>
+                )
+              })}
+            </div>
+          ))}
+          {flat.length === 0 ? <EmptyState title="Nothing matches" /> : null}
+        </div>
+      </SearchView>
     {starting ? (
       <StartSession item={starting} onOpenChange={(now) => now || setStarting(null)} open />
     ) : null}

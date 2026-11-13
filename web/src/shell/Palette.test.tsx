@@ -96,7 +96,29 @@ describe('the command palette', () => {
     const dialog = await open()
     expect(await dialog.findByRole('group', { name: 'Machines' })).toBeTruthy()
     expect(dialog.getByRole('group', { name: 'Pages' })).toBeTruthy()
-    expect(dialog.getByText('Finds a place or a thread by its title, or runs a step of the coding loop.')).toBeTruthy()
+  })
+
+  /** Y-746: the field is the header; there is no Esc chip, no label and no key footer. */
+  it('is a search view: a bare field named Search anything, with no footer', async () => {
+    mount('desktop')
+    await screen.findByRole('button', { name: /Search anything/ })
+    const dialog = await open()
+    expect(dialog.getByRole('combobox', { name: 'Search anything' })).toBeTruthy()
+    expect(dialog.queryByText('Esc', { selector: 'kbd' })).toBeNull()
+    expect(dialog.queryByText(/Finds a place or a thread/)).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Clear search' })).toBeNull()
+  })
+
+  it('clears the field and keeps the focus in it', async () => {
+    mount('desktop')
+    await screen.findByRole('button', { name: /Search anything/ })
+    const dialog = await open()
+    const field = dialog.getByRole('combobox') as HTMLInputElement
+    fireEvent.change(field, { target: { value: 'sit' } })
+    fireEvent.click(await dialog.findByRole('button', { name: 'Clear search' }))
+    expect(field.value).toBe('')
+    await waitFor(() => expect(document.activeElement).toBe(field))
+    expect(dialog.queryByRole('button', { name: 'Clear search' })).toBeNull()
   })
 
   /** D3 §3.2: every place the palette offers is opened, and the daemon is
@@ -168,12 +190,14 @@ describe('the command palette', () => {
       expect(option.textContent).toContain('· gone')
     })
 
-    it('names a failed read in the footer and keeps the other groups', async () => {
+    it('names a failed read in a note row and keeps the other groups', async () => {
       mount('desktop', '/', { overrides: at('the daemon keeps no thread store', 503, 'sit') })
       await screen.findByRole('button', { name: /Search anything/ })
       const dialog = await open()
       fireEvent.change(dialog.getByRole('combobox'), { target: { value: 'sit' } })
-      expect(await dialog.findByText(/Threads could not be read\./)).toBeTruthy()
+      const note = await dialog.findByRole('note')
+      expect(note.textContent).toBe('Threads could not be read.')
+      expect(dialog.queryByRole('listbox')?.contains(note)).toBe(false)
       expect(dialog.getByRole('group', { name: 'Workspaces' })).toBeTruthy()
     })
 
