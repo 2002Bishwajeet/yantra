@@ -1,366 +1,556 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import type { Readiness } from '@/api'
-import { aMachine, looked } from '@/api/fixtures'
-import * as contract from '@/contract.gen'
-import { isRailed } from './destinations'
-import { mount, unmount } from './harness'
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import type { Readiness } from "@/api";
+import { aMachine, looked } from "@/api/fixtures";
+import * as contract from "@/contract.gen";
+import { isRailed } from "./destinations";
+import { mount, unmount } from "./harness";
 
 afterEach(() => {
-  cleanup()
-  unmount()
-})
+  cleanup();
+  unmount();
+});
 
-const DESTINATIONS = ['Dashboard', 'Fleet', 'Machines', 'Usage']
+const DESTINATIONS = ["Dashboard", "Fleet", "Machines", "Usage"];
 
-const nav = () => within(screen.getByRole('navigation', { name: 'Main' }))
+const nav = () => within(screen.getByRole("navigation", { name: "Main" }));
 
 /** The shell's FAB. A page may keep its own tonal copy of the same action, so
  *  a query by name alone would find two. */
-const fab = () => document.querySelector<HTMLElement>('.shell__fab, .shell__rail-fab')
-const named = (one: HTMLElement | null) => one?.textContent?.replace(/\s+/g, ' ').trim() ?? null
+const fab = () =>
+  document.querySelector<HTMLElement>(".shell__fab, .shell__rail-fab");
+const named = (one: HTMLElement | null) =>
+  one?.textContent?.replace(/\s+/g, " ").trim() ?? null;
 
-const empty = { body: looked.ok([]) }
-const up = aMachine({ name: 'cachyos-g14', os: 'linux', online: true })
+const empty = { body: looked.ok([]) };
+const up = aMachine({ name: "cachyos-g14", os: "linux", online: true });
 /** The seven checks a session needs (`lib/ready`), tmux among them. */
-const SEVEN = ['reachable', 'sshd', 'tmux', 'git', 'agent-cli', 'terminfo', 'login-session']
+const SEVEN = [
+  "reachable",
+  "sshd",
+  "tmux",
+  "git",
+  "agent-cli",
+  "terminfo",
+  "login-session",
+];
 const report = (absent: string[]): Readiness => ({
   machine: up.name,
   age_seconds: 0,
-  checks: SEVEN.map((check) => ({ check, state: absent.includes(check) ? 'absent' : 'present', detail: '' })),
-})
+  checks: SEVEN.map((check) => ({
+    check,
+    state: absent.includes(check) ? "absent" : "present",
+    detail: "",
+  })),
+});
 /** No workspace, one Linux machine online, and the key made by its join. */
 const firstRun = (absent: string[]) => ({
-  '/api/workspaces': empty,
-  '/api/machines': { body: looked.ok([up]) },
-  '/api/readiness': { body: looked.ok([report(absent)]) },
-  '/api/notifications': empty,
-  '/api/ssh-identity': { body: contract.sshIdentity },
-  '/api/machines/cachyos-g14/install': { status: 202, body: undefined },
-})
+  "/api/workspaces": empty,
+  "/api/machines": { body: looked.ok([up]) },
+  "/api/readiness": { body: looked.ok([report(absent)]) },
+  "/api/notifications": empty,
+  "/api/ssh-identity": { body: contract.sshIdentity },
+  "/api/machines/cachyos-g14/install": { status: 202, body: undefined },
+});
 
-describe('the desktop shell', () => {
-  it('has the four destinations as pills, the open one current', async () => {
-    mount('desktop', '/fleet')
-    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
-    for (const label of DESTINATIONS) expect(nav().getByRole('link', { name: label })).toBeTruthy()
-    expect(nav().getByRole('link', { name: 'Fleet' }).getAttribute('aria-current')).toBe('page')
-    expect(nav().getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBeNull()
-    expect(document.querySelector('[data-shell]')?.getAttribute('data-shell')).toBe('desktop')
-  })
+describe("the desktop shell", () => {
+  it("has the four destinations as pills, the open one current", async () => {
+    mount("desktop", "/fleet");
+    await screen.findByRole("heading", { level: 1, name: "Fleet" });
+    for (const label of DESTINATIONS)
+      expect(nav().getByRole("link", { name: label })).toBeTruthy();
+    expect(
+      nav().getByRole("link", { name: "Fleet" }).getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      nav()
+        .getByRole("link", { name: "Dashboard" })
+        .getAttribute("aria-current"),
+    ).toBeNull();
+    expect(
+      document.querySelector("[data-shell]")?.getAttribute("data-shell"),
+    ).toBe("desktop");
+  });
 
-  it('draws the sessions rail on / and /new and nowhere else', async () => {
-    mount('desktop')
-    const rail = await screen.findByRole('complementary', { name: 'Sessions' })
-    expect(await within(rail).findByRole('link', { name: /api/ })).toBeTruthy()
-    expect(within(rail).getByRole('region', { name: 'Live' })).toBeTruthy()
-    expect(within(rail).getByRole('link', { name: 'All sessions →' }).getAttribute('href')).toBe('/fleet')
+  it("draws the sessions rail on / and /new and nowhere else", async () => {
+    mount("desktop");
+    const rail = await screen.findByRole("complementary", { name: "Sessions" });
+    expect(await within(rail).findByRole("link", { name: /api/ })).toBeTruthy();
+    expect(within(rail).getByRole("region", { name: "Live" })).toBeTruthy();
+    expect(
+      within(rail)
+        .getByRole("link", { name: "All sessions →" })
+        .getAttribute("href"),
+    ).toBe("/fleet");
 
-    fireEvent.click(nav().getByRole('link', { name: 'Machines' }))
-    await screen.findByRole('heading', { level: 1, name: 'Machines' })
-    expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
+    fireEvent.click(nav().getByRole("link", { name: "Machines" }));
+    await screen.findByRole("heading", { level: 1, name: "Machines" });
+    expect(
+      screen.queryByRole("complementary", { name: "Sessions" }),
+    ).toBeNull();
 
-    fireEvent.click(screen.getByRole('link', { name: 'Yantra' }))
-    expect(await screen.findByRole('complementary', { name: 'Sessions' })).toBeTruthy()
-  })
+    fireEvent.click(screen.getByRole("link", { name: "Yantra" }));
+    expect(
+      await screen.findByRole("complementary", { name: "Sessions" }),
+    ).toBeTruthy();
+  });
 
-  it('draws the home rail on /new, because the dashboard sits behind the scrim', async () => {
-    mount('desktop', '/new')
-    await screen.findByRole('dialog', { name: 'New session' })
+  it("draws the home rail on /new, because the dashboard sits behind the scrim", async () => {
+    mount("desktop", "/new");
+    await screen.findByRole("dialog", { name: "New session" });
     // The modal hides what is behind it from the accessibility tree.
-    const rail = await screen.findByRole('complementary', { name: 'Sessions', hidden: true })
-    expect(within(rail).getByRole('region', { name: 'Live', hidden: true })).toBeTruthy()
-  })
+    const rail = await screen.findByRole("complementary", {
+      name: "Sessions",
+      hidden: true,
+    });
+    expect(
+      within(rail).getByRole("region", { name: "Live", hidden: true }),
+    ).toBeTruthy();
+  });
 
   /** Finding 112: five session boards draw the rail beside the screen. That it
    *  is drawn there is the e2e's, which loads the session screen for it. */
-  it('counts a session screen among the places the rail belongs', () => {
-    for (const path of ['/', '/new', '/w/api']) expect(isRailed(path)).toBe(true)
-    for (const path of ['/fleet', '/machines', '/settings', '/w/api/repair']) {
-      expect(isRailed(path)).toBe(false)
+  it("counts a session screen among the places the rail belongs", () => {
+    for (const path of ["/", "/new", "/w/api"])
+      expect(isRailed(path)).toBe(true);
+    for (const path of ["/fleet", "/machines", "/settings", "/w/api/repair"]) {
+      expect(isRailed(path)).toBe(false);
     }
-  })
+  });
 
-  it('counts unseen events and GitHub items on the bell', async () => {
-    mount('desktop')
+  it("counts unseen events and GitHub items on the bell", async () => {
+    mount("desktop");
     // Nine events, none seen, plus one review and one issue.
-    expect(await screen.findByRole('button', { name: /Notifications\s*11 unread/ })).toBeTruthy()
-  })
+    expect(
+      await screen.findByRole("button", { name: /Notifications\s*11 unread/ }),
+    ).toBeTruthy();
+  });
 
-  it('offers Settings and About from the avatar', async () => {
-    mount('desktop')
-    fireEvent.click(await screen.findByRole('button', { name: 'Account' }))
-    const menu = await screen.findByRole('menu')
-    expect(within(menu).getByRole('menuitem', { name: 'Settings' }).getAttribute('href')).toBe('/settings')
-    expect(within(menu).getByRole('menuitem', { name: 'About' }).getAttribute('href')).toBe('/settings/about')
-  })
+  it("offers Settings and About from the avatar", async () => {
+    mount("desktop");
+    fireEvent.click(await screen.findByRole("button", { name: "Account" }));
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getByRole("menuitem", { name: "Settings" })
+        .getAttribute("href"),
+    ).toBe("/settings");
+    expect(
+      within(menu)
+        .getByRole("menuitem", { name: "About" })
+        .getAttribute("href"),
+    ).toBe("/settings/about");
+  });
 
-  it('closes the avatar menu when one of its links is followed', async () => {
-    mount('desktop')
-    fireEvent.click(await screen.findByRole('button', { name: 'Account' }))
-    const menu = await screen.findByRole('menu')
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Rooms' }))
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
-  })
+  it("closes the avatar menu when one of its links is followed", async () => {
+    mount("desktop");
+    fireEvent.click(await screen.findByRole("button", { name: "Account" }));
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Rooms" }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  });
 
-  it('says nothing is at a path nothing routes', async () => {
-    mount('desktop', '/nope')
-    expect(await screen.findByText(/Nothing is at/)).toBeTruthy()
-    expect(screen.getByRole('heading', { level: 1, name: 'Not found' })).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Dashboard' }).dataset.variant).toBe('tonal')
-  })
-})
+  it("says nothing is at a path nothing routes", async () => {
+    mount("desktop", "/nope");
+    expect(await screen.findByText(/Nothing is at/)).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Not found" }),
+    ).toBeTruthy();
+    expect(
+      screen
+        .getAllByRole("link", { name: "Dashboard" })
+        .find((a) => a.classList.contains("m3-not-found__way"))?.dataset
+        .variant,
+    ).toBe("tonal");
+  });
+});
 
-describe('the tablet shell', () => {
+describe("the tablet shell", () => {
   /** Finding 129: TabletDashboard.dc.html puts the bell and the avatar at the
    *  foot of the rail and draws no search, so nothing of the chrome is left
    *  outside a landmark (finding 121). */
-  it('has a rail with the FAB on top, the bell and the avatar at its foot, and no search', async () => {
-    mount('tablet', '/fleet')
-    await screen.findByRole('heading', { level: 1, name: 'Fleet' })
-    const rail = nav()
-    for (const label of DESTINATIONS) expect(rail.getByRole('link', { name: label })).toBeTruthy()
-    expect(rail.getByRole('link', { name: 'Fleet' }).getAttribute('aria-current')).toBe('page')
-    expect(rail.getByRole('link', { name: 'New session, quick action' }).getAttribute('href')).toBe('/new')
-    expect(document.querySelector('.m3-pill-group')).toBeNull()
-    expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
-    expect(screen.queryByRole('button', { name: /Search anything/ })).toBeNull()
-    expect(await rail.findByRole('button', { name: /Notifications/ })).toBeTruthy()
-    expect(await rail.findByRole('button', { name: 'Account' })).toBeTruthy()
-  })
+  it("has a rail with the FAB on top, the bell and the avatar at its foot, and no search", async () => {
+    mount("tablet", "/fleet");
+    await screen.findByRole("heading", { level: 1, name: "Fleet" });
+    const rail = nav();
+    for (const label of DESTINATIONS)
+      expect(rail.getByRole("link", { name: label })).toBeTruthy();
+    expect(
+      rail.getByRole("link", { name: "Fleet" }).getAttribute("aria-current"),
+    ).toBe("page");
+    expect(
+      rail
+        .getByRole("link", { name: "New session, quick action" })
+        .getAttribute("href"),
+    ).toBe("/new");
+    expect(document.querySelector(".m3-pill-group")).toBeNull();
+    expect(
+      screen.queryByRole("complementary", { name: "Sessions" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Search anything/ }),
+    ).toBeNull();
+    expect(
+      await rail.findByRole("button", { name: /Notifications/ }),
+    ).toBeTruthy();
+    expect(await rail.findByRole("button", { name: "Account" })).toBeTruthy();
+  });
 
-  it('opens notifications as a side sheet the bell names', async () => {
-    mount('tablet')
-    await screen.findByRole('heading', { level: 1, name: 'Dashboard' })
-    const bell = await screen.findByRole('button', { name: /Notifications/ })
+  it("opens notifications as a side sheet the bell names", async () => {
+    mount("tablet");
+    await screen.findByRole("heading", { level: 1, name: "Dashboard" });
+    const bell = await screen.findByRole("button", { name: /Notifications/ });
     // Finding 121: the sheet is in the tree from the first paint, so what the
     // bell says it controls is there to be found, open or closed.
-    const named = () => document.getElementById(bell.getAttribute('aria-controls') ?? '')
-    await waitFor(() => expect(named()?.getAttribute('aria-label')).toBe('Notifications'))
-    expect(bell.getAttribute('aria-expanded')).toBe('false')
-    expect(named()?.hidden).toBe(true)
-    fireEvent.click(bell)
-    expect(bell.getAttribute('aria-expanded')).toBe('true')
-    const sheet = await screen.findByRole('complementary', { name: 'Notifications' })
-    expect(sheet.hidden).toBe(false)
-    expect(await within(sheet).findByText('api is waiting for trust')).toBeTruthy()
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Close Notifications' }))
-    expect(sheet.hidden).toBe(true)
-  })
-})
+    const named = () =>
+      document.getElementById(bell.getAttribute("aria-controls") ?? "");
+    await waitFor(() =>
+      expect(named()?.getAttribute("aria-label")).toBe("Notifications"),
+    );
+    expect(bell.getAttribute("aria-expanded")).toBe("false");
+    expect(named()?.hidden).toBe(true);
+    fireEvent.click(bell);
+    expect(bell.getAttribute("aria-expanded")).toBe("true");
+    const sheet = await screen.findByRole("complementary", {
+      name: "Notifications",
+    });
+    expect(sheet.hidden).toBe(false);
+    expect(
+      await within(sheet).findByText("api is waiting for trust"),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(sheet).getByRole("button", { name: "Close Notifications" }),
+    );
+    expect(sheet.hidden).toBe(true);
+  });
+});
 
-describe('the phone shell', () => {
-  it('has a bottom bar, a FAB, and the app bar as the heading', async () => {
-    mount('phone', '/machines')
-    await screen.findAllByRole('heading', { level: 1, name: 'Machines' })
-    const bar = nav()
-    for (const label of DESTINATIONS) expect(bar.getByRole('link', { name: label })).toBeTruthy()
-    expect(bar.getByRole('link', { name: 'Machines' }).getAttribute('aria-current')).toBe('page')
-    expect(fab()?.getAttribute('href')).toBe('/machines/add')
-    expect(screen.getByRole('banner').querySelector('h1')?.textContent).toBe('Machines')
-    expect(screen.getByRole('link', { name: /Notifications/ }).getAttribute('href')).toBe('/notifications')
-  })
+describe("the phone shell", () => {
+  it("has a bottom bar, a FAB, and the app bar as the heading", async () => {
+    mount("phone", "/machines");
+    await screen.findAllByRole("heading", { level: 1, name: "Machines" });
+    const bar = nav();
+    for (const label of DESTINATIONS)
+      expect(bar.getByRole("link", { name: label })).toBeTruthy();
+    expect(
+      bar.getByRole("link", { name: "Machines" }).getAttribute("aria-current"),
+    ).toBe("page");
+    expect(fab()?.getAttribute("href")).toBe("/machines/add");
+    expect(screen.getByRole("banner").querySelector("h1")?.textContent).toBe(
+      "Machines",
+    );
+    expect(
+      screen.getByRole("link", { name: /Notifications/ }).getAttribute("href"),
+    ).toBe("/notifications");
+  });
 
-  it('pushes settings: a back arrow, no bar, no FAB', async () => {
-    mount('phone', '/settings')
-    await waitFor(() => expect(screen.getByRole('banner').querySelector('h1')?.textContent).toBe('Settings'))
-    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
-    expect(screen.queryByRole('link', { name: 'New session' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
-    await waitFor(() => expect(location.pathname).toBe('/'))
-  })
+  it("pushes settings: a back arrow, no bar, no FAB", async () => {
+    mount("phone", "/settings");
+    await waitFor(() =>
+      expect(screen.getByRole("banner").querySelector("h1")?.textContent).toBe(
+        "Settings",
+      ),
+    );
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "New session" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(location.pathname).toBe("/"));
+  });
 
-  it('opens notifications as a pushed screen', async () => {
-    mount('phone', '/notifications')
-    await waitFor(() => expect(screen.getByRole('banner').querySelector('h1')?.textContent).toBe('Notifications'))
-    expect(await screen.findByText('api is waiting for trust')).toBeTruthy()
-    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
-  })
-})
+  it("opens notifications as a pushed screen", async () => {
+    mount("phone", "/notifications");
+    await waitFor(() =>
+      expect(screen.getByRole("banner").querySelector("h1")?.textContent).toBe(
+        "Notifications",
+      ),
+    );
+    expect(await screen.findByText("api is waiting for trust")).toBeTruthy();
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+  });
+});
 
 /** D7 §3.6: the FAB carries the page's one next action, or is not drawn. */
-describe('the FAB', () => {
+describe("the FAB", () => {
   const ROUTES = [
-    ['/', 'Dashboard', 'New session', '/new'],
-    ['/fleet', 'Fleet', 'New session', '/new'],
-    ['/machines', 'Machines', 'Add a device', '/machines/add'],
-    ['/usage', 'Usage', null, null],
-  ] as const
+    ["/", "Dashboard", "New session", "/new"],
+    ["/fleet", "Fleet", "New session", "/new"],
+    ["/machines", "Machines", "Add a device", "/machines/add"],
+    ["/usage", "Usage", null, null],
+  ] as const;
 
-  for (const size of ['phone', 'tablet'] as const) {
-    it.each(ROUTES)(`carries on the ${size} what %s offers next`, async (path, title, label, href) => {
-      mount(size, path)
-      await screen.findAllByRole('heading', { level: 1, name: title })
-      if (label === null) {
-        expect(fab()).toBeNull()
-        return
-      }
-      await waitFor(() => expect(named(fab())).toBe(label))
-      expect(fab()!.getAttribute('href')).toBe(href)
-      // WCAG 2.5.3: the name starts with the words on screen, and differs
-      // from the page's own copy of the action.
-      expect(screen.getByRole('link', { name: `${label}, quick action` })).toBe(fab())
-      // D7 §4.4: the page does not also draw its own Add a device.
-      if (path === '/machines') {
-        expect(within(screen.getByRole('main')).queryByRole('link', { name: 'Add a device' })).toBeNull()
-      }
-    })
+  for (const size of ["phone", "tablet"] as const) {
+    it.each(ROUTES)(
+      `carries on the ${size} what %s offers next`,
+      async (path, title, label, href) => {
+        mount(size, path);
+        await screen.findAllByRole("heading", { level: 1, name: title });
+        if (label === null) {
+          expect(fab()).toBeNull();
+          return;
+        }
+        await waitFor(() => expect(named(fab())).toBe(label));
+        expect(fab()!.getAttribute("href")).toBe(href);
+        // WCAG 2.5.3: the name starts with the words on screen, and differs
+        // from the page's own copy of the action.
+        expect(
+          screen.getByRole("link", { name: `${label}, quick action` }),
+        ).toBe(fab());
+        // D7 §4.4: the page does not also draw its own Add a device.
+        if (path === "/machines") {
+          expect(
+            within(screen.getByRole("main")).queryByRole("link", {
+              name: "Add a device",
+            }),
+          ).toBeNull();
+        }
+      },
+    );
   }
 
   /** The machine page's Readiness card holds its action; a FAB would repeat it. */
   it.each([
-    ['/m/cachyos-g14', 'cachyos-g14'],
-    ['/settings', 'Settings'],
-    ['/new', 'New session'],
-  ])('draws none on the tablet on %s', async (path, title) => {
-    mount('tablet', path)
-    if (path === '/new') await screen.findByRole('dialog', { name: title })
-    else await screen.findAllByRole('heading', { level: 1, name: title })
-    expect(fab()).toBeNull()
+    ["/m/cachyos-g14", "cachyos-g14"],
+    ["/settings", "Settings"],
+    ["/new", "New session"],
+  ])("draws none on the tablet on %s", async (path, title) => {
+    mount("tablet", path);
+    if (path === "/new") await screen.findByRole("dialog", { name: title });
+    else await screen.findAllByRole("heading", { level: 1, name: title });
+    expect(fab()).toBeNull();
     // The rail keeps the FAB's place, so the destinations never move.
-    expect(document.querySelector('.shell__rail-slot')).toBeTruthy()
-  })
+    expect(document.querySelector(".shell__rail-slot")).toBeTruthy();
+  });
 
   /** A swap under a keyboard reader keeps the element, so focus stays on it. */
-  it('keeps focus on the FAB when the next route swaps its action', async () => {
-    mount('phone', '/')
-    await waitFor(() => expect(named(fab())).toBe('New session'))
-    const before = fab()!
-    before.focus()
+  it("keeps focus on the FAB when the next route swaps its action", async () => {
+    mount("phone", "/");
+    await waitFor(() => expect(named(fab())).toBe("New session"));
+    const before = fab()!;
+    before.focus();
     // fireEvent does not move focus, so the FAB keeps it through the navigation.
-    fireEvent.click(nav().getByRole('link', { name: 'Machines' }))
-    await waitFor(() => expect(named(fab())).toBe('Add a device'))
-    expect(fab()).toBe(before)
-    expect(document.activeElement).toBe(before)
-  })
+    fireEvent.click(nav().getByRole("link", { name: "Machines" }));
+    await waitFor(() => expect(named(fab())).toBe("Add a device"));
+    expect(fab()).toBe(before);
+    expect(document.activeElement).toBe(before);
+  });
 
-  it('draws none on the desktop, where the action stays in the page', async () => {
-    mount('desktop', '/machines')
-    await screen.findByRole('heading', { level: 1, name: 'Machines' })
-    expect(fab()).toBeNull()
-    expect(document.querySelector('.m3-fab')).toBeNull()
-    const add = within(screen.getByRole('main')).getByRole('link', { name: 'Add a device' })
-    expect(add.dataset.variant).toBe('tonal')
-  })
+  it("draws none on the desktop, where the action stays in the page", async () => {
+    mount("desktop", "/machines");
+    await screen.findByRole("heading", { level: 1, name: "Machines" });
+    expect(fab()).toBeNull();
+    expect(document.querySelector(".m3-fab")).toBeNull();
+    const add = within(screen.getByRole("main")).getByRole("link", {
+      name: "Add a device",
+    });
+    expect(add.dataset.variant).toBe("tonal");
+  });
 
-  it('draws none while yantrad cannot be reached', async () => {
-    mount('phone', '/', { down: true })
-    expect((await screen.findAllByText(/yantrad/)).length).toBeGreaterThan(0)
-    expect(fab()).toBeNull()
-  })
+  it("draws none while yantrad cannot be reached", async () => {
+    mount("phone", "/", { down: true });
+    expect((await screen.findAllByText(/yantrad/)).length).toBeGreaterThan(0);
+    expect(fab()).toBeNull();
+  });
 
-  it('draws none on the dashboard when nothing it reads can be reached', async () => {
-    const failed = { body: { looked: 'failed', age_seconds: 0, error: 'tailscale did not answer' } }
-    mount('tablet', '/', { overrides: { '/api/machines': failed, '/api/workspaces': failed, '/api/sessions': failed } })
-    expect(await screen.findByText('The daemon could not read the fleet')).toBeTruthy()
-    expect(fab()).toBeNull()
-    expect(screen.queryByRole('link', { name: /new session/i })).toBeNull()
-  })
+  it("draws none on the dashboard when nothing it reads can be reached", async () => {
+    const failed = {
+      body: {
+        looked: "failed",
+        age_seconds: 0,
+        error: "tailscale did not answer",
+      },
+    };
+    mount("tablet", "/", {
+      overrides: {
+        "/api/machines": failed,
+        "/api/workspaces": failed,
+        "/api/sessions": failed,
+      },
+    });
+    expect(
+      await screen.findByText("The daemon could not read the fleet"),
+    ).toBeTruthy();
+    expect(fab()).toBeNull();
+    expect(screen.queryByRole("link", { name: /new session/i })).toBeNull();
+  });
 
-  it('draws no New button on the desktop rail when nothing it reads can be reached', async () => {
-    const failed = { body: { looked: 'failed', age_seconds: 0, error: 'tailscale did not answer' } }
-    mount('desktop', '/', { overrides: { '/api/machines': failed, '/api/workspaces': failed, '/api/sessions': failed } })
-    expect(await screen.findByText('The daemon could not read the fleet')).toBeTruthy()
-    const rail = within(screen.getByRole('complementary', { name: 'Sessions' }))
-    expect(rail.queryByRole('link', { name: 'New' })).toBeNull()
-  })
+  it("draws no New button on the desktop rail when nothing it reads can be reached", async () => {
+    const failed = {
+      body: {
+        looked: "failed",
+        age_seconds: 0,
+        error: "tailscale did not answer",
+      },
+    };
+    mount("desktop", "/", {
+      overrides: {
+        "/api/machines": failed,
+        "/api/workspaces": failed,
+        "/api/sessions": failed,
+      },
+    });
+    expect(
+      await screen.findByText("The daemon could not read the fleet"),
+    ).toBeTruthy();
+    const rail = within(
+      screen.getByRole("complementary", { name: "Sessions" }),
+    );
+    expect(rail.queryByRole("link", { name: "New" })).toBeNull();
+  });
 
-  describe('while the checklist is the page', () => {
-    it('carries Install on the machine, and leaves the line its tonal copy', async () => {
-      const asked = mount('phone', '/', { overrides: firstRun(['tmux']) })
-      await waitFor(() => expect(named(fab())).toBe('Install on cachyos-g14'))
-      expect(fab()!.tagName).toBe('BUTTON')
-      const main = within(screen.getByRole('main'))
-      expect(main.getByRole('button', { name: 'Install on cachyos-g14' }).dataset.variant).toBe('tonal')
-      expect(screen.getByRole('main').querySelector('[data-variant="filled"]')).toBeNull()
+  describe("while the checklist is the page", () => {
+    it("carries Install on the machine, and leaves the line its tonal copy", async () => {
+      const asked = mount("phone", "/", { overrides: firstRun(["tmux"]) });
+      await waitFor(() => expect(named(fab())).toBe("Install on cachyos-g14"));
+      expect(fab()!.tagName).toBe("BUTTON");
+      const main = within(screen.getByRole("main"));
+      expect(
+        main.getByRole("button", { name: "Install on cachyos-g14" }).dataset
+          .variant,
+      ).toBe("tonal");
+      expect(
+        screen.getByRole("main").querySelector('[data-variant="filled"]'),
+      ).toBeNull();
 
-      fab()!.focus()
-      fireEvent.click(fab()!)
-      await waitFor(() => expect(asked).toContain('POST /api/machines/cachyos-g14/install'))
+      fab()!.focus();
+      fireEvent.click(fab()!);
+      await waitFor(() =>
+        expect(asked).toContain("POST /api/machines/cachyos-g14/install"),
+      );
       // The line's track says it is running; there is nothing left to press.
-      expect(await screen.findByText('installing on cachyos-g14…')).toBeTruthy()
-      await waitFor(() => expect(fab()).toBeNull())
+      expect(
+        await screen.findByText("installing on cachyos-g14…"),
+      ).toBeTruthy();
+      await waitFor(() => expect(fab()).toBeNull());
       // Focus goes to the line that says what happened, not to the body.
-      const said = document.activeElement as HTMLElement
-      expect(said.hasAttribute('data-fab-return')).toBe(true)
-      expect(within(said).getByText('installing on cachyos-g14…')).toBeTruthy()
-    })
+      const said = document.activeElement as HTMLElement;
+      expect(said.hasAttribute("data-fab-return")).toBe(true);
+      expect(within(said).getByText("installing on cachyos-g14…")).toBeTruthy();
+    });
 
-    it('carries Add a device before any machine has joined', async () => {
+    it("carries Add a device before any machine has joined", async () => {
       // Y-582: a reached hub needs no adding, so no node is the hub here.
-      const unhubbed = { body: looked.ok(contract.machines.data.map((one) => ({ ...one, hub: false }))) }
-      mount('tablet', '/', { overrides: { '/api/workspaces': empty, '/api/machines': unhubbed } })
-      await waitFor(() => expect(named(fab())).toBe('Add a device'))
-      expect(fab()!.getAttribute('href')).toBe('/machines/add')
+      const unhubbed = {
+        body: looked.ok(
+          contract.machines.data.map((one) => ({ ...one, hub: false })),
+        ),
+      };
+      mount("tablet", "/", {
+        overrides: { "/api/workspaces": empty, "/api/machines": unhubbed },
+      });
+      await waitFor(() => expect(named(fab())).toBe("Add a device"));
+      expect(fab()!.getAttribute("href")).toBe("/machines/add");
       // Y-615: the FAB is the one Add a device, so the page draws no copy.
-      expect(within(screen.getByRole('main')).queryByRole('link', { name: 'Add a device' })).toBeNull()
-    })
+      expect(
+        within(screen.getByRole("main")).queryByRole("link", {
+          name: "Add a device",
+        }),
+      ).toBeNull();
+    });
 
-    it('carries New session once a machine is ready and nothing else is left', async () => {
+    it("carries New session once a machine is ready and nothing else is left", async () => {
       // Ready and keyed, yet no workspace: the gate has passed, so `/` is the
       // board, whose own action is New session.
       // An empty GitHub queue, so the hero is empty and draws its own copy.
-      const quiet = { ...contract.attention, data: { ...contract.attention.data, reviews: [], issues: [], notifications: 0 } }
-      mount('phone', '/', { overrides: { ...firstRun([]), '/api/attention': { body: quiet } } })
-      await screen.findAllByRole('heading', { level: 1, name: 'Dashboard' })
-      await waitFor(() => expect(named(fab())).toBe('New session'))
-      const hero = within(screen.getByRole('region', { name: 'Needs you' }))
-      expect(hero.getByRole('link', { name: 'New session' }).dataset.variant).toBe('tonal')
-    })
+      const quiet = {
+        ...contract.attention,
+        data: {
+          ...contract.attention.data,
+          reviews: [],
+          issues: [],
+          notifications: 0,
+        },
+      };
+      mount("phone", "/", {
+        overrides: { ...firstRun([]), "/api/attention": { body: quiet } },
+      });
+      await screen.findAllByRole("heading", { level: 1, name: "Dashboard" });
+      await waitFor(() => expect(named(fab())).toBe("New session"));
+      const hero = within(screen.getByRole("region", { name: "Needs you" }));
+      expect(
+        hero.getByRole("link", { name: "New session" }).dataset.variant,
+      ).toBe("tonal");
+    });
 
     /** D7 S11: on the desktop, the action is inline and filled, and the rail
      *  that would only say nothing has been read is not drawn. */
-    it('keeps the action in the page on the desktop, and hides the sessions rail', async () => {
-      mount('desktop', '/', { overrides: firstRun(['tmux']) })
-      await screen.findByRole('heading', { level: 1, name: 'Set up Yantra' })
-      const main = within(screen.getByRole('main'))
+    it("keeps the action in the page on the desktop, and hides the sessions rail", async () => {
+      mount("desktop", "/", { overrides: firstRun(["tmux"]) });
+      await screen.findByRole("heading", { level: 1, name: "Set up Yantra" });
+      const main = within(screen.getByRole("main"));
       await waitFor(() =>
-        expect(main.getByRole('button', { name: 'Install on cachyos-g14' }).dataset.variant).toBe('filled'),
-      )
-      expect(fab()).toBeNull()
-      expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
+        expect(
+          main.getByRole("button", { name: "Install on cachyos-g14" }).dataset
+            .variant,
+        ).toBe("filled"),
+      );
+      expect(fab()).toBeNull();
+      expect(
+        screen.queryByRole("complementary", { name: "Sessions" }),
+      ).toBeNull();
 
       // New session draws over the checklist, so the rail follows the page behind it.
-      fireEvent.click(main.getByRole('link', { name: 'New session' }))
-      await screen.findByRole('dialog', { name: 'New session' })
-      expect(screen.queryByRole('complementary', { name: 'Sessions' })).toBeNull()
-    })
-  })
-})
+      fireEvent.click(main.getByRole("link", { name: "New session" }));
+      await screen.findByRole("dialog", { name: "New session" });
+      expect(
+        screen.queryByRole("complementary", { name: "Sessions" }),
+      ).toBeNull();
+    });
+  });
+});
 
 /** Y-583: the GitHub profile image on the account button, and the icon
  *  whenever there is no image to draw. */
-describe('the account button', () => {
-  const AVATAR = 'https://avatars.githubusercontent.com/u/1?v=4'
-  const account = () => screen.findByRole('button', { name: 'Account' })
-  const image = (button: HTMLElement) => button.querySelector('img')
-  const icon = (button: HTMLElement) => button.querySelector('svg')
+describe("the account button", () => {
+  const AVATAR = "https://avatars.githubusercontent.com/u/1?v=4";
+  const account = () => screen.findByRole("button", { name: "Account" });
+  const image = (button: HTMLElement) => button.querySelector("img");
+  const icon = (button: HTMLElement) => button.querySelector("svg");
 
-  it('draws the profile image of the grant the daemon holds', async () => {
-    mount('desktop', '/', { overrides: { '/api/github': { body: { ...contract.github, avatar_url: AVATAR } } } })
-    const button = await account()
-    await waitFor(() => expect(image(button)?.getAttribute('src')).toBe(AVATAR))
+  it("draws the profile image of the grant the daemon holds", async () => {
+    mount("desktop", "/", {
+      overrides: {
+        "/api/github": { body: { ...contract.github, avatar_url: AVATAR } },
+      },
+    });
+    const button = await account();
+    await waitFor(() =>
+      expect(image(button)?.getAttribute("src")).toBe(AVATAR),
+    );
     // Decorative: the button keeps its name, and the image adds none.
-    expect(image(button)?.getAttribute('alt')).toBe('')
-  })
+    expect(image(button)?.getAttribute("alt")).toBe("");
+  });
 
   it.each([
-    ['no grant is held', { status: 200, body: { ...contract.disconnected, avatar_url: AVATAR } }],
-    ['GitHub has no image', { status: 200, body: { ...contract.github, avatar_url: null } }],
-    ['the daemon refuses', { status: 500, body: 'boom' }],
-  ])('draws the icon when %s', async (_, answer) => {
-    const asked = mount('desktop', '/', { overrides: { '/api/github': answer } })
-    const button = await account()
-    await waitFor(() => expect(asked).toContain('GET /api/github'))
-    expect(icon(button)).toBeTruthy()
-    expect(image(button)).toBeNull()
-  })
+    [
+      "no grant is held",
+      { status: 200, body: { ...contract.disconnected, avatar_url: AVATAR } },
+    ],
+    [
+      "GitHub has no image",
+      { status: 200, body: { ...contract.github, avatar_url: null } },
+    ],
+    ["the daemon refuses", { status: 500, body: "boom" }],
+  ])("draws the icon when %s", async (_, answer) => {
+    const asked = mount("desktop", "/", {
+      overrides: { "/api/github": answer },
+    });
+    const button = await account();
+    await waitFor(() => expect(asked).toContain("GET /api/github"));
+    expect(icon(button)).toBeTruthy();
+    expect(image(button)).toBeNull();
+  });
 
-  describe('when GitHub refuses the grant (Y-606)', () => {
+  describe("when GitHub refuses the grant (Y-606)", () => {
     const grantOf = (readiness: unknown) => ({
-      '/api/github': { body: contract.github },
-      '/api/readiness/github': { body: readiness },
-    })
+      "/api/github": { body: contract.github },
+      "/api/readiness/github": { body: readiness },
+    });
 
     it('names the refusal on the button and leads the menu to Providers', async () => {
       mount('desktop', '/', { overrides: grantOf(contract.githubRefused) })
@@ -371,31 +561,37 @@ describe('the account button', () => {
       expect(item.textContent).not.toContain('yantra github')
     })
 
-    it('draws neither the badge nor the item for a grant GitHub accepts', async () => {
-      const asked = mount('desktop', '/', { overrides: grantOf(contract.githubReadiness) })
-      const button = await account()
-      await waitFor(() => expect(asked).toContain('GET /api/readiness/github'))
-      expect(button.textContent).not.toMatch(/refused/)
-      fireEvent.click(button)
-      await screen.findByRole('menuitem', { name: 'Rooms' })
-      expect(screen.queryByRole('menuitem', { name: /refused/ })).toBeNull()
-    })
-  })
+    it("draws neither the badge nor the item for a grant GitHub accepts", async () => {
+      const asked = mount("desktop", "/", {
+        overrides: grantOf(contract.githubReadiness),
+      });
+      const button = await account();
+      await waitFor(() => expect(asked).toContain("GET /api/readiness/github"));
+      expect(button.textContent).not.toMatch(/refused/);
+      fireEvent.click(button);
+      await screen.findByRole("menuitem", { name: "Rooms" });
+      expect(screen.queryByRole("menuitem", { name: /refused/ })).toBeNull();
+    });
+  });
 
-  it('goes back to the icon, in the same box, when the image does not load', async () => {
-    mount('desktop', '/', { overrides: { '/api/github': { body: { ...contract.github, avatar_url: AVATAR } } } })
-    const button = await account()
+  it("goes back to the icon, in the same box, when the image does not load", async () => {
+    mount("desktop", "/", {
+      overrides: {
+        "/api/github": { body: { ...contract.github, avatar_url: AVATAR } },
+      },
+    });
+    const button = await account();
     const loaded = await waitFor(() => {
-      const one = image(button)
-      expect(one).toBeTruthy()
-      return one as HTMLImageElement
-    })
+      const one = image(button);
+      expect(one).toBeTruthy();
+      return one as HTMLImageElement;
+    });
     // The icon is drawn under the image the whole time, so losing the image
     // moves nothing; the box itself is the e2e's to measure.
-    const under = icon(button)
-    expect(under).toBeTruthy()
-    fireEvent.error(loaded)
-    await waitFor(() => expect(image(button)).toBeNull())
-    expect(icon(button)).toBe(under)
-  })
-})
+    const under = icon(button);
+    expect(under).toBeTruthy();
+    fireEvent.error(loaded);
+    await waitFor(() => expect(image(button)).toBeNull());
+    expect(icon(button)).toBe(under);
+  });
+});
