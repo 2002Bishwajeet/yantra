@@ -505,8 +505,6 @@ describe('merge', () => {
 
   it.each([
     [409, "the thread's branch has no open PR; open one first with `yantra pr open`", 'The PR could not be read'],
-    [409, 'no GitHub grant — run `yantra github login`', 'No GitHub grant'],
-    [403, 'this node is not the owner', 'No GitHub grant'],
     [502, 'GitHub answered 500 to the pull request', 'GitHub did not send the PR'],
     [503, 'ssh: no route to host', 'The machine did not answer'],
   ] as const)('draws a %s read saying "%s", keeps Merge off, and reads again', async (status, said, title) => {
@@ -526,6 +524,22 @@ describe('merge', () => {
     expect(log.map((one) => one.path)).toEqual([`${base}/pending`, `${base}/pending`])
   })
 
+  it.each([
+    [409, 'no GitHub grant — run `yantra github login`'],
+    [403, 'this node is not the owner'],
+  ] as const)('draws a %s read saying "%s" as Connect, keeps Merge off', async (status, said) => {
+    daemon({ pending: [status, said] })
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    expect(await within(asked).findByText('GitHub is not connected')).toBeTruthy()
+    expect(within(asked).queryByText(said)).toBeNull()
+    expect(within(asked).queryByRole('alert')).toBeNull()
+    expect(mergeButton(asked).disabled).toBe(true)
+    fireEvent.click(within(asked).getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
+  })
+
   it('draws a read that nothing answered as a network failure', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))))
     open({ diffs: 0, listed })
@@ -537,11 +551,11 @@ describe('merge', () => {
     [409, 'no GitHub grant — run `yantra github login`'],
     [403, 'this node is not the owner'],
   ] as const)('draws a %s merge saying "%s" as Connect, without the daemon words', async (status, said) => {
-    daemon({ merge: [status, said] })
+    daemon({ pending, merge: [status, said] })
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
     open({ diffs: 0, listed })
     const asked = await confirm()
-    fireEvent.click(within(asked).getByRole('button', { name: 'Merge' }))
+    fireEvent.click(await ready(asked))
     expect(await within(asked).findByText('GitHub is not connected')).toBeTruthy()
     expect(within(asked).queryByText(said)).toBeNull()
     expect(within(asked).queryByRole('alert')).toBeNull()
