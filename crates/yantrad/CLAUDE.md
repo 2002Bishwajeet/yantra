@@ -381,7 +381,7 @@ directory to walk.
 
 `POST /api/workspaces`, `PATCH /api/workspaces/{name}`,
 `POST /api/workspaces/{name}/{up,down,resume,tokens,logs,repair,threads,threads/new,mentions,commands}`,
-`POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr,merge,terminal}`,
+`POST /api/workspaces/{name}/threads/{thread}/{message,commit,push,pr,pending,merge,terminal}`,
 `DELETE /api/workspaces/{name}/threads/{thread}`, `POST /api/relay`,
 `GET /api/workspaces/{name}/threads` (Y-649: each held thread's `{id, state, since}`, read from memory, no ssh),
 `POST /api/machines/{machine}/clone`, `POST /api/machines/{machine}/install`, `POST /api/github/login`,

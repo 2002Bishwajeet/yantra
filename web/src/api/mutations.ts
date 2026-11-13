@@ -22,6 +22,7 @@ import type {
   ThreadMessage,
   ThreadOpened,
   ThreadPrMerged,
+  ThreadPrPending,
   ThreadPrOpened,
   ThreadPushed,
   ThreadTerminal,
@@ -390,12 +391,22 @@ export function useOpenPr(name: string) {
   })
 }
 
-/** `…/merge` with the PR number the owner confirmed (Y-496): a squash, then the remote branch
- *  goes. 409 is no open PR, another PR, a head that moved during the merge or one GitHub will not merge; 502 is GitHub. */
+/** `…/pending` (Y-781): the thread's open PR, its head and its commit count, for the merge
+ *  dialog. A read over a POST that a person starts, so a mutation; nothing polls it (ADR-0019).
+ *  409 is no open PR or no grant; 502 is GitHub. */
+export function usePendingPr(name: string) {
+  return useMutation<ThreadPrPending, ApiError, string>({
+    mutationFn: (id) => fetchJson<ThreadPrPending>(thread(name, id, 'pending'), { method: 'POST' }),
+  })
+}
+
+/** `…/merge` with the PR number the owner confirmed and the head `usePendingPr` showed (Y-496,
+ *  Y-781): a squash, then the remote branch goes. 409 is no open PR, another PR, a head that
+ *  moved after the read or one GitHub will not merge; 502 is GitHub. */
 export function useMergePr(name: string) {
-  return useMutation<ThreadPrMerged, ApiError, { id: string; number: number }>({
-    mutationFn: ({ id, number }) =>
-      fetchJson<ThreadPrMerged>(thread(name, id, 'merge'), { method: 'POST', ...json({ number }) }),
+  return useMutation<ThreadPrMerged, ApiError, { id: string; number: number; head_sha: string }>({
+    mutationFn: ({ id, number, head_sha }) =>
+      fetchJson<ThreadPrMerged>(thread(name, id, 'merge'), { method: 'POST', ...json({ number, head_sha }) }),
   })
 }
 

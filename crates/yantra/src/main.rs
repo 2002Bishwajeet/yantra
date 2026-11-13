@@ -3034,7 +3034,7 @@ async fn pr_merge(workspace: &str, thread: &str, yes: bool) -> ExitCode {
         &github,
         &token,
         pending.number,
-        Some(&pending.head_sha),
+        &pending.head_sha,
     )
     .await
     {
@@ -3051,8 +3051,13 @@ async fn pr_merge(workspace: &str, thread: &str, yes: bool) -> ExitCode {
 
 fn merge_question(pending: &commit::Pending) -> String {
     format!(
-        "Squash-merge PR #{} {} and delete branch {}? [y/N] ",
-        pending.number, pending.url, pending.branch
+        "Squash-merge PR #{} {}, {} commit{} at head {}, and delete branch {}? [y/N] ",
+        pending.number,
+        pending.url,
+        pending.commits,
+        if pending.commits == 1 { "" } else { "s" },
+        pending.head_sha.get(..7).unwrap_or(&pending.head_sha),
+        pending.branch
     )
 }
 
@@ -6107,11 +6112,12 @@ mod tests {
             number: 21,
             url: "https://github.com/o/r/pull/21".to_owned(),
             branch: "yantra/7-0a1b".to_owned(),
-            head_sha: "aaa111".to_owned(),
+            head_sha: "aaa111bbb222ccc333".to_owned(),
+            commits: 3,
         };
         assert_eq!(
             merge_question(&pending),
-            "Squash-merge PR #21 https://github.com/o/r/pull/21 and delete branch yantra/7-0a1b? [y/N] "
+            "Squash-merge PR #21 https://github.com/o/r/pull/21, 3 commits at head aaa111b, and delete branch yantra/7-0a1b? [y/N] "
         );
         let mut merged = commit::MergedPr {
             number: 21,

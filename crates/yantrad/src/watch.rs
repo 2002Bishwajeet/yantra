@@ -374,6 +374,7 @@ pub(crate) mod tests {
             value: PullHead {
                 state,
                 head_sha: sha.to_owned(),
+                commits: 1,
                 author: "owner".to_owned(),
             },
         }
@@ -817,7 +818,7 @@ pub(crate) mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let base = format!("http://{}", listener.local_addr().expect("its address"));
         let answers = [
-            r#"{"state":"open","merged_at":null,"head":{"sha":"aaa"},"user":{"login":"owner"}}"#,
+            r#"{"state":"open","merged_at":null,"head":{"sha":"aaa"},"commits":1,"user":{"login":"owner"}}"#,
             r#"{"check_runs":[{"name":"test","status":"completed","conclusion":"failure","output":{"title":"CHECK_TITLE","summary":"CHECK_SUMMARY"}}]}"#,
             r#"[{"id":7,"user":{"login":"friend"},"state":"COMMENTED","body":"REVIEW_BODY"}]"#,
             r#"[{"id":31,"user":{"login":"friend"},"path":"a.rs","line":3,"body":"COMMENT_BODY"}]"#,

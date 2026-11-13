@@ -337,6 +337,7 @@ pub struct Merged {
 pub struct PullHead {
     pub state: PullState,
     pub head_sha: String,
+    pub commits: u64,
     /// The PR author's login; empty for a deleted account.
     pub author: String,
 }
@@ -737,6 +738,7 @@ impl Github {
             |found: HeadAnswer| PullHead {
                 state: state_of(found.merged_at.as_deref(), &found.state),
                 head_sha: found.head.sha,
+                commits: found.commits,
                 author: found.user.map(|user| user.login).unwrap_or_default(),
             },
         )
@@ -1106,6 +1108,7 @@ struct HeadAnswer {
     state: String,
     merged_at: Option<String>,
     head: Sha,
+    commits: u64,
     user: Option<User>,
 }
 
@@ -2653,7 +2656,7 @@ pub(crate) mod tests {
         );
     }
 
-    const HEAD: &str = r#"{"number":21,"state":"open","merged_at":null,"title":"Secret plan","body":"Do not log","head":{"sha":"aaa111","ref":"fix-7"},"user":{"login":"owner"}}"#;
+    const HEAD: &str = r#"{"number":21,"state":"open","merged_at":null,"title":"Secret plan","body":"Do not log","head":{"sha":"aaa111","ref":"fix-7"},"commits":3,"user":{"login":"owner"}}"#;
 
     /// The watch's three reads send the etag they were given back, and a 304
     /// is no answer to parse.
@@ -2679,6 +2682,7 @@ pub(crate) mod tests {
                 value: PullHead {
                     state: PullState::Open,
                     head_sha: "aaa111".to_owned(),
+                    commits: 3,
                     author: "owner".to_owned(),
                 },
             }
@@ -2709,7 +2713,7 @@ pub(crate) mod tests {
             listener,
             vec![reply(
                 "200 OK",
-                r#"{"state":"closed","merged_at":"2026-11-01T00:00:00Z","head":{"sha":"b"},"user":null}"#,
+                r#"{"state":"closed","merged_at":"2026-11-01T00:00:00Z","head":{"sha":"b"},"commits":1,"user":null}"#,
             )],
         );
         let read = at(address).pull(&token(), "o", "r", 1, None).await;
@@ -2720,6 +2724,7 @@ pub(crate) mod tests {
                 value: PullHead {
                     state: PullState::Merged,
                     head_sha: "b".to_owned(),
+                    commits: 1,
                     author: String::new(),
                 },
             }

@@ -130,13 +130,20 @@ test('an open PR is merged after the owner confirms, and the Chat offers to remo
   const confirm = page.getByRole('dialog', { name: 'Merge PR #497' })
   await expect(
     confirm.getByText(
-      'Squash-merge PR #497 as it is on GitHub now into the default branch, and delete its remote branch.',
+      'Squash-merge PR #497 at the head shown here into the default branch, and delete its remote branch.',
       { exact: true },
     ),
   ).toBeVisible()
+  // Y-781: the dialog shows the head it read, and the merge names that head.
+  const head = confirm.getByRole('link', { name: /3 commits/ })
+  await expect(head).toContainText('Head 89abcde')
+  await expect(head).toHaveAttribute('href', 'https://github.com/2002Bishwajeet/yantra/pull/497/commits/89abcdef0123456789abcdef0123456789abcdef')
+  expect((await head.boundingBox())!.height).toBeGreaterThanOrEqual(44)
   await fitsTheScreen(page, confirm)
   await axe(page)
+  const merged = page.waitForRequest((one) => one.method() === 'POST' && one.url().endsWith('/merge'))
   await confirm.getByRole('button', { name: 'Merge', exact: true }).click()
+  expect((await merged).postDataJSON()).toEqual({ number: 497, head_sha: '89abcdef0123456789abcdef0123456789abcdef' })
   await expect(confirm).toBeHidden()
 
   const offer = page.getByRole('dialog', { name: 'PR #497 merged' })

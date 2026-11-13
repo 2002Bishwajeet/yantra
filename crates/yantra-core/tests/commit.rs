@@ -547,6 +547,7 @@ async fn a_thread_walks_from_a_commit_to_a_merge_and_is_removed() -> Result<()> 
                 "state": "open",
                 "merged_at": null,
                 "head": {"sha": tip},
+                "commits": 1,
                 "user": {"login": "o"},
             })
             .to_string(),
@@ -554,7 +555,7 @@ async fn a_thread_walks_from_a_commit_to_a_merge_and_is_removed() -> Result<()> 
         ("200 OK", r#"{"sha":"5ca1ab1e"}"#.into()),
         ("204 No Content", String::new()),
     ]);
-    let merged = commit::merge_pr(&thread, &github, &token, 3, Some(&tip)).await?;
+    let merged = commit::merge_pr(&thread, &github, &token, 3, &tip).await?;
     assert_eq!(merged.number, 3);
     assert_eq!(merged.branch, pushed.branch);
     assert_eq!(merged.kept, None);
