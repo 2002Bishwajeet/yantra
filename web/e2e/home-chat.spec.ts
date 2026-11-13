@@ -85,7 +85,7 @@ test('Remove closes the thread and starts a fresh one', async ({ page }) => {
 
 test('a machine the tailnet does not have is a typed not-found surface', async ({ page }) => {
   await page.goto('/m/no-such-box/home')
-  await expect(page.getByRole('heading', { name: 'No such machine' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No machine is called no-such-box' })).toBeVisible()
   await expect(page.getByText('The tailnet has no machine called no-such-box.', { exact: true })).toBeVisible()
 })
 

@@ -161,10 +161,10 @@ describe('one room', () => {
   it('a room the daemon does not hold is named, with a way back', async () => {
     daemon({})
     open('/rooms/gone')
-    const alert = await screen.findByRole('alert')
-    expect(within(alert).getByText('No room is called gone')).toBeTruthy()
-    expect(alert.textContent).toContain('a restart ended it')
-    expect(within(alert).getByRole('link', { name: 'All rooms' }).getAttribute('href')).toBe('/rooms')
+    expect(await screen.findByRole('heading', { name: 'No room is called gone' })).toBeTruthy()
+    expect(screen.getByText(/a restart ended it/)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'All rooms' }).getAttribute('href')).toBe('/rooms')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('a paused room has a banner, and Resume lifts it and says so', async () => {

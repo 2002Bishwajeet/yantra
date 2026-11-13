@@ -73,6 +73,19 @@ describe('ErrorSurface', () => {
     expect(screen.queryByRole('button', { name: 'Details' })).toBeNull()
   })
 
+  it('draws no Details toggle when the daemon said only what the sentence says', () => {
+    const same = { kind: 'refused', said: ' It is gone. ', retryable: false, describe: () => 'It is gone.' }
+    render(<ErrorSurface.Page title="Gone" error={same} />)
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull()
+  })
+
+  it('draws Details when the daemon said more than the sentence does', () => {
+    const more = { kind: 'refused', said: 'node x is not yours', retryable: false, describe: () => 'It is gone.' }
+    render(<ErrorSurface.Page title="Gone" error={more} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }))
+    expect(screen.getByText('node x is not yours')).toBeTruthy()
+  })
+
   it('keeps the card whole: sentence, words, unknowns and both buttons, no toggle', () => {
     render(
       <ErrorSurface.Card

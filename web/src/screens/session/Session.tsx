@@ -10,6 +10,7 @@ import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { NotFound } from '@/m3/not-found/NotFound'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
@@ -22,7 +23,6 @@ import { VIEWS, type View } from '@/views'
 import { Chat } from './Chat'
 import { Header } from './Header'
 import { KeyRow } from './Keys'
-import { NotFound } from './NotFound'
 import { Spend } from './Spend'
 import { Terminal } from './Terminal'
 import { Transcript } from './Transcript'
@@ -105,7 +105,9 @@ export function Workspace(props: {
     return made ? (
       <Loaded onThread={onThread ?? (() => {})} thread={thread} view={view} workspace={made} />
     ) : (
-      <NotFound name={name} />
+      <NotFound headline={`No workspace is called ${name}`} label="Fleet" to="/fleet">
+        The fleet lists the ones there are.
+      </NotFound>
     )
   }
 

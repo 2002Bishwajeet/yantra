@@ -47,9 +47,11 @@ describe('the home chat route', () => {
 
   it('says so, with a typed surface, for a machine the list does not have', async () => {
     mount('desktop', '/m/no-such-box/home')
-    const alert = (await screen.findByText('No such machine')).closest('[role="alert"]') as HTMLElement
+    expect(await screen.findByRole('heading', { name: 'No machine is called no-such-box' })).toBeTruthy()
 
-    expect(within(alert).getByText('The tailnet has no machine called no-such-box.')).toBeTruthy()
+    expect(screen.getByText('The tailnet has no machine called no-such-box.')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Machines' }).getAttribute('href')).toBe('/machines')
+    expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByRole('region', { name: 'Chat' })).toBeNull()
   })
 

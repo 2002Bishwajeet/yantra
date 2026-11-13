@@ -319,9 +319,9 @@ describe('/m/thinkpad, which is off', () => {
 describe('/m/nowhere', () => {
   it('says no machine has that name and offers the list', async () => {
     mount('desktop', '/m/nowhere')
-    const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain('No machine is called nowhere.')
-    expect(within(alert).getByRole('link', { name: 'Machines' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'No machine is called nowhere' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Machines' }).getAttribute('href')).toBe('/machines')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
 

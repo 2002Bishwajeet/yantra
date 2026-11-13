@@ -129,7 +129,7 @@ describe('the repair page', () => {
     daemon({ status: 404, body: { error: 'no workspace named site' } })
     open()
 
-    expect(await screen.findByText('No workspace is called site.')).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'No workspace is called site' })).toBeTruthy()
     expect(screen.getByText('The fleet lists the ones there are.')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Fleet' }).getAttribute('href')).toBe('/fleet')
   })

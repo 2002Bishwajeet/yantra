@@ -578,27 +578,22 @@
   padding: 0 8px;
 }
 
-/* Not found, broken */
+/* Broken */
 
-.session__notfound,
 .session__broken {
   gap: var(--m3-card-gap);
 }
 
-.session__notfound > div,
 .session__broken > div {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.session__notfound .m3-button,
 .session__broken .m3-button {
   align-self: flex-start;
 }
 
-.session__notfound h2,
-.session__notfound p,
 .session__broken h2 {
   margin: 0;
 }
