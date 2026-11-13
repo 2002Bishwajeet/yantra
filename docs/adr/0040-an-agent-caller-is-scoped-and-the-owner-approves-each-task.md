@@ -1,7 +1,7 @@
 # ADR-0040 — An agent caller is scoped, and the owner approves each task
 
 - **Date:** 2026-11-05. Rewritten 2026-11-13.
-- **Status:** Proposed ([Y-693](../backlog.md)). The owner accepts or changes it. The 2026-11-13
+- **Status:** Accepted 2026-11-13 by the owner ([Y-693](../../tracker.md)). The 2026-11-13
   rewrite replaces the first text after a security audit of it. Until that day the title was *An
   agent caller is tagged and scoped*, and ADR-0042 and ADR-0044 name it by that title.
 - **Evidence:** the marketing agent Bilbo, on the appliance since 2026-11-05. The audit of
