@@ -53,6 +53,31 @@
   padding: 12px var(--m3-gutter);
 }
 
+/* Y-749: the document scrolls on desktop, so the bar pins under the status strip. M3 on-scroll is a change
+   of tone, not of elevation (useBarScrolled sets data-scrolled). */
+[data-shell="desktop"] .shell__bar {
+  position: sticky;
+  top: var(--m3-safe-top);
+  z-index: 5;
+  background-color: var(--md-sys-color-surface);
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+[data-shell="desktop"][data-scrolled] .shell__bar {
+  background-color: var(--md-sys-color-surface-container);
+}
+
+/* WCAG 2.4.11: a focused control or an anchor never lands under the pinned bar. */
+:root:has([data-shell="desktop"]) {
+  scroll-padding-top: calc(64px + var(--m3-safe-top));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-shell="desktop"] .shell__bar {
+    transition: none;
+  }
+}
+
 .shell__wordmark {
   display: inline-flex;
   align-items: center;
@@ -145,6 +170,17 @@
   letter-spacing: var(--md-sys-typescale-label-large-tracking);
   color: var(--md-sys-color-primary);
   text-decoration: none;
+}
+
+/* Y-749: the rail sticks under the bar, like the tablet's, and a tall one scrolls its own items. The foot
+   is the body's 24 px padding. */
+[data-shell="desktop"] .rail {
+  position: sticky;
+  top: calc(64px + var(--m3-safe-top));
+  align-self: flex-start;
+  block-size: calc(100dvh - 64px - var(--m3-safe-top) - var(--m3-safe-bottom) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* Tablet: the rail on the left, the sheet docked on the right. */
