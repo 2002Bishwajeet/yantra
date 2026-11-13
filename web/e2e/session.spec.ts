@@ -436,3 +436,22 @@ test.describe('the terminal fits the phone', () => {
     await fits(page, '.session-terminal__row')
   })
 })
+
+/** Y-770: xterm paints on the pane's scheme colour, not its own black, in both schemes. */
+test.describe('the terminal sits on one scheme colour', () => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`in ${colorScheme}`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme })
+      await scenario(page, 'busy')
+      await page.goto(`${PATH}?view=terminal`)
+      await expect(page.locator('.xterm-rows')).toContainText('Do you want to proceed?')
+      await paneSettled(page)
+
+      const pane = page.locator('.terminal__pane')
+      const ground = await pane.evaluate((el) => getComputedStyle(el).backgroundColor)
+      expect(ground).not.toBe('rgb(0, 0, 0)')
+      expect(await pane.locator('.xterm-scrollable-element').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(ground)
+      expect(await pane.evaluate((el) => parseFloat(getComputedStyle(el).borderTopLeftRadius))).toBeGreaterThan(0)
+    })
+  }
+})
