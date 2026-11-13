@@ -237,7 +237,8 @@ takes time to copy. For a private repository the account cannot fetch, so the da
 the default branch to the machine the same way. ADR-0034 decision 2 and ADR-0023 decision 4 change
 for an agent's task: the push runs on the hub, and the token still never crosses ssh.
 
-**Cost: one more file that the daemon writes.** CLAUDE.md §B1's list of what the daemon writes gains one line.
+**Cost: one more file that the daemon writes.** CLAUDE.md §B1's list of what the daemon writes
+gains one line.
 
 **Cost: a restart forgets.** Waiting briefs, running tasks and the budget counts are in memory. A
 restart loses them, and the agent sends its brief again.
