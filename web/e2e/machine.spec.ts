@@ -121,7 +121,7 @@ test.describe('one machine on a busy fleet', () => {
 })
 
 test.describe('one machine that is off', () => {
-  test('is asleep, not failed, and its ssh error wraps inside the screen', async ({ page }) => {
+  test('is asleep, not failed, and its ssh error wraps inside the screen', async ({ page, size }) => {
     await scenario(page, 'busy')
     await page.goto('/m/thinkpad')
     const ready = card(page, 'Readiness')
@@ -133,6 +133,7 @@ test.describe('one machine that is off', () => {
     await expect(sessions.getByRole('button', { name: /What ssh said/ })).toHaveCount(0)
     await fits(page)
     await axe(page)
+    await screenshot(page, 'machine-off', 'busy', size)
   })
 })
 
@@ -159,6 +160,10 @@ test.describe('one device that runs no session', () => {
 
   test('passes axe', async ({ page }) => {
     await axe(page)
+  })
+
+  test('looks like the board', async ({ page, size }) => {
+    await screenshot(page, 'machine-device', 'setup', size)
   })
 })
 
