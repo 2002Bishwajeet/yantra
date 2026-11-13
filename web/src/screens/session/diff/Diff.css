@@ -18,6 +18,10 @@
   align-items: start;
 }
 
+[data-shell="desktop"] .diff__tree {
+  top: calc(64px + var(--m3-safe-top));
+}
+
 .diff__tree {
   position: sticky;
   top: 0;

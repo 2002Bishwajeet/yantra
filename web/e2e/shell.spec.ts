@@ -94,6 +94,86 @@ test.describe('the tablet rail on a scrolling page', () => {
 
 })
 
+/** Y-749: the desktop top bar is pinned and the sessions rail sticks under it. */
+test.describe('the desktop bar on a scrolling page', () => {
+  test.beforeEach(async ({ page, size }) => {
+    test.skip(size !== 'desktop', 'the pinned bar is the desktop shell')
+    await scenario(page, 'busy')
+    await page.setViewportSize({ width: 1440, height: 600 })
+  })
+
+  const bar = (page: Page) => page.locator('.shell__bar')
+  const shell = (page: Page) => page.locator('[data-shell="desktop"]')
+  const scrollY = (page: Page) => page.evaluate(() => window.scrollY)
+  const tone = (page: Page) => bar(page).evaluate((el) => getComputedStyle(el).backgroundColor)
+  const token = (page: Page, name: string) =>
+    page.evaluate((n) => {
+      const probe = document.createElement('div')
+      probe.style.backgroundColor = `var(${n})`
+      document.body.append(probe)
+      const colour = getComputedStyle(probe).backgroundColor
+      probe.remove()
+      return colour
+    }, name)
+  const toBottom = async (page: Page) => {
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
+  }
+
+  test('pins the bar and changes its tone while the page scrolls', async ({ page }) => {
+    await page.goto('/fleet')
+    await expect(heading(page, 'Fleet')).toBeVisible()
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)).toBe(true)
+    const surface = await token(page, '--md-sys-color-surface')
+    const container = await token(page, '--md-sys-color-surface-container')
+    await expect.poll(() => tone(page)).toBe(surface)
+    const mainBefore = (await page.getByRole('main').boundingBox())!
+
+    await toBottom(page)
+    expect((await bar(page).boundingBox())!.y).toBe(0)
+    await expect(shell(page)).toHaveAttribute('data-scrolled', '')
+    await expect.poll(() => tone(page)).toBe(container)
+    expect((await page.getByRole('main').boundingBox())!.y).toBeLessThan(mainBefore.y)
+
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await expect(shell(page)).not.toHaveAttribute('data-scrolled')
+    await expect.poll(() => tone(page)).toBe(surface)
+  })
+
+  test('keeps the sessions rail in place under the bar', async ({ page }) => {
+    await page.goto('/')
+    await expect(heading(page, 'Dashboard')).toBeVisible()
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    const rail = page.locator('aside.rail')
+    await expect(rail).toBeVisible()
+    await page.evaluate(() => {
+      const pad = document.createElement('div')
+      pad.style.height = '1500px'
+      document.querySelector('.shell__main')!.append(pad)
+    })
+    const before = (await rail.boundingBox())!
+    await toBottom(page)
+    const after = (await rail.boundingBox())!
+    expect(after.x).toBe(before.x)
+    expect(after.y).toBe(before.y)
+    expect(after.y).toBe((await bar(page).boundingBox())!.height)
+  })
+
+  test('does not hide a focused control under the bar', async ({ page }) => {
+    await page.goto('/fleet')
+    await expect(heading(page, 'Fleet')).toBeVisible()
+    await toBottom(page)
+    const barBottom = (await bar(page).boundingBox())!.height
+    await page.keyboard.press('Shift+Tab')
+    for (let i = 0; i < 6; i++) {
+      const box = await page.evaluate(() => document.activeElement?.getBoundingClientRect().top ?? 1e9)
+      expect(box).toBeGreaterThanOrEqual(barBottom - 1)
+      await page.keyboard.press('Shift+Tab')
+    }
+  })
+})
+
 test('draws no FAB while yantrad cannot be reached', async ({ page }) => {
   await scenario(page, 'down')
   await page.goto('/')

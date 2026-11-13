@@ -97,8 +97,15 @@ for (const [name, type, options] of looks) {
     const file = `${out}/${shot}-${name}`
     // A reviewer reading an image corrects a misspelt word without noticing (Y-660's planted fault), so the text goes beside it.
     writeFileSync(`${file}.txt`, await page.locator('body').innerText())
-    if (name === 'desktop-chromium') await page.screenshot({ path: `${file}.png`, fullPage: true })
-    else {
+    if (name === 'desktop-chromium') {
+      await page.screenshot({ path: `${file}.png`, fullPage: true })
+      // Y-749: a full-page shot cannot show the pinned bar, so a long page is shot again scrolled.
+      if (await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight)) {
+        await page.evaluate(() => window.scrollTo(0, 600))
+        await page.waitForTimeout(300)
+        await page.screenshot({ path: `${file}-scrolled.png` })
+      }
+    } else {
       // WebKit draws fixed bars mid-page in a full-page capture, over the content, so the phone is shot a screen at a time.
       const height = await page.evaluate(() => document.documentElement.scrollHeight)
       for (let n = 1, y = 0; y < height && n <= 6; n++, y += 844) {

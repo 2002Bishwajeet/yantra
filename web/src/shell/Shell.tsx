@@ -23,6 +23,7 @@ import { useSetupHome } from '@/screens/setup/progress'
 import { StatusAnnouncer } from './Announce'
 import { DESTINATIONS, isDestination, isRailed } from './destinations'
 import { useFabFocus, type FabFocus } from './fabFocus'
+import { useBarScrolled } from './useBarScrolled'
 import { useFabCollapse } from './useFabCollapse'
 import { useFormFactor } from './formFactor'
 import { useKeyboardInset } from './useKeyboardInset'
@@ -464,6 +465,7 @@ export function Shell() {
   const fab = down === null && (factor === 'tablet' || (factor === 'phone' && top)) ? primary : null
   usePublishDrawn(fab !== null)
   useFabCollapse(factor === 'phone' && fab !== null, pathname)
+  useBarScrolled(factor === 'desktop', pathname)
   const key = keyOf(fab)
   const focus = useFabFocus(key)
   const [beat, setBeat] = useState({ key, odd: false })
