@@ -12,7 +12,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { fromReading } from '@/api/client'
 import { reachWords } from '@/lib/checks'
 import { SshSaid } from './ReachFailure'
-import { sessionsFailure, type Verdict } from './verdict'
+import { chipOf, sessionsFailure, titleOf, type Verdict } from './verdict'
 
 type Row = { session: Session; workspace: string | null }
 
@@ -72,10 +72,16 @@ export function Sessions(props: {
           </Text>
           <SshSaid detail={failure.detail} kind="listing" />
         </div>
-      ) : failure ? (
-        // Y-775: Readiness owns the cause and the one "What ssh said".
+      ) : failure === verdict ? (
+        // Y-775: Readiness showed this cause and its one "What ssh said", so say it only once.
         <div className="machine__failed" role="status">
           <State state="unknown">The sessions cannot be listed</State>
+        </div>
+      ) : failure && answer?.reached === 'no' ? (
+        // R-23: Readiness did not show this cause, so Sessions does.
+        <div className="machine__failed" role="status">
+          <State state={chipOf(failure, null).state}>{titleOf(failure, machine)}</State>
+          <SshSaid detail={answer.error} />
         </div>
       ) : sessions.looked === 'failed' ? (
         <ErrorSurface.Inline error={fromReading(sessions)!} title="The sessions could not be read" />

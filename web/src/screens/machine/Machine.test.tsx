@@ -146,10 +146,12 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
     const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
     expect(await ready.findByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
+    // Readiness did not show the cause, so Sessions shows it, once.
     const sessions = card('Sessions')
-    expect(await sessions.findByText('The sessions cannot be listed')).toBeTruthy()
-    expect(sessions.queryByText('cachyos-g14 needs a browser sign-in')).toBeNull()
-    expect(sessions.queryByRole('button', { name: /What ssh said/ })).toBeNull()
+    expect(await sessions.findByText('cachyos-g14 needs a browser sign-in')).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: /What ssh said/ })).toHaveLength(1)
+    fireEvent.click(sessions.getByRole('button', { name: /What ssh said/ }))
+    expect(sessions.getByText(/Tailscale SSH requires an additional check/)).toBeTruthy()
   })
 
   /** Y-585 review: tmux's own `Permission denied` is not the appliance's key. */
@@ -339,6 +341,10 @@ describe('/m/cachyos-g14 when nothing can be reached', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('Machines could not be read')
     expect(screen.getByRole('heading', { level: 1, name: 'cachyos-g14' })).toBeTruthy()
+    // Y-775: the machine is unknown, so the page offers no ssh or sudo control.
+    for (const region of ['Readiness', 'Sessions', 'Owner terminal']) {
+      expect(screen.queryByRole('region', { name: region })).toBeNull()
+    }
   })
 
   it('is one page-sized error with Try again', async () => {
@@ -356,8 +362,8 @@ describe('/m/cachyos-g14 when nothing can be reached', () => {
 describe('a device that runs no session', () => {
   const cases = [
     ['setup', '/m/iphone', 'online', 'now'],
-    ['firstrun', '/m/pixel-tablet', 'unreachable', /^\d+ Sep$/],
-    ['setup', '/m/gaming-pc', 'unreachable', /^\d+ Sep$/],
+    ['firstrun', '/m/pixel-tablet', 'asleep', /^\d+ Sep$/],
+    ['setup', '/m/gaming-pc', 'asleep', /^\d+ Sep$/],
   ] as const
 
   for (const [name, path, word, seen] of cases) {
