@@ -11,6 +11,8 @@
 #   walk.sh shoot <worktree> <route>... screenshots and the visible text of each route, WebKit at 390 px, Chromium at
 #                                       1440 px, and of the sign-in screen when WALK_PORT+1 answers
 #                                       /machines also shoots the page of each machine whose card lists a failing check (Y-740)
+#                                       or what ssh said, and the page of each phone, tablet and Windows PC of the owner's,
+#                                       which the list hides (Y-775)
 #   walk.sh down <worktree>
 #   walk.sh mac <worktree>              runs `just test-mac` against the real Mac; exit 2 when the Mac is unreachable
 #   walk.sh publish <worktree> <pr>     pushes the screenshots to the `walks` branch and comments them on the PR
