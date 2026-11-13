@@ -150,11 +150,14 @@ describe('/fleet on the phone', () => {
 })
 
 describe('/fleet when GitHub has no grant', () => {
-  it('names the reason and links to Providers', async () => {
-    mount('desktop', '/fleet', scenario('nogrant'))
-    await screen.findByText('GitHub is not signed in', {}, { timeout: 2000 })
-    expect(screen.queryByText(/yantra github login/)).toBeNull()
-    expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/settings/providers')
+  it('draws one GitHub is not connected row with a Connect button, and none of the daemon words', async () => {
+    // The unit harness serves `/api/github` from the scenario's `github` key; the e2e server keeps the connection in `connection`.
+    mount('desktop', '/fleet', Object.assign(scenario('nogrant'), { github: contract.disconnected }))
+    await screen.findByText('GitHub is not connected', {}, { timeout: 2000 })
+    expect(screen.getAllByText('GitHub is not connected')).toHaveLength(1)
+    expect(screen.queryByText(/github login|no GitHub grant/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
   })
 })
 

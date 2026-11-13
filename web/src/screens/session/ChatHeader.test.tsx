@@ -16,17 +16,21 @@ afterEach(() => {
 /** `asked` holds the POSTs, which are the ssh reads; `reads` holds the GETs of the live states. */
 let reads: string[] = []
 let live: [number, unknown] = [200, []]
+let connection: [number, unknown] = [200, contract.github]
 
 function daemon(...replies: [number, unknown][]) {
   const asked: string[] = []
   let at = 0
   reads = []
   live = [200, []]
+  connection = [200, contract.github]
   // A thread with an open PR draws Checks, which reads the form factor; jsdom has no `matchMedia`.
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
   vi.stubGlobal(
     'fetch',
     vi.fn((path: string, init?: RequestInit) => {
+      if (path === '/api/github') return Promise.resolve(answer(...connection))
+      if (path === '/api/readiness/github') return Promise.resolve(answer(200, contract.githubReadiness))
       if (!init?.method || init.method === 'GET') {
         reads.push(path)
         return Promise.resolve(answer(...live))
@@ -182,13 +186,27 @@ describe('the thread menu', () => {
     expect(router.history.length).toBe(before)
   })
 
-  it('shows an unknown PR with its reason and keeps the list', async () => {
+  it('shows an unknown PR with its reason and keeps the list while a grant is held', async () => {
     daemon([200, contract.threads])
     await show()
     await openMenu()
     expect(await screen.findByText('no GitHub grant — run `yantra github login`')).toBeTruthy()
     expect(await rows()).toHaveLength(5)
     expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText('GitHub is not connected')).toBeNull()
+  })
+
+  it('hides the daemon reason with no grant, keeps the PR unknown mark, and offers Connect GitHub', async () => {
+    daemon([200, contract.threads])
+    connection = [200, contract.disconnected]
+    await show()
+    await openMenu()
+    expect(await screen.findByText('GitHub is not connected')).toBeTruthy()
+    expect(await rows()).toHaveLength(5)
+    expect(screen.getByText('PR unknown')).toBeTruthy()
+    expect(screen.queryByText(/github login/)).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Connect GitHub' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
   })
 
   it('marks an offline thread with a word and when it was seen, and a gone one as gone', async () => {
@@ -275,6 +293,7 @@ describe('the thread menu', () => {
 
   it('draws a pending state while the read is out', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
     await show()
     await openMenu()
     await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeTruthy())

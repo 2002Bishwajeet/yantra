@@ -10,6 +10,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
+import { NotConnected } from '@/screens/settings/NotConnected'
 import { pickWorkspaces, type Choice } from './issuePick'
 
 /** What a refusal of `threads/new` means here. A status alone is ambiguous: 409 is
@@ -163,17 +164,11 @@ function Pick(props: { choice: Choice; issue: string }) {
       )}
       {choice.reason ? <Text scale="body-small" tone="variant">{choice.reason}</Text> : null}
       {open.error ? (
-        <ErrorSurface.Inline
-          action={
-            noSignIn(open.error) ? (
-              <Button render={<Link params={{ category: 'providers' }} to="/settings/$category" />} role="link" variant="text">
-                Sign in
-              </Button>
-            ) : undefined
-          }
-          error={explain(open.error)}
-          title="The session could not be started"
-        />
+        noSignIn(open.error) ? (
+          <NotConnected why="Connect GitHub to read the issue, then start the session." />
+        ) : (
+          <ErrorSurface.Inline error={explain(open.error)} title="The session could not be started" />
+        )
       ) : null}
     </div>
   )

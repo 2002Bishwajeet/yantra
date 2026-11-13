@@ -6,7 +6,7 @@ import type { Repo } from '@/api'
 import { asApiError } from '@/api/errors'
 import { useGithub, useGithubReadiness, useHiddenOrgs, useRepos } from '@/api/hooks'
 import { dirsQuery } from '@/api/queries'
-import { grant, grantPage, hiddenNote, REFUSED } from '@/lib/github'
+import { grant, grantPage, hiddenNote, lacksGrant } from '@/lib/github'
 import { derive } from '@/lib/name'
 import { at } from '@/lib/time'
 import { Chevron, Control, Icon, Label } from '@/composer/Control'
@@ -18,6 +18,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { IconTile } from '@/m3/tile/Tile'
+import { NotConnected } from '@/screens/settings/NotConnected'
 import { KeptReading } from '@/screens/fleet/KeptReading'
 import { useTick } from '@/useTick'
 import { CloneFolder } from './CloneFolder'
@@ -31,13 +32,6 @@ function pushed(repo: Repo, now: number): string {
   const read = at(repo.pushed_at, now)
   if (!read) return `pushed ${repo.pushed_at}`
   return /^\d+[smh]$/.test(read.text) ? `pushed ${read.text} ago` : `pushed ${read.text}`
-}
-
-const notSignedIn = {
-  kind: 'refused' as const,
-  said: '',
-  retryable: false,
-  describe: () => 'Nothing is signed in to Yantra, so no repository can be listed.',
 }
 
 /** The one place the account shows: the chip names the login, the menu holds what it can do.
@@ -192,46 +186,9 @@ export function GithubRepos(props: { form: SessionForm; values: Values }) {
   if (github.error) {
     return <ErrorSurface.Inline error={asApiError(github.error)} reset={() => void github.refetch()} title="GitHub" />
   }
-  if (github.data && !github.data.connected) {
-    return (
-      <ErrorSurface.Inline
-        action={
-          <Button
-            render={<Link params={{ category: 'providers' }} to="/settings/$category" />}
-            role="link"
-            variant="tonal"
-          >
-            Sign in in Settings
-          </Button>
-        }
-        error={notSignedIn}
-        title="GitHub is not signed in"
-      />
-    )
-  }
-
   const held = grant(github.data, readiness)
-  if (held.kind === 'refused') {
-    return (
-      <ErrorSurface.Inline
-        action={
-          <Button
-            render={<Link params={{ category: 'providers' }} to="/settings/$category" />}
-            role="link"
-            variant="tonal"
-          >
-            Sign in again in Settings
-          </Button>
-        }
-        error={{
-          kind: 'refused',
-          said: readiness.looked === 'ok' ? readiness.data.detail : '',
-          retryable: false,
-          describe: () => `${REFUSED} — it was revoked or replaced, so no repository can be listed`,
-        }}
-        title={REFUSED}
-      />
-    )
+  if (lacksGrant(held)) {
+    return <NotConnected refused={held.kind === 'refused'} why="Connect GitHub to list and search your repositories." />
   }
 
   return (

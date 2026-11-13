@@ -457,8 +457,6 @@ describe('merge', () => {
   it.each([
     [409, 'GitHub will not merge the pull request: Pull Request is not mergeable', 'The merge was refused'],
     [409, 'the merge names no head; reload the dashboard, read the pull request again and confirm', 'The merge was refused'],
-    [409, 'no GitHub grant — run `yantra github login`', 'No GitHub grant'],
-    [403, 'this node is not the owner', 'No GitHub grant'],
     [502, 'GitHub answered 500 to the merge', 'GitHub did not merge'],
     [503, 'ssh: no route to host', 'The machine did not answer'],
   ] as const)('draws a %s merge saying "%s" in the dialog, and retries it', async (status, said, title) => {
@@ -533,6 +531,22 @@ describe('merge', () => {
     open({ diffs: 0, listed })
     const alert = await within(await confirm()).findByRole('alert')
     expect(within(alert).getByRole('heading', { name: 'The daemon did not answer' })).toBeTruthy()
+  })
+
+  it.each([
+    [409, 'no GitHub grant — run `yantra github login`'],
+    [403, 'this node is not the owner'],
+  ] as const)('draws a %s merge saying "%s" as Connect, without the daemon words', async (status, said) => {
+    daemon({ merge: [status, said] })
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    fireEvent.click(within(asked).getByRole('button', { name: 'Merge' }))
+    expect(await within(asked).findByText('GitHub is not connected')).toBeTruthy()
+    expect(within(asked).queryByText(said)).toBeNull()
+    expect(within(asked).queryByRole('alert')).toBeNull()
+    fireEvent.click(within(asked).getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
   })
 
   it.each([

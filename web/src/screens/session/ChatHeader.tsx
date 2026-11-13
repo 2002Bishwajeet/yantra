@@ -10,8 +10,11 @@ import { createPortal } from 'react-dom'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { ChevronDown, Diff, Plus, SquareTerminal } from 'lucide-react'
 import type { ChatTarget } from '@/api/chat'
+import { useGithub, useGithubReadiness } from '@/api/hooks'
 import { useThreads } from '@/api/mutations'
 import { useThreadStates } from '@/api/queries'
+import { grant } from '@/lib/github'
+import { ConnectSheet } from '@/screens/settings/ConnectSheet'
 import { useTick } from '@/useTick'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -99,6 +102,9 @@ function WorkspaceHeader(props: ChatHeaderProps & { workspace: string }) {
   useEffect(() => onReadOnly?.(readOnly), [onReadOnly, readOnly])
   const groupId = useId()
   const noTerminal = useId()
+  // The daemon's per-thread PR reason names the CLI when no grant is held, so the menu says it once and offers the sign-in (Y-753).
+  const unconnected = grant(useGithub().data, useGithubReadiness()).kind === 'none'
+  const [connecting, setConnecting] = useState(false)
 
   useRegisterLoopCommands(into === null ? [] : [{ id: 'diff', disabled: false, reason: null }], () => diff.onToggle())
   if (into === null) return null
@@ -197,7 +203,7 @@ function WorkspaceHeader(props: ChatHeaderProps & { workspace: string }) {
                           <State className="threads__pr" state={mark.state}>
                             {mark.word}
                           </State>
-                          {one.pr.state === 'unknown' && !presence ? (
+                          {one.pr.state === 'unknown' && !presence && !unconnected ? (
                             <Text className="threads__said" scale="body-small" tone="variant">
                               {one.pr.said}
                             </Text>
@@ -208,6 +214,14 @@ function WorkspaceHeader(props: ChatHeaderProps & { workspace: string }) {
                   </div>
                 ))
               : null}
+            {unconnected ? (
+              <div aria-labelledby={`${groupId}-github`} className="threads__group" role="group">
+                <Text id={`${groupId}-github`} scale="body-small" tone="variant">
+                  GitHub is not connected
+                </Text>
+                <MenuItem onClick={() => setConnecting(true)}>Connect GitHub</MenuItem>
+              </div>
+            ) : null}
             <MenuSeparator />
             <MenuItem closeOnClick={false} disabled={threads.isPending} onClick={() => mutate()}>
               Refresh threads
@@ -262,6 +276,7 @@ function WorkspaceHeader(props: ChatHeaderProps & { workspace: string }) {
       <span aria-live="polite" className="chat__added">
         {added ? 'Comment added to your message.' : ''}
       </span>
+      <ConnectSheet onOpenChange={setConnecting} open={connecting} />
     </header>
   )
   return into ? createPortal(header, into) : header

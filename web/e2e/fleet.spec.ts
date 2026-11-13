@@ -195,3 +195,16 @@ test('the last card on the phone clears the floating action button', async ({ pa
   const button = (await fab.boundingBox())!
   expect(last.y + last.height).toBeLessThanOrEqual(button.y + 0.5)
 })
+
+/** Y-753: the same row on /fleet. */
+test.describe('the fleet when GitHub has no grant', () => {
+  test('draws one GitHub is not connected row and no daemon sentence', async ({ page }) => {
+    await scenario(page, 'nogrant')
+    await page.goto('/fleet')
+    await expect(page.getByText(/^looked /)).toBeVisible({ timeout: 15_000 })
+    await expect(band(page, 'Needs you').getByText('GitHub is not connected')).toHaveCount(1)
+    await expect(page.getByText(/github login/)).toHaveCount(0)
+    await page.getByRole('button', { name: 'Connect' }).click()
+    await expect(page.getByRole('dialog', { name: 'Connect GitHub' })).toBeVisible()
+  })
+})

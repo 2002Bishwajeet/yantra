@@ -88,10 +88,7 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
     next: 'The PR got a new head after this dialog read it, so nothing was merged. Read the PR again, look at the new head, then merge.',
   },
   mergeGithub: { title: 'GitHub did not merge', next: 'GitHub did not take the merge. Try again in a moment.' },
-  noGrant: {
-    title: 'No GitHub grant',
-    next: 'The daemon cannot write to GitHub for you. Run `yantra github login` on the appliance, then try again.',
-  },
+  noGrant: { title: 'GitHub is not connected', next: 'Connect GitHub, then try again.' },
   removeRefused: {
     title: 'The worktree was not removed',
     next: 'git on the machine kept the worktree or its branch. Try again, or remove it there.',
@@ -142,18 +139,22 @@ export class GitFailure {
 function conflict(action: GitAction, said: string): GitFailureKind {
   if (/running/i.test(said)) return 'turnRunning'
   if (/tmux server/i.test(said)) return 'noLogin'
-  if (/github login/i.test(said)) return 'noGrant'
   if (/head moved/i.test(said)) return 'mergeHeadMoved'
   if (action === 'draft') return /nothing to commit/i.test(said) ? 'draftNothing' : 'other'
   return byStatus[action][409] ?? 'other'
 }
+
+// The daemon's words for a missing grant name the CLI, so only they tell it from any other refusal (Y-753).
+const NO_GRANT = /no github grant|github login/i
 
 export function gitFailure(action: GitAction, cause: unknown): GitFailure {
   const error = asApiError(cause)
   const kind: GitFailureKind =
     error.kind === 'network'
       ? 'network'
-      : error.status === 404
+      : NO_GRANT.test(error.said)
+        ? 'noGrant'
+        : error.status === 404
         ? 'noThread'
         : error.status === 503
           ? 'unreachable'

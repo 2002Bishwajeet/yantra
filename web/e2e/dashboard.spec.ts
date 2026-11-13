@@ -144,3 +144,26 @@ test.describe('the dashboard in the dark', () => {
     await screenshot(page, 'dashboard-dark', 'busy', size)
   })
 })
+
+/** Y-753: with no GitHub grant the hero says so once, in words of its own, and offers the sign-in in place. */
+test.describe('the dashboard when GitHub has no grant', () => {
+  test.beforeEach(async ({ page }) => {
+    await scenario(page, 'nogrant')
+    await page.goto('/')
+    await firstReading(page)
+  })
+
+  test('draws one GitHub is not connected row, with no count and no daemon sentence', async ({ page }) => {
+    const hero = region(page, 'Needs you')
+    await expect(hero.getByText('GitHub is not connected')).toHaveCount(1)
+    await expect(page.getByText('GitHub is not connected')).toHaveCount(1)
+    await expect(hero.getByText(/waiting on you/)).toHaveCount(0)
+    await expect(page.getByText(/github login/)).toHaveCount(0)
+    await axe(page)
+  })
+
+  test('opens the sign-in from Connect', async ({ page }) => {
+    await region(page, 'Needs you').getByRole('button', { name: 'Connect' }).click()
+    await expect(page.getByRole('dialog', { name: 'Connect GitHub' })).toBeVisible()
+  })
+})

@@ -51,6 +51,16 @@ describe('gitFailure', () => {
     expect(gitFailure(action, refused(409, said)).kind).toBe(kind)
   })
 
+  it.each<GitAction>(['draft', 'commit', 'push', 'pr', 'merge', 'remove'])(
+    'a %s refusal that names the missing grant is noGrant, with no CLI in its words',
+    (action) => {
+      const failure = gitFailure(action, refused(409, 'no GitHub grant — run `yantra github login`'))
+      expect(failure.kind).toBe('noGrant')
+      expect(failure.title).toBe('GitHub is not connected')
+      expect(failure.describe()).toBe('Connect GitHub, then try again.')
+    },
+  )
+
   it.each<GitAction>(['draft', 'commit', 'push'])('a %s 409 saying a turn or a revert is running is turnRunning', (action) => {
     expect(gitFailure(action, refused(409, 'a turn or a revert is running')).kind).toBe('turnRunning')
   })

@@ -3,7 +3,7 @@
   "attention": {
     "looked": "failed",
     "age_seconds": 0,
-    "error": "no GitHub grant: nothing is signed in here, so reviews, issues and repositories cannot be read"
+    "error": "no GitHub grant — run `yantra github login`"
   },
   "github": {
     "looked": "ok",

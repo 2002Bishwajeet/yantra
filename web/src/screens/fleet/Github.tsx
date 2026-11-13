@@ -1,7 +1,7 @@
-import { Link } from '@tanstack/react-router'
 import { ArrowUpRight, CircleDot, GitPullRequest } from 'lucide-react'
 import type { Attention, Item } from '@/api'
 import type { Reading } from '@/api/hooks'
+import { lacksGrant, QUEUE_WHY, type Grant } from '@/lib/github'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { State } from '@/m3/mark/Mark'
@@ -13,17 +13,14 @@ import { useFormFactor } from '@/shell/formFactor'
 import { Ago } from './age'
 import { KeptReading } from './KeptReading'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
+import { NotConnected } from '@/screens/settings/NotConnected'
 import { StartSession } from './StartSession'
-
-/** D6 §3.4: the daemon's reasons are already instructions, and the one about
- *  a missing sign-in has a page to send a reader to. */
-const GRANTLESS = /grant|logged in|signed in|auth login/i
 
 /** D6 §3: a block inside `Needs you`, under its own heading, because a
  *  crashed agent on your own fleet is more urgent than a review request. Its
  *  links open GitHub and nothing else. */
-export function Github(props: { attention: Reading<Attention> }) {
-  const { attention } = props
+export function Github(props: { attention: Reading<Attention>; grant: Grant }) {
+  const { attention, grant } = props
 
   return (
     <section aria-labelledby="fleet-github" className="github">
@@ -56,7 +53,7 @@ export function Github(props: { attention: Reading<Attention> }) {
 
       {attention.looked === 'never' ? <EmptyState state="unknown" title="GitHub not looked at yet" /> : null}
 
-      {attention.looked === 'failed' ? <Failed error={attention.error} /> : null}
+      {attention.looked === 'failed' ? <Failed error={attention.error} grant={grant} /> : null}
 
       {attention.looked === 'ok' ? (
         <div className="github__groups">
@@ -68,23 +65,20 @@ export function Github(props: { attention: Reading<Attention> }) {
   )
 }
 
-/** Y-743: a missing grant is a step for the owner, so it gets a sentence and
- *  a button, never the daemon's CLI hint. Any other reason is shown as said,
- *  with its backticked commands drawn as code. */
-function Failed(props: { error: string }) {
-  const { error } = props
-  const grantless = GRANTLESS.test(error)
+/** Y-753: a missing or refused grant is one row with a Connect button, read from the daemon's
+ *  connection and not from its words. Any other reason is shown as said, with its backticked
+ *  commands drawn as code. */
+function Failed(props: { error: string; grant: Grant }) {
+  const { error, grant } = props
+  if (lacksGrant(grant)) {
+    return <NotConnected refused={grant.kind === 'refused'} why={QUEUE_WHY} />
+  }
   return (
     <div className="github__failed" role="status">
-      <State state="failed">{grantless ? 'GitHub is not signed in' : 'GitHub could not be read'}</State>
+      <State state="failed">GitHub could not be read</State>
       <Text render={<p />} className="github__error" scale="body-medium">
-        {grantless ? 'Sign in to see the reviews and issues that wait on you.' : <Said text={error} />}
+        <Said text={error} />
       </Text>
-      {grantless ? (
-        <Button render={<Link params={{ category: 'providers' }} to="/settings/$category" />} role="link" variant="text">
-          Sign in
-        </Button>
-      ) : null}
     </div>
   )
 }

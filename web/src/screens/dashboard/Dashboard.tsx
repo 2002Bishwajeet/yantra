@@ -17,6 +17,8 @@ import {
   loaded,
   useAgents,
   useAttention,
+  useGithub,
+  useGithubReadiness,
   useMachines,
   useNotifications,
   useSessions,
@@ -24,7 +26,9 @@ import {
   type Reading,
 } from '@/api/hooks'
 import { readAgain } from '@/api/queries'
+import { grant, lacksGrant, QUEUE_WHY, type Grant } from '@/lib/github'
 import { ago, at } from '@/lib/time'
+import { NotConnected } from '@/screens/settings/NotConnected'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
@@ -307,11 +311,13 @@ function Hero(props: {
   /** Counted over the live bands: the rows above may be held (D3 §4.4), the number may not. */
   count: number
   attention: Reading<Attention>
+  /** What `/api/github` says is held, so a missing grant is not drawn from the daemon's sentence (Y-753). */
+  github: Grant
   events: Event[]
   now: number
   retry: () => void
 }) {
-  const { rows, count, attention, events, now, retry } = props
+  const { rows, count, attention, github, events, now, retry } = props
   // D7 §3.1: where the FAB carries New session, this copy is not also filled.
   const carried = useFab() !== null
   const empty = count === 0 && rows.length === 0 && attention.looked === 'ok'
@@ -321,7 +327,7 @@ function Hero(props: {
         <Eyebrow render={<h2 />} className="dash__hero-eyebrow" id="dash-needs">
           Needs you
         </Eyebrow>
-        {empty ? null : (
+        {empty || attention.looked !== 'ok' ? null : (
           <>
             <span className="dash__hero-n">{count}</span>
             <Text className="dash__hero-words" scale="title-medium">
@@ -368,7 +374,11 @@ function Hero(props: {
               <KeptReading reading={attention} />
             </>
           ) : attention.looked === 'failed' ? (
-            <ErrorSurface.Inline error={fromReading(attention)!} reset={retry} title="GitHub could not be read" />
+            lacksGrant(github) ? (
+              <NotConnected refused={github.kind === 'refused'} why={QUEUE_WHY} />
+            ) : (
+              <ErrorSurface.Inline error={fromReading(attention)!} reset={retry} title="GitHub could not be read" />
+            )
           ) : attention.looked === 'never' ? (
             <NotLooked what="GitHub has" />
           ) : (
@@ -722,6 +732,7 @@ export function Dashboard() {
   const agents = fleetEmpty ? NO_AGENTS : read
   // The fifth is on the daemon's 300 s clock and stamps itself (D6 §2).
   const attention = useAttention()
+  const github = grant(useGithub().data, useGithubReadiness())
   const notifications = useNotifications()
   const events = asEvents(notifications.data)
   const client = useQueryClient()
@@ -816,7 +827,7 @@ export function Dashboard() {
       {headed ? null : strip}
       {gate.passed ? (
         <ErrorBoundary layout="inline" title="Finish setup could not be drawn">
-          <FinishSetup now={now} />
+          <FinishSetup githubInHero={attention.looked === 'failed' && lacksGrant(github)} now={now} />
         </ErrorBoundary>
       ) : null}
       {changed > 0 ? (
@@ -842,6 +853,7 @@ export function Dashboard() {
           <ErrorBoundary eyebrow="Needs you" title="Needs you could not be drawn">
             <Hero
               attention={attention}
+              github={github}
               count={waiting(live, attention.looked === 'ok' ? attention.data : null)}
               events={events}
               now={now}
