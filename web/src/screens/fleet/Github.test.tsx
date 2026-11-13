@@ -12,6 +12,8 @@ afterEach(() => {
 })
 
 const looked = (data: unknown) => ({ looked: 'ok', age_seconds: 0, data })
+const held = { kind: 'accepted', login: 'me' } as const
+
 const attention = { looked: 'ok', age_seconds: 0, data: contract.attention.data } as const as {
   looked: 'ok'
   age_seconds: number
@@ -56,7 +58,7 @@ function daemon(replies: Replies = {}) {
 const issues = () => within(screen.getByRole('heading', { name: 'Issues' }).closest('.github__group') as HTMLElement)
 
 async function open() {
-  await renderInApp(<Github attention={attention} />)
+  await renderInApp(<Github attention={attention} grant={held} />)
   fireEvent.click(await screen.findByRole('button', { name: 'Start session on 2002Bishwajeet/yantra#118' }))
   return screen.findByRole('dialog')
 }
@@ -64,7 +66,7 @@ async function open() {
 describe('Start session', () => {
   it('is on every issue and on no review', async () => {
     daemon()
-    await renderInApp(<Github attention={attention} />)
+    await renderInApp(<Github attention={attention} grant={held} />)
     expect(await issues().findAllByRole('button', { name: /^Start session on / })).toHaveLength(contract.attention.data.issues.length)
     expect(screen.getAllByRole('button', { name: /^Start session on / })).toHaveLength(contract.attention.data.issues.length)
   })
@@ -86,7 +88,7 @@ describe('Start session', () => {
   it('offers New session when no workspace holds the repository', async () => {
     daemon()
     const other = { ...contract.attention.data.issues[0]!, repo: '2002Bishwajeet/homelab-k8s', number: 31 }
-    await renderInApp(<Github attention={{ ...attention, data: { ...attention.data, issues: [other] } }} />)
+    await renderInApp(<Github attention={{ ...attention, data: { ...attention.data, issues: [other] } }} grant={held} />)
     fireEvent.click(await screen.findByRole('button', { name: 'Start session on 2002Bishwajeet/homelab-k8s#31' }))
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByText('No workspace holds this repository')).toBeTruthy()
@@ -105,7 +107,6 @@ describe('Start session', () => {
     [400, 'o/r#1 is a pull request, not an issue', 'The daemon refused the request.'],
     [404, 'workspace `site` not found', 'The daemon does not know that workspace.'],
     [404, 'GitHub answered 404 to the issue', 'GitHub has no such issue, or the sign-in cannot see it.'],
-    [409, grant, 'The daemon holds no GitHub sign-in, so it cannot read the issue.'],
     [409, 'git worktree add failed: branch already exists', 'The workspace already has a worktree or branch for this issue.'],
     [502, 'GitHub returned 500', 'GitHub did not answer.'],
     [503, 'ssh timed out', 'The workspace machine did not answer.'],
@@ -119,9 +120,18 @@ describe('Start session', () => {
     expect(alert.textContent).toContain('The session could not be started')
     expect(alert.textContent).toContain(sentence)
     expect(alert.textContent).toContain(said)
-    const sign = within(alert).queryByRole('link', { name: 'Sign in' })
-    if (said === grant) expect(sign?.getAttribute('href')).toBe('/settings/providers')
-    else expect(sign).toBeNull()
+    expect(within(alert).queryByRole('button', { name: 'Connect' })).toBeNull()
+  })
+
+  it('draws a 409 for a missing grant as the Connect row, without the daemon words', async () => {
+    daemon({ 'POST /api/workspaces/*/threads/new': [409, grant] })
+    const dialog = await open()
+    const list = await within(dialog).findByRole('list', { name: 'Workspaces that hold this repository' })
+    fireEvent.click(within(list).getAllByRole('button')[0]!)
+    expect(await within(dialog).findByText('GitHub is not connected')).toBeTruthy()
+    expect(within(dialog).queryByRole('alert')).toBeNull()
+    expect(within(dialog).queryByText(/github login/)).toBeNull()
+    expect(within(dialog).getByRole('button', { name: 'Connect' })).toBeTruthy()
   })
 
   it('says the match is by folder name when the path does not end in owner/repo', async () => {
@@ -146,7 +156,7 @@ describe('the GitHub queue', () => {
 
   it('lists reviews before issues, each row with the reason it needs you', async () => {
     daemon()
-    await renderInApp(<Github attention={attention} />)
+    await renderInApp(<Github attention={attention} grant={held} />)
     const headings = screen.getAllByRole('heading', { level: 4 }).map((one) => one.textContent)
     expect(headings).toEqual(['Reviews', 'Issues'])
     for (const row of items('Reviews')) expect(within(row).getByText('review requested')).toBeTruthy()
@@ -155,7 +165,7 @@ describe('the GitHub queue', () => {
 
   it('gives every row one actions slot, the primary action first', async () => {
     daemon()
-    await renderInApp(<Github attention={attention} />)
+    await renderInApp(<Github attention={attention} grant={held} />)
     for (const row of [...items('Reviews'), ...items('Issues')]) {
       expect(row.querySelectorAll('.github__actions')).toHaveLength(1)
     }
@@ -170,53 +180,72 @@ describe('the GitHub queue', () => {
 
   it('links the count as plain text, "Open N on GitHub"', async () => {
     daemon()
-    await renderInApp(<Github attention={attention} />)
+    await renderInApp(<Github attention={attention} grant={held} />)
     const link = screen.getByRole('link', { name: `Open ${contract.attention.data.notifications} on GitHub` })
     expect(link.getAttribute('href')).toBe('https://github.com/notifications')
   })
 
   it('draws a skeleton while pending', async () => {
     daemon()
-    await renderInApp(<Github attention={{ looked: 'pending' }} />)
+    await renderInApp(<Github attention={{ looked: 'pending' }} grant={held} />)
     expect(document.querySelector('.github__pending[aria-busy="true"]')).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Reviews' })).toBeNull()
   })
 
   it('says GitHub was never looked at', async () => {
     daemon()
-    await renderInApp(<Github attention={{ looked: 'never' } as never} />)
+    await renderInApp(<Github attention={{ looked: 'never' } as never} grant={held} />)
     expect(screen.getByText('GitHub not looked at yet')).toBeTruthy()
   })
 
-  it('names the failure and links a missing sign-in to Providers', async () => {
+  it('draws a missing grant as one row with a Connect button that opens the sign-in', async () => {
     daemon()
     await renderInApp(
-      <Github attention={{ looked: 'failed', age_seconds: 0, error: 'no GitHub grant — run `yantra github login`' }} />,
+      <Github
+        attention={{ looked: 'failed', age_seconds: 0, error: 'no GitHub grant — run `yantra github login`' }}
+        grant={{ kind: 'none' }}
+      />,
     )
-    expect(screen.getByText('GitHub is not signed in')).toBeTruthy()
-    expect(screen.getByText('Sign in to see the reviews and issues that wait on you.')).toBeTruthy()
-    // Y-743: the daemon's CLI hint is for a shell, not for this card.
+    expect(screen.getByText('GitHub is not connected')).toBeTruthy()
+    expect(screen.getByText('Connect to see the reviews and issues that wait on you.')).toBeTruthy()
+    // Y-743, Y-753: the daemon's CLI hint is for a shell, not for this card.
     expect(screen.queryByText(/yantra github login/)).toBeNull()
-    expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/settings/providers')
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
+  })
+
+  it('draws a refused grant as REFUSED with Sign in again', async () => {
+    daemon()
+    await renderInApp(
+      <Github
+        attention={{ looked: 'failed', age_seconds: 0, error: 'GitHub refused the grant — run `yantra github login`' }}
+        grant={{ kind: 'refused', login: 'me' }}
+      />,
+    )
+    expect(screen.getByText('GitHub refused the grant')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
   })
 
   it('shows any other reason as said, with its commands drawn as code and no backticks', async () => {
     daemon()
     await renderInApp(
-      <Github attention={{ looked: 'failed', age_seconds: 0, error: 'GitHub answered 502 — run `yantra doctor`' }} />,
+      <Github
+        attention={{ looked: 'failed', age_seconds: 0, error: 'GitHub answered 502 — run `yantra doctor`' }}
+        grant={held}
+      />,
     )
     expect(screen.getByText('GitHub could not be read')).toBeTruthy()
     const code = screen.getByText('yantra doctor')
     expect(code.tagName).toBe('CODE')
     expect(code.closest('p')?.textContent).toBe('GitHub answered 502 — run yantra doctor')
-    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
     expect(screen.queryByRole('button', { name: /retrying/ })).toBeNull()
   })
 
   /** Y-745: one failed read is not a failure. The items stay and the stamp is an age. */
   it('keeps the items of a reading whose last read failed, and marks it as old and not as failed', async () => {
     daemon()
-    await renderInApp(<Github attention={{ ...contract.attentionRetrying, age_seconds: 372 }} />)
+    await renderInApp(<Github attention={{ ...contract.attentionRetrying, age_seconds: 372 }} grant={held} />)
     expect(items('Reviews')).toHaveLength(contract.attentionRetrying.data.reviews.length)
     expect(items('Issues')).toHaveLength(contract.attentionRetrying.data.issues.length)
     const stamp = screen.getByRole('button', { name: 'as of 6m · retrying' })
@@ -232,7 +261,7 @@ describe('the GitHub queue', () => {
 
   it('gives the reason of the failed read when the stamp is pressed', async () => {
     daemon()
-    await renderInApp(<Github attention={{ ...contract.attentionRetrying, age_seconds: 372 }} />)
+    await renderInApp(<Github attention={{ ...contract.attentionRetrying, age_seconds: 372 }} grant={held} />)
     const stamp = screen.getByRole('button', { name: 'as of 6m · retrying' })
     expect(stamp.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(stamp)
@@ -244,7 +273,7 @@ describe('the GitHub queue', () => {
 
   it('stamps a fresh reading with the clock it is read on, and offers no reason', async () => {
     daemon()
-    await renderInApp(<Github attention={attention} />)
+    await renderInApp(<Github attention={attention} grant={held} />)
     expect(items('Reviews').length).toBeGreaterThan(0)
     expect(screen.getByText(/read every 5 min/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: /retrying/ })).toBeNull()

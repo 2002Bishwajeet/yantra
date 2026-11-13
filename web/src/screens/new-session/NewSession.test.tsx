@@ -251,10 +251,9 @@ describe('step 2, where the code comes from', () => {
     await screen.findByRole('dialog', { name: 'New session' })
     press('cachyos-g14')
     press('Continue')
-    expect(await screen.findByText('GitHub is not signed in')).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Sign in in Settings' }).getAttribute('href')).toBe(
-      '/settings/providers',
-    )
+    expect(await screen.findByText('GitHub is not connected')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /Sign in/ })).toBeNull()
     expect(screen.queryByText(/GitLab/)).toBeNull()
     expect(screen.getAllByRole('radio').map((one) => one.textContent)).toEqual(['GitHub', 'Local directory'])
     expect(screen.getByRole('status').textContent).toBe('')
@@ -267,9 +266,7 @@ describe('step 2, where the code comes from', () => {
     press('cachyos-g14')
     press('Continue')
     expect(await screen.findByText('GitHub refused the grant')).toBeTruthy()
-    expect(screen.getByRole('link', { name: 'Sign in again in Settings' }).getAttribute('href')).toBe(
-      '/settings/providers',
-    )
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
     expect(screen.queryByText(/private repositories included/)).toBeNull()
     expect(screen.queryByRole('list', { name: 'Repositories' })).toBeNull()
     expect(screen.getByRole('status').textContent).toBe('')

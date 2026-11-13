@@ -1,0 +1,21 @@
+.not-connected {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.not-connected__text {
+  display: flex;
+  flex: 1 1 16rem;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.not-connected__text p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.not-connected .m3-button {
+  min-height: 48px;
+}

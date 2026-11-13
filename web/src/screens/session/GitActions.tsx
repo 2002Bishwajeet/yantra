@@ -13,6 +13,7 @@ import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Mono } from '@/m3/text/Text'
 import { IconTile } from '@/m3/tile/Tile'
+import { NotConnected } from '@/screens/settings/NotConnected'
 import { gitFailure, type GitFailure } from './git'
 import { buildMenuItems, resolveQuickAction, type GitVerb } from './gitActions.logic'
 import './GitActions.css'
@@ -21,6 +22,7 @@ type Pr = { number: number; url: string; state: 'open' | 'merged' }
 
 function Failure(props: { failure: GitFailure; retry: () => void }) {
   const { failure, retry } = props
+  if (failure.kind === 'noGrant') return <NotConnected className="git__fail" why={failure.describe()} />
   return <ErrorSurface.Inline className="git__fail" error={failure} reset={retry} title={failure.title} />
 }
 

@@ -1,7 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { Info, KeyRound, MessagesSquare, Settings as SettingsIcon } from 'lucide-react'
 import { REFUSED } from '@/lib/github'
-import { Text } from '@/m3/text/Text'
 import { Menu, MenuLinkItem, MenuPopup } from '@/m3/menu/Menu'
 import { guardOutsidePress, useReady, type PopupProps } from './useReady'
 
@@ -19,13 +18,7 @@ export function AccountMenu(props: PopupProps & { refused: boolean }) {
             icon={<KeyRound />}
             render={<Link params={{ category: 'providers' }} to="/settings/$category" />}
           >
-            <span>
-              {REFUSED} · sign in again
-              <br />
-              <Text render={<span />} scale="label-small" tone="variant">
-                or run yantra github login
-              </Text>
-            </span>
+            <span>{REFUSED} · sign in again</span>
           </MenuLinkItem>
         ) : null}
         <MenuLinkItem closeOnClick icon={<MessagesSquare />} render={<Link to="/rooms" />}>

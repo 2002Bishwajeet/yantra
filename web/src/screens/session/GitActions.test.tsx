@@ -457,8 +457,6 @@ describe('merge', () => {
   it.each([
     [409, 'GitHub will not merge the pull request: Pull Request is not mergeable', 'The merge was refused'],
     [409, 'the merge names no head; reload the dashboard, read the pull request again and confirm', 'The merge was refused'],
-    [409, 'no GitHub grant — run `yantra github login`', 'No GitHub grant'],
-    [403, 'this node is not the owner', 'No GitHub grant'],
     [502, 'GitHub answered 500 to the merge', 'GitHub did not merge'],
     [503, 'ssh: no route to host', 'The machine did not answer'],
   ] as const)('draws a %s merge saying "%s" in the dialog, and retries it', async (status, said, title) => {
@@ -507,8 +505,6 @@ describe('merge', () => {
 
   it.each([
     [409, "the thread's branch has no open PR; open one first with `yantra pr open`", 'The PR could not be read'],
-    [409, 'no GitHub grant — run `yantra github login`', 'No GitHub grant'],
-    [403, 'this node is not the owner', 'No GitHub grant'],
     [502, 'GitHub answered 500 to the pull request', 'GitHub did not send the PR'],
     [503, 'ssh: no route to host', 'The machine did not answer'],
   ] as const)('draws a %s read saying "%s", keeps Merge off, and reads again', async (status, said, title) => {
@@ -528,11 +524,63 @@ describe('merge', () => {
     expect(log.map((one) => one.path)).toEqual([`${base}/pending`, `${base}/pending`])
   })
 
+  it('draws a 403 read as the daemon said it, not as Connect', async () => {
+    daemon({ pending: [403, 'this node is not the owner'] })
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    const alert = await within(asked).findByRole('alert')
+    expect(within(alert).getByText('this node is not the owner')).toBeTruthy()
+    expect(within(asked).queryByText('GitHub is not connected')).toBeNull()
+    expect(within(asked).queryByRole('button', { name: 'Connect' })).toBeNull()
+    expect(mergeButton(asked).disabled).toBe(true)
+  })
+
+  it.each([
+    [409, 'no GitHub grant — run `yantra github login`'],
+  ] as const)('draws a %s read saying "%s" as Connect, keeps Merge off', async (status, said) => {
+    daemon({ pending: [status, said] })
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    expect(await within(asked).findByText('GitHub is not connected')).toBeTruthy()
+    expect(within(asked).queryByText(said)).toBeNull()
+    expect(within(asked).queryByRole('alert')).toBeNull()
+    expect(mergeButton(asked).disabled).toBe(true)
+    fireEvent.click(within(asked).getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
+  })
+
   it('draws a read that nothing answered as a network failure', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))))
     open({ diffs: 0, listed })
     const alert = await within(await confirm()).findByRole('alert')
     expect(within(alert).getByRole('heading', { name: 'The daemon did not answer' })).toBeTruthy()
+  })
+
+  it('draws a 403 merge as the daemon said it, not as Connect', async () => {
+    daemon({ pending, merge: [403, 'this node is not the owner'] })
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    fireEvent.click(await ready(asked))
+    const alert = await within(asked).findByRole('alert')
+    expect(within(alert).getByText('this node is not the owner')).toBeTruthy()
+    expect(within(asked).queryByText('GitHub is not connected')).toBeNull()
+    expect(within(asked).queryByRole('button', { name: 'Connect' })).toBeNull()
+  })
+
+  it.each([
+    [409, 'no GitHub grant — run `yantra github login`'],
+  ] as const)('draws a %s merge saying "%s" as Connect, without the daemon words', async (status, said) => {
+    daemon({ pending, merge: [status, said] })
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    fireEvent.click(await ready(asked))
+    expect(await within(asked).findByText('GitHub is not connected')).toBeTruthy()
+    expect(within(asked).queryByText(said)).toBeNull()
+    expect(within(asked).queryByRole('alert')).toBeNull()
+    fireEvent.click(within(asked).getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
   })
 
   it.each([

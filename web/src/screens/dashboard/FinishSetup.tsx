@@ -10,7 +10,7 @@ import { REQUIRED, useChecklist } from '@/screens/setup/progress'
 import { marks, statusWord, TITLES } from '@/screens/setup/steps'
 import { hideSetupCard, setupCardHidden } from './setupCard'
 
-function Unfinished(props: { now: number }) {
+function Unfinished(props: { now: number; githubInHero: boolean }) {
   const heading = useId()
   const configured = useId()
   const { steps, later, githubGrant, done, settled } = useChecklist(props.now)
@@ -21,6 +21,8 @@ function Unfinished(props: { now: number }) {
     { key: 'push', title: 'Push to your phone', step: later.push, action: 'Set up', category: 'notifications' },
   ].filter((one) => one.step.status !== 'done')
   if (open.length === 0) return null
+  // The hero draws the GitHub row while it asks for the grant; the track still counts the step.
+  const shown = props.githubInHero ? open.filter((one) => one.key !== 'github') : open
   const total = REQUIRED + 2
   const all = done + 2 - open.length
   return (
@@ -52,7 +54,7 @@ function Unfinished(props: { now: number }) {
         </>
       ) : null}
       <ul className="dash__setup-list">
-        {open.map((one) => (
+        {shown.map((one) => (
           <li key={one.key}>
             <div className="dash__setup-text">
               <Text emphasized scale="body-medium">
@@ -80,7 +82,7 @@ function Unfinished(props: { now: number }) {
 /** D7 §4.9 and the owner's ruling (b): once the checklist stops being `/`,
  *  this card holds the steps for later until they are done or it is hidden.
  *  Settings → General brings a hidden card back. */
-export function FinishSetup(props: { now: number }) {
+export function FinishSetup(props: { now: number; githubInHero: boolean }) {
   if (setupCardHidden(usePrefs())) return null
-  return <Unfinished now={props.now} />
+  return <Unfinished githubInHero={props.githubInHero} now={props.now} />
 }

@@ -10,6 +10,8 @@ import {
   type Reading,
   useAgents,
   useAttention,
+  useGithub,
+  useGithubReadiness,
   useMachines,
   useSessions,
   useWorkspaces,
@@ -25,6 +27,7 @@ import { Pill } from '@/m3/pill/Pill'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { answerFailure, reachWords } from '@/lib/checks'
+import { grant } from '@/lib/github'
 import { Eyebrow, Mono, Num, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
@@ -63,6 +66,7 @@ export function Fleet() {
   const sessions = useSessions()
   const agents = useAgents(workspaces)
   const attention = useAttention()
+  const github = grant(useGithub().data, useGithubReadiness())
   const factor = useFormFactor()
 
   // §7.1: the bands wait for the read that decides them, or every row would
@@ -140,7 +144,7 @@ export function Fleet() {
           surface="primary"
           title="Needs you"
         >
-          {speaks(attention) ? <Github attention={attention} /> : null}
+          {speaks(attention) ? <Github attention={attention} grant={github} /> : null}
         </Group>
       </ErrorBoundary>
 

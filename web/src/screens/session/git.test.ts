@@ -15,12 +15,8 @@ describe('gitFailure', () => {
     ['pr', 502, 'prGithub'],
     ['pending', 409, 'pendingRefused'],
     ['pending', 502, 'pendingGithub'],
-    ['pending', 401, 'noGrant'],
-    ['pending', 403, 'noGrant'],
     ['merge', 409, 'mergeRefused'],
     ['merge', 502, 'mergeGithub'],
-    ['merge', 401, 'noGrant'],
-    ['merge', 403, 'noGrant'],
     ['remove', 409, 'removeRefused'],
   ])('%s with %s is %s', (action, status, kind) => {
     const failure = gitFailure(action, refused(status, 'daemon words'))
@@ -49,6 +45,27 @@ describe('gitFailure', () => {
     ['remove', 'a turn or a revert is running in this thread; wait for it to end', 'turnRunning'],
   ])('a %s 409 saying "%s" is %s', (action, said, kind) => {
     expect(gitFailure(action, refused(409, said)).kind).toBe(kind)
+  })
+
+  it.each<GitAction>(['draft', 'commit', 'push', 'pr', 'merge', 'remove'])(
+    'a %s refusal that names the missing grant is noGrant, with no CLI in its words',
+    (action) => {
+      const failure = gitFailure(action, refused(409, 'no GitHub grant — run `yantra github login`'))
+      expect(failure.kind).toBe('noGrant')
+      expect(failure.title).toBe('GitHub is not connected')
+      expect(failure.describe()).toBe('Connect GitHub, then try again.')
+    },
+  )
+
+  it.each<[GitAction, number]>([
+    ['pending', 401],
+    ['pending', 403],
+    ['merge', 401],
+    ['merge', 403],
+  ])('a %s %s is the caller gate, not the grant, so it keeps the daemon words', (action, status) => {
+    const failure = gitFailure(action, refused(status, 'this node is not the owner'))
+    expect(failure.kind).toBe('other')
+    expect(failure.said).toBe('this node is not the owner')
   })
 
   it.each<GitAction>(['draft', 'commit', 'push'])('a %s 409 saying a turn or a revert is running is turnRunning', (action) => {
@@ -117,7 +134,7 @@ describe('gitFailure', () => {
       ['merge', refused(409)],
       ['merge', refused(409, 'head moved')],
       ['merge', refused(502)],
-      ['merge', refused(401)],
+      ['merge', refused(409, 'no GitHub grant — run `yantra github login`')],
       ['remove', refused(409)],
     ]
     for (const [action, error] of probes) {

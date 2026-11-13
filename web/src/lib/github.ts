@@ -21,6 +21,12 @@ export function grant(connection: Connection | undefined, readiness: Reading<Che
   return { kind: readiness.data.state === 'absent' ? 'refused' : 'unasked', login }
 }
 
+/** What the Connect row says where the GitHub queue (reviews and issues) is missing. */
+export const QUEUE_WHY = 'Connect to see the reviews and issues that wait on you.'
+
+/** A grant to ask for: none held, a sign-in under way, or one GitHub refused. */
+export const lacksGrant = (g: Grant) => g.kind === 'none' || g.kind === 'pending' || g.kind === 'refused'
+
 /** Where GitHub lets the account grant Yantra's OAuth app each organisation.
  *  Without a client id, the list of every authorised app. */
 export const grantPage = (clientId: string | null) =>

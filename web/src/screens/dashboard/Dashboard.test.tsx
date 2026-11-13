@@ -99,16 +99,43 @@ describe('the Dashboard on a busy fleet', () => {
     expect(hero.queryByText(/Review requested/)).toBeNull()
   })
 
-  it('draws a grant that is gone as a failure at once, with what the daemon said', async () => {
+  it('draws a missing grant as one GitHub is not connected row, with no count and no daemon words', async () => {
     const state = scenario('busy')
     state.attention = { looked: 'failed', age_seconds: 0, error: 'no GitHub grant — run `yantra github login`' } as never
+    Object.assign(state, { github: contract.disconnected })
+    mount('desktop', '/', state)
+    await drawn()
+    const hero = region('Needs you')
+    expect(await hero.findByText('GitHub is not connected')).toBeTruthy()
+    expect(screen.getAllByText('GitHub is not connected')).toHaveLength(1)
+    expect(reads('Needs you')).not.toMatch(/github login|no GitHub grant|waiting on you/)
+    expect(hero.queryByText(/things? (is|are) waiting/)).toBeNull()
+    expect(hero.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(hero.queryByText(/Review requested/)).toBeNull()
+    fireEvent.click(hero.getByRole('button', { name: 'Connect' }))
+    expect(await screen.findByRole('dialog', { name: 'Connect GitHub' })).toBeTruthy()
+  })
+
+  it('draws a refused grant as REFUSED with Sign in again', async () => {
+    const state = scenario('busy')
+    state.attention = { looked: 'failed', age_seconds: 0, error: 'GitHub refused the grant' } as never
+    Object.assign(state, { github: contract.github, 'readiness/github': contract.githubRefused })
+    mount('desktop', '/', state)
+    await drawn()
+    const hero = region('Needs you')
+    expect(await hero.findByText('GitHub refused the grant')).toBeTruthy()
+    expect(hero.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
+    expect(hero.queryByText('GitHub could not be read')).toBeNull()
+  })
+
+  it('keeps the failure as read when the grant is held, and hides the count', async () => {
+    const state = scenario('busy')
+    state.attention = { looked: 'failed', age_seconds: 0, error: 'GitHub answered 502' } as never
     mount('desktop', '/', state)
     await drawn()
     const hero = region('Needs you')
     expect(hero.getByText('GitHub could not be read')).toBeTruthy()
-    expect(reads('Needs you')).toContain('no GitHub grant')
-    expect(hero.queryByRole('button', { name: /retrying/ })).toBeNull()
-    expect(hero.queryByText(/Review requested/)).toBeNull()
+    expect(reads('Needs you')).not.toContain('waiting on you')
   })
 
   it('moves the hero count when a band changes, while the row stays held', async () => {
@@ -422,6 +449,22 @@ describe('the Dashboard on the first run', () => {
     fireEvent.click(card.getByRole('button', { name: 'Hide Finish setup' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Finish setup' })).toBeNull())
     expect(readPrefs().general.finishSetup).toBe('hidden')
+  })
+
+  it('leaves the GitHub step to the hero row while the hero asks for the grant, and still counts it', async () => {
+    const state = keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')]))
+    Object.assign(state, {
+      github: contract.disconnected,
+      attention: { looked: 'failed', age_seconds: 0, error: 'no GitHub grant — run `yantra github login`' },
+    })
+    mount('desktop', '/', state)
+    const card = within(await screen.findByRole('region', { name: 'Finish setup' }))
+    expect(await region('Needs you').findByText('GitHub is not connected')).toBeTruthy()
+    expect(screen.getAllByText('GitHub is not connected')).toHaveLength(1)
+    expect(card.queryByText('GitHub')).toBeNull()
+    expect(card.queryByRole('link', { name: 'Connect' })).toBeNull()
+    expect(card.getByRole('link', { name: 'Add another device' })).toBeTruthy()
+    expect(card.getByRole('progressbar').getAttribute('aria-label')).toMatch(/of 6 setup steps done/)
   })
 
   it('says on Finish setup that GitHub refused the grant, and offers Sign in again', async () => {
