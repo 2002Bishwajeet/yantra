@@ -1,64 +1,77 @@
-.palette {
-  align-self: start;
-  gap: 8px;
-  max-width: var(--m3-palette-width);
-  margin-top: 12vh;
-  padding: 12px;
-}
-
-/* The field is the title a reader needs; the dialog's own stays for the name. */
-.palette .m3-dialog__title {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-}
-
 .palette__list {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 50vh;
-  overflow-y: auto;
+  padding-top: 8px;
 }
 
 .palette__label {
-  display: block;
-  padding: 8px 12px 4px;
+  padding: 12px 16px 8px;
+  font: var(--md-sys-typescale-title-small);
+  letter-spacing: var(--md-sys-typescale-title-small-tracking);
+  color: var(--md-sys-color-primary);
 }
 
 .palette__row {
-  width: 100%;
+  gap: 16px;
+  width: calc(100% - 16px);
+  min-height: 56px;
+  margin-inline: 8px;
+  padding: 8px 16px;
   border: 0;
+  border-radius: var(--md-sys-shape-corner-extra-large);
   font: inherit;
   text-align: left;
+}
+
+.palette__row .m3-tile {
+  width: 40px;
+  height: 40px;
+}
+
+.palette__row .m3-row__headline {
+  font: var(--md-sys-typescale-body-large);
+  letter-spacing: var(--md-sys-typescale-body-large-tracking);
+}
+
+.palette__row .m3-row__supporting {
+  font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+}
+
+/* A phone has no keyboard, so it shows no key hints. */
+.palette__hint {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .palette__hint {
+    display: inline-flex;
+  }
+}
+
+.palette__note {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 8px 16px;
+  font: var(--md-sys-typescale-body-medium);
+  letter-spacing: var(--md-sys-typescale-body-medium-tracking);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.palette__note > svg {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  color: var(--md-sys-color-error);
 }
 
 .palette__match {
   color: inherit;
   background: var(--md-sys-color-primary-container);
   border-radius: var(--md-sys-shape-corner-extra-small);
-}
-
-.palette__foot {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 4px 12px;
-  padding: 8px 12px 0;
-  border-top: 1px solid var(--md-sys-color-outline-variant);
-  font: var(--md-sys-typescale-body-small);
-  letter-spacing: var(--md-sys-typescale-body-small-tracking);
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.palette__legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
 }
 
 .keyhelp {
