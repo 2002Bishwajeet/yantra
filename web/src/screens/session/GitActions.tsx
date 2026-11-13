@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ChevronDown, GitCommitHorizontal, GitMerge, GitPullRequest, RefreshCw, Trash2, Upload } from 'lucide-react'
-import { useCommit, useDraftMessage, useMergePr, useOpenPr, usePush, useRemoveThread } from '@/api/mutations'
-import type { ThreadPr } from '@/api'
+import { ArrowUpRight, ChevronDown, GitCommitHorizontal, GitMerge, GitPullRequest, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { useCommit, useDraftMessage, useMergePr, useOpenPr, usePendingPr, usePush, useRemoveThread } from '@/api/mutations'
+import type { ThreadPr, ThreadPrPending } from '@/api'
 import { Button } from '@/m3/button/Button'
 import { useRegisterLoopCommands } from '@/shell/loopCommands'
 import { Dialog, DialogClose, DialogPopup } from '@/m3/dialog/Dialog'
@@ -9,6 +9,10 @@ import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
 import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
+import { Row, RowText } from '@/m3/row/Row'
+import { Skeleton } from '@/m3/skeleton/Skeleton'
+import { Mono } from '@/m3/text/Text'
+import { IconTile } from '@/m3/tile/Tile'
 import { gitFailure, type GitFailure } from './git'
 import { buildMenuItems, resolveQuickAction, type GitVerb } from './gitActions.logic'
 import './GitActions.css'
@@ -18,6 +22,28 @@ type Pr = { number: number; url: string; state: 'open' | 'merged' }
 function Failure(props: { failure: GitFailure; retry: () => void }) {
   const { failure, retry } = props
   return <ErrorSurface.Inline className="git__fail" error={failure} reset={retry} title={failure.title} />
+}
+
+/** What the merge will take: the PR's commit count and its head, which opens on GitHub (Y-781). */
+function Head(props: { pr: ThreadPrPending }) {
+  const { url, head_sha, commits } = props.pr
+  return (
+    <Row className="git__head" render={<a href={`${url}/commits/${head_sha}`} rel="noopener noreferrer" target="_blank" />}>
+      <IconTile>
+        <GitCommitHorizontal />
+      </IconTile>
+      <RowText
+        headline={`${commits} ${commits === 1 ? 'commit' : 'commits'}`}
+        supporting={
+          <>
+            Head <Mono>{head_sha.slice(0, 7)}</Mono>
+            <span className="m3-sr-only">, view on GitHub</span>
+          </>
+        }
+      />
+      <ArrowUpRight aria-hidden="true" className="git__out" />
+    </Row>
+  )
 }
 
 const ICON = {
@@ -71,6 +97,7 @@ export function GitActions(props: {
   const commit = useCommit(workspace)
   const push = usePush(workspace)
   const openPr = useOpenPr(workspace)
+  const reading = usePendingPr(workspace)
   const merge = useMergePr(workspace)
   const remove = useRemoveThread(workspace)
   const [mergeAsk, setMergeAsk] = useState(false)
@@ -140,17 +167,28 @@ export function GitActions(props: {
       },
     })
   }
+  // Y-781: the dialog reads the PR's head when it opens, and the merge names that head.
+  const readPr = () => {
+    merge.reset()
+    if (thread !== null) reading.mutate(thread)
+  }
+  const changeMergeAsk = (next: boolean) => {
+    setMergeAsk(next)
+    if (next) readPr()
+    else reading.reset()
+  }
+  const seen = reading.data
   const mergeIt = () => {
-    if (thread === null || pr === null) return
+    if (thread === null || pr === null || seen === undefined) return
     merge.mutate(
-      { id: thread, number: pr.number },
+      { id: thread, number: pr.number, head_sha: seen.head_sha },
       {
         onSuccess: (done) => {
           setOpened({ ...pr, state: 'merged' })
           setBranchKept(!done.branchDeleted)
           setNote(`Merged PR #${done.number}`)
           refresh()
-          setMergeAsk(false)
+          changeMergeAsk(false)
           askRemove()
         },
       },
@@ -174,10 +212,8 @@ export function GitActions(props: {
     if (verb === 'commit') changeDialog(true)
     else if (verb === 'push') pushIt()
     else if (verb === 'pr') openIt()
-    else if (verb === 'merge') {
-      merge.reset()
-      setMergeAsk(true)
-    } else askRemove()
+    else if (verb === 'merge') changeMergeAsk(true)
+    else askRemove()
   }
 
   // The palette and the chords run a verb through `run`, so Commit asks for its message and Merge for its confirmation.
@@ -197,7 +233,10 @@ export function GitActions(props: {
   const draftFailure = draft.isError ? gitFailure('draft', draft.error) : null
   const commitFailure = commit.isError ? gitFailure('commit', commit.error) : null
   const clean = draftFailure?.kind === 'draftNothing'
+  const pendingFailure = reading.isError ? gitFailure('pending', reading.error) : null
   const mergeFailure = merge.isError ? gitFailure('merge', merge.error) : null
+  // The head on screen is no longer the PR's, so it is read again before a second merge.
+  const moved = mergeFailure?.kind === 'mergeHeadMoved'
   const removeFailure = remove.isError ? gitFailure('remove', remove.error) : null
 
   // The quick action and the menu item run one verb, so they share its pending word.
@@ -258,22 +297,31 @@ export function GitActions(props: {
           )}
         </DialogPopup>
       </Dialog>
-      <Dialog onOpenChange={setMergeAsk} open={mergeAsk}>
+      <Dialog onOpenChange={changeMergeAsk} open={mergeAsk}>
         <DialogPopup
           actions={
             <>
               <DialogClose render={<Button variant="text" />}>Cancel</DialogClose>
-              <Button disabled={merge.isPending} icon={ICON.merge} onClick={mergeIt}>
+              <Button disabled={seen === undefined || moved || merge.isPending} icon={ICON.merge} onClick={mergeIt}>
                 {merge.isPending ? 'Merging…' : 'Merge'}
               </Button>
             </>
           }
           className="git__confirm"
-          description={`Squash-merge PR #${pr?.number} as it is on GitHub now into the default branch, and delete its remote branch.`}
+          description={`Squash-merge PR #${pr?.number} at the head shown here into the default branch, and delete its remote branch.`}
           finalFocus={returnTo}
           title={`Merge PR #${pr?.number}`}
         >
-          {mergeFailure ? <Failure failure={mergeFailure} retry={mergeIt} /> : null}
+          <p className="m3-sr-only" role="status">
+            {reading.isPending ? 'Reading the PR from GitHub…' : ''}
+          </p>
+          {reading.isPending ? <Skeleton shape="row" /> : null}
+          {seen && !moved ? <Head pr={seen} /> : null}
+          {pendingFailure ? (
+            <Failure failure={pendingFailure} retry={readPr} />
+          ) : mergeFailure ? (
+            <Failure failure={mergeFailure} retry={moved ? readPr : mergeIt} />
+          ) : null}
         </DialogPopup>
       </Dialog>
       <Dialog onOpenChange={setRemoveAsk} open={removeAsk}>

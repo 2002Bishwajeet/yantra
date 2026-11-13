@@ -761,6 +761,17 @@ const routes = [
       return good
     },
   ]),
+  // Y-781: the read the merge dialog makes. It is not a git verb, so `gitfails` leaves it alone.
+  [
+    'POST',
+    /^\/api\/workspaces\/([^/]+)\/threads\/([^/]+)\/pending$/,
+    (s, [name]) => {
+      if (!findWorkspace(s, name)) return [404, notFound(name)]
+      const pr = s.opened?.[name]
+      if (pr?.state !== 'open') return [409, "the thread's branch has no open PR"]
+      return [200, { ...contract.threadPrPending, number: pr.number, url: pr.url }]
+    },
+  ],
   // Y-496: merge the thread's PR, then remove its worktree.
   [
     'POST',
@@ -770,6 +781,9 @@ const routes = [
       if (s.gitFails) return [409, 'GitHub will not merge the pull request: Pull Request is not mergeable']
       const pr = s.opened?.[name]
       if (pr?.state !== 'open' || pr.number !== sent.number) return [409, "the thread's branch has no open PR"]
+      if (sent.head_sha !== contract.threadPrPending.head_sha) {
+        return [409, "the pull request's head moved after it was read; read it again and confirm the merge"]
+      }
       s.opened[name] = { ...pr, state: 'merged' }
       return [200, { ...contract.threadPrMerged, number: pr.number, url: pr.url }]
     },

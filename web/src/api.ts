@@ -676,7 +676,17 @@ export type ThreadPrOpened = {
   created: boolean
 }
 
-/** `POST /api/workspaces/{name}/threads/{thread}/merge` with `{ number }` (Y-496): a squash.
+/** `POST /api/workspaces/{name}/threads/{thread}/pending` (Y-781): the thread's open PR as the
+ *  merge dialog shows it. The merge sends `head_sha` back. */
+export type ThreadPrPending = {
+  number: number
+  url: string
+  head_sha: string
+  commits: number
+}
+
+/** `POST /api/workspaces/{name}/threads/{thread}/merge` with `{ number, head_sha }` (Y-496): a
+ *  squash. A `head_sha` that is absent or no longer the PR's head is a 409 (Y-781).
  *  `branchDeleted` is false when the remote branch stayed. */
 export type ThreadPrMerged = {
   number: number

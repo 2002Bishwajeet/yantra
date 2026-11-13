@@ -108,6 +108,7 @@ import type {
   ThreadOpened,
   ThreadPrMerged,
   ThreadPrOpened,
+  ThreadPrPending,
   ThreadPushed,
   ThreadState,
   ThreadTerminal,

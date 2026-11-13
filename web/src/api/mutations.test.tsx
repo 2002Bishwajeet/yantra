@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { daemon } from '../test/daemon'
 import { renderHookQueried } from '../test/inQuery'
 import { ApiError } from './errors'
-import { threadCommitted, threadMessage, threadPrOpened, threadPushed } from '@/contract.gen'
+import { threadCommitted, threadMessage, threadPrMerged, threadPrOpened, threadPrPending, threadPushed } from '@/contract.gen'
 import { aWorkspace, looked, opened, stopped } from './fixtures'
 import { keys } from './keys'
 import {
@@ -21,7 +21,9 @@ import {
   useInstall,
   useKillSession,
   useMakeDir,
+  useMergePr,
   useOpenPr,
+  usePendingPr,
   usePush,
   useRecheckReadiness,
   useRepairWorkspace,
@@ -519,6 +521,15 @@ describe('the git verbs on a thread', () => {
     ],
     ['push', () => usePush('yantra'), '0a1b', 'push', undefined, threadPushed],
     ['pr', () => useOpenPr('yantra'), '0a1b', 'pr', '{}', threadPrOpened],
+    ['pending', () => usePendingPr('yantra'), '0a1b', 'pending', undefined, threadPrPending],
+    [
+      'merge',
+      () => useMergePr('yantra'),
+      { id: '0a1b', number: 497, head_sha: threadPrPending.head_sha },
+      'merge',
+      JSON.stringify({ number: 497, head_sha: threadPrPending.head_sha }),
+      threadPrMerged,
+    ],
   ] as const)('%s is a POST to its own route and returns the answer', async (_, hook, input, verb, body, answer) => {
     const asked = daemon(200, answer)
     const { result } = renderHookQueried(hook as () => ReturnType<typeof usePush>)
@@ -534,6 +545,7 @@ describe('the git verbs on a thread', () => {
     ['commit', () => useCommit('yantra'), { id: '0a1b', message: 'x' }, 409, 'nothing to commit'],
     ['push', () => usePush('yantra'), '0a1b', 409, 'push refused'],
     ['pr', () => useOpenPr('yantra'), '0a1b', 409, 'branch not pushed'],
+    ['pending', () => usePendingPr('yantra'), '0a1b', 409, 'no open PR'],
   ] as const)('%s rejects with the status and the words', async (_, hook, input, status, said) => {
     daemon(status, said)
     const { result } = renderHookQueried(hook as () => ReturnType<typeof usePush>)
