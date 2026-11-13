@@ -463,6 +463,11 @@ where
             "/workspaces/{name}/threads/{thread}/merge",
             post(merging_pr::<I>),
         )
+        // ADR-0019: the read awaits ssh and GitHub and nothing polls it, so it is a POST.
+        .route(
+            "/workspaces/{name}/threads/{thread}/pending",
+            post(pending_pr::<I>),
+        )
         .route(
             "/workspaces/{name}/threads/{thread}",
             axum::routing::delete(removing::<I>),
@@ -2854,23 +2859,14 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MergeBody {
-    /// The PR the owner confirmed; another one open is refused.
-    number: u64,
-}
-
-/// `yantra pr merge <workspace> <thread>` on the wire (Y-496): a squash with the daemon's grant
-/// (ADR-0034 decision 1), then the remote branch is deleted. The dialog shows the number and no
-/// commits, so the merge takes the head the daemon reads, not one the owner saw.
-async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
+/// What `yantra pr merge` reads before it asks (Y-781): the thread's open PR, its head and its
+/// commit count, with the daemon's grant. The merge dialog shows them and sends the head back.
+async fn pending_pr<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path((name, id)): Path<(String, String)>,
-    Json(MergeBody { number }): Json<MergeBody>,
-) -> Result<Json<ThreadPrMerged>, Refused> {
+) -> Result<Json<ThreadPrPending>, Refused> {
     let caller = allowed(&state.authoriser, &from, &headers).await?;
     let token = state
         .fleet
@@ -2878,10 +2874,62 @@ async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
         .token()
         .await
         .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
-    tracing::info!("pr merge {name} {id} #{number} for {}", caller.node);
-    let merged = commit::merge_pr_for(&name, &id, &github::Github::default(), &token, number, None)
+    tracing::info!("pr pending {name} {id} for {}", caller.node);
+    let pending = commit::pending_pr_for(&name, &id, &github::Github::default(), &token)
         .await
         .map_err(refuse_commit)?;
+    Ok(Json(ThreadPrPending {
+        number: pending.number,
+        url: pending.url,
+        head_sha: pending.head_sha,
+        commits: pending.commits,
+    }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MergeBody {
+    /// The PR the owner confirmed; another one open is refused.
+    number: u64,
+    /// The head the owner was shown. Optional so that its absence is a 409 with a next step,
+    /// not serde's 422.
+    #[serde(default)]
+    head_sha: Option<String>,
+}
+
+/// `yantra pr merge <workspace> <thread>` on the wire (Y-496): a squash with the daemon's grant
+/// (ADR-0034 decision 1), then the remote branch is deleted. The body names the head the owner
+/// was shown (Y-781): a body with no head is refused before the grant is read, and a head that
+/// moved since is refused before GitHub is written.
+async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Remembered<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Path((name, id)): Path<(String, String)>,
+    Json(MergeBody { number, head_sha }): Json<MergeBody>,
+) -> Result<Json<ThreadPrMerged>, Refused> {
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let seen = head_sha.ok_or_else(|| Refused::Verb {
+        status: StatusCode::CONFLICT,
+        said: NO_HEAD.to_owned(),
+    })?;
+    let token = state
+        .fleet
+        .github
+        .token()
+        .await
+        .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
+    tracing::info!("pr merge {name} {id} #{number} for {}", caller.node);
+    let merged = commit::merge_pr_for(
+        &name,
+        &id,
+        &github::Github::default(),
+        &token,
+        number,
+        &seen,
+    )
+    .await
+    .map_err(refuse_commit)?;
     Ok(Json(ThreadPrMerged {
         number: merged.number,
         url: merged.url,
@@ -2931,6 +2979,11 @@ fn idle(chats: &crate::chat::Registry, name: &str, id: &str) -> Result<(), Refus
     }
     Ok(())
 }
+
+/// A merge body from a dashboard older than Y-781. It does not say "head moved", which the web
+/// reads as [`github::Error::HeadMoved`].
+const NO_HEAD: &str =
+    "the merge names no head; reload the dashboard, read the pull request again and confirm";
 
 fn refuse_commit(error: commit::Failed) -> Refused {
     Refused::Unlogged {
@@ -3551,6 +3604,15 @@ struct ThreadPrOpened {
     url: String,
     /// `false` when the PR was already open.
     created: bool,
+}
+
+/// `head_sha` is spelled as `/api/pulls` spells it, and the merge body sends it back.
+#[derive(Debug, serde::Serialize)]
+struct ThreadPrPending {
+    number: u64,
+    url: String,
+    head_sha: String,
+    commits: u64,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -4247,6 +4309,16 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 number: 497,
                 url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
                 created: true,
+            }),
+        ),
+        (
+            "threadPrPending",
+            "ThreadPrPending",
+            of(&ThreadPrPending {
+                number: 497,
+                url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
+                head_sha: "89abcdef0123456789abcdef0123456789abcdef".to_owned(),
+                commits: 3,
             }),
         ),
         (
@@ -6504,9 +6576,10 @@ mod tests {
                 .body(Body::from(r#"{"message":"Add x"}"#)),
             Request::post("/workspaces/site/threads/0a1b/push").body(Body::empty()),
             Request::post("/workspaces/site/threads/0a1b/pr").body(Body::empty()),
+            Request::post("/workspaces/site/threads/0a1b/pending").body(Body::empty()),
             Request::post("/workspaces/site/threads/0a1b/merge")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"number":21}"#)),
+                .body(Body::from(r#"{"number":21,"head_sha":"aaa111"}"#)),
             Request::delete("/workspaces/site/threads/0a1b").body(Body::empty()),
             Request::post("/workspaces/site/threads/0a1b/terminal").body(Body::empty()),
         ] {
@@ -6749,7 +6822,8 @@ mod tests {
     }
 
     /// Y-496: a running turn refuses a removal, and not a merge, which touches no worktree;
-    /// with no grant the merge is the 409 that names the login.
+    /// with no grant the merge and the read before it are the 409 that names the login.
+    /// Y-781: a merge that names no head is refused before the grant is read.
     #[tokio::test]
     async fn a_busy_thread_refuses_its_removal_and_not_its_merge() {
         use axum::body::Body;
@@ -6783,6 +6857,17 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(said.contains("a turn or a revert is running"), "{said}");
 
+        for request in [
+            Request::post("/workspaces/site/threads/0a1b/merge")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"number":21,"head_sha":"aaa111"}"#)),
+            Request::post("/workspaces/site/threads/0a1b/pending").body(Body::empty()),
+        ] {
+            let (status, said) = send(request).await;
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert!(said.contains("yantra github login"), "{said}");
+        }
+
         let (status, said) = send(
             Request::post("/workspaces/site/threads/0a1b/merge")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -6790,7 +6875,9 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
-        assert!(said.contains("yantra github login"), "{said}");
+        assert_eq!(said, NO_HEAD);
+        // The web reads "head moved" as a head that changed, which is another failure.
+        assert!(!said.contains("head moved"), "{said}");
     }
 
     #[test]
@@ -6813,8 +6900,14 @@ mod tests {
             said: "Pull Request is not mergeable".to_owned(),
         }));
         assert!(said.contains("Pull Request is not mergeable"), "{said}");
-        let asked: MergeBody = serde_json::from_str(r#"{"number":21}"#).expect("a number");
-        assert_eq!(asked.number, 21);
+        let asked: MergeBody =
+            serde_json::from_str(r#"{"number":21,"head_sha":"aaa111"}"#).expect("a number");
+        assert_eq!(
+            (asked.number, asked.head_sha.as_deref()),
+            (21, Some("aaa111"))
+        );
+        let headless: MergeBody = serde_json::from_str(r#"{"number":21}"#).expect("a number");
+        assert_eq!(headless.head_sha, None);
         assert!(serde_json::from_str::<MergeBody>("{}").is_err());
         assert!(serde_json::from_str::<MergeBody>(r#"{"number":21,"method":"rebase"}"#).is_err());
     }

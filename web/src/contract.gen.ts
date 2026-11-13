@@ -58,6 +58,7 @@ import type {
   ThreadOpened,
   ThreadPrMerged,
   ThreadPrOpened,
+  ThreadPrPending,
   ThreadPushed,
   ThreadState,
   ThreadTerminal,
@@ -1137,6 +1138,13 @@ export const threadPrOpened = {
   "number": 497,
   "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
 } satisfies ThreadPrOpened
+
+export const threadPrPending = {
+  "commits": 3,
+  "head_sha": "89abcdef0123456789abcdef0123456789abcdef",
+  "number": 497,
+  "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
+} satisfies ThreadPrPending
 
 export const threadPrMerged = {
   "branchDeleted": true,

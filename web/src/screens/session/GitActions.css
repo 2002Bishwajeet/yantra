@@ -38,6 +38,19 @@
   font: var(--md-sys-typescale-body-small);
 }
 
+/* The bar is as tall as the head row it stands for, so the dialog does not jump when the read lands. */
+.git__confirm .m3-skeleton,
+.git__head {
+  min-height: 58px;
+}
+
+.git__out {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
 .git__split {
   display: inline-flex;
   align-items: center;

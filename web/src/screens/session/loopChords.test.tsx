@@ -49,13 +49,13 @@ const chord = (id: string) => {
 const open: ThreadPr = { number: 7, url: 'https://github.com/o/r/pull/7', state: 'open' }
 
 describe('the git chords', () => {
-  it('Merge opens the confirmation and merges nothing', async () => {
+  it('Merge opens the confirmation, reads the PR and merges nothing', async () => {
     const calls = daemon()
     show(open)
     chord('merge')
     const dialog = await screen.findByRole('dialog', { name: 'Merge PR #7' })
     expect(within(dialog).getByRole('button', { name: 'Merge' })).toBeTruthy()
-    expect(calls.filter((one) => one.startsWith('POST'))).toEqual([])
+    expect(calls.filter((one) => one.startsWith('POST'))).toEqual([`POST /api/workspaces/site/threads/${mine}/pending`])
   })
 
   it('Commit opens the editable message dialog', async () => {

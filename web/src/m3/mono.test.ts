@@ -17,6 +17,7 @@ const ALLOWED = new Set([
   'screens/session/markdown/CodeBlock.tsx',
   'screens/session/WorkLog.tsx',
   'screens/session/Turns.tsx',
+  'screens/session/GitActions.tsx',
   'screens/session/Terminal.tsx',
   'screens/session/RunAsOwner.tsx',
   'screens/fleet/Github.tsx',

@@ -6,7 +6,7 @@
  */
 import { asApiError } from '@/api/errors'
 
-export type GitAction = 'draft' | 'commit' | 'push' | 'pr' | 'merge' | 'remove'
+export type GitAction = 'draft' | 'commit' | 'push' | 'pr' | 'pending' | 'merge' | 'remove'
 
 /** One kind per action and status the daemon sends (Y-492, Y-449), then the three any action meets. */
 export type GitFailureKind =
@@ -20,6 +20,8 @@ export type GitFailureKind =
   | 'pushRefused'
   | 'prRefused'
   | 'prGithub'
+  | 'pendingRefused'
+  | 'pendingGithub'
   | 'mergeRefused'
   | 'mergeHeadMoved'
   | 'mergeGithub'
@@ -69,13 +71,21 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
     title: 'GitHub failed',
     next: 'GitHub did not take the pull request. Try again in a moment.',
   },
+  pendingRefused: {
+    title: 'The PR could not be read',
+    next: 'The branch has no open PR that the daemon can see. It can be merged or closed already. Check it on github.com, then read it again.',
+  },
+  pendingGithub: {
+    title: 'GitHub did not send the PR',
+    next: 'GitHub did not answer the read, so there is no head to confirm. Try again in a moment.',
+  },
   mergeRefused: {
     title: 'The merge was refused',
     next: 'GitHub will not merge it, or the PR is no longer the open one. Check the PR on github.com, then try again.',
   },
   mergeHeadMoved: {
     title: 'The PR changed',
-    next: 'New commits reached the PR while the merge ran. Look at them on github.com, then merge again.',
+    next: 'The PR got a new head after this dialog read it, so nothing was merged. Read the PR again, look at the new head, then merge.',
   },
   mergeGithub: { title: 'GitHub did not merge', next: 'GitHub did not take the merge. Try again in a moment.' },
   noGrant: {
@@ -100,6 +110,7 @@ const byStatus: Record<GitAction, Partial<Record<number, GitFailureKind>>> = {
   commit: { 400: 'commitEmpty', 409: 'commitRefused' },
   push: { 409: 'pushRefused' },
   pr: { 409: 'prRefused', 502: 'prGithub' },
+  pending: { 401: 'noGrant', 403: 'noGrant', 409: 'pendingRefused', 502: 'pendingGithub' },
   merge: { 401: 'noGrant', 403: 'noGrant', 409: 'mergeRefused', 502: 'mergeGithub' },
   remove: { 409: 'removeRefused' },
 }
