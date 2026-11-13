@@ -37,7 +37,7 @@ describe('Y-441 budget figures', () => {
   })
 
   it('the Y-325 row quotes no byte figure', () => {
-    const row = read('../tracker.md').split('\n').find((line) => line.startsWith('| Y-325 |')) ?? ''
+    const row = read('../docs/archive/m14-m18.md').split('\n').find((line) => line.startsWith('| Y-325 |')) ?? ''
     expect(row).toContain('npm run budget')
     expect(row).not.toMatch(/\d[\d,.]* ?(B|KiB)\b/)
   })
