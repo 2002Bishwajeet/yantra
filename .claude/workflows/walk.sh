@@ -8,7 +8,8 @@
 #                                       it returns when the daemon has checked the machines, so a card shows its checks (Y-740).
 #                                       This daemon runs as you with your ssh config, and no agent reports to it. It cannot show
 #                                       a check that only the hub's own account or an agent's report can fail (Y-740)
-#   walk.sh shoot <worktree> <route>... screenshots and the visible text of each route, WebKit at 390 px, Chromium at
+#   walk.sh shoot <worktree> <route>... screenshots (a route ending in @dark is shot in the dark scheme)
+#                                       screenshots and the visible text of each route, WebKit at 390 px, Chromium at
 #                                       1440 px, and of the sign-in screen when WALK_PORT+1 answers
 #                                       /machines also shoots the page of each machine whose card lists a failing check (Y-740)
 #   walk.sh down <worktree>
