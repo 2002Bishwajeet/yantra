@@ -260,9 +260,10 @@ describe('the cards with nothing to say', () => {
     const error = 'ssh to pi-5 failed before the command reported a status: No route to host'
     mount('desktop', '/m/pi-5', none({ sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'pi-5', reached: 'no', error }] } }))
     await screen.findByRole('region', { name: 'Sessions' })
+    // Readiness does not show this cause for pi-5, so Sessions shows it, once.
     const sessions = card('Sessions')
-    expect(await sessions.findByText('The sessions cannot be listed')).toBeTruthy()
-    expect(sessions.queryByText(/ssh to pi-5 fails/)).toBeNull()
+    expect(await sessions.findByText(/ssh to pi-5 fails/)).toBeTruthy()
+    expect(sessions.queryByText('The sessions cannot be listed')).toBeNull()
   })
 
   it('keeps Sessions while it is pending', async () => {
