@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from '@tanstack/react-router'
 import { Activity, Clock, Cpu, HardDrive, Layers, MemoryStick, Monitor, Zap, type LucideIcon } from 'lucide-react'
-import type { AgentRow, Beat, Machine as OneMachine, Workspace } from '@/api'
+import type { AgentRow, Beat, Machine as OneMachine, MachineSessions, Workspace } from '@/api'
 import { fromReading } from '@/api/client'
 import {
   loaded,
@@ -13,6 +13,7 @@ import {
   useSessions,
   useWorkspaces,
 } from '@/api/hooks'
+import { apart, runsSessions } from '@/lib/platform'
 import { at } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -126,6 +127,44 @@ function About(props: { machine: OneMachine; lastSeen: string | null }) {
   )
 }
 
+const ago = (lastSeen: string) => (/^\d+[smhd]$/.test(lastSeen) ? `${lastSeen} ago` : lastSeen)
+
+/** Y-775: a phone, tablet or Windows PC runs no session, so it shows its state and nothing to press. */
+function Apart(props: { machine: OneMachine; lastSeen: string | null; name: string }) {
+  const { machine, lastSeen, name } = props
+  // An offline phone in a pocket is normal, so only an expired key is an error.
+  const asleep = !machine.online && !machine.expired
+  const { state, word } = asleep ? { state: 'unknown' as const, word: 'asleep' } : machineState(machine)
+  const seen = machine.online ? 'now' : lastSeen ? ago(lastSeen) : 'not seen'
+  return (
+    <Page>
+      <PageHeader
+        subtitle={
+          <Chip tone={machine.expired ? 'error' : 'lowest'}>
+            <Mark size="small" state={state} />
+            {machine.online || !lastSeen ? word : `${word} · ${ago(lastSeen)}`}
+          </Chip>
+        }
+        title={name}
+      />
+      <Card aria-labelledby="machine-device" className="machine__card" surface="container">
+        <div className="machine__head">
+          <Text render={<h2 />} emphasized id="machine-device" scale="title-large">
+            This device
+          </Text>
+        </div>
+        <dl className="machine__facts">
+          <Fact icon={Activity} label="Status">{word}</Fact>
+          <Fact icon={Clock} label="Last seen">{seen}</Fact>
+        </dl>
+        <Text render={<p />} scale="body-small" tone="variant">
+          {apart(machine)}
+        </Text>
+      </Card>
+    </Page>
+  )
+}
+
 function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string; ready: boolean }) {
   const { rows, pending, machine, ready } = props
   // D7 B3: a card with nothing in it and no way to start one says nothing.
@@ -183,27 +222,42 @@ function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string
   )
 }
 
-/** D7 §4.3: header, then Readiness — whose verdict decides the one action —
- *  then Workspaces, Sessions, the owner terminal (Y-701) and About. */
+/** Y-775: nothing is known about the device yet, so the page shows no ssh or sudo control. */
+function Unknown(props: { name: string; failed?: Reading<unknown> }) {
+  const client = useQueryClient()
+  const { name, failed } = props
+  return (
+    <Page>
+      <PageHeader title={name} />
+      {failed ? (
+        <ErrorSurface.Inline
+          error={fromReading(failed)!}
+          reset={() => void client.invalidateQueries()}
+          title="Machines could not be read"
+        />
+      ) : (
+        <Card aria-busy="true" aria-label={name} className="machine__card" role="region" surface="container">
+          <div className="machine__pending">
+            <Skeleton shape="text" style={{ width: '56%' }} />
+            <Skeleton shape="text" style={{ width: '72%' }} />
+          </div>
+        </Card>
+      )}
+    </Page>
+  )
+}
+
+/** D7 §4.3: a machine is looked up first, so a phone, tablet or Windows PC never reaches
+ *  the Readiness, Sessions or owner-terminal cards (Y-775). */
 export function Machine() {
   const { machine: name } = useParams({ from: '/m/$machine' })
   const client = useQueryClient()
-  const factor = useFormFactor()
   const now = useTick(false)
   const machines = useMachines()
-  const readiness = useMachineReadiness(name)
   const sessions = useSessions()
   const listed = loaded(useWorkspaces())
-  const here: Reading<Workspace[]> =
-    listed.looked === 'ok'
-      ? { ...listed, data: listed.data.filter((one) => one.machine === name) }
-      : listed
-  const agents = useAgents(here)
-  const one = machines.looked === 'ok' ? machines.data.find((m) => m.name === name) : undefined
-  const answer = sessions.looked === 'ok' ? sessions.data.find((m) => m.machine === name) : undefined
-  const verdicted = useVerdict(name, one, readiness, answer?.reached === 'no' ? answer.error : null)
 
-  const nothing = unreachable([machines, readiness, sessions, listed])
+  const nothing = unreachable([machines, sessions, listed])
   if (nothing) {
     return (
       <Page>
@@ -218,7 +272,11 @@ export function Machine() {
     )
   }
 
-  if (machines.looked === 'ok' && !one) {
+  if (machines.looked === 'failed') return <Unknown failed={machines} name={name} />
+  if (machines.looked !== 'ok') return <Unknown name={name} />
+
+  const one = machines.data.find((m) => m.name === name)
+  if (!one) {
     return (
       <Page>
         <PageHeader title={name} />
@@ -241,8 +299,31 @@ export function Machine() {
     )
   }
 
-  const lastSeen = one?.last_seen ? (at(one.last_seen, now)?.text ?? null) : null
-  const chip = one ? chipOf(verdicted.verdict, lastSeen) : null
+  const lastSeen = one.last_seen ? (at(one.last_seen, now)?.text ?? null) : null
+  if (!runsSessions(one)) return <Apart lastSeen={lastSeen} machine={one} name={name} />
+  return <Sessionful lastSeen={lastSeen} listed={listed} machine={one} machines={machines} name={name} sessions={sessions} />
+}
+
+function Sessionful(props: {
+  name: string
+  machine: OneMachine
+  machines: Reading<OneMachine[]>
+  sessions: Reading<MachineSessions[]>
+  listed: Reading<Workspace[]>
+  lastSeen: string | null
+}) {
+  const { name, machine: one, machines, sessions, listed, lastSeen } = props
+  const factor = useFormFactor()
+  const readiness = useMachineReadiness(name)
+  const here: Reading<Workspace[]> =
+    listed.looked === 'ok'
+      ? { ...listed, data: listed.data.filter((one) => one.machine === name) }
+      : listed
+  const agents = useAgents(here)
+  const answer = sessions.looked === 'ok' ? sessions.data.find((m) => m.machine === name) : undefined
+  const verdicted = useVerdict(name, one, readiness, answer?.reached === 'no' ? answer.error : null)
+
+  const chip = chipOf(verdicted.verdict, lastSeen)
   const rows = agents.looked === 'ok' ? agents.data : []
 
   return (
@@ -250,23 +331,13 @@ export function Machine() {
       <PageHeader
         stamp={<Looked plain reads={[machines, readiness, sessions]} />}
         subtitle={
-          chip ? (
-            <Chip tone={chip.error ? 'error' : 'lowest'}>
-              <Mark size="small" state={chip.state} />
-              {chip.word}
-            </Chip>
-          ) : null
+          <Chip tone={chip.error ? 'error' : 'lowest'}>
+            <Mark size="small" state={chip.state} />
+            {chip.word}
+          </Chip>
         }
         title={name}
       />
-
-      {machines.looked === 'failed' ? (
-        <ErrorSurface.Inline
-          error={fromReading(machines)!}
-          reset={() => void client.invalidateQueries()}
-          title="Machines could not be read"
-        />
-      ) : null}
 
       <div className="machine__columns">
         <ErrorBoundary eyebrow={name} title="Readiness could not be drawn">
@@ -297,19 +368,12 @@ export function Machine() {
                 About
               </Text>
             </div>
-            {one ? (
-              factor === 'phone' ? (
-                <Disclosure summary={`${one.os} · ${machineState(one).word}`}>
-                  <About lastSeen={lastSeen} machine={one} />
-                </Disclosure>
-              ) : (
+            {factor === 'phone' ? (
+              <Disclosure summary={`${one.os} · ${machineState(one).word}`}>
                 <About lastSeen={lastSeen} machine={one} />
-              )
+              </Disclosure>
             ) : (
-              <div aria-busy="true" className="machine__pending">
-                <Skeleton shape="text" style={{ width: '56%' }} />
-                <Skeleton shape="text" style={{ width: '72%' }} />
-              </div>
+              <About lastSeen={lastSeen} machine={one} />
             )}
           </Card>
         </ErrorBoundary>

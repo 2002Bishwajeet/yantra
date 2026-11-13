@@ -134,11 +134,19 @@ for (const [name, type, options] of looks) {
       }
     }
     if (shot === 'machines') {
+      const also = (route) => queue.some(([, other]) => other === slug(route)) || queue.push([`${base}${route}`, slug(route)])
       // Y-740: a card lists a failing check and the machine's page holds its fix, so the walk reads both.
-      const faulted = page.locator('.machines__card').filter({ has: page.locator('.machines__check') })
-      for (const link of await faulted.getByRole('link', { name: 'Open' }).all()) {
-        const route = await link.getAttribute('href')
-        if (!queue.some(([, other]) => other === slug(route))) queue.push([`${base}${route}`, slug(route)])
+      // Y-775: a card of a machine that ssh cannot reach lists no check; it holds what ssh said.
+      const faulted = page.locator('.machines__card').filter({ has: page.locator('.machines__check, .m3-disclosure') })
+      for (const link of await faulted.getByRole('link', { name: 'Open' }).all()) also(await link.getAttribute('href'))
+      // Y-775: a phone, a tablet and a Windows PC get no card, so no link leads to their pages. The daemon's list names them.
+      try {
+        const fleet = await page.evaluate(() => fetch('/api/machines').then((answer) => answer.json()))
+        for (const one of fleet.data ?? []) {
+          if (one.ownership === 'yours' && one.os !== 'linux' && one.os !== 'macOS') also(`/m/${encodeURIComponent(one.name)}`)
+        }
+      } catch (e) {
+        errors.push(`${name} machines: the daemon's list could not be read: ${e.message}`)
       }
     }
     if (shot === 'settings-about') {
