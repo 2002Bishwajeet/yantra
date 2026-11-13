@@ -677,3 +677,26 @@ test.describe('the palette on a phone finds a thread', () => {
     await expect(page).toHaveURL(/\/w\/cargo-zig\?view=chat&thread=1a2b3c4d$/)
   })
 })
+
+/** Y-751: the phone's app bar and the tablet's rail carry a Search button; the keys alone were no trigger on touch. */
+test.describe('the search button opens Search', () => {
+  test('on a phone and a tablet, one tap opens Search with the field focused', async ({ page, size }) => {
+    test.skip(size === 'desktop', 'the desktop bar draws the search pill')
+    await scenario(page, 'busy')
+    await page.goto('/')
+    await expect(heading(page, 'Dashboard')).toBeVisible()
+    const button = page.getByRole('button', { name: 'Search' })
+    const box = (await button.boundingBox())!
+    expect(box.width).toBeGreaterThanOrEqual(48)
+    expect(box.height).toBeGreaterThanOrEqual(48)
+
+    await button.tap()
+    const dialog = page.getByRole('dialog', { name: 'Search' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('combobox')).toBeFocused()
+    const fits = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
+    expect(fits).toBe(true)
+    await axe(page)
+    await screenshot(page, 'shell-search', 'busy', size, { overlay: true })
+  })
+})

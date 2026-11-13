@@ -921,7 +921,8 @@ src/
   shell/
     Shell.tsx        the three shells (the tablet sheet's list lives here), and the outlet under one boundary that a
                      navigation resets
-    Palette.tsx      the search pill and `⌘K`; the popup is its own chunk
+    Palette.tsx      the search pill and `⌘K`; the popup is its own chunk.
+                     `SearchButton.tsx` opens it from the phone bar and the tablet rail
     loopCommands.ts  the verbs a chat registers, and the shell's chords for them
     KeyboardHelp.tsx the `?` sheet
     Bell.tsx  BellPopover.tsx  NotificationsScreen.tsx
