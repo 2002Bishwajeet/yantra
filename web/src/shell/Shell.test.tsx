@@ -366,7 +366,7 @@ describe('the account button', () => {
       fireEvent.click(button)
       const item = await screen.findByRole('menuitem', { name: /GitHub refused the grant · sign in again/ })
       expect(item.getAttribute('href')).toBe('/settings/providers')
-      expect(item.textContent).toContain('yantra github login')
+      expect(item.textContent).not.toContain('yantra github')
     })
 
     it('draws neither the badge nor the item for a grant GitHub accepts', async () => {

@@ -145,7 +145,7 @@ function conflict(action: GitAction, said: string): GitFailureKind {
 }
 
 // The daemon's words for a missing grant name the CLI, so only they tell it from any other refusal (Y-753).
-const NO_GRANT = /no github grant|github login/i
+const NO_GRANT = /no github grant|github\s+login/i
 
 export function gitFailure(action: GitAction, cause: unknown): GitFailure {
   const error = asApiError(cause)
