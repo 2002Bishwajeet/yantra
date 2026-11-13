@@ -16,7 +16,7 @@
   overflow: hidden;
   overscroll-behavior: contain;
   color: var(--md-sys-color-on-surface);
-  background: var(--md-sys-color-surface);
+  background: var(--md-sys-color-surface-container-low);
   outline: none;
   transition:
     transform var(--md-sys-motion-duration-default-spatial) var(--md-sys-motion-spring-default-spatial),
@@ -39,9 +39,12 @@
   flex: none;
   gap: 8px;
   box-sizing: border-box;
-  min-height: 56px;
-  padding: var(--m3-safe-top) calc(8px + var(--m3-safe-right)) 0 calc(8px + var(--m3-safe-left));
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  /* Contained style: a filled full-round bar in a 72 px header (8 + 56 + 8). */
+  height: 56px;
+  margin: calc(var(--m3-safe-top) + 8px) max(16px, var(--m3-safe-right)) 8px max(16px, var(--m3-safe-left));
+  padding: 0 8px;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: var(--md-sys-color-surface-container-high);
 }
 
 .m3-search__icon {
@@ -107,7 +110,9 @@
   }
 
   .m3-search__bar {
+    margin: 8px;
     padding: 0 8px 0 16px;
+    background: var(--md-sys-color-surface-container-highest);
   }
 
   .m3-search__back {

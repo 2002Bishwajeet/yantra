@@ -79,10 +79,26 @@ async function bellScene(page, name, url, out) {
   }
   await page.keyboard.press('Escape')
 }
+// Y-746: the phone taps the top bar's Search button; the desktop presses the pill. Typing shows the results list too.
+async function searchScene(page, name, url, out) {
+  await page.goto(url, { waitUntil: 'load' })
+  await page.waitForTimeout(1500)
+  const opener = name === 'desktop-chromium' ? page.getByRole('button', { name: /^Search anything/ }) : page.getByRole('button', { name: 'Search', exact: true })
+  if (name === 'desktop-chromium') await opener.click()
+  else await opener.tap()
+  await page.getByRole('dialog', { name: 'Search' }).waitFor()
+  await page.waitForTimeout(1000)
+  await snap(page, `${out}/search-open-${name}`, false)
+  await page.getByRole('combobox', { name: 'Search anything' }).fill('a')
+  await page.waitForTimeout(800)
+  await snap(page, `${out}/search-typed-${name}`, false)
+  await page.keyboard.press('Escape')
+}
 for (const [name, type, options] of looks) {
   const browser = await type.launch()
   const context = await browser.newContext({ ...options, reducedMotion: 'reduce', colorScheme: 'light' })
   let belled = false
+  let searched = false
   // The loop below adds to the queue, so each look starts from the routes the walk named.
   const queue = [...shots]
   for (const [url, shot] of queue) {
@@ -138,6 +154,14 @@ for (const [name, type, options] of looks) {
         await bellScene(page, name, url, out)
       } catch (e) {
         errors.push(`${name} bell scene: ${e.message}`)
+      }
+    }
+    if (shot !== 'sign-in' && !searched) {
+      searched = true
+      try {
+        await searchScene(page, name, url, out)
+      } catch (e) {
+        errors.push(`${name} search scene: ${e.message}`)
       }
     }
     await page.close()
