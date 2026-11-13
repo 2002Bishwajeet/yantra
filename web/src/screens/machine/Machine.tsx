@@ -13,6 +13,7 @@ import {
   useSessions,
   useWorkspaces,
 } from '@/api/hooks'
+import { apart, runsSessions } from '@/lib/platform'
 import { at } from '@/lib/time'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
@@ -126,6 +127,42 @@ function About(props: { machine: OneMachine; lastSeen: string | null }) {
   )
 }
 
+const ago = (lastSeen: string) => (/^\d+[smhd]$/.test(lastSeen) ? `${lastSeen} ago` : lastSeen)
+
+/** Y-775: a phone, tablet or Windows PC runs no session, so it shows its state and nothing to press. */
+function Apart(props: { machine: OneMachine; lastSeen: string | null; name: string }) {
+  const { machine, lastSeen, name } = props
+  const { state, word } = machineState(machine)
+  const seen = machine.online ? 'now' : lastSeen ? ago(lastSeen) : 'not seen'
+  return (
+    <Page>
+      <PageHeader
+        subtitle={
+          <Chip tone={machine.online ? 'lowest' : 'error'}>
+            <Mark size="small" state={state} />
+            {machine.online || !lastSeen ? word : `${word} · ${ago(lastSeen)}`}
+          </Chip>
+        }
+        title={name}
+      />
+      <Card aria-labelledby="machine-device" className="machine__card" surface="container">
+        <div className="machine__head">
+          <Text render={<h2 />} emphasized id="machine-device" scale="title-large">
+            This device
+          </Text>
+        </div>
+        <dl className="machine__facts">
+          <Fact icon={Activity} label="Status">{word}</Fact>
+          <Fact icon={Clock} label="Last seen">{seen}</Fact>
+        </dl>
+        <Text render={<p />} scale="body-small" tone="variant">
+          {apart(machine)}
+        </Text>
+      </Card>
+    </Page>
+  )
+}
+
 function Workspaces(props: { rows: AgentRow[]; pending: boolean; machine: string; ready: boolean }) {
   const { rows, pending, machine, ready } = props
   // D7 B3: a card with nothing in it and no way to start one says nothing.
@@ -227,6 +264,8 @@ export function Machine() {
   }
 
   const lastSeen = one?.last_seen ? (at(one.last_seen, now)?.text ?? null) : null
+  if (one && !runsSessions(one)) return <Apart lastSeen={lastSeen} machine={one} name={name} />
+
   const chip = one ? chipOf(verdicted.verdict, lastSeen) : null
   const rows = agents.looked === 'ok' ? agents.data : []
 

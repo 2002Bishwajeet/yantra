@@ -113,7 +113,7 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
 
   /** Y-585: the sweep skips a machine no workspace names, and Sessions asks it
    *  anyway. Both cards then say the one thing that is known. */
-  it('gives one title in both cards when only the sessions failed', async () => {
+  it('shows the ssh failure once, in Readiness, when only the sessions failed', async () => {
     const busy = scenario('busy')
     const error = 'ssh to cachyos-g14 failed before the command reported a status: No route to host'
     const state = {
@@ -127,11 +127,13 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     expect(await ready.findByRole('heading', { name: title })).toBeTruthy()
     expect(ready.queryByText('Not checked yet')).toBeNull()
 
+    // Y-775: Readiness owns the cause and the one disclosure.
     const sessions = card('Sessions')
-    expect(await sessions.findByText(title)).toBeTruthy()
-    expect(sessions.queryByText(/No route to host/)).toBeNull()
-    fireEvent.click(sessions.getByRole('button', { name: /What ssh said/ }))
-    expect(sessions.getByText(error)).toBeTruthy()
+    expect(await sessions.findByText('The sessions cannot be listed')).toBeTruthy()
+    expect(sessions.queryByText(title)).toBeNull()
+    expect(sessions.queryByRole('button', { name: /What ssh said/ })).toBeNull()
+    expect(screen.getAllByRole('button', { name: /What ssh said/ })).toHaveLength(1)
+    expect(ready.getByRole('button', { name: /What ssh said/ })).toBeTruthy()
   })
 
   it('classifies the sessions error itself when Readiness has not failed', async () => {
@@ -144,7 +146,10 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     mount('desktop', '/m/cachyos-g14', state as unknown as typeof busy)
     const ready = within(await screen.findByRole('region', { name: 'Readiness' }))
     expect(await ready.findByRole('heading', { name: 'Ready for sessions' })).toBeTruthy()
-    expect(await card('Sessions').findByText('cachyos-g14 needs a browser sign-in')).toBeTruthy()
+    const sessions = card('Sessions')
+    expect(await sessions.findByText('The sessions cannot be listed')).toBeTruthy()
+    expect(sessions.queryByText('cachyos-g14 needs a browser sign-in')).toBeNull()
+    expect(sessions.queryByRole('button', { name: /What ssh said/ })).toBeNull()
   })
 
   /** Y-585 review: tmux's own `Permission denied` is not the appliance's key. */
@@ -253,7 +258,9 @@ describe('the cards with nothing to say', () => {
     const error = 'ssh to pi-5 failed before the command reported a status: No route to host'
     mount('desktop', '/m/pi-5', none({ sessions: { looked: 'ok', age_seconds: 0, data: [{ machine: 'pi-5', reached: 'no', error }] } }))
     await screen.findByRole('region', { name: 'Sessions' })
-    expect(await card('Sessions').findByText(/ssh to pi-5 fails/)).toBeTruthy()
+    const sessions = card('Sessions')
+    expect(await sessions.findByText('The sessions cannot be listed')).toBeTruthy()
+    expect(sessions.queryByText(/ssh to pi-5 fails/)).toBeNull()
   })
 
   it('keeps Sessions while it is pending', async () => {
@@ -307,10 +314,10 @@ describe('/m/thinkpad, which is off', () => {
     expect(ready.queryByRole('button', { name: 'Check again' })).toBeNull()
     expect(screen.getByText(/^asleep/)).toBeTruthy()
     const sessions = card('Sessions')
-    expect(await sessions.findByText('thinkpad is asleep')).toBeTruthy()
+    expect(await sessions.findByText('The sessions cannot be listed')).toBeTruthy()
+    expect(sessions.queryByText('thinkpad is asleep')).toBeNull()
+    expect(sessions.queryByRole('button', { name: /What ssh said/ })).toBeNull()
     expect(sessions.queryByText(/No route to host/)).toBeNull()
-    fireEvent.click(sessions.getByRole('button', { name: /What ssh said/ }))
-    expect(sessions.getByText(/No route to host/)).toBeTruthy()
     // N2: no Kill here, so nothing says how Kill behaves.
     expect(sessions.queryByText(/Kill asks first/)).toBeNull()
   })
@@ -342,5 +349,36 @@ describe('/m/cachyos-g14 when nothing can be reached', () => {
     expect(alert.textContent).not.toContain('Nothing here can be reached')
     expect(alert.textContent).not.toContain('off the tailnet')
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+})
+
+/** Y-775: a phone, tablet or Windows PC runs no session, so the page offers no ssh and no sudo. */
+describe('a device that runs no session', () => {
+  const cases = [
+    ['setup', '/m/iphone', 'online', 'now'],
+    ['firstrun', '/m/pixel-tablet', 'unreachable', /^\d+ Sep$/],
+    ['setup', '/m/gaming-pc', 'unreachable', /^\d+ Sep$/],
+  ] as const
+
+  for (const [name, path, word, seen] of cases) {
+    it(`${path} shows its state and last seen, and nothing to press`, async () => {
+      mount('phone', path, scenario(name))
+      await screen.findAllByRole('heading', { level: 1, name: path.slice(3) })
+      const status = (await screen.findByText('Status')).closest('.machine__fact') as HTMLElement
+      expect(within(status).getByText(word)).toBeTruthy()
+      const last = screen.getByText('Last seen').closest('.machine__fact') as HTMLElement
+      expect(within(last).getByText(seen)).toBeTruthy()
+
+      for (const region of ['Readiness', 'Sessions', 'Workspaces on this machine', 'Owner terminal', 'About']) {
+        expect(screen.queryByRole('region', { name: region })).toBeNull()
+      }
+      expect(screen.queryByRole('button', { name: /^Check/ })).toBeNull()
+      expect(document.body.textContent).not.toMatch(/ssh|sudo/i)
+    })
+  }
+
+  it('says why the device is apart', async () => {
+    mount('phone', '/m/iphone', scenario('setup'))
+    expect(await screen.findByText('opens the dashboard · runs no session')).toBeTruthy()
   })
 })

@@ -12,7 +12,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { fromReading } from '@/api/client'
 import { reachWords } from '@/lib/checks'
 import { SshSaid } from './ReachFailure'
-import { chipOf, sessionsFailure, titleOf, type Verdict } from './verdict'
+import { sessionsFailure, type Verdict } from './verdict'
 
 type Row = { session: Session; workspace: string | null }
 
@@ -72,11 +72,10 @@ export function Sessions(props: {
           </Text>
           <SshSaid detail={failure.detail} kind="listing" />
         </div>
-      ) : failure && answer?.reached === 'no' ? (
-        // R-23: a machine that did not answer is data about the machine.
+      ) : failure ? (
+        // Y-775: Readiness owns the cause and the one "What ssh said".
         <div className="machine__failed" role="status">
-          <State state={chipOf(failure, null).state}>{titleOf(failure, machine)}</State>
-          <SshSaid detail={answer.error} />
+          <State state="unknown">The sessions cannot be listed</State>
         </div>
       ) : sessions.looked === 'failed' ? (
         <ErrorSurface.Inline error={fromReading(sessions)!} title="The sessions could not be read" />
