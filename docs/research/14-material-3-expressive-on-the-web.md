@@ -296,6 +296,18 @@ velocity, a spring carries momentum. That matters for drag-to-dismiss and a FAB 
 mid-open, nowhere else on these boards; the Web Animations API with the same string handles those
 without a library. A spring library is the only option that costs bundle; do not add one.
 
+> **2026-11-14, Y-806: "off the main thread" is false for Safari below 27.3.** Released Safari
+> cannot accelerate an animation that uses a `linear()` easing, so it runs the animation on the main
+> thread. A WebKit engineer says so in bug 281429 ("This is as designed") and again in bug 312407
+> ("This is true of the released Safari so far", 2026-04-15). The reporter of bug 281429 gives
+> the cost: 60 fps at most, and 30 fps in low-power mode. The fix is the "Threaded Time-based
+> Animations" flag of bug 312015. The first release that has it is the Safari 27.3 beta of
+> 2026-11-03, whose notes say that animations with `linear()` and `steps()` easings "are now also
+> accelerated". The owner saw the cost on an iPhone as a stutter when a menu opened. `Menu.css` now
+> eases with the cubic-bezier tokens, which every Safari accelerates. Every other file that uses a
+> spring token still animates on the main thread on those iPhones. Nobody here measured an iPhone:
+> the engines in CI do not have this limit.
+
 **View Transitions** (`document.startViewTransition`) cover the route change and the shared-element
 move from a row to its session screen: Chrome 111, Safari 18 / iOS 18, Firefox 144; the
 `{types, update}` options form is Chrome 125 / Safari 18.2 / Firefox 147. React 19's
@@ -422,6 +434,12 @@ Accessed 2026-09-06 unless noted.
 - `linear()` — <https://developer.chrome.com/docs/css-ui/css-linear-easing-function>; MDN
   browser-compat-data `css/types/easing-function.json`, `api/Document.json`,
   `css/at-rules/starting-style.json`, `css/properties/corner-shape.json`
+- `linear()` on the main thread in Safari (accessed 2026-11-14) — WebKit bugs
+  <https://bugs.webkit.org/show_bug.cgi?id=281429>, <https://bugs.webkit.org/show_bug.cgi?id=312407>
+  and <https://bugs.webkit.org/show_bug.cgi?id=312015>; Safari 27.3 beta release notes —
+  <https://developer.apple.com/documentation/safari-release-notes/safari-27_3-release-notes>
+  (JS-rendered; read through its JSON at
+  `developer.apple.com/tutorials/data/documentation/safari-release-notes/safari-27_3-release-notes.json`)
 - WCAG 2.2 — <https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html> and
   `target-size-enhanced.html`; axe-core —
   <https://github.com/dequelabs/axe-core/blob/develop/doc/rule-descriptions.md>
