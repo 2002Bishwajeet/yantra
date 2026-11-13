@@ -7,7 +7,7 @@ import { grant, held, REFUSED, signedIn } from '@/lib/github'
 import { Button } from '@/m3/button/Button'
 import { Lead } from '@/m3/lead/Lead'
 import { Avatar } from '@/shell/Avatar'
-import { ListItem, ListValue } from '@/m3/list/List'
+import { ListItem } from '@/m3/list/List'
 import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { useFormFactor } from '@/shell/formFactor'
@@ -89,8 +89,7 @@ export function Providers() {
               <GitFork />
             </Lead>
           }
-          supporting="not connected"
-          trailing={<ListValue>Later</ListValue>}
+          supporting="not connected · Later"
         />
       </Group>
       <Group label="LLM">
@@ -114,8 +113,7 @@ export function Providers() {
               <Box />
             </Lead>
           }
-          supporting={phone ? 'nothing uses it yet' : 'not set up · for a future agent, nothing uses it yet'}
-          trailing={<ListValue>Later</ListValue>}
+          supporting={phone ? 'nothing uses it yet · Later' : 'not set up · for a future agent, nothing uses it yet · Later'}
         />
       </Group>
       <Note>

@@ -22,7 +22,7 @@ describe('Providers', () => {
     // contract.readiness has no login-session check on any machine.
     expect(await screen.findByText(/Claude subscription · signed in on 0 of \d+ machines/)).toBeTruthy()
     // GitLab and OpenAI are "Later", D7 N6: a value, not a disabled button.
-    expect(screen.getAllByText('Later')).toHaveLength(2)
+    expect(screen.getAllByText(/ · Later$/)).toHaveLength(2)
     expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
   })
 
@@ -42,7 +42,7 @@ describe('Providers', () => {
     expect(await screen.findByText('Connected as 2002Bishwajeet')).toBeTruthy()
     expect(screen.queryByText(/repositories, reviews, issues/)).toBeNull()
     expect(await screen.findByText(/^Signed in on 0 of \d+ machines$/)).toBeTruthy()
-    expect(screen.getByText('nothing uses it yet')).toBeTruthy()
+    expect(screen.getByText('nothing uses it yet · Later')).toBeTruthy()
     expect(screen.queryByText(/for a future agent/)).toBeNull()
   })
 
@@ -70,7 +70,7 @@ describe('Providers', () => {
     await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')
     // §1 row 46: the footnote repeated the category blurb word for word.
     expect(screen.getAllByText(/Yantra signs in to GitHub itself/)).toHaveLength(1)
-    expect(screen.getByText('not connected')).toBeTruthy()
+    expect(screen.getByText('not connected · Later')).toBeTruthy()
   })
 
   it('walks the device flow: a code, where to type it, and then the login', async () => {
@@ -288,8 +288,8 @@ describe('Providers', () => {
   describe('GitLab and OpenAI', () => {
     it('draw "Later" as a value, never a disabled button (N6)', async () => {
       mountSettings('desktop', '/settings/providers')
-      await screen.findByText('not connected')
-      const later = screen.getAllByText('Later')
+      await screen.findByText('not connected · Later')
+      const later = screen.getAllByText(/ · Later$/)
       expect(later).toHaveLength(2)
       for (const one of later) expect(one.tagName).not.toBe('BUTTON')
     })

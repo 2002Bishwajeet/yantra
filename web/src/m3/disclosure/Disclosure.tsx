@@ -9,18 +9,20 @@ export type DisclosureProps = {
   /** The trigger's word: "Show". */
   action?: string
   className?: string
+  /** quiet: no outline, a short row, for inside a log. */
+  variant?: 'quiet'
   defaultOpen?: boolean
   children: ReactNode
 }
 
 /** The dashboard's Idle line: an outlined row that opens on a spring. */
-export function Disclosure({ summary, action, className, defaultOpen, children }: DisclosureProps) {
+export function Disclosure({ summary, action, className, defaultOpen, variant, children }: DisclosureProps) {
   const id = useId()
   const [open, setOpen] = useState(defaultOpen ?? false)
   // Children mount on the first open and stay, so the close can animate.
   const [seen, setSeen] = useState(defaultOpen ?? false)
   return (
-    <div className={clsx('m3-disclosure', className)} data-open={open ? '' : undefined}>
+    <div className={clsx('m3-disclosure', className)} data-open={open ? '' : undefined} data-variant={variant}>
       <div className="m3-disclosure__row">
         <div className="m3-disclosure__summary" id={`${id}-summary`}>{summary}</div>
         <button

@@ -83,7 +83,7 @@ test.describe('the session screen, chat first', () => {
     await expect(page.getByRole('status')).toHaveText('Claude finished.')
     await expect(page.getByRole('button', { name: 'Context window 15% used' })).toBeVisible()
     await page.getByRole('button', { name: /^Worked/ }).click()
-    await page.getByText('Output').click()
+    await page.getByRole('button', { name: /Output/ }).click()
     await expect(page.getByText('test result: ok')).toBeVisible()
   })
 

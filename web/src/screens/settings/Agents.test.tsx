@@ -12,14 +12,14 @@ describe('Agents', () => {
   it('counts the machines the agent is installed on, and marks the default', async () => {
     mountSettings('desktop', '/settings/agents')
     // contract.readiness carries no `agent-cli` check on either machine.
-    expect(await screen.findByText(/^present on 0 of \d+ machines/)).toBeTruthy()
+    expect(await screen.findByText(/present on 0 of \d+ machines/)).toBeTruthy()
     expect(screen.getByText('Claude Code')).toBeTruthy()
-    expect(screen.getByText('Default')).toBeTruthy()
+    expect(screen.getByText(/^Default · present on 0 of/)).toBeTruthy()
   })
 
   it('says no machine is checked on a fresh install, and draws no placeholder agent', async () => {
     mountSettings('desktop', '/settings/agents', { 'GET /api/readiness': [200, { ...contract.readiness, data: [] }] })
-    expect(await screen.findByText(/^no machine is checked yet · trust prompts/)).toBeTruthy()
+    expect(await screen.findByText(/^Default · no machine is checked yet · trust prompts/)).toBeTruthy()
     expect(screen.queryByText(/of 0 machines/)).toBeNull()
     expect(screen.queryByText('Another agent')).toBeNull()
     expect(screen.queryByText('Coming')).toBeNull()
