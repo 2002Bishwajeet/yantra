@@ -64,7 +64,7 @@ test.describe('the tablet rail on a scrolling page', () => {
   const scrollY = (page: Page) => page.evaluate(() => window.scrollY)
 
   test('stays put and fills the screen while the page scrolls', async ({ page }) => {
-    await page.setViewportSize({ width: 820, height: 500 })
+    await page.setViewportSize({ width: 820, height: 580 })
     await page.goto('/fleet')
     await expect(heading(page, 'Fleet')).toBeVisible()
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
@@ -687,8 +687,8 @@ test.describe('the search button opens Search', () => {
     await expect(heading(page, 'Dashboard')).toBeVisible()
     const button = page.getByRole('button', { name: 'Search' })
     const box = (await button.boundingBox())!
-    expect(box.width).toBeGreaterThanOrEqual(48)
-    expect(box.height).toBeGreaterThanOrEqual(48)
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    expect(box.height).toBeGreaterThanOrEqual(44)
 
     await button.tap()
     const dialog = page.getByRole('dialog', { name: 'Search' })

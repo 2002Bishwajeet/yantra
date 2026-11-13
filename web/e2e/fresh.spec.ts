@@ -70,6 +70,7 @@ const SHELL: Record<string, Expect> = {
   Machines: url('/machines'),
   Usage: url('/usage'),
   'Search anything': expanded,
+  Search: dialog,
   Notifications: { phone: url('/notifications'), tablet: expanded, desktop: expanded },
   Account: expanded,
   Back: url('/'),
