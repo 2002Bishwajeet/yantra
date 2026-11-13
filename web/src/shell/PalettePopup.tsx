@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { Cpu, FileText, MessageSquare, Play, Search } from 'lucide-react'
 import type { Item } from '@/api'
@@ -85,11 +85,13 @@ export function PalettePopup(props: {
   open: boolean
   onOpenChange: (open: boolean) => void
   help: boolean
+  /** Where the focus goes back to on close; null leaves it to Base UI. */
+  opener: RefObject<HTMLElement | null>
   onHelpChange: (open: boolean) => void
   /** A query to put in the field, such as the issue chord's. */
   seed: { query: string } | null
 }) {
-  const { open, onOpenChange, help, onHelpChange, seed } = props
+  const { open, onOpenChange, help, onHelpChange, opener, seed } = props
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -302,7 +304,7 @@ export function PalettePopup(props: {
         }}
         open={open}
       >
-        <DialogPopup className="palette" title="Search">
+        <DialogPopup className="palette" finalFocus={() => opener.current ?? true} title="Search">
           <TextField
             aria-activedescendant={flat.length ? `${listId}-${current}` : undefined}
             aria-controls={listId}

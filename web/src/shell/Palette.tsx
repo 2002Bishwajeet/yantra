@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { Kbd } from '@/m3/kbd/Kbd'
@@ -6,14 +6,15 @@ import { Pill } from '@/m3/pill/Pill'
 import { matchHelp } from '@/screens/session/keys'
 import { PALETTE_EVENT, useLoopChords } from './loopCommands'
 
-const PalettePopup = lazy(() =>
-  import('./PalettePopup').then((it) => ({ default: it.PalettePopup })),
-)
+const loadPopup = () => import('./PalettePopup')
+const PalettePopup = lazy(() => loadPopup().then((it) => ({ default: it.PalettePopup })))
+// A failed warm-up is the real import's to report, behind its boundary.
+export const warmPalette = () => void loadPopup().catch(() => {})
 
 // The listener takes either modifier; this only says which one to press.
 const SHORTCUT = navigator.userAgent.includes('Mac') ? '⌘K' : 'Ctrl K'
 
-/** The search pill, ⌘K and `?`. The tablet and the phone draw no pill but keep the keys. The overlay arrives with the first summon, and
+/** The search pill, ⌘K and `?`. The tablet rail and the phone bar draw a search button instead (SearchButton) and keep the keys. The overlay arrives with the first summon, and
  *  stays mounted after it so a second press is instant. */
 export function Palette(props: { pill?: boolean }) {
   const pill = props.pill ?? true
@@ -21,6 +22,8 @@ export function Palette(props: { pill?: boolean }) {
   const [open, setOpen] = useState(false)
   const [help, setHelp] = useState(false)
   const [seed, setSeed] = useState<{ query: string } | null>(null)
+  // The seed event has no Base UI trigger, so the popup needs the opener to hand the focus back to.
+  const opener = useRef<HTMLElement | null>(null)
   // Here, not in the Chat: Start from issue is offered on every page.
   useLoopChords()
 
@@ -31,6 +34,7 @@ export function Palette(props: { pill?: boolean }) {
       // readline's kill-to-end-of-line. `.xterm` is the pane's own mark.
       if (document.activeElement?.closest('.xterm')) return
       event.preventDefault()
+      opener.current = null
       setArmed(true)
       setOpen((was) => !was)
     }
@@ -42,6 +46,7 @@ export function Palette(props: { pill?: boolean }) {
     }
     // The issue chord opens the palette with its query in it.
     const seeded = (event: Event) => {
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setSeed({ query: (event as CustomEvent<string>).detail })
       setArmed(true)
       setOpen(true)
@@ -79,7 +84,7 @@ export function Palette(props: { pill?: boolean }) {
       {armed ? (
         <ErrorBoundary layout="inline" title="The palette could not be drawn">
           <Suspense fallback={null}>
-            <PalettePopup help={help} onHelpChange={setHelp} onOpenChange={setOpen} open={open} seed={seed} />
+            <PalettePopup help={help} opener={opener} onHelpChange={setHelp} onOpenChange={setOpen} open={open} seed={seed} />
           </Suspense>
         </ErrorBoundary>
       ) : null}

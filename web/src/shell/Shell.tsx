@@ -29,6 +29,7 @@ import { useKeyboardInset } from './useKeyboardInset'
 import { Avatar } from './Avatar'
 import { Bell } from './Bell'
 import { Palette } from './Palette'
+import { SearchButton } from './SearchButton'
 import { usePrefs } from './prefs'
 import { keyOf, usePrimary, usePublishDrawn, usePublishRoute, useRouteAction, type Primary } from './primary'
 import { NotReached } from './NotReached'
@@ -289,6 +290,9 @@ function TabletRail(props: { fab: ReactNode; onToggle: () => void; open: boolean
       fab={<div className="shell__rail-slot">{fab}</div>}
       trailing={
         <>
+          <Guarded title="Search could not be drawn">
+            <SearchButton />
+          </Guarded>
           <Guarded title="Notifications could not be drawn">
             <Bell
               aria-controls={SHEET}
@@ -335,6 +339,9 @@ function PhoneBar({ top }: { top: boolean }) {
       actions={
         top ? (
           <>
+            <Guarded title="Search could not be drawn">
+              <SearchButton />
+            </Guarded>
             <Guarded title="Notifications could not be drawn">
               <Bell role="link" render={<Link to="/notifications" />} />
             </Guarded>

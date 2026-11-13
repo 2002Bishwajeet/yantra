@@ -64,7 +64,7 @@ test.describe('the tablet rail on a scrolling page', () => {
   const scrollY = (page: Page) => page.evaluate(() => window.scrollY)
 
   test('stays put and fills the screen while the page scrolls', async ({ page }) => {
-    await page.setViewportSize({ width: 820, height: 500 })
+    await page.setViewportSize({ width: 820, height: 580 })
     await page.goto('/fleet')
     await expect(heading(page, 'Fleet')).toBeVisible()
     await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
@@ -675,5 +675,28 @@ test.describe('the palette on a phone finds a thread', () => {
 
     await row.tap()
     await expect(page).toHaveURL(/\/w\/cargo-zig\?view=chat&thread=1a2b3c4d$/)
+  })
+})
+
+/** Y-751: the phone's app bar and the tablet's rail carry a Search button; the keys alone were no trigger on touch. */
+test.describe('the search button opens Search', () => {
+  test('on a phone and a tablet, one tap opens Search with the field focused', async ({ page, size }) => {
+    test.skip(size === 'desktop', 'the desktop bar draws the search pill')
+    await scenario(page, 'busy')
+    await page.goto('/')
+    await expect(heading(page, 'Dashboard')).toBeVisible()
+    const button = page.getByRole('button', { name: 'Search' })
+    const box = (await button.boundingBox())!
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    expect(box.height).toBeGreaterThanOrEqual(44)
+
+    await button.tap()
+    const dialog = page.getByRole('dialog', { name: 'Search' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('combobox')).toBeFocused()
+    const fits = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)
+    expect(fits).toBe(true)
+    await axe(page)
+    await screenshot(page, 'shell-search', 'busy', size, { overlay: true })
   })
 })
