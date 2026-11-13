@@ -466,6 +466,7 @@
 }
 
 [data-shell="phone"] .settings__preview {
+  gap: 4px;
   padding: 8px;
 }
 
