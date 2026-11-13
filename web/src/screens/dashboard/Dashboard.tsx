@@ -28,6 +28,7 @@ import {
 import { readAgain } from '@/api/queries'
 import { grant, lacksGrant, QUEUE_WHY, type Grant } from '@/lib/github'
 import { ago, at } from '@/lib/time'
+import { useConnecting } from '@/lib/connecting'
 import { NotConnected } from '@/screens/settings/NotConnected'
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
@@ -320,6 +321,7 @@ function Hero(props: {
   const { rows, count, attention, github, events, now, retry } = props
   // D7 §3.1: where the FAB carries New session, this copy is not also filled.
   const carried = useFab() !== null
+  const connecting = useConnecting()
   const empty = count === 0 && rows.length === 0 && attention.looked === 'ok'
   return (
     <Card aria-labelledby="dash-needs" className="dash__hero" surface="primary">
@@ -374,7 +376,7 @@ function Hero(props: {
               <KeptReading reading={attention} />
             </>
           ) : attention.looked === 'failed' ? (
-            lacksGrant(github) ? (
+            lacksGrant(github) || connecting ? (
               <NotConnected refused={github.kind === 'refused'} why={QUEUE_WHY} />
             ) : (
               <ErrorSurface.Inline error={fromReading(attention)!} reset={retry} title="GitHub could not be read" />
@@ -733,6 +735,7 @@ export function Dashboard() {
   // The fifth is on the daemon's 300 s clock and stamps itself (D6 §2).
   const attention = useAttention()
   const github = grant(useGithub().data, useGithubReadiness())
+  const connecting = useConnecting()
   const notifications = useNotifications()
   const events = asEvents(notifications.data)
   const client = useQueryClient()
@@ -827,7 +830,7 @@ export function Dashboard() {
       {headed ? null : strip}
       {gate.passed ? (
         <ErrorBoundary layout="inline" title="Finish setup could not be drawn">
-          <FinishSetup githubInHero={attention.looked === 'failed' && lacksGrant(github)} now={now} />
+          <FinishSetup githubInHero={attention.looked === 'failed' && (lacksGrant(github) || connecting)} now={now} />
         </ErrorBoundary>
       ) : null}
       {changed > 0 ? (

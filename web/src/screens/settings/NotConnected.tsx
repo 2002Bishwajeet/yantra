@@ -1,5 +1,8 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { LogIn } from 'lucide-react'
+import { keys } from '@/api/keys'
+import { holdConnect } from '@/lib/connecting'
 import { REFUSED } from '@/lib/github'
 import { Button } from '@/m3/button/Button'
 import { State } from '@/m3/mark/Mark'
@@ -16,6 +19,16 @@ export function NotConnected(props: { why: string; refused?: boolean; className?
   const { why, refused, className } = props
   const [open, setOpen] = useState(false)
   const [asked, setAsked] = useState(false)
+  const client = useQueryClient()
+  useEffect(() => {
+    if (!open) return
+    const release = holdConnect()
+    return () => {
+      release()
+      // The attention read failed for want of the grant; read it again once the sheet is done.
+      void client.invalidateQueries({ queryKey: keys.attention() })
+    }
+  }, [open, client])
   return (
     <Row className={className ? `not-connected ${className}` : 'not-connected'}>
       <div className="not-connected__text">

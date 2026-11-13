@@ -13,6 +13,7 @@ import { useFormFactor } from '@/shell/formFactor'
 import { Ago } from './age'
 import { KeptReading } from './KeptReading'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
+import { useConnecting } from '@/lib/connecting'
 import { NotConnected } from '@/screens/settings/NotConnected'
 import { StartSession } from './StartSession'
 
@@ -70,7 +71,8 @@ export function Github(props: { attention: Reading<Attention>; grant: Grant }) {
  *  commands drawn as code. */
 function Failed(props: { error: string; grant: Grant }) {
   const { error, grant } = props
-  if (lacksGrant(grant)) {
+  const connecting = useConnecting()
+  if (lacksGrant(grant) || connecting) {
     return <NotConnected refused={grant.kind === 'refused'} why={QUEUE_WHY} />
   }
   return (

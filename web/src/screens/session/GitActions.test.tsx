@@ -524,9 +524,19 @@ describe('merge', () => {
     expect(log.map((one) => one.path)).toEqual([`${base}/pending`, `${base}/pending`])
   })
 
+  it('draws a 403 read as the daemon said it, not as Connect', async () => {
+    daemon({ pending: [403, 'this node is not the owner'] })
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    const alert = await within(asked).findByRole('alert')
+    expect(within(alert).getByText('this node is not the owner')).toBeTruthy()
+    expect(within(asked).queryByText('GitHub is not connected')).toBeNull()
+    expect(within(asked).queryByRole('button', { name: 'Connect' })).toBeNull()
+    expect(mergeButton(asked).disabled).toBe(true)
+  })
+
   it.each([
     [409, 'no GitHub grant — run `yantra github login`'],
-    [403, 'this node is not the owner'],
   ] as const)('draws a %s read saying "%s" as Connect, keeps Merge off', async (status, said) => {
     daemon({ pending: [status, said] })
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
@@ -547,9 +557,19 @@ describe('merge', () => {
     expect(within(alert).getByRole('heading', { name: 'The daemon did not answer' })).toBeTruthy()
   })
 
+  it('draws a 403 merge as the daemon said it, not as Connect', async () => {
+    daemon({ pending, merge: [403, 'this node is not the owner'] })
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    fireEvent.click(await ready(asked))
+    const alert = await within(asked).findByRole('alert')
+    expect(within(alert).getByText('this node is not the owner')).toBeTruthy()
+    expect(within(asked).queryByText('GitHub is not connected')).toBeNull()
+    expect(within(asked).queryByRole('button', { name: 'Connect' })).toBeNull()
+  })
+
   it.each([
     [409, 'no GitHub grant — run `yantra github login`'],
-    [403, 'this node is not the owner'],
   ] as const)('draws a %s merge saying "%s" as Connect, without the daemon words', async (status, said) => {
     daemon({ pending, merge: [status, said] })
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))

@@ -18,6 +18,7 @@ import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import { IconTile } from '@/m3/tile/Tile'
+import { useConnecting } from '@/lib/connecting'
 import { NotConnected } from '@/screens/settings/NotConnected'
 import { KeptReading } from '@/screens/fleet/KeptReading'
 import { useTick } from '@/useTick'
@@ -183,11 +184,12 @@ export function GithubRepos(props: { form: SessionForm; values: Values }) {
   const [query, setQuery] = useState('')
   const deferred = useDeferredValue(query)
 
+  const connecting = useConnecting()
   if (github.error) {
     return <ErrorSurface.Inline error={asApiError(github.error)} reset={() => void github.refetch()} title="GitHub" />
   }
   const held = grant(github.data, readiness)
-  if (lacksGrant(held)) {
+  if (lacksGrant(held) || connecting) {
     return <NotConnected refused={held.kind === 'refused'} why="Connect GitHub to list and search your repositories." />
   }
 

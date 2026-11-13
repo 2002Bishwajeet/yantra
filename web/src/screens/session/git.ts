@@ -107,8 +107,8 @@ const byStatus: Record<GitAction, Partial<Record<number, GitFailureKind>>> = {
   commit: { 400: 'commitEmpty', 409: 'commitRefused' },
   push: { 409: 'pushRefused' },
   pr: { 409: 'prRefused', 502: 'prGithub' },
-  pending: { 401: 'noGrant', 403: 'noGrant', 409: 'pendingRefused', 502: 'pendingGithub' },
-  merge: { 401: 'noGrant', 403: 'noGrant', 409: 'mergeRefused', 502: 'mergeGithub' },
+  pending: { 409: 'pendingRefused', 502: 'pendingGithub' },
+  merge: { 409: 'mergeRefused', 502: 'mergeGithub' },
   remove: { 409: 'removeRefused' },
 }
 
