@@ -147,7 +147,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     'Dictation model': url('https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2'),
   },
   notifications: { Settings: url('/settings/notifications'), 'Mark all read': disabled },
-  rooms: {},
+  rooms: { 'New session': url('/new') },
   'add-device': {
     Copy: text('Copied'),
     'Show key': dialog,
