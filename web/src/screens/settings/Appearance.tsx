@@ -194,9 +194,9 @@ function Choice(props: { chosen: boolean; label: string; why: string; onChoose: 
           {label}
         </Text>
         {chosen ? (
-          <Text scale="body-small" tone="variant">
-            selected
-          </Text>
+          <span aria-hidden="true" className="settings__choice-check">
+            <Check />
+          </span>
         ) : null}
       </span>
       <Text scale="body-small" tone="variant">
@@ -220,7 +220,9 @@ function Preview(props: { scheme: 'light' | 'dark' }) {
         <Text render={<p />} className="settings__hero-number" scale="display-medium" emphasized>
           3
         </Text>
-        <Text scale="body-medium">things are waiting on you</Text>
+        <Text className="settings__hero-line" scale="body-medium">
+          things are waiting on you
+        </Text>
       </Card>
     </div>
   )

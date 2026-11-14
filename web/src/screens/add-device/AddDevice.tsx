@@ -13,6 +13,7 @@ import { asPlatform, guessPlatform, PLATFORMS, platformName, platformOf, type Pl
 import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Copyable } from '@/m3/copyable/Copyable'
+import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Page } from '@/m3/page/Page'
@@ -187,12 +188,11 @@ function JoinKey() {
           Show key
         </Button>
       </div>
-      <details className="add-device__diagnostics">
-        <summary>Diagnostics</summary>
+      <Disclosure summary="Diagnostics" variant="quiet">
         <Note>
           The key is at {key.path} on the appliance.
         </Note>
-      </details>
+      </Disclosure>
       <Sheet
         actions={
           <Button onClick={() => setOpen(false)} variant="text">

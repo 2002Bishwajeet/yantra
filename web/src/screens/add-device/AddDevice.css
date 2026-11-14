@@ -132,7 +132,3 @@
   gap: 4px 8px;
 }
 
-.add-device__diagnostics summary {
-  cursor: pointer;
-  color: var(--md-sys-color-on-surface-variant);
-}

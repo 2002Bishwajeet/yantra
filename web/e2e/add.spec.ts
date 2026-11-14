@@ -73,7 +73,7 @@ test.describe('Add a device', () => {
     const joined = beat(page, 'Joined')
     await expect(joined.getByText(/The command adds this key: ed25519 · SHA256:/)).toBeVisible()
     await expect(joined.getByText('/home/<user>/.ssh/id_yantra')).toBeHidden()
-    await joined.getByText('Diagnostics').click()
+    await joined.getByRole('button', { name: /Diagnostics/ }).click()
     await expect(joined.getByText('/home/<user>/.ssh/id_yantra')).toBeVisible()
     await axe(page)
     await joined.getByRole('button', { name: 'Show key' }).click()

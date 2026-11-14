@@ -107,6 +107,7 @@ export function About() {
       </section>
       <Group label="Who can open the dashboard">
         <ListItem
+          stack
           headline="Only devices on your tailnet"
           supporting="No separate login"
           trailing={facts?.tailnet ? <ListValue>{facts.tailnet}</ListValue> : undefined}

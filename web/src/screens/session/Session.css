@@ -389,12 +389,6 @@
   white-space: pre-wrap;
 }
 
-.chat__tool-output summary,
-.chat__thinking summary {
-  min-height: 24px;
-  cursor: pointer;
-}
-
 .chat__diff {
   gap: 8px;
   width: min(100%, var(--m3-turn-max));

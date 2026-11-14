@@ -18,13 +18,15 @@ export type ListItemProps = useRender.ComponentProps<'div'> & {
   supporting?: ReactNode
   /** A value, a chevron, a switch or a button. */
   trailing?: ReactNode
+  /** On a phone the wide trailing control wraps under the text. */
+  stack?: boolean
 }
 
 /** One row of a List. It is a link or a button when `render` says so, and the
  *  `<li>` stays outside the control so a switch in `trailing` keeps its own
  *  focus. */
 export function ListItem(props: ListItemProps) {
-  const { leading, headline, supporting, trailing, className, render, ...rest } = props
+  const { leading, headline, supporting, trailing, stack, className, render, ...rest } = props
   const body = useRender({
     render,
     defaultTagName: 'div',
@@ -43,7 +45,7 @@ export function ListItem(props: ListItemProps) {
     },
   })
   return (
-    <li className="m3-list__row">
+    <li className="m3-list__row" data-stack={stack ? '' : undefined}>
       {body}
       {trailing ? <span className="m3-list-item__trailing">{trailing}</span> : null}
     </li>

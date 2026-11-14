@@ -151,6 +151,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
   'add-device': {
     Copy: text('Copied'),
     'Show key': dialog,
+    Show: expanded,
     'Show QR code': expanded,
     'tailscale.com/download': url('https://tailscale.com/download'),
     ...Object.fromEntries(['pi-5', 'nas'].map((n) => [n, url(`/machines/add?platform=linux&machine=${n}`)])),
