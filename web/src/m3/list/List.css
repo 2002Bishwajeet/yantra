@@ -96,9 +96,9 @@
   max-width: 60%;
 }
 
-/* On desktop a trailing select matches the 40 px segmented controls; the 56 px
-   field stays for the stacked phone row. */
-@media (min-width: 600px) {
+/* With a mouse a trailing select matches the 40 px segmented controls; a touch
+   screen keeps the 56 px field for its 44 px hit area. */
+@media (min-width: 600px) and (pointer: fine) {
   .m3-list__row[data-stack] .m3-select {
     height: 40px;
   }
