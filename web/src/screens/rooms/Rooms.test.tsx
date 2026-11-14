@@ -124,8 +124,11 @@ describe('the rooms list', () => {
     daemon({ 'GET /api/rooms': { status: 200, body: [] } })
     open('/rooms')
     expect(await screen.findByText('No rooms')).toBeTruthy()
-    expect(screen.getByText(/A room an agent made ends on a restart/)).toBeTruthy()
-    expect(screen.queryByRole('link')).toBeNull()
+    const empty = within(screen.getByText('No rooms').closest('[data-slot="empty"]') as HTMLElement)
+    expect(empty.getByText('Agents share a room to work on one project together.')).toBeTruthy()
+    expect(empty.queryByText(/yantra|owner/i)).toBeNull()
+    expect(empty.getAllByRole('link')).toHaveLength(1)
+    expect(empty.getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
   })
 
   it('draws a refusal of the list as an error, with the daemon’s words', async () => {

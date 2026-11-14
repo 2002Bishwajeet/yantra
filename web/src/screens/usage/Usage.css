@@ -17,6 +17,11 @@
   gap: 10px;
 }
 
+.usage__empty {
+  justify-content: center;
+  min-height: 40dvh;
+}
+
 .usage__head {
   display: flex;
   align-items: baseline;

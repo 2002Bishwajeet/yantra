@@ -317,12 +317,16 @@ function Hero(props: {
   events: Event[]
   now: number
   retry: () => void
+  /** Another band has rows, so a quiet Needs you has nothing to add. */
+  others: boolean
+  fleetEmpty: boolean
 }) {
-  const { rows, count, attention, github, events, now, retry } = props
+  const { rows, count, attention, github, events, now, retry, others, fleetEmpty } = props
   // D7 §3.1: where the FAB carries New session, this copy is not also filled.
   const carried = useFab() !== null
   const connecting = useConnecting()
   const empty = count === 0 && rows.length === 0 && attention.looked === 'ok'
+  if (empty && others) return null
   return (
     <Card aria-labelledby="dash-needs" className="dash__hero" surface="primary">
       <div className="dash__hero-head">
@@ -340,20 +344,18 @@ function Hero(props: {
       </div>
       {empty ? (
         <>
-          <div className="dash__hero-empty">
-            <State className="dash__hero-empty-title" state="idle">
-              Nothing needs you
-            </State>
-            <Text scale="body-large">
-              when an agent asks for trust or a review is requested, it appears here first
-            </Text>
-          </div>
+          <EmptyState
+            action={
+              <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant={carried ? 'tonal' : 'filled'}>
+                New session
+              </Button>
+            }
+            state="idle"
+            title={fleetEmpty ? 'No workspaces yet' : 'Nothing needs you'}
+          >
+            {fleetEmpty ? 'Start a session and it shows here.' : 'Nothing runs. A request shows here first.'}
+          </EmptyState>
           <KeptReading reading={attention} />
-          <div>
-            <Button icon={<Plus />} render={<Link to="/new" />} role="link" variant={carried ? 'tonal' : 'filled'}>
-              New session
-            </Button>
-          </div>
         </>
       ) : (
         <div className="dash__rows">
@@ -438,13 +440,9 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
   const live = rows.flatMap((row) => (row.kind === 'workspace' ? [row] : []))
   const timed = live.map((row) => ({ row, started: startedAt(sessions, row.workspace) }))
   const longest = Math.max(0, ...timed.flatMap((one) => (one.started === null ? [] : [now / 1000 - one.started])))
+  if (live.length === 0) return null
   return (
-    <Card
-      aria-labelledby="dash-running"
-      className="dash__running"
-      data-empty={live.length === 0 ? '' : undefined}
-      surface="high"
-    >
+    <Card aria-labelledby="dash-running" className="dash__running" surface="high">
       <CardHead
         id="dash-running"
         title="Running"
@@ -460,15 +458,11 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
           </>
         }
       />
-      {live.length === 0 ? (
-        <EmptyState title="Nothing is running">Start a session and its elapsed time shows here</EmptyState>
-      ) : (
-        <div className="dash__rows">
-          {timed.map(({ row, started }) => (
-            <RunningRow key={row.id} longest={longest} now={now} phone={phone} row={row} started={started} />
-          ))}
-        </div>
-      )}
+      <div className="dash__rows">
+        {timed.map(({ row, started }) => (
+          <RunningRow key={row.id} longest={longest} now={now} phone={phone} row={row} started={started} />
+        ))}
+      </div>
     </Card>
   )
 }
@@ -496,17 +490,7 @@ function Worth(props: {
   }
   const rows = sessions.looked === 'ok' ? unclaimed(sessions.data, workspaces) : []
   const unknown = sessions.looked === 'never' || workspaces.looked !== 'ok'
-  // D7 S13: an empty band is one quiet line, not the loudest block on the page.
-  if (!unknown && rows.length === 0) {
-    return (
-      <section aria-labelledby="dash-worth" className="dash__line">
-        <Eyebrow render={<h2 />} id="dash-worth">
-          Worth a look
-        </Eyebrow>
-        <State state="idle">every tmux session on the machines that answered belongs to a workspace</State>
-      </section>
-    )
-  }
+  if (!unknown && rows.length === 0) return null
   return (
     <Card aria-labelledby="dash-worth" className="dash__worth" surface="high">
       <CardHead
@@ -518,8 +502,6 @@ function Worth(props: {
         <NotLooked what="Sessions have" />
       ) : unknown ? (
         <State state="unknown">no workspace list to check these against, so none can be called unclaimed</State>
-      ) : rows.length === 0 ? (
-        <State state="idle">every tmux session on the machines that answered belongs to a workspace</State>
       ) : (
         <ul className="dash__rows">
           {rows.map(({ machine, session }) => {
@@ -604,25 +586,11 @@ function Idle(props: {
   sessions: Reading<MachineSessions[]>
   now: number
   compact: boolean
-  fleetEmpty: boolean
 }) {
-  const { rows, sessions, now, compact, fleetEmpty } = props
+  const { rows, sessions, now, compact } = props
   const workspaces = rows.flatMap((row) => (row.kind === 'workspace' ? [row] : []))
+  if (workspaces.length === 0) return null
   const words = `${plural(workspaces.length, 'workspace')}, nothing running`
-  const empty = (
-    <EmptyState
-      action={
-        fleetEmpty ? (
-          <Button render={<Link to="/new" />} role="link" variant="text">
-            New →
-          </Button>
-        ) : undefined
-      }
-      compact
-      state="idle"
-      title={fleetEmpty ? 'No workspaces yet' : 'No idle workspaces'}
-    />
-  )
   const list = (
     <ul className={compact ? 'dash__grid' : 'dash__idle-list'}>
       {workspaces.map((row) => (
@@ -634,18 +602,8 @@ function Idle(props: {
     return (
       <Card aria-labelledby="dash-idle" className="dash__idle" variant="outlined">
         <CardHead id="dash-idle" title="Idle" words={<State state="idle">{words}</State>} />
-        {workspaces.length === 0 ? <div className="dash__idle-empty">{empty}</div> : list}
+        {list}
       </Card>
-    )
-  }
-  if (workspaces.length === 0) {
-    // The empty board's Idle line: the fleet is the only thing missing, so
-    // New is the one verb on it.
-    return (
-      <div className="dash__line">
-        <Eyebrow render={<h2 />}>Idle</Eyebrow>
-        {empty}
-      </div>
     )
   }
   return (
@@ -673,6 +631,7 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
     return <ErrorSurface.Card error={error} eyebrow="Recent" reset={retry} title="Events could not be read" />
   }
   const rows = recent(events)
+  if (rows.length === 0) return null
   return (
     <Card aria-labelledby="dash-recent" className="dash__recent">
       <CardHead
@@ -680,30 +639,24 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
         title="Recent"
         words={`last ${rows.length} session event${rows.length === 1 ? '' : 's'}`}
       />
-      {rows.length === 0 ? (
-        <Text scale="body-medium" tone="variant">
-          Nothing has happened since the daemon started.
-        </Text>
-      ) : (
-        <ul className="dash__idle-list">
-          {rows.map((one) => (
-            <li key={`${one.workspace} ${one.at}`}>
-              <Row
-                className="dash__recent-row"
-                render={<Link params={{ name: one.workspace }} search={{ view: 'chat' }} to="/w/$name" />}
-                tone="lowest"
-              >
-                <Tile name={one.workspace} size="small" />
-                <span className="dash__name m3-wrap">{one.workspace}</span>
-                <State className="dash__recent-words" size="small" state={one.mark}>
-                  {one.words} · {one.machine}
-                </State>
-                <Num className="dash__age dash__when">{ago(now / 1000 - one.at, now).text}</Num>
-              </Row>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="dash__idle-list">
+        {rows.map((one) => (
+          <li key={`${one.workspace} ${one.at}`}>
+            <Row
+              className="dash__recent-row"
+              render={<Link params={{ name: one.workspace }} search={{ view: 'chat' }} to="/w/$name" />}
+              tone="lowest"
+            >
+              <Tile name={one.workspace} size="small" />
+              <span className="dash__name m3-wrap">{one.workspace}</span>
+              <State className="dash__recent-words" size="small" state={one.mark}>
+                {one.words} · {one.machine}
+              </State>
+              <Num className="dash__age dash__when">{ago(now / 1000 - one.at, now).text}</Num>
+            </Row>
+          </li>
+        ))}
+      </ul>
     </Card>
   )
 }
@@ -816,6 +769,11 @@ export function Dashboard() {
   const band = (which: WorkRow['band']) => placed.filter((row) => row.band === which)
   const notAnswering = placed.flatMap((row) => (row.kind === 'machine' ? [row.machine] : []))
   const unread = band('unknown')
+  const idleRows = band('idle').filter((row) => row.kind === 'workspace')
+  const stray =
+    sessions.looked === 'ok' && workspaces.looked === 'ok' ? unclaimed(sessions.data, workspaces).length : 0
+  const others = band('running').length > 0 || idleRows.length > 0 || stray > 0
+  const recentShown = Boolean(notifications.error) || recent(events).length > 0
   // On a phone the app bar is the title, so the strip takes the header's row and the stamp rides at its end.
   const strip = (
     <ErrorBoundary layout="inline" title="The status line could not be drawn">
@@ -862,6 +820,8 @@ export function Dashboard() {
               now={now}
               retry={retry}
               rows={band('needs').filter((row) => row.kind !== 'machine')}
+              others={others}
+              fleetEmpty={fleetEmpty}
             />
           </ErrorBoundary>
           <ErrorBoundary eyebrow="Running" title="Running could not be drawn">
@@ -874,17 +834,19 @@ export function Dashboard() {
       </ErrorBoundary>
       {listed.looked === 'ok' && agents.looked === 'ok' ? (
         compact ? (
-          <div className="dash__pair">
-            <ErrorBoundary eyebrow="Idle" title="Idle could not be drawn">
-              <Idle compact fleetEmpty={fleetEmpty} now={now} rows={band('idle')} sessions={sessions} />
-            </ErrorBoundary>
-            <ErrorBoundary eyebrow="Recent" title="Recent could not be drawn">
-              <Recent error={notifications.error ? asApiError(notifications.error) : null} events={events} now={now} retry={retry} />
-            </ErrorBoundary>
-          </div>
+          idleRows.length > 0 || recentShown ? (
+            <div className="dash__pair">
+              <ErrorBoundary eyebrow="Idle" title="Idle could not be drawn">
+                <Idle compact now={now} rows={band('idle')} sessions={sessions} />
+              </ErrorBoundary>
+              <ErrorBoundary eyebrow="Recent" title="Recent could not be drawn">
+                <Recent error={notifications.error ? asApiError(notifications.error) : null} events={events} now={now} retry={retry} />
+              </ErrorBoundary>
+            </div>
+          ) : null
         ) : (
           <ErrorBoundary eyebrow="Idle" title="Idle could not be drawn">
-            <Idle compact={false} fleetEmpty={fleetEmpty} now={now} rows={band('idle')} sessions={sessions} />
+            <Idle compact={false} now={now} rows={band('idle')} sessions={sessions} />
           </ErrorBoundary>
         )
       ) : null}

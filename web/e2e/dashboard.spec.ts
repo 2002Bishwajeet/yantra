@@ -85,18 +85,14 @@ test.describe('the dashboard on a busy fleet', () => {
 })
 
 test.describe('the dashboard on an empty fleet', () => {
-  test('says what each block would hold, and offers New session', async ({ page }) => {
+  test('draws one line, hides the empty bands, and offers New session', async ({ page }) => {
     await scenario(page, 'empty')
     await page.goto('/')
     await firstReading(page)
-    await expect(region(page, 'Needs you').getByText('Nothing needs you')).toBeVisible()
-    await expect(region(page, 'Running').getByText('Nothing is running')).toBeVisible()
-    await expect(
-      region(page, 'Worth a look').getByText(
-        'every tmux session on the machines that answered belongs to a workspace',
-      ),
-    ).toBeVisible()
-    await expect(page.getByText('No workspaces yet')).toBeVisible()
+    await expect(region(page, 'Needs you').getByText('No workspaces yet')).toBeVisible()
+    for (const name of ['Running', 'Worth a look', 'Idle']) {
+      await expect(page.getByRole('region', { name })).toHaveCount(0)
+    }
     // The shell's FAB offers the same verb; this is the hero's own.
     await expect(page.getByRole('main').getByRole('link', { name: 'New session' })).toBeVisible()
     await axe(page)

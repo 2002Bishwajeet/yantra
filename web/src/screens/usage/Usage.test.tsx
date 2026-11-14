@@ -49,7 +49,17 @@ describe('/usage on the busy fleet', () => {
       '30 days',
     ])
     expect(within(window).getByRole('radio', { name: 'All', checked: true })).toBeTruthy()
-    expect(screen.getByText('as read · every response in each transcript')).toBeTruthy()
+    // Before the first read there is no stamp and no ssh note: the page has read nothing.
+    expect(screen.queryByText(/^as read/)).toBeNull()
+    expect(screen.queryByText(/Read over ssh/)).toBeNull()
+    expect(screen.getByText('Spend is read from each machine only when you ask.')).toBeTruthy()
+  })
+
+  it('shows the stamp and the ssh note once the page has read something', async () => {
+    mount('desktop', '/usage', scenario('busy'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
+    expect(await screen.findByText('as read · every response in each transcript')).toBeTruthy()
+    expect(screen.getByText(/Read over ssh/)).toBeTruthy()
   })
 
   it('puts Read spend in the empty state, and pressing it starts the fan-out', async () => {
@@ -184,8 +194,15 @@ describe('/usage when the proxy hides who is calling', () => {
 describe('/usage on an empty fleet', () => {
   it('says there is no spend yet', async () => {
     mount('desktop', '/usage', scenario('empty'))
-    expect(await screen.findByText('No spend yet', {}, { timeout: 2000 })).toBeTruthy()
+    const title = await screen.findByText('No spend yet', {}, { timeout: 2000 })
+    const empty = within(title.closest('[data-slot="empty"]') as HTMLElement)
+    // One sentence, no inline link, and New session as the one action.
+    expect(empty.getByText(/^Spend is read from a workspace's transcript/)).toBeTruthy()
+    expect(empty.getAllByRole('link')).toHaveLength(1)
+    expect(empty.getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
     expect(screen.queryByRole('button', { name: 'Read spend' })).toBeNull()
+    expect(screen.queryByText(/^as read/)).toBeNull()
+    expect(screen.queryByText(/Read over ssh/)).toBeNull()
   })
 })
 
@@ -239,7 +256,7 @@ describe('/usage time windows (Y-354)', () => {
     vi.mocked(fetch).mockClear()
     await pick('7 days')
     expect(await screen.findByText('Nothing read yet')).toBeTruthy()
-    expect(screen.getByText('as read · responses in the last 7 days')).toBeTruthy()
+    expect(screen.queryByText(/^as read/)).toBeNull()
     expect(screen.getByRole('button', { name: 'Read spend' })).toBeTruthy()
     expect(location.search).toBe('?window=7d')
 
