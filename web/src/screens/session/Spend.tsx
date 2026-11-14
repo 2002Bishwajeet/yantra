@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { type ReactNode, useEffect } from 'react'
 import { Link } from '@tanstack/react-router'
 import { RefreshCw } from 'lucide-react'
 import type { Counts, Spend as Read, Workspace } from '@/api'
@@ -12,6 +12,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Mark, State } from '@/m3/mark/Mark'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Num, Text } from '@/m3/text/Text'
+import { useFormFactor } from '@/shell/formFactor'
 import { count, money } from './format'
 
 // The four token fields, and never `responses` — a response is not a token.
@@ -24,8 +25,9 @@ const responses = (of: number) => `${count(of)} response${of === 1 ? '' : 's'}`
  *  §6.2). Where any model is unpriced the headline is the token count and no
  *  dollar figure is drawn — a partly-priced sum is the understatement R-23
  *  refuses. */
-function Hero(props: { spend: Read }) {
-  const { spend } = props
+function Hero(props: { spend: Read; ask: ReactNode; note: ReactNode }) {
+  const { spend, ask, note } = props
+  const scale = useFormFactor() === 'phone' ? 'display-small' : 'display-large'
   const unpriced = spend.models.some((model) => model.cost === null)
   const asOf = on(spend.as_of)
   const nothing = spend.total.responses === 0
@@ -41,23 +43,31 @@ function Hero(props: { spend: Read }) {
               </Text>
             ) : spend.cost === null || unpriced ? (
               <>
-                <Num className="spend__number">{count(tokens(spend.total))}</Num>
+                <Text className="m3-num spend__number" emphasized scale={scale}>
+                  {count(tokens(spend.total))}
+                </Text>
                 <Text scale="title-medium">tokens, unpriced</Text>
               </>
             ) : (
               <>
-                <Num className="spend__number">{money(spend.cost)}</Num>
+                <Text className="m3-num spend__number" emphasized scale={scale}>
+                  {money(spend.cost)}
+                </Text>
                 <Text scale="title-medium">
                   across {spend.models.length} model{spend.models.length === 1 ? '' : 's'}
                 </Text>
               </>
             )}
           </div>
+          {note}
         </div>
-        {/* `as_of` is the day a written-down table was read, not an instant. */}
-        <Text scale="body-small">
-          prices as of <Num>{asOf ? asOf.text : spend.as_of}</Num>
-        </Text>
+        <div className="spend__aside">
+          {ask}
+          {/* `as_of` is the day a written-down table was read, not an instant. */}
+          <Text scale="body-small">
+            prices as of <Num>{asOf ? asOf.text : spend.as_of}</Num>
+          </Text>
+        </div>
       </div>
       {!nothing && (spend.cost === null || unpriced) ? (
         <Text render={<p />} scale="body-medium">
@@ -95,11 +105,11 @@ function Hero(props: { spend: Read }) {
   )
 }
 
-function Figure(props: { spend: Read }) {
-  const { spend } = props
+function Figure(props: { spend: Read; ask: ReactNode; note: ReactNode }) {
+  const { spend, ask, note } = props
   return (
     <>
-      <Hero spend={spend} />
+      <Hero ask={ask} note={note} spend={spend} />
       {spend.models.length > 0 ? (
         <ul className="spend__models">
           {spend.models.map((model) => (
@@ -112,7 +122,9 @@ function Figure(props: { spend: Read }) {
                   </Chip>
                 </div>
                 <div className="spend__model-figure">
-                  <Num className="spend__model-cost">{model.cost === null ? '—' : money(model.cost)}</Num>
+                  <Text className="m3-num" emphasized scale="display-small">
+                    {model.cost === null ? '—' : money(model.cost)}
+                  </Text>
                   <Text scale="body-small" tone="variant">
                     <Num>{count(model.responses)}</Num> response{model.responses === 1 ? '' : 's'}
                   </Text>
@@ -162,31 +174,39 @@ export function Spend(props: SpendProps) {
     </Link>
   )
 
+  const ask = (
+    <div className="spend__ask">
+      <Button disabled={asked.asked === 'asking'} icon={<RefreshCw />} onClick={onAsk} variant="tonal">
+        Read spend
+      </Button>
+      {read ? (
+        <Text scale="body-small" tone="variant">
+          read{' '}
+          <Num>
+            <time dateTime={read.iso} title={read.title}>
+              {read.text}
+            </time>
+          </Num>{' '}
+          ago
+        </Text>
+      ) : null}
+    </div>
+  )
+  const note = (
+    <Text className="spend__note" render={<p />} scale="body-small" tone="variant">
+      Read over ssh from the Terminal agent's transcript on {machine}, only when you ask; chat turns and
+      other workspaces are not counted.
+    </Text>
+  )
+
   return (
     <div className="spend">
-      <div className="spend__ask">
-        <Button disabled={asked.asked === 'asking'} icon={<RefreshCw />} onClick={onAsk}>
-          Read spend
-        </Button>
-        <Text render={<p />} scale="body-small" tone="variant">
-          Reads the agent's transcript on {machine} over ssh, when you ask. Nothing polls it.
-          {read ? (
-            <>
-              {' '}
-              Read{' '}
-              <Num>
-                <time dateTime={read.iso} title={read.title}>
-                  {read.text}
-                </time>
-              </Num>{' '}
-              ago.
-            </>
-          ) : null}
-        </Text>
-      </div>
-      <Text render={<p />} scale="body-small" tone="variant">
-        Counts the agent in the Terminal tab. Chat turns are not counted.
-      </Text>
+      {asked.asked === 'read' ? null : (
+        <>
+          {ask}
+          {note}
+        </>
+      )}
       <div aria-live="polite" className="spend__answer">
         {asked.asked === 'asking' || asked.asked === 'no' ? (
           <div aria-busy="true" className="turns__reading" data-slot="reading">
@@ -221,12 +241,8 @@ export function Spend(props: SpendProps) {
             title="The spend could not be read"
           />
         ) : null}
-        {asked.asked === 'read' ? <Figure spend={asked.spend} /> : null}
+        {asked.asked === 'read' ? <Figure ask={ask} note={note} spend={asked.spend} /> : null}
       </div>
-      <Text render={<p />} scale="body-small" tone="variant">
-        Per workspace only. There is no fleet total: one would cost an ssh transcript read per workspace
-        on open.
-      </Text>
     </div>
   )
 }

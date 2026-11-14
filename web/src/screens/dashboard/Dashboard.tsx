@@ -44,7 +44,6 @@ import { Row, RowText } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Eyebrow, Mono, Num, Text } from '@/m3/text/Text'
 import { IconTile, Tile } from '@/m3/tile/Tile'
-import { Track } from '@/m3/track/Track'
 import { useFormFactor } from '@/shell/formFactor'
 import { asEvents } from '@/shell/notifications'
 import { phrase } from '@/shell/phrase'
@@ -397,11 +396,10 @@ function Hero(props: {
 function RunningRow(props: {
   row: Extract<WorkRow, { kind: 'workspace' }>
   started: number | null
-  longest: number
   now: number
   phone: boolean
 }) {
-  const { row, started, longest, now, phone } = props
+  const { row, started, now, phone } = props
   const { mark, words } = phrase(row.status)
   const seconds = started === null ? null : now / 1000 - started
   const link = <Link params={{ name: row.workspace.name }} search={{ view: 'chat' }} to="/w/$name" />
@@ -419,13 +417,6 @@ function RunningRow(props: {
         />
         <Num className="dash__elapsed dash__when">{seconds === null ? '' : elapsed(seconds)}</Num>
       </div>
-      {seconds === null ? null : (
-        <Track
-          className="dash__track"
-          label={`elapsed, ${elapsed(seconds)} of the longest ${elapsed(longest)}`}
-          value={longest > 0 ? seconds / longest : 0}
-        />
-      )}
       {phone ? null : (
         <Button className="dash__open" render={link} role="link" variant="text">
           Open
@@ -460,7 +451,7 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
       />
       <div className="dash__rows">
         {timed.map(({ row, started }) => (
-          <RunningRow key={row.id} longest={longest} now={now} phone={phone} row={row} started={started} />
+          <RunningRow key={row.id} now={now} phone={phone} row={row} started={started} />
         ))}
       </div>
     </Card>
