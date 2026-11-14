@@ -92,15 +92,16 @@ describe('a phone that is not on the tailnet', () => {
 const onPhone = (share?: () => Promise<void>) =>
   vi.stubGlobal('navigator', { userAgent: navigator.userAgent, clipboard: { writeText: vi.fn() }, ...(share ? { share } : {}) })
 const joinAt = at('platform=linux&machine=laptop')
+const openFails = (name: RegExp = /If it fails/) => fireEvent.click(screen.getByRole('button', { name }))
 
 describe('a phone sends the link', () => {
-  it('leads with Copy and Share, above the command, and draws the code only when asked', async () => {
+  it('offers Copy and Share after the command, and draws the code only when asked', async () => {
     onPhone(vi.fn(() => Promise.resolve()))
     mountSettings('phone', joinAt, fleet([laptop], []))
     const copy = await screen.findByRole('button', { name: "Copy this page's address" })
     expect(screen.getByRole('button', { name: 'Share' })).toBeTruthy()
     const command = await screen.findByText(COMMAND)
-    expect(copy.compareDocumentPosition(command) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(command.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByRole('img', { name: /QR code/ })).toBeNull()
     const toggle = screen.getByRole('button', { name: 'Show QR code' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
@@ -137,6 +138,24 @@ describe('a phone sends the link', () => {
   })
 })
 
+describe("the join command is the step's one action (Y-767)", () => {
+  it('draws the join command with a filled Copy, before the key note', async () => {
+    mountSettings('desktop', joinAt, fleet([laptop], []))
+    const copy = await screen.findByRole('button', { name: 'Copy the join command' })
+    expect(copy.getAttribute('data-variant')).toBe('filled')
+    const note = await screen.findByText(/The command adds this key/)
+    expect(copy.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('draws the platform choice with no wrapping class, and says Phone on a phone', async () => {
+    mountSettings('phone', at('platform=linux'), fleet([laptop], []))
+    const group = await screen.findByRole('radiogroup', { name: 'Platform' })
+    expect(group.className.split(' ')).toEqual(['m3-segmented'])
+    const phone = within(group).getByRole('radio', { name: 'Phone or tablet' })
+    expect(phone.textContent).toBe('Phone')
+  })
+})
+
 describe('the device in use', () => {
   it('is named under the platform pick and marked among the candidates', async () => {
     mountSettings('desktop', at('platform=linux'), fleet([laptop], [], [], { 'GET /api/here': [200, { machine: 'laptop' }] }))
@@ -165,7 +184,7 @@ describe('beat 1, on the tailnet', () => {
   it("watches with Tailscale's commands, and offers the nodes already there", async () => {
     mountSettings('desktop', at('platform=linux'), fleet([laptop], []))
     expect(await screen.findByText(/waiting · watching the tailnet for a new Linux machine/)).toBeTruthy()
-    expect(screen.getByText('curl -fsSL https://tailscale.com/install.sh | sh')).toBeTruthy()
+    expect(screen.getByText('curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'laptop' }).getAttribute('href')).toBe('/machines/add?platform=linux&machine=laptop')
     expect(beat('Joined').getByText(/not yet · waits for the device to be on the tailnet/)).toBeTruthy()
   })
@@ -212,11 +231,9 @@ describe('beat 2, joined', () => {
   it('names the key the command adds, and keeps its path in collapsed diagnostics', async () => {
     mountSettings('desktop', joinAt, fleet([laptop], []))
     expect(await screen.findByText(/The command adds this key: ed25519 · SHA256:<fingerprint>/)).toBeTruthy()
-    const trigger = screen.getByRole('button', { name: /Diagnostics/ })
-    expect(trigger.getAttribute('aria-expanded')).toBe('false')
-    fireEvent.click(trigger)
-    expect(trigger.getAttribute('aria-expanded')).toBe('true')
-    expect(screen.getByText(/The key is at \/home\/<user>\/\.ssh\/id_yantra on the appliance/)).toBeTruthy()
+    expect(screen.queryByText(/the key is at/)).toBeNull()
+    openFails()
+    expect(screen.getByText(/the key is at \/home\/<user>\/\.ssh\/id_yantra on the appliance/)).toBeTruthy()
     expect(screen.queryByText(/ssh-ed25519 AAAA/)).toBeNull()
   })
 
@@ -270,7 +287,10 @@ describe('beat 2, joined', () => {
   it('shows Remote Login on a Mac', async () => {
     const mac = aMachine({ name: 'laptop', os: 'macOS', online: true })
     mountSettings('desktop', at('platform=macos&machine=laptop'), fleet([mac], []))
-    expect(await screen.findByText(/First turn on Remote Login: System Settings → General → Sharing/)).toBeTruthy()
+    await screen.findByText(COMMAND)
+    expect(screen.queryByText(/First turn on Remote Login/)).toBeNull()
+    openFails()
+    expect(screen.getByText(/First turn on Remote Login: System Settings → General → Sharing/)).toBeTruthy()
   })
 })
 
@@ -297,8 +317,11 @@ describe('the account the join command runs as', () => {
   ] as const)('on a %s, gives %s the commands that make karigar, each with Copy', async (size, platform, commands) => {
     const os = platform === 'macos' ? 'macOS' : 'linux'
     mountSettings(size, at(`platform=${platform}&machine=laptop`), fleet([aMachine({ name: 'laptop', os, online: true })], []))
-    expect(await screen.findByText(/Run the join command as a separate account without sudo, named karigar/)).toBeTruthy()
-    expect(screen.getByText(/Run this once in a terminal on laptop, as karigar/)).toBeTruthy()
+    expect(await screen.findByText(/Run this once in a terminal on laptop, as karigar/)).toBeTruthy()
+    // Y-767: the preparation is under "If it fails" and is not drawn until it opens.
+    expect(screen.queryByText(commands[0]!)).toBeNull()
+    openFails()
+    expect(screen.getByText(/Run the join command as a separate account without sudo, named karigar/)).toBeTruthy()
     for (const command of commands) {
       const shown = screen.getByText(command)
       expect(within(shown.closest('.m3-copyable')! as HTMLElement).getByRole('button', { name: /^Copy / })).toBeTruthy()
@@ -310,7 +333,9 @@ describe('the account the join command runs as', () => {
   it('tells a Mac to log in as karigar at the screen once', async () => {
     const mac = aMachine({ name: 'laptop', os: 'macOS', online: true })
     mountSettings('desktop', at('platform=macos&machine=laptop'), fleet([mac], []))
-    expect(await screen.findByText(/log in as karigar at the Mac's screen once/)).toBeTruthy()
+    await screen.findByText(COMMAND)
+    openFails()
+    expect(screen.getByText(/log in as karigar at the Mac's screen once/)).toBeTruthy()
     expect(screen.getByText(/Allow karigar in System Settings → General → Sharing → Remote Login/)).toBeTruthy()
   })
 })
@@ -399,7 +424,10 @@ describe('beat 4, ready', () => {
   it('names Homebrew and the Command Line Tools on a Mac', async () => {
     const mac = aMachine({ name: 'laptop', os: 'macOS', online: true })
     mountSettings('desktop', at('platform=macos&machine=laptop'), fleet([mac], [clean], [reached]))
-    expect(await screen.findByText(/Install needs Homebrew for tmux and git/)).toBeTruthy()
+    await screen.findByRole('button', { name: 'Install' })
+    expect(screen.queryByText(/Install needs Homebrew for tmux and git/)).toBeNull()
+    openFails(/If Install fails/)
+    expect(screen.getByText(/Install needs Homebrew for tmux and git/)).toBeTruthy()
     expect(screen.getByText('xcode-select --install')).toBeTruthy()
   })
 

@@ -46,3 +46,16 @@
   position: absolute;
   inset: -4px 0;
 }
+
+.m3-copyable[data-hero] .m3-copyable__text {
+  padding: 14px 16px;
+  border-radius: var(--md-sys-shape-corner-medium);
+  font-size: var(--md-sys-typescale-body-medium-size);
+  line-height: var(--md-sys-typescale-body-medium-line-height);
+  background: var(--md-sys-color-surface-container-high);
+}
+
+[data-shell="phone"] .m3-copyable[data-hero] .m3-copyable__row {
+  flex-direction: column;
+  align-items: stretch;
+}

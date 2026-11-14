@@ -18,7 +18,7 @@ import { State, type MarkState } from '@/m3/mark/Mark'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Num, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { useFab } from '@/shell/primary'
 import { PrimaryAction } from '@/shell/PrimaryAction'
@@ -422,15 +422,16 @@ export function Setup() {
                   reset={() => void identity.refetch()}
                   title="The appliance's key could not be read"
                 />
+              ) : identity.data ? (
+                <>
+                  <Text scale="label-large" tone="variant">
+                    This appliance's key
+                  </Text>
+                  <Copyable text={identity.data.fingerprint} what="this appliance's key" />
+                </>
               ) : (
                 <Text scale="body-small" tone="variant">
-                  {identity.data ? (
-                    <>
-                      this appliance's key · <Mono title={identity.data.fingerprint}>{identity.data.fingerprint}</Mono>
-                    </>
-                  ) : (
-                    'the key is made when the first machine joins'
-                  )}
+                  the key is made when the first machine joins
                 </Text>
               )}
               {machines.looked === 'failed' ? (
