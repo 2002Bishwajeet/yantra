@@ -108,7 +108,9 @@ for (const one of ROUTES) {
       await scenario(page, 'unreachable')
       await page.goto(one.path)
       const alert =
-        kind === 'missing' ? page.getByRole('heading', { name: 'Not found' }) : page.getByRole('alert').first()
+        kind === 'missing' && one.id !== 'setup-route'
+          ? page.getByRole('heading', { name: 'Not found' })
+          : page.getByRole('alert').first()
       await expect(alert).toBeVisible()
       if (kind === 'page') {
         await expect(page.getByRole('button', { name: 'Try again' }).first()).toBeVisible()
