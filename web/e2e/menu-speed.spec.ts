@@ -53,7 +53,7 @@ test.describe('the phone menus open within a quarter second of the first tap', (
   })
 })
 
-/** Runs in the page, from before the tap to 600 ms after it. Only gaps that begin after the tap count; one frame is 16 to 17 ms, so the bound is a frame plus timer slack. WebKit has no long-task entry, so a
+/** Runs in the page, from before the tap to 600 ms after it. WebKit has no long-task entry, so a
  *  MessageChannel ping-pong (React's scheduler does the same) times each task and rendering update. */
 const watchOpen = () => {
   const popup = document.querySelector('.m3-menu')!
@@ -85,6 +85,7 @@ const watchOpen = () => {
     let last = performance.now()
     port1.onmessage = () => {
       const now = performance.now()
+      // A gap that began before the tap is the task that delivered it: the describe above bounds that wait.
       if (tap && last >= tap && now - last > gap) {
         gap = now - last
         offset = last - tap
@@ -101,7 +102,7 @@ const watchOpen = () => {
 }
 
 /** Y-806: the open stuttered on an iPhone. Safari below 27.3 runs a `linear()` easing on the main
- *  thread. CI's WebKit is the Linux port and has no such limit, so the easing is asserted by name. */
+ *  thread. CI's WebKit is the Linux port without that limit: only the easing check fails on the old CSS. */
 async function opensSmoothly(trigger: Locator) {
   const page = trigger.page()
   await mountedClosed(page)
@@ -119,9 +120,14 @@ async function opensSmoothly(trigger: Locator) {
     expect(properties.sort()).toEqual(['opacity', 'transform'])
     expect(easings.filter((easing) => easing.includes('linear('))).toEqual([])
   }
+  const gaps = runs.map((it) => it.gap)
   const report = runs.map((it) => `${it.gap.toFixed(1)} ms starting ${it.offset.toFixed(1)} ms after the tap`).join('; ')
-  const median = runs.map((it) => it.gap).sort((a, b) => a - b)[2]
-  expect(median, `the longest main-thread gap of each open: ${report}`).toBeLessThanOrEqual(20)
+  // Printed on a pass too: CI's log is the only record of what the runner measured.
+  console.log(`${test.info().project.name}, ${test.info().title}: the longest main-thread gap of each open: ${report}`)
+  // CI's runner cannot hold one frame on each open: the first open after a load measured 20 to 30 ms (R14 §5).
+  // So each open stays under the 50 ms long-task limit, and the median under a frame plus timer slack.
+  expect(Math.max(...gaps), `an open held the main thread for a long task: ${report}`).toBeLessThanOrEqual(50)
+  expect(gaps.toSorted((a, b) => a - b)[2], `the median open held the main thread past one frame: ${report}`).toBeLessThanOrEqual(20)
 }
 
 test.describe('the phone menus open on transform and opacity without holding the main thread', () => {

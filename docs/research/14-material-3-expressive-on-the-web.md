@@ -307,6 +307,15 @@ without a library. A spring library is the only option that costs bundle; do not
 > eases with the cubic-bezier tokens, which every Safari accelerates. Every other file that uses a
 > spring token still animates on the main thread on those iPhones. Nobody here measured an iPhone:
 > the engines in CI do not have this limit.
+>
+> **What CI measured, and what it cannot show.** `web/e2e/menu-speed.spec.ts` opens a menu five
+> times and records the longest main-thread gap that began after the tap. CI run 43530925204, on a
+> shared GitHub runner, gave these for the Account menu: Chromium 20, 16, 16, 16, 16 ms and
+> 21, 16, 16, 17, 17 ms; WebKit 30, 11, 13, 16, 18 ms. The first open after a load is the longest
+> each time, and it is longer than one frame. In two more WebKit attempts the gap that contained
+> the tap was 23 to 55 ms long. So the runner cannot hold each open to one frame. The spec holds
+> each open under the 50 ms long-task limit and the median open under 20 ms, and it prints the gaps
+> on every run. A trace on an iPhone is the only proof that no frame of the open is over 16 ms.
 
 **View Transitions** (`document.startViewTransition`) cover the route change and the shared-element
 move from a row to its session screen: Chrome 111, Safari 18 / iOS 18, Firefox 144; the
@@ -440,6 +449,9 @@ Accessed 2026-09-06 unless noted.
   <https://developer.apple.com/documentation/safari-release-notes/safari-27_3-release-notes>
   (JS-rendered; read through its JSON at
   `developer.apple.com/tutorials/data/documentation/safari-release-notes/safari-27_3-release-notes.json`)
+- The main-thread gaps of the menu open in CI (accessed 2026-11-14) — the failed `e2e (phone 1/2)`
+  and `e2e (phone-webkit)` job logs of <https://github.com/2002Bishwajeet/yantra/actions/runs/43530925204>;
+  GitHub keeps job logs for a limited time
 - WCAG 2.2 — <https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html> and
   `target-size-enhanced.html`; axe-core —
   <https://github.com/dequelabs/axe-core/blob/develop/doc/rule-descriptions.md>
