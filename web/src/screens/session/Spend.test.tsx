@@ -2,7 +2,7 @@
  * Y-644: the Spend tab names what it counts, and prints no transcript path and
  * no session id.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, screen } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { aWorkspace } from '@/api/fixtures'
@@ -12,20 +12,46 @@ import { Spend } from './Spend'
 
 const workspace = aWorkspace()
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-/
-const TERMINAL_ONLY = 'Counts the agent in the Terminal tab. Chat turns are not counted.'
+const SCOPE = /^Read over ssh from the Terminal agent's transcript on .+, only when you ask; chat turns and other workspaces are not counted\.$/
 
 const draw = (asked: Asked) =>
   renderRouted(<Spend asked={asked} now={Date.parse('2026-11-09T10:00:00Z')} onAsk={() => {}} workspace={workspace} />)
 
-afterEach(cleanup)
+// The hero reads the form factor; jsdom has no `matchMedia`. `matches: true` is a desktop.
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }))
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe('the Spend tab', () => {
   it('says it counts the Terminal agent only, and prints no transcript path', async () => {
     await draw({ asked: 'read', workspace, spend: contract.spend, at: '2026-11-09T09:59:00Z' })
 
-    expect(await screen.findByText(TERMINAL_ONLY)).toBeTruthy()
+    await screen.findByRole('button', { name: 'Read spend' })
+    const note = document.querySelector('.spend__note')!
+    expect(note.textContent).toMatch(SCOPE)
+    expect(note.textContent).toContain(workspace.machine)
     expect(document.body.textContent).not.toContain('.jsonl')
     expect(document.body.textContent).not.toMatch(UUID)
+    expect(document.body.textContent).not.toContain('Nothing polls it')
+    expect(document.body.textContent).not.toContain('There is no fleet total')
+  })
+
+  it('sets the figure in the display type scale, with a Read spend button beside the read age', async () => {
+    await draw({ asked: 'read', workspace, spend: contract.spend, at: '2026-11-09T09:59:00Z' })
+
+    await screen.findByRole('button', { name: 'Read spend' })
+    const figure = document.querySelector('.spend__number')!
+    expect(figure.getAttribute('data-scale')).toBe('display-large')
+    expect(figure.classList.contains('m3-mono')).toBe(false)
+    expect(figure.classList.contains('m3-num')).toBe(true)
+    const button = screen.getByRole('button', { name: 'Read spend' })
+    expect(button.getAttribute('data-variant')).toBe('tonal')
+    expect(button.parentElement!.querySelector('time')!.textContent).toBe('1m')
   })
 
   it('names the Terminal agent when there is nothing, and drops the session id the daemon sent', async () => {
@@ -37,7 +63,7 @@ describe('the Spend tab', () => {
 
     expect(await screen.findByText('There is nothing to add up yet.')).toBeTruthy()
     expect(screen.getByText(/The agent in the Terminal has not written a turn\./)).toBeTruthy()
-    expect(screen.getByText(TERMINAL_ONLY)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Read spend' })).toBeTruthy()
     expect(document.body.textContent).not.toMatch(UUID)
   })
 

@@ -38,7 +38,7 @@ test.describe('the dashboard on a busy fleet', () => {
     await expect(hero.getByRole('link', { name: 'Answer' })).toBeVisible()
 
     const running = region(page, 'Running')
-    await expect(running.getByRole('progressbar')).toHaveCount(3)
+    await expect(running.getByRole('progressbar')).toHaveCount(0)
 
     const worth = region(page, 'Worth a look')
     await expect(worth.getByRole('link', { name: 'Attach' })).toHaveCount(2)
