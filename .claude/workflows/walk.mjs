@@ -10,8 +10,9 @@ const looks = [
 ]
 const slug = (route) => route.replace(/^\/+|\/+$/g, '').replace(/[^A-Za-z0-9]+/g, '-') || 'home'
 // Y-687: walk.sh's second hop is a device of the owner's with no cookie, so its home is the sign-in screen.
-const shots = routes.map((route) => [`${base}${route}`, slug(route)])
-if (process.env.WALK_SIGNIN) shots.push([`${process.env.WALK_SIGNIN}/`, 'sign-in'])
+// A route ending in @dark is shot in the dark scheme (Y-770); the others stay light.
+const shots = routes.map((route) => [`${base}${route.replace(/@dark$/, '')}`, slug(route), route.endsWith('@dark') ? 'dark' : 'light'])
+if (process.env.WALK_SIGNIN) shots.push([`${process.env.WALK_SIGNIN}/`, 'sign-in', 'light'])
 const errors = []
 const snap = async (page, file, full) => {
   writeFileSync(`${file}.txt`, await page.locator('body').innerText())
@@ -101,12 +102,13 @@ for (const [name, type, options] of looks) {
   let searched = false
   // The loop below adds to the queue, so each look starts from the routes the walk named.
   const queue = [...shots]
-  for (const [url, shot] of queue) {
+  for (const [url, shot, scheme] of queue) {
     const page = await context.newPage()
     page.on('pageerror', (e) => errors.push(`${name} ${shot}: ${e.message}`))
     // Every read on the sign-in hop is a 401 on purpose, and the browser logs each one.
     const expected = (m) => shot === 'sign-in' && m.text().includes('401')
     page.on('console', (m) => m.type() === 'error' && !expected(m) && errors.push(`${name} ${shot}: console: ${m.text()}`))
+    await page.emulateMedia({ colorScheme: scheme })
     await page.goto(url, { waitUntil: 'load' })
     // The fleet arrives over a socket after load, so no network-idle moment exists to wait for.
     await page.waitForTimeout(5000)
@@ -138,7 +140,7 @@ for (const [name, type, options] of looks) {
       const faulted = page.locator('.machines__card').filter({ has: page.locator('.machines__check') })
       for (const link of await faulted.getByRole('link', { name: 'Open' }).all()) {
         const route = await link.getAttribute('href')
-        if (!queue.some(([, other]) => other === slug(route))) queue.push([`${base}${route}`, slug(route)])
+        if (!queue.some(([, other]) => other === slug(route))) queue.push([`${base}${route}`, slug(route), 'light'])
       }
     }
     if (shot === 'settings-about') {

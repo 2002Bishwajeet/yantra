@@ -15,6 +15,7 @@
      inverse-surface, and on a dark one the page's own low container. Each token
      is already resolved for the theme, so the branch picks which role to read. */
   background: light-dark(var(--md-sys-color-inverse-surface), var(--md-sys-color-surface-container-low));
+  color: light-dark(var(--md-sys-color-inverse-on-surface), var(--md-sys-color-on-surface));
   overflow: hidden;
 }
 
@@ -133,10 +134,10 @@
   white-space: nowrap;
 }
 
-/* Y-720: the pane runs edge to edge on the phone, so xterm fits the whole screen. The drawer and the sheet keep their card. */
+/* Y-720: the pane runs edge to edge on the phone, so xterm fits the whole screen, but it keeps a rounded corner. The drawer and the sheet keep their card. */
 [data-shell="phone"] :is(.session__terminal, .session-terminal) > .terminal > .terminal__pane {
   width: auto;
   margin-inline: calc(-1 * max(var(--m3-gutter), var(--m3-safe-left))) calc(-1 * max(var(--m3-gutter), var(--m3-safe-right)));
   padding-inline: max(4px, var(--m3-safe-left)) max(4px, var(--m3-safe-right));
-  border-radius: 0;
+  border-radius: var(--md-sys-shape-corner-large);
 }

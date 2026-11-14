@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { FitAddon } from '@xterm/addon-fit'
-import { Terminal as Xterm } from '@xterm/xterm'
+import { type ITheme, Terminal as Xterm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { ApiError } from '@/api/errors'
 import { ATTEMPTS, attachTerminal, type Link as Wire, type Target, terminalAddress } from '@/api/socket'
@@ -36,6 +36,13 @@ const FAMILY = '"IBM Plex Mono", ui-monospace, monospace'
  *  the only member of FAMILY that has to be fetched. */
 const FACE = `${SIZE}px "IBM Plex Mono"`
 
+/** The pane's resolved scheme colours, so xterm paints on the ground the CSS chose.
+ *  Selection inverts the pair, which stays legible without parsing an alpha. */
+export function paneTheme(el: HTMLElement): ITheme {
+  const { backgroundColor: background, color: foreground } = getComputedStyle(el)
+  return { background, foreground, cursor: foreground, cursorAccent: background, selectionBackground: foreground, selectionForeground: background }
+}
+
 /** xterm.js and the socket, wired to each other. Returns the teardown, which
  *  is the whole of what closing a terminal is. */
 function attach(
@@ -48,9 +55,15 @@ function attach(
   leave: () => void,
   ending: Ending,
 ): Wired {
-  // WCAG 1.4.3: xterm's ANSI blue is 3.5:1 on its black, and every shell prompt
-  // paints a path in it. xterm lifts each colour that falls short of 4.5:1.
-  const xterm = new Xterm({ cursorBlink: false, fontSize: SIZE, fontFamily: FAMILY, minimumContrastRatio: 4.5 })
+  // WCAG 1.4.3: xterm's ANSI blue is 3.5:1 on black, and every shell prompt
+  // paints a path in it. xterm lifts each colour that falls short of 4.5:1 on the pane's ground.
+  const xterm = new Xterm({
+    cursorBlink: false,
+    fontSize: SIZE,
+    fontFamily: FAMILY,
+    minimumContrastRatio: 4.5,
+    theme: paneTheme(host),
+  })
   const fit = new FitAddon()
   xterm.loadAddon(fit)
   xterm.open(host)
@@ -119,11 +132,21 @@ function attach(
   // and the unit tests run there.
   const watching = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => link.resize())
   watching?.observe(host)
+  // The theme is resolved colours, so a scheme change must repaint them.
+  const repaint = () => {
+    xterm.options.theme = paneTheme(host)
+  }
+  const scheme = new MutationObserver(repaint)
+  scheme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] })
+  const dark = typeof matchMedia === 'undefined' ? null : matchMedia('(prefers-color-scheme: dark)')
+  dark?.addEventListener('change', repaint)
 
   return {
     close: () => {
       clearTimeout(prompt)
       watching?.disconnect()
+      scheme.disconnect()
+      dark?.removeEventListener('change', repaint)
       window.removeEventListener('resize', link.resize)
       host.removeEventListener('paste', paste, true)
       typed.dispose()

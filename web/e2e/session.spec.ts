@@ -436,3 +436,48 @@ test.describe('the terminal fits the phone', () => {
     await fits(page, '.session-terminal__row')
   })
 })
+
+/** Y-770: the frame and xterm's ground are one scheme role, not xterm's own black. The light picture is `session-terminal`. */
+test.describe('the terminal sits on one scheme colour', () => {
+  for (const [colorScheme, role, on] of [
+    ['light', 'inverse-surface', 'inverse-on-surface'],
+    ['dark', 'surface-container-low', 'on-surface'],
+  ] as const) {
+    test(`in ${colorScheme}`, async ({ page, size }) => {
+      await page.emulateMedia({ colorScheme })
+      await scenario(page, 'busy')
+      await page.goto(`${PATH}?view=terminal`)
+      await expect(page.locator('.xterm-rows')).toContainText('Do you want to proceed?')
+      await paneSettled(page)
+
+      const pane = page.locator('.terminal__pane')
+      const drawn = await pane.evaluate(
+        (el, roles) => {
+          const probe = document.createElement('i')
+          probe.style.cssText = `background: var(--md-sys-color-${roles.role}); color: var(--md-sys-color-${roles.on})`
+          document.body.append(probe)
+          const want = getComputedStyle(probe)
+          const frame = getComputedStyle(el)
+          const read = {
+            role: want.backgroundColor,
+            on: want.color,
+            frame: frame.backgroundColor,
+            text: frame.color,
+            xterm: getComputedStyle(el.querySelector('.xterm-scrollable-element')!).backgroundColor,
+            corner: parseFloat(frame.borderTopLeftRadius),
+            clip: frame.overflow,
+          }
+          probe.remove()
+          return read
+        },
+        { role, on },
+      )
+      expect(drawn.frame).toBe(drawn.role)
+      expect(drawn.xterm).toBe(drawn.role)
+      expect(drawn.text).toBe(drawn.on)
+      expect(drawn.corner).toBeGreaterThan(0)
+      expect(drawn.clip).toBe('hidden')
+      if (colorScheme === 'dark') await screenshot(page, 'session-terminal-dark', 'busy', size)
+    })
+  }
+})

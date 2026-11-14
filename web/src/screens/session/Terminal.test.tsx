@@ -15,7 +15,7 @@ import { ATTEMPTS, PAUSE, type Target } from '@/api/socket'
 import { renderRouted } from '@/test/inRouter'
 import { browser, daemon, type Frame } from './harness'
 import { KeyRow } from './Keys'
-import { Terminal } from './Terminal'
+import { paneTheme, Terminal } from './Terminal'
 
 /** Every refusal names its machine and links to it (D5 §7), so the component
  *  wants a router. One call site keeps the props in one place. */
@@ -683,5 +683,36 @@ describe('a command typed in for the owner (Y-702)', () => {
 
     await wait(700)
     expect(daemonised.heard).toHaveLength(1)
+  })
+})
+
+describe('the terminal on the pane colour', () => {
+  const viewport = () => document.querySelector<HTMLElement>('.xterm-scrollable-element')!
+
+  it('reads the ground and the text from the element', () => {
+    const el = document.createElement('div')
+    el.style.backgroundColor = 'rgb(10, 20, 30)'
+    el.style.color = 'rgb(200, 210, 220)'
+    document.body.append(el)
+
+    expect(paneTheme(el)).toMatchObject({
+      background: 'rgb(10, 20, 30)',
+      foreground: 'rgb(200, 210, 220)',
+      cursor: 'rgb(200, 210, 220)',
+    })
+    el.remove()
+  })
+
+  it('paints xterm on the pane ground, and again when the theme attribute changes', async () => {
+    await open()
+    const pane = document.querySelector<HTMLElement>('.terminal__pane')!
+    pane.style.backgroundColor = 'rgb(10, 20, 30)'
+    document.documentElement.dataset.theme = 'dark'
+    await settled(() => expect(viewport().style.backgroundColor).toBe('rgb(10, 20, 30)'))
+
+    pane.style.backgroundColor = 'rgb(240, 240, 240)'
+    document.documentElement.dataset.theme = 'light'
+    await settled(() => expect(viewport().style.backgroundColor).toBe('rgb(240, 240, 240)'))
+    delete document.documentElement.dataset.theme
   })
 })
