@@ -53,7 +53,7 @@ test.describe('the phone menus open within a quarter second of the first tap', (
   })
 })
 
-/** Runs in the page, from before the tap to 600 ms after it. WebKit has no long-task entry, so a
+/** Runs in the page, from before the tap to 600 ms after it. Only gaps that begin after the tap count; one frame is 16 to 17 ms, so the bound is a frame plus timer slack. WebKit has no long-task entry, so a
  *  MessageChannel ping-pong (React's scheduler does the same) times each task and rendering update. */
 const watchOpen = () => {
   const popup = document.querySelector('.m3-menu')!
@@ -85,7 +85,7 @@ const watchOpen = () => {
     let last = performance.now()
     port1.onmessage = () => {
       const now = performance.now()
-      if (tap && now - last > gap) {
+      if (tap && last >= tap && now - last > gap) {
         gap = now - last
         offset = last - tap
       }
@@ -121,7 +121,7 @@ async function opensSmoothly(trigger: Locator) {
   }
   const report = runs.map((it) => `${it.gap.toFixed(1)} ms starting ${it.offset.toFixed(1)} ms after the tap`).join('; ')
   const median = runs.map((it) => it.gap).sort((a, b) => a - b)[2]
-  expect(median, `the longest main-thread gap of each open: ${report}`).toBeLessThan(16)
+  expect(median, `the longest main-thread gap of each open: ${report}`).toBeLessThanOrEqual(20)
 }
 
 test.describe('the phone menus open on transform and opacity without holding the main thread', () => {
