@@ -97,6 +97,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     'Check all': CHECKED,
     Check: CHECKED,
     'New session': url('/new'),
+    Copy: text('Copied'),
     Connect: url('/settings/providers'),
     'Set up': dialog,
     'Admin console': url('https://login.tailscale.com/admin/machines'),

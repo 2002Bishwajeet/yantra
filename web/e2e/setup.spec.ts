@@ -128,6 +128,22 @@ test.describe('a fresh install with a ready hub', () => {
     await expect(page.getByText('iphone', { exact: true })).toHaveCount(0)
   })
 
+  test('holds no card inside a card', async ({ page }) => {
+    await expect(page.locator('.m3-list .m3-list')).toHaveCount(0)
+    const nested = await page.locator('.setup__line').evaluateAll((all) =>
+      all.filter((one) => {
+        const style = getComputedStyle(one)
+        return style.backgroundColor !== 'rgba(0, 0, 0, 0)' || style.borderTopLeftRadius !== '0px'
+      }).length,
+    )
+    expect(nested).toBe(0)
+    // The ssh disclosure inside a step is the quiet variant: no outline, no pill.
+    const boxed = await page.locator('.setup__list .m3-disclosure').evaluateAll(
+      (all) => all.filter((one) => getComputedStyle(one).borderTopWidth !== '0px').length,
+    )
+    expect(boxed).toBe(0)
+  })
+
   test('passes axe', async ({ page }) => {
     await axe(page)
   })
@@ -150,7 +166,7 @@ test.describe('the first run with a real key', () => {
     await page.goto(route('dashboard').path)
     const key = page.getByText(/SHA256:aBcDe/)
     await expect(key).toBeVisible()
-    await expect(key).toHaveAttribute('title', /^SHA256:aBcDe/)
+    await expect(page.getByRole('button', { name: "Copy this appliance's key" })).toBeVisible()
     const box = (await key.boundingBox())!
     expect(box.x + box.width).toBeLessThanOrEqual(390)
   })
