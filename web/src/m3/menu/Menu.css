@@ -54,12 +54,18 @@
   opacity: var(--md-sys-state-hover-state-layer-opacity);
 }
 
-.m3-menu-item[data-disabled] {
-  opacity: 0.38;
-}
-
 .m3-menu-item[data-tone="error"] {
   color: var(--md-sys-color-error);
+}
+
+/* After the tone rule: M3 draws a disabled item on-surface at 38 %, not a faded tone. */
+.m3-menu-item[data-disabled] {
+  opacity: 1;
+  color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
+}
+
+.m3-menu-item[data-disabled] .m3-menu-item__icon {
+  color: inherit;
 }
 
 .m3-menu-item__icon {

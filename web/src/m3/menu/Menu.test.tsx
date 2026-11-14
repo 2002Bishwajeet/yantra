@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link } from '@tanstack/react-router'
@@ -95,5 +97,20 @@ describe('Menu', () => {
     const item = screen.getByRole('menuitem', { name: 'Settings' })
     expect(item.tagName).toBe('A')
     expect(item.getAttribute('href')).toBe('/')
+  })
+})
+
+describe('a disabled item (CSS read as text; jsdom applies none)', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/m3/menu/Menu.css'), 'utf8')
+  const rule = /\.m3-menu-item\[data-disabled\] \{([^}]*)\}/.exec(css)
+  const toneAt = css.indexOf('.m3-menu-item[data-tone="error"] {')
+
+  it('draws on-surface at 38 % with full opacity, so an error tone does not fade to pink', () => {
+    expect(rule?.[1]).toMatch(/opacity: 1;/)
+    expect(rule?.[1]).toMatch(/color-mix\(in srgb, var\(--md-sys-color-on-surface\) 38%, transparent\)/)
+  })
+
+  it('comes after the tone rule so it wins at equal specificity', () => {
+    expect(css.indexOf('.m3-menu-item[data-disabled] {')).toBeGreaterThan(toneAt)
   })
 })

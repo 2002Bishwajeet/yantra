@@ -43,9 +43,10 @@
   position: relative;
 }
 
-/* Room for the tonal Answer that sits over the row's trailing edge. */
+/* Room for the tonal Answer icon button on the row's trailing edge; the text
+   wraps so the owner still reads what the agent waits for. */
 .notifications__row--answer {
-  padding-inline-end: 104px;
+  padding-inline-end: 68px;
 }
 
 .notifications__answer {
