@@ -211,7 +211,17 @@ function JoinKey() {
   )
 }
 
-/** What a join that failed needs: the account, Remote Login on a Mac, and where the key is. */
+/** The account is not a failure fix: run as the owner's own sudo account the
+ *  join succeeds, so its summary stays visible (Y-628, ADR-0046). */
+function JoinAs(props: { platform: Session }) {
+  return (
+    <Disclosure action="How" summary={<Text scale="body-small">Run it as karigar, an account without sudo</Text>}>
+      <AgentAccount platform={props.platform} />
+    </Disclosure>
+  )
+}
+
+/** What a join that failed needs: Remote Login on a Mac, and where the key is. */
 function JoinFails(props: { platform: Session }) {
   const { platform } = props
   const key = useSshIdentity().data
@@ -222,7 +232,6 @@ function JoinFails(props: { platform: Session }) {
           First turn on Remote Login: System Settings → General → Sharing. The join command cannot turn it on for you.
         </Note>
       ) : null}
-      <AgentAccount platform={platform} />
       {key ? <Note>Diagnostics: the key is at {key.path} on the appliance.</Note> : null}
     </Disclosure>
   )
@@ -241,6 +250,7 @@ function JoinHere(props: { platform: Session; name: string | undefined }) {
         Run this once in a terminal on {device}, as karigar. It adds this appliance's key to the account that runs it
         and tells the appliance which account that is.
       </Note>
+      <JoinAs platform={platform} />
       <Join hero machine={name ?? device} what="the join command" />
       <JoinKey />
       {phone ? (

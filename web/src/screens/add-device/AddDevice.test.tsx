@@ -92,6 +92,7 @@ describe('a phone that is not on the tailnet', () => {
 const onPhone = (share?: () => Promise<void>) =>
   vi.stubGlobal('navigator', { userAgent: navigator.userAgent, clipboard: { writeText: vi.fn() }, ...(share ? { share } : {}) })
 const joinAt = at('platform=linux&machine=laptop')
+const openHow = () => fireEvent.click(screen.getByRole('button', { name: /^How Run it as karigar/ }))
 const openFails = (name: RegExp = /If it fails/) => fireEvent.click(screen.getByRole('button', { name }))
 
 describe('a phone sends the link', () => {
@@ -318,9 +319,10 @@ describe('the account the join command runs as', () => {
     const os = platform === 'macos' ? 'macOS' : 'linux'
     mountSettings(size, at(`platform=${platform}&machine=laptop`), fleet([aMachine({ name: 'laptop', os, online: true })], []))
     expect(await screen.findByText(/Run this once in a terminal on laptop, as karigar/)).toBeTruthy()
-    // Y-767: the preparation is under "If it fails" and is not drawn until it opens.
+    // Y-767: the summary is always visible; the commands draw when "How" opens.
+    expect(screen.getByText('Run it as karigar, an account without sudo')).toBeTruthy()
     expect(screen.queryByText(commands[0]!)).toBeNull()
-    openFails()
+    openHow()
     expect(screen.getByText(/Run the join command as a separate account without sudo, named karigar/)).toBeTruthy()
     for (const command of commands) {
       const shown = screen.getByText(command)
@@ -334,7 +336,7 @@ describe('the account the join command runs as', () => {
     const mac = aMachine({ name: 'laptop', os: 'macOS', online: true })
     mountSettings('desktop', at('platform=macos&machine=laptop'), fleet([mac], []))
     await screen.findByText(COMMAND)
-    openFails()
+    openHow()
     expect(screen.getByText(/log in as karigar at the Mac's screen once/)).toBeTruthy()
     expect(screen.getByText(/Allow karigar in System Settings → General → Sharing → Remote Login/)).toBeTruthy()
   })

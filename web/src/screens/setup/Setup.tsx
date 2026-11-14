@@ -158,7 +158,7 @@ function HubLine(props: { machine: Machine; line: Line | null }) {
           {apart(machine)}
         </Text>
         <Button render={<Link params={{ machine: machine.name }} to="/m/$machine" />} role="link" variant="text">
-          Open
+          Open {machine.name}
         </Button>
       </li>
     )
@@ -179,11 +179,11 @@ function HubLine(props: { machine: Machine; line: Line | null }) {
         <Text scale="body-small" tone="variant">
           {beat ? `${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy` : 'no beat has arrived'}
         </Text>
-        {bad(said) ? <SshSaid detail={said.detail} /> : null}
+        {bad(said) ? <SshSaid detail={said.detail} quiet /> : null}
       </div>
       {said.kind === 'ready' ? null : (
         <Button render={<Link params={{ machine: machine.name }} to="/m/$machine" />} role="link" variant="text">
-          Open
+          Open {machine.name}
         </Button>
       )}
     </li>
@@ -277,7 +277,7 @@ function MachineLine(props: {
           </Text>
         ) : null}
         {bad(said) && joinFixes(said.kind) ? join : null}
-        {bad(said) ? <SshSaid detail={said.detail} /> : null}
+        {bad(said) ? <SshSaid detail={said.detail} quiet /> : null}
         {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)
@@ -386,7 +386,7 @@ export function Setup() {
               title={TITLES.tailnet}
               trailing={
                 <Button render={<Link params={{ category: 'about' }} to="/settings/$category" />} role="link" variant="text">
-                  Open
+                  Tailnet settings
                 </Button>
               }
             />

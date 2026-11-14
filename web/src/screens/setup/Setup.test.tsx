@@ -405,7 +405,7 @@ describe('the hub', () => {
     })
     const hub = hubList()
     expect(hub.getByText('missing tmux')).toBeTruthy()
-    expect(hub.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+    expect(hub.getByRole('link', { name: 'Open yantra-box' }).getAttribute('href')).toBe('/m/yantra-box')
     expect(hub.queryByRole('button')).toBeNull()
     expect(screen.queryByRole('button', { name: /Install/ })).toBeNull()
   })
@@ -456,7 +456,7 @@ describe('the hub', () => {
     expect(hub.getByText(words)).toBeTruthy()
     expect(otherMachines()).toBeNull()
     expect(hub.queryByText(/join command/)).toBeNull()
-    expect(hub.getByRole('link', { name: 'Open' }).getAttribute('href')).toBe('/m/yantra-box')
+    expect(hub.getByRole('link', { name: 'Open yantra-box' }).getAttribute('href')).toBe('/m/yantra-box')
   })
 
   it('lists a tagged hub once, under step 1, and not among the devices the account does not own', async () => {

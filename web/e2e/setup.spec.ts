@@ -137,6 +137,11 @@ test.describe('a fresh install with a ready hub', () => {
       }).length,
     )
     expect(nested).toBe(0)
+    // The ssh disclosure inside a step is the quiet variant: no outline, no pill.
+    const boxed = await page.locator('.setup__list .m3-disclosure').evaluateAll(
+      (all) => all.filter((one) => getComputedStyle(one).borderTopWidth !== '0px').length,
+    )
+    expect(boxed).toBe(0)
   })
 
   test('passes axe', async ({ page }) => {
