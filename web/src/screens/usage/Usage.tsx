@@ -188,12 +188,14 @@ function Read(props: { fanned: Fanned; factor: FormFactor; read: () => void }) {
   const { fanned, factor, read } = props
   if (fanned.fanned === 'no') {
     return (
-      <Card className="usage__card">
+      <Card className="usage__card usage__empty">
         <EmptyState
           action={<Button onClick={read}>Read spend</Button>}
           state="unknown"
           title="Nothing read yet"
-        />
+        >
+          Spend is read from each machine only when you ask.
+        </EmptyState>
       </Card>
     )
   }
@@ -297,10 +299,12 @@ export function Usage() {
           ) : null
         }
         stamp={
-          <>
-            <Num>as read · {AS_READ[span]}</Num>
-            {asOf ? <Num> · prices from {asOf}</Num> : null}
-          </>
+          fanned.fanned === 'done' ? (
+            <>
+              <Num>as read · {AS_READ[span]}</Num>
+              {asOf ? <Num> · prices from {asOf}</Num> : null}
+            </>
+          ) : undefined
         }
         title="Usage"
       />
@@ -310,19 +314,27 @@ export function Usage() {
           <Waiting />
         </Card>
       ) : list.length === 0 ? (
-        <Card className="usage__card">
-          <EmptyState title="No spend yet">
-            Money is read from a workspace's transcript, and <Link className="m3-hit" to="/new">New session</Link>{' '}
-            makes the first one.
+        <Card className="usage__card usage__empty">
+          <EmptyState
+            action={
+              <Button render={<Link to="/new" />} role="link">
+                New session
+              </Button>
+            }
+            title="No spend yet"
+          >
+            Spend is read from a workspace's transcript, so start a session first.
           </EmptyState>
         </Card>
       ) : (
         <Read factor={factor} fanned={fanned} read={() => void read()} />
       )}
 
-      <Text render={<p />} className="usage__note" scale="body-small" tone="variant">
-        Read over ssh from each machine's transcript, only when you ask. There is no fleet total.
-      </Text>
+      {fanned.fanned === 'done' ? (
+        <Text render={<p />} className="usage__note" scale="body-small" tone="variant">
+          Read over ssh from each machine's transcript, only when you ask. There is no fleet total.
+        </Text>
+      ) : null}
     </Page>
   )
 }

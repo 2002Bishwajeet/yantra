@@ -301,13 +301,12 @@ describe('the FAB', () => {
     it('carries New session once a machine is ready and nothing else is left', async () => {
       // Ready and keyed, yet no workspace: the gate has passed, so `/` is the
       // board, whose own action is New session.
-      // An empty GitHub queue, so the hero is empty and draws its own copy.
+      // An empty GitHub queue and an unclaimed session: Worth a look has rows, so the empty hero is hidden (Y-773).
       const quiet = { ...contract.attention, data: { ...contract.attention.data, reviews: [], issues: [], notifications: 0 } }
       mount('phone', '/', { overrides: { ...firstRun([]), '/api/attention': { body: quiet } } })
       await screen.findAllByRole('heading', { level: 1, name: 'Dashboard' })
       await waitFor(() => expect(named(fab())).toBe('New session'))
-      const hero = within(screen.getByRole('region', { name: 'Needs you' }))
-      expect(hero.getByRole('link', { name: 'New session' }).dataset.variant).toBe('tonal')
+      expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
     })
 
     /** D7 S11: on the desktop, the action is inline and filled, and the rail

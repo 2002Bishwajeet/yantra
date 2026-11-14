@@ -8,7 +8,7 @@ import { ROUTES, type RouteId } from './lib/routes'
 
 /** What a route draws on `empty`, or null where no board has a block. */
 const EMPTY: Record<RouteId, readonly string[] | null> = {
-  dashboard: ['Nothing needs you', 'Nothing is running', 'No workspaces yet'],
+  dashboard: ['No workspaces yet'],
   fleet: ['No workspaces yet'],
   machines: null,
   machine: null,
