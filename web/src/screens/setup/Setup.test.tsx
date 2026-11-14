@@ -237,7 +237,8 @@ describe('the steps', () => {
     expect(screen.queryByText(/yantra ssh-identity/)).toBeNull()
     cleanup()
     await draw({ ...base(), 'GET /api/ssh-identity': [200, contract.sshIdentity] })
-    expect(screen.getByText('SHA256:<fingerprint>')).toBeTruthy()
+    const copy = screen.getByRole('button', { name: "Copy this appliance's key" })
+    expect(within(copy.closest('.m3-copyable') as HTMLElement).getByText('SHA256:<fingerprint>')).toBeTruthy()
   })
 
   /** A key that could not be read is not *no key yet*. */

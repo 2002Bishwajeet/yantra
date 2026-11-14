@@ -18,6 +18,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
+import { Skeleton } from '@/m3/skeleton/Skeleton'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Stepper, type StepItem, type StepState } from '@/m3/stepper/Stepper'
 import { Text } from '@/m3/text/Text'
@@ -139,8 +140,7 @@ function Tailscale(props: { platform: Exclude<Platform, 'windows'> }) {
     return (
       <>
         <Note>Install Tailscale on it, then log in with the account the appliance uses:</Note>
-        <Copyable text={TAILSCALE} what="Tailscale's install command" />
-        <Copyable text="sudo tailscale up" what="Tailscale's login command" />
+        <Copyable text={`${TAILSCALE} && sudo tailscale up`} what="Tailscale's install and login command" />
       </>
     )
   }
@@ -176,7 +176,13 @@ function JoinKey() {
     )
   }
   const key = identity.data
-  if (key === undefined) return null
+  if (key === undefined) {
+    return (
+      <div data-slot="reading">
+        <Skeleton shape="text" style={{ width: 240 }} />
+      </div>
+    )
+  }
   if (key === null) return <Note>The appliance makes its key when the first machine joins.</Note>
   return (
     <>
@@ -188,11 +194,6 @@ function JoinKey() {
           Show key
         </Button>
       </div>
-      <Disclosure summary="Diagnostics" variant="quiet">
-        <Note>
-          The key is at {key.path} on the appliance.
-        </Note>
-      </Disclosure>
       <Sheet
         actions={
           <Button onClick={() => setOpen(false)} variant="text">
@@ -210,54 +211,53 @@ function JoinKey() {
   )
 }
 
+/** What a join that failed needs: the account, Remote Login on a Mac, and where the key is. */
+function JoinFails(props: { platform: Session }) {
+  const { platform } = props
+  const key = useSshIdentity().data
+  return (
+    <Disclosure summary="If it fails">
+      {platform === 'macos' ? (
+        <Note>
+          First turn on Remote Login: System Settings → General → Sharing. The join command cannot turn it on for you.
+        </Note>
+      ) : null}
+      <AgentAccount platform={platform} />
+      {key ? <Note>Diagnostics: the key is at {key.path} on the appliance.</Note> : null}
+    </Disclosure>
+  )
+}
+
 /** Beat 2's body: the command, and this page on the new device (walk-through
  *  §3.2), where it is one tap to copy. */
 function JoinHere(props: { platform: Session; name: string | undefined }) {
   const { platform, name } = props
   const here = useHere(platform, name)
   const device = name ?? 'the new device'
-  if (useFormFactor() === 'phone') {
-    return (
-      <div className="add-device__join">
-        <div className="add-device__join-text">
-          <Note>Send this page to {device}, and run the command there:</Note>
-          <Shareable href={here} what="this page's address" />
-          {platform === 'macos' ? (
-            <Note>
-              First turn on Remote Login: System Settings → General → Sharing. The join command cannot turn it on for
-              you.
-            </Note>
-          ) : null}
-          <AgentAccount platform={platform} />
-          <Note>
-            Run this once in a terminal on {device}, as karigar. It adds this appliance's key to the account that runs
-            it and tells the appliance which account that is.
-          </Note>
-          <Join machine={name ?? device} what="the join command" />
-          <JoinKey />
-        </div>
-      </div>
-    )
-  }
+  const phone = useFormFactor() === 'phone'
   return (
     <div className="add-device__join">
-      <div className="add-device__join-text">
-        {platform === 'macos' ? (
-          <Note>
-            First turn on Remote Login: System Settings → General → Sharing. The join command cannot turn it on for you.
-          </Note>
-        ) : null}
-        <AgentAccount platform={platform} />
-        <Note>
-          Run this once in a terminal on {device}, as karigar. It adds this appliance's key to the account that runs it
-          and tells the appliance which account that is.
-        </Note>
-        <Join machine={name ?? device} what="the join command" />
-        <JoinKey />
-        <Note>Or open this on {device}, where the command is one tap to copy:</Note>
-        <Copyable text={here} what="this page's address" />
-      </div>
-      <Code href={here} />
+      <Note>
+        Run this once in a terminal on {device}, as karigar. It adds this appliance's key to the account that runs it
+        and tells the appliance which account that is.
+      </Note>
+      <Join hero machine={name ?? device} what="the join command" />
+      <JoinKey />
+      {phone ? (
+        <>
+          <Note>Or send this page to {device}, where the command is one tap to copy:</Note>
+          <Shareable href={here} what="this page's address" />
+        </>
+      ) : (
+        <div className="add-device__here">
+          <div className="add-device__here-text">
+            <Note>Or open this on {device}, where the command is one tap to copy:</Note>
+            <Copyable text={here} what="this page's address" />
+          </div>
+          <Code href={here} />
+        </div>
+      )}
+      <JoinFails platform={platform} />
     </div>
   )
 }
@@ -352,12 +352,12 @@ function Following(props: { first: StepItem; machine: Machine; platform: Session
                 </>
               ) : null}
               {platform === 'macos' && fixes ? (
-                <>
+                <Disclosure summary="If Install fails">
                   <Note>On a Mac, Install needs Homebrew for tmux and git. Without it, install Homebrew first:</Note>
                   <Copyable text={HOMEBREW} what="Homebrew's install command" />
                   <Note>Or, for git alone, Apple's Command Line Tools open a dialog on the Mac:</Note>
                   <Copyable text="xcode-select --install" what="the Command Line Tools command" />
-                </>
+                </Disclosure>
               ) : null}
               <div className="add-device__actions">
                 {install.running ? null : fixes ? (
@@ -453,8 +453,8 @@ function Flow(props: { platform: Exclude<Platform, 'windows'>; named: string | u
           {phone ? (
             <Shareable href={`${location.origin}/`} what="the dashboard's address" />
           ) : (
-            <div className="add-device__join">
-              <div className="add-device__join-text">
+            <div className="add-device__here">
+              <div className="add-device__here-text">
                 <Copyable text={`${location.origin}/`} what="the dashboard's address" />
               </div>
               <Code href={`${location.origin}/`} />
@@ -501,6 +501,7 @@ export function AddDevice() {
   const navigate = useNavigate({ from: '/machines/add' })
   const platform = search.platform ?? guessPlatform(navigator)
   const here = useThisDevice()
+  const phone = useFormFactor() === 'phone'
   return (
     <Page className="add-device" width="reading">
       <PageHeader title="Add a device" />
@@ -514,8 +515,8 @@ export function AddDevice() {
           value={platform}
         >
           {PLATFORMS.map((one) => (
-            <Segment key={one} value={one}>
-              {platformName[one]}
+            <Segment aria-label={platformName[one]} key={one} value={one}>
+              {phone && one === 'mobile' ? 'Phone' : platformName[one]}
             </Segment>
           ))}
         </Segmented>

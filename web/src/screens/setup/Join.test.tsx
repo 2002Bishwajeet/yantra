@@ -35,6 +35,17 @@ describe('the join command', () => {
     expect(screen.getAllByText(/works once, within 10 minutes/)).toHaveLength(2)
   })
 
+  it('draws a filled Copy when it is the hero', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(answer(200, { code: 'ABCD2345', expires_in: 600, command: COMMAND }))))
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <Join hero machine="laptop" what="the join command" />
+      </QueryClientProvider>,
+    )
+    const copy = await screen.findByRole('button', { name: 'Copy the join command' })
+    expect(copy.getAttribute('data-variant')).toBe('filled')
+  })
+
   it('says there is none in a short row, and keeps the daemon’s words behind Details', async () => {
     draw(503, 'the hub does not know its MagicDNS name yet')
     const [row] = await screen.findAllByRole('alert')
