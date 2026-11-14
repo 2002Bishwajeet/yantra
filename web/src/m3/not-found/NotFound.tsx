@@ -28,7 +28,8 @@ export function NotFound(props: NotFoundProps) {
     const before = document.title
     document.title = 'Not found · Yantra'
     return () => {
-      document.title = before
+      // The next route's head commits before this cleanup; do not overwrite it.
+      if (document.title === 'Not found · Yantra') document.title = before
     }
   }, [])
   return (
