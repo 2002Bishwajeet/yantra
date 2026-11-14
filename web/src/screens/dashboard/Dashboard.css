@@ -147,7 +147,7 @@
   padding-right: 8px;
 }
 
-/* Running rows: the track takes the middle, the time and Open sit right. */
+/* Running rows: the name takes the middle, the time and Open sit right. */
 
 .dash__run {
   gap: 16px;
@@ -158,24 +158,15 @@
 }
 
 .dash__run .m3-row__text {
-  flex: none;
-  width: 240px;
-}
-
-.dash__track {
-  order: 1;
+  flex: 1;
+  min-width: 0;
 }
 
 .dash__elapsed {
-  order: 2;
   flex: none;
   margin-inline-start: auto;
   width: 64px;
   text-align: right;
-}
-
-.dash__open {
-  order: 3;
 }
 
 .dash__running {
