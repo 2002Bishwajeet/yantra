@@ -106,6 +106,10 @@ describe('the desktop shell', () => {
   it('says nothing is at a path nothing routes', async () => {
     mount('desktop', '/nope')
     expect(await screen.findByText(/Nothing is at/)).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Not found' })).toBeTruthy()
+    expect(screen
+        .getAllByRole('link', { name: 'Dashboard' })
+        .find((a) => a.classList.contains('m3-not-found__way'))?.dataset.variant).toBe('tonal')
   })
 })
 

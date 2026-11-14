@@ -53,9 +53,12 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
   const fold = !page && folded && Boolean(error.said)
   const [open, setOpen] = useState(false)
   const detailsId = useId()
-  const hasDetails = Boolean(error.said || unknowns?.length || meta)
+  const sentence = error.describe()
+  // A page's Details earn their toggle only with text the sentence has not said.
+  const more = error.said.trim() !== sentence.trim() ? error.said : ''
+  const hasDetails = Boolean(more || unknowns?.length || meta)
   const heading = error.headline ?? title
-  const words = `${heading}. ${error.describe()}`
+  const words = `${heading}. ${sentence}`
   useEffect(() => announce(words), [words])
   return (
     <section
@@ -72,7 +75,7 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
       <div className="m3-error__text">
         {eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : null}
         <h2 className="m3-error__title">{heading}</h2>
-        <p className="m3-error__sentence">{error.describe()}</p>
+        <p className="m3-error__sentence">{sentence}</p>
         {!page && !fold && error.said ? (
           <Text scale="body-small" className="m3-error__said m3-wrap">
             {error.said}
@@ -95,7 +98,7 @@ function Body(props: ErrorSurfaceProps & { layout: 'page' | 'card' | 'inline' })
               </Button>
               {open ? (
                 <div className="m3-error__details" id={detailsId}>
-                  {error.said ? <Text scale="body-small" className="m3-error__said m3-wrap">{error.said}</Text> : null}
+                  {more ? <Text scale="body-small" className="m3-error__said m3-wrap">{more}</Text> : null}
                   {unknowns?.length ? <Unknowns items={unknowns} /> : null}
                   {meta ? <Text scale="body-small" className="m3-error__meta m3-wrap">{meta}</Text> : null}
                 </div>

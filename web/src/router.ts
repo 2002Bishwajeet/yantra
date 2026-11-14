@@ -46,7 +46,7 @@ type Context = { client: QueryClient }
 const root = createRootRouteWithContext<Context>()({
   component: Shell,
   notFoundComponent: Nowhere,
-  head: () => titled('Nowhere'),
+  head: () => titled('Not found'),
 })
 
 // The one eager route: everything else arrives with its chunk (ADR-0024 §3).

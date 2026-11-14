@@ -126,15 +126,12 @@ test.describe('the settings shell', () => {
     await keyboardWalk(page, 12)
   })
 
-  test('says a category it does not know is nowhere', async ({ page, size }) => {
+  test('says a category it does not know is nowhere', async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto('/settings/plugins')
     await expect(page.getByText('The dashboard is where the sessions and machines are.')).toBeVisible()
-    // The phone hides every screen's h1 under the app bar's, and Nowhere puts
-    // its sentence in one (shell/Shell.tsx), so only the line under it shows.
-    if (size !== 'phone') {
-      await expect(page.getByText('Nothing is at /settings/plugins')).toBeVisible()
-    }
+    // The headline is an h2, so the phone's hidden h1 does not take it.
+    await expect(page.getByRole('heading', { name: 'Nothing is at /settings/plugins' })).toBeVisible()
   })
 })
 

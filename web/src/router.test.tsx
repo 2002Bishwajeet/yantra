@@ -128,7 +128,16 @@ describe('every path draws its screen and names it in the title', () => {
   it('says nothing is at a path nothing routes', async () => {
     await open('/no-such-page')
     expect(await screen.findByText(/Nothing is at/)).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1, name: 'Not found' })).toBeTruthy()
     expect(screen.queryByRole('heading', { level: 1, name: 'Dashboard' })).toBeNull()
+  })
+
+  it('gives the next route its own title after a not-found page', async () => {
+    await open('/no-such-page')
+    await waitFor(() => expect(document.title).toBe('Not found · Yantra'))
+    await navigateTo('/usage')
+    expect(await h1('Usage')).toBeTruthy()
+    await waitFor(() => expect(document.title).toBe('Usage · Yantra'))
   })
 })
 

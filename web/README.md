@@ -771,7 +771,8 @@ Route changes use the router's view transitions (Y-678): the content slides by d
   title scale from `tokens.css`. An empty block is an
   [`EmptyState`](src/m3/empty-state/EmptyState.tsx) (`compact` for a banner or a
   line), a read in flight is a `Skeleton` card or row, and a failure is an
-  `ErrorSurface` under the header, so the title stays. A reading page starts
+  `ErrorSurface` under the header, so the title stays. A missing name or path
+  is a [`NotFound`](src/m3/not-found/NotFound.tsx), never an alert. A reading page starts
   where the wide column starts, so a title keeps one left edge on a desktop; a
   conversation (a session, a room) is centred. A measure, a dialog and a menu
   take `--m3-measure`, `--m3-dialog-width` and `--m3-menu-width`.

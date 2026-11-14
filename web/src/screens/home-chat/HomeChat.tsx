@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { getRouteApi, Link } from '@tanstack/react-router'
+import { getRouteApi } from '@tanstack/react-router'
 import { ApiError } from '@/api/errors'
 import { useMachines } from '@/api/hooks'
 import { keys } from '@/api/keys'
-import { Button } from '@/m3/button/Button'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { NotFound } from '@/m3/not-found/NotFound'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -83,19 +83,9 @@ export function Home(props: { machine: string; thread?: string; onThread: (threa
 
   if (!machines.data.some((one) => one.name === machine)) {
     return (
-      <Page width="wide">
-        <PageHeader title={machine} />
-        <ErrorSurface.Page
-          action={
-            <Button render={<Link to="/machines" />} role="link" variant="text">
-              Machines
-            </Button>
-          }
-          error={new ApiError('missing', machine, { sentence: `The tailnet has no machine called ${machine}.` })}
-          eyebrow="Home chat"
-          title="No such machine"
-        />
-      </Page>
+      <NotFound headline={`No machine is called ${machine}`} label="Machines" to="/machines">
+        The tailnet has no machine called {machine}.
+      </NotFound>
     )
   }
 
