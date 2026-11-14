@@ -441,7 +441,8 @@ describe('the Dashboard hides the bands that have nothing to say', () => {
     await drawn()
     const hero = region('Needs you')
     expect(hero.getByText('Nothing needs you')).toBeTruthy()
-    expect(hero.getByText('Nothing runs. A request shows here first.')).toBeTruthy()
+    expect(hero.getByText('A request shows here first.')).toBeTruthy()
+    expect(hero.queryByText(/Nothing runs/)).toBeNull()
     expect(hero.getAllByRole('link', { name: 'New session' })).toHaveLength(1)
   })
 

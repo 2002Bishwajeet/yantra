@@ -353,7 +353,7 @@ function Hero(props: {
             state="idle"
             title={fleetEmpty ? 'No workspaces yet' : 'Nothing needs you'}
           >
-            {fleetEmpty ? 'Start a session and it shows here.' : 'Nothing runs. A request shows here first.'}
+            {fleetEmpty ? 'Start a session and it shows here.' : 'A request shows here first.'}
           </EmptyState>
           <KeptReading reading={attention} />
         </>
