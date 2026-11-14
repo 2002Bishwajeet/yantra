@@ -80,7 +80,7 @@ export async function scenario(
         const v = get.call(this, k)
         if (k !== 'yantra.prefs') return v
         try {
-          return JSON.stringify({ v: 1, ...JSON.parse(v ?? '{}'), updateDismissed: '0.4.0' })
+          return JSON.stringify({ v: 1, ...JSON.parse(v ?? '{}'), updateDismissed: '0.4.0', updateOpened: '0.4.0' })
         } catch {
           return v
         }
