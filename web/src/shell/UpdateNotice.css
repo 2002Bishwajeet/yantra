@@ -1,28 +1,17 @@
-.update-notice {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  box-sizing: border-box;
-  width: 100%;
-  max-width: var(--m3-page-max-wide);
+.update-snackbar {
+  position: fixed;
+  inset-inline: calc(16px + var(--m3-safe-left)) calc(16px + var(--m3-safe-right));
+  /* Above the navigation bar and the extended FAB on the phone. */
+  bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+  z-index: 20;
+  max-width: var(--m3-measure);
   margin-inline: auto;
-  margin-block-start: var(--m3-page-top);
-  padding: 12px 8px 8px 16px;
-  border-radius: var(--md-sys-shape-corner-large);
-  background: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-on-surface);
 }
 
-.update-notice__text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding-inline-end: 8px;
+[data-shell="tablet"] .update-snackbar {
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
-.update-notice__actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+[data-shell="desktop"] .update-snackbar {
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
 }

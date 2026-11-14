@@ -929,7 +929,7 @@ src/
     Bell.tsx  BellPopover.tsx  NotificationsScreen.tsx
                      one set of notifications, at three widths
     formFactor.ts    phone / tablet / desktop, from three media queries
-    UpdateNotice.tsx a banner on every page but About when a newer release is out; Dismiss is a pref
+    UpdateNotice.tsx a snackbar once per release, then a badge on Account and a row in About; two prefs remember it
     Reconnecting.tsx the mark a page wears while it keeps its readings and the daemon does not answer (Y-744)
     prefs.ts         `localStorage` under one versioned key (ADR-0024 §5)
   screens/
