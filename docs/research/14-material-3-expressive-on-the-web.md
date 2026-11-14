@@ -296,6 +296,35 @@ velocity, a spring carries momentum. That matters for drag-to-dismiss and a FAB 
 mid-open, nowhere else on these boards; the Web Animations API with the same string handles those
 without a library. A spring library is the only option that costs bundle; do not add one.
 
+> **2026-11-14, Y-806: "off the main thread" is false for Safari below 27.3.** Released Safari
+> cannot accelerate an animation that uses a `linear()` easing, so it runs the animation on the main
+> thread. A WebKit engineer says so in bug 281429 ("This is as designed") and again in bug 312407
+> ("This is true of the released Safari so far", 2026-04-15). The reporter of bug 281429 gives
+> the cost: 60 fps at most, and 30 fps in low-power mode. The fix is the "Threaded Time-based
+> Animations" flag of bug 312015. The first release that has it is the Safari 27.3 beta of
+> 2026-11-03, whose notes say that animations with `linear()` and `steps()` easings "are now also
+> accelerated". The owner saw the cost on an iPhone as a stutter when a menu opened. `Menu.css` now
+> eases with the cubic-bezier tokens, which every Safari accelerates. Every other file that uses a
+> spring token still animates on the main thread on those iPhones. Nobody here measured an iPhone:
+> the engines in CI do not have this limit.
+>
+> **What CI measured, and what it cannot show.** `web/e2e/menu-speed.spec.ts` opens a menu five
+> times and records the longest main-thread gap that began after the tap. CI run 43530925204, on a
+> shared GitHub runner, gave these for the Account menu: Chromium 20, 16, 16, 16, 16 ms and
+> 21, 16, 16, 17, 17 ms; WebKit 30, 11, 13, 16, 18 ms. The first open after a load is the longest
+> each time, and it is longer than one frame. In two more WebKit attempts the gap that contained
+> the tap was 23 to 55 ms long. Run 43541549754 gave the same shape: the More menu's first open
+> took 30 ms in WebKit and 22 ms in Chromium, and no later open of either menu took more than
+> 17 ms. So the runner cannot hold the first open to one frame, and it does hold each later open.
+> The spec holds the first open under the 50 ms long-task limit, each later open under 25 ms, which
+> is a frame and a half, and the median open under 20 ms. It prints the gaps on every run.
+>
+> **The row's 16 ms clause is not proved.** These gaps are main-thread time on a shared x86 runner,
+> not frame times on a phone, and nobody knows how one maps to the other. CI's engines do not have
+> Safari's limit, so on the old CSS only the easing check can fail. The proof is a recording of the
+> open on the owner's iPhone, made with the Timelines tab of Safari's Web Inspector on a Mac, with
+> the phone on a cable.
+
 **View Transitions** (`document.startViewTransition`) cover the route change and the shared-element
 move from a row to its session screen: Chrome 111, Safari 18 / iOS 18, Firefox 144; the
 `{types, update}` options form is Chrome 125 / Safari 18.2 / Firefox 147. React 19's
@@ -422,6 +451,17 @@ Accessed 2026-09-06 unless noted.
 - `linear()` — <https://developer.chrome.com/docs/css-ui/css-linear-easing-function>; MDN
   browser-compat-data `css/types/easing-function.json`, `api/Document.json`,
   `css/at-rules/starting-style.json`, `css/properties/corner-shape.json`
+- `linear()` on the main thread in Safari (accessed 2026-11-14) — WebKit bugs
+  <https://bugs.webkit.org/show_bug.cgi?id=281429>, <https://bugs.webkit.org/show_bug.cgi?id=312407>
+  and <https://bugs.webkit.org/show_bug.cgi?id=312015>; Safari 27.3 beta release notes —
+  <https://developer.apple.com/documentation/safari-release-notes/safari-27_3-release-notes>
+  (JS-rendered; read through its JSON at
+  `developer.apple.com/tutorials/data/documentation/safari-release-notes/safari-27_3-release-notes.json`)
+- The main-thread gaps of the menu open in CI (accessed 2026-11-14) — the failed `e2e (phone 1/2)`
+  and `e2e (phone-webkit)` job logs of <https://github.com/2002Bishwajeet/yantra/actions/runs/43530925204>,
+  and the passing `e2e (phone 1/2)` and `e2e (phone-webkit)` job logs of
+  <https://github.com/2002Bishwajeet/yantra/actions/runs/43541549754>; GitHub keeps job logs for a
+  limited time
 - WCAG 2.2 — <https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html> and
   `target-size-enhanced.html`; axe-core —
   <https://github.com/dequelabs/axe-core/blob/develop/doc/rule-descriptions.md>
