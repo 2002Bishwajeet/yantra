@@ -102,7 +102,8 @@ const watchOpen = () => {
 }
 
 /** Y-806: the open stuttered on an iPhone. Safari below 27.3 runs a `linear()` easing on the main
- *  thread. CI's WebKit is the Linux port without that limit: only the easing check fails on the old CSS. */
+ *  thread. CI's WebKit is the Linux port without that limit: only the easing check fails on the old CSS.
+ *  The gaps guard the open's main-thread work; they do not prove a frame time on a phone (R14 §5). */
 async function opensSmoothly(trigger: Locator) {
   const page = trigger.page()
   await mountedClosed(page)
@@ -124,9 +125,10 @@ async function opensSmoothly(trigger: Locator) {
   const report = runs.map((it) => `${it.gap.toFixed(1)} ms starting ${it.offset.toFixed(1)} ms after the tap`).join('; ')
   // Printed on a pass too: CI's log is the only record of what the runner measured.
   console.log(`${test.info().project.name}, ${test.info().title}: the longest main-thread gap of each open: ${report}`)
-  // CI's runner cannot hold one frame on each open: the first open after a load measured 20 to 30 ms (R14 §5).
-  // So each open stays under the 50 ms long-task limit, and the median under a frame plus timer slack.
-  expect(Math.max(...gaps), `an open held the main thread for a long task: ${report}`).toBeLessThanOrEqual(50)
+  // CI's runner cannot hold the first open after a load to one frame: it measured 20 to 30 ms there (R14 §5).
+  // So that open stays under the 50 ms long-task limit, and each later open under a frame and a half.
+  expect(gaps[0], `the first open held the main thread for a long task: ${report}`).toBeLessThanOrEqual(50)
+  expect(Math.max(...gaps.slice(1)), `a later open held the main thread past one frame: ${report}`).toBeLessThanOrEqual(25)
   expect(gaps.toSorted((a, b) => a - b)[2], `the median open held the main thread past one frame: ${report}`).toBeLessThanOrEqual(20)
 }
 
