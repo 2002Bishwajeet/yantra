@@ -31,7 +31,7 @@ export type HomeHeaderProps = {
   into?: HTMLElement | null
 }
 
-/** A home chat has no repository, so the header holds the thread menu and Remove, and no git. */
+/** A home chat has no repository, so the header holds the thread menu, which also removes the thread, and no git. */
 export function HomeHeader(props: HomeHeaderProps) {
   const { machine, thread, urlThread, busy, into } = props
   const active = thread ?? urlThread ?? null
@@ -115,20 +115,22 @@ export function HomeHeader(props: HomeHeaderProps) {
             <MenuItem closeOnClick={false} onClick={() => void threads.refetch()}>
               Refresh threads
             </MenuItem>
+            {active ? (
+              <MenuItem
+                disabled={busy}
+                icon={<Trash2 aria-hidden="true" />}
+                onClick={() => {
+                  remove.reset()
+                  setAsking(true)
+                }}
+                tone="error"
+              >
+                Remove thread
+              </MenuItem>
+            ) : null}
           </MenuPopup>
         </Menu>
       </nav>
-      <Button
-        disabled={!active || busy}
-        icon={<Trash2 />}
-        onClick={() => {
-          remove.reset()
-          setAsking(true)
-        }}
-        variant="text"
-      >
-        Remove
-      </Button>
       <Dialog onOpenChange={setAsking} open={asking}>
         <DialogPopup
           actions={

@@ -20,6 +20,7 @@ export function IconButton(props: IconButtonProps) {
     <Base
       className={clsx('m3-icon-button', 'm3-interactive', className)}
       data-variant={variant ?? 'standard'}
+      data-filled={variant === 'filled' || variant === 'tonal' ? '' : undefined}
       render={render}
       nativeButton={!render}
       {...rest}

@@ -64,6 +64,12 @@ describe('/fleet on the busy fleet', () => {
     await waitFor(() => expect(asked).toContain('POST /api/workspaces/homelab-k8s/down'))
   })
 
+  it('draws no Reorder button before any row moves', async () => {
+    mount('desktop', '/fleet')
+    await screen.findByText(/^looked /, {}, { timeout: 2000 })
+    expect(screen.queryByRole('button', { name: /^Reorder/ })).toBeNull()
+  })
+
   it('draws the GitHub queue inside Needs you with links out', async () => {
     mount('desktop', '/fleet')
     await screen.findByText(/^looked /, {}, { timeout: 2000 })

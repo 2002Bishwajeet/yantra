@@ -552,19 +552,22 @@ describe('a home chat header (ADR-0046)', () => {
     expect(names.filter((name) => /^(Diff|Terminal|Commit|Push|Open PR|Git actions)/.test(name))).toEqual([])
   })
 
-  it('has no Remove for a chat with no thread, and none while a turn runs', async () => {
+  it('has no Remove for a chat with no thread, and a disabled one while a turn runs', async () => {
     stub([204, undefined])
     await showHome({ urlThread: undefined })
-    expect((await screen.findByRole('button', { name: 'Remove' })).hasAttribute('disabled')).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
+    const none = await openMenu()
+    expect(within(none).queryByRole('menuitem', { name: 'Remove thread' })).toBeNull()
     cleanup()
     await showHome({ busy: true })
-    expect((await screen.findByRole('button', { name: 'Remove' })).hasAttribute('disabled')).toBe(true)
+    const menu = await openMenu()
+    expect(within(menu).getByRole('menuitem', { name: 'Remove thread' }).getAttribute('aria-disabled')).toBe('true')
   })
 
   it('asks, then DELETEs the thread and leaves for a new one', async () => {
     stub([204, undefined])
     const router = await showHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    fireEvent.click(within(await openMenu()).getByRole('menuitem', { name: 'Remove thread' }))
     fireEvent.click(await within(await screen.findByRole('dialog')).findByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(calls).toContain('DELETE /api/machines/mac/threads/6a1b2c3d4e5f6a7b'))
     await waitFor(() => expect(router.state.location.search).toEqual({}))
@@ -577,7 +580,7 @@ describe('a home chat header (ADR-0046)', () => {
   ])('shows an error surface with the daemon\'s words when Remove answers %i, and stays', async (status, said) => {
     stub([status, said])
     const router = await showHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    fireEvent.click(within(await openMenu()).getByRole('menuitem', { name: 'Remove thread' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
     expect(await within(dialog).findByText('The thread could not be removed')).toBeTruthy()

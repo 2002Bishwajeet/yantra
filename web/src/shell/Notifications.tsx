@@ -59,14 +59,15 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
   ) : undefined
   return (
     <li>
-      <Row render={render} tone="lowest">
-        <EntryTile tile={entry.tile} />
-        <EntryText entry={entry} supporting={supporting} />
-        <Num className="notifications__age">{ago(now / 1000 - entry.at, now).text}</Num>
-      </Row>
-      {entry.answer ? (
-        <div className="notifications__answer">
+      <div className="notifications__item">
+        <Row className={entry.answer ? 'notifications__row--answer' : undefined} render={render} tone="lowest">
+          <EntryTile tile={entry.tile} />
+          <EntryText entry={entry} supporting={supporting} />
+          <Num className="notifications__age">{ago(now / 1000 - entry.at, now).text}</Num>
+        </Row>
+        {entry.answer ? (
           <Button
+            className="notifications__answer"
             onClick={onOpen}
             role="link"
             render={<Link params={{ name: entry.answer }} search={{ view: 'chat' }} to="/w/$name" />}
@@ -75,8 +76,8 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
           >
             Answer
           </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
       {commands.length ? (
         <div className="notifications__commands">
           {commands.map((command, index) => (
@@ -123,13 +124,11 @@ export function NotificationsList(props: { onOpen?: () => void }) {
           </Segment>
           <Segment value="all">All</Segment>
         </Segmented>
-        <Button
-          disabled={newest === null || fresh.length === 0}
-          onClick={() => writePrefs({ seenAt: newest })}
-          variant="text"
-        >
-          Mark all read
-        </Button>
+        {newest !== null && fresh.length > 0 ? (
+          <Button onClick={() => writePrefs({ seenAt: newest })} variant="text">
+            Mark all read
+          </Button>
+        ) : null}
       </div>
       {shown.today.length + shown.earlier.length === 0 ? (
         filter === 'unread' ? (

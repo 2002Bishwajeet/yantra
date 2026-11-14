@@ -39,9 +39,20 @@
   color: var(--md-sys-color-on-surface-variant);
 }
 
+.notifications__item {
+  position: relative;
+}
+
+/* Room for the tonal Answer that sits over the row's trailing edge. */
+.notifications__row--answer {
+  padding-inline-end: 104px;
+}
+
 .notifications__answer {
-  display: flex;
-  padding: 0 12px 8px 60px;
+  position: absolute;
+  inset-inline-end: 12px;
+  top: 50%;
+  translate: 0 -50%;
 }
 
 .notifications__commands {

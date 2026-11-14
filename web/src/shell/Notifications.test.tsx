@@ -59,6 +59,8 @@ describe('notifications on the desktop', () => {
     expect(readPrefs().seenAt).toBe(1786471773)
     expect(JSON.parse(localStorage.getItem('yantra.prefs')!).seenAt).toBe(1786471773)
     expect(await popover.findByText('Nothing unread')).toBeTruthy()
+    // Nothing unread: the action cannot apply, so it is not drawn.
+    expect(popover.queryByRole('button', { name: 'Mark all read' })).toBeNull()
     // The badge is the Unread tab's count, so it clears with it.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Notifications' })).toBeTruthy())
     fireEvent.click(popover.getByRole('radio', { name: 'All' }))
@@ -153,7 +155,12 @@ describe('row taps (Y-722)', () => {
     const item = (await popover.findAllByRole('listitem')).find((one) => one.textContent?.includes('said'))!
     expect(item.querySelector('a.m3-row')!.getAttribute('href')).toBe('/w/api')
     expect(item.querySelector('a.m3-row a, a.m3-row button')).toBeNull()
-    expect(within(item).getByRole('link', { name: 'Answer' }).getAttribute('href')).toBe('/w/api?view=chat')
+    const answer = within(item).getByRole('link', { name: 'Answer' })
+    expect(answer.getAttribute('href')).toBe('/w/api?view=chat')
+    // A trailing sibling of the row link, not a block under it.
+    expect(answer.closest('.notifications__item')).not.toBeNull()
+    expect(item.querySelector('a.m3-row')!.contains(answer)).toBe(false)
+    expect(item.querySelector('a.m3-row')).not.toBeNull()
   })
 })
 
