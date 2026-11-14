@@ -188,7 +188,7 @@ function JoinKey() {
           Show key
         </Button>
       </div>
-      <Disclosure summary="Diagnostics">
+      <Disclosure summary="Diagnostics" variant="quiet">
         <Note>
           The key is at {key.path} on the appliance.
         </Note>

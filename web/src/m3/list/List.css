@@ -96,6 +96,14 @@
   max-width: 60%;
 }
 
+/* On desktop a trailing select matches the 40 px segmented controls; the 56 px
+   field stays for the stacked phone row. */
+@media (min-width: 600px) {
+  .m3-list__row[data-stack] .m3-select {
+    height: 40px;
+  }
+}
+
 /* Below the phone breakpoint (formFactor.ts) a wide control drops under the
    headline, inset to the text. */
 @media (max-width: 599px) {
