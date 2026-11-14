@@ -30,7 +30,7 @@ import { HomeHeader } from './HomeHeader'
 import { elapsed, groupThreads, presenceWord, prMark, readOnlyWhy, threadTitle } from './threads'
 
 export type ChatHeaderProps = {
-  /** A home chat draws the thread menu and Remove, and no git (ADR-0046). */
+  /** A home chat draws the thread menu, with Remove inside it, and no git (ADR-0046). */
   target: ChatTarget
   /** The thread the daemon named for this chat; null until it has. */
   thread: string | null

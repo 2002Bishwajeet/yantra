@@ -16,6 +16,18 @@ describe('IconButton', () => {
     expect(button.dataset.variant).toBe('standard')
   })
 
+  it.each([['filled', true], ['tonal', true], ['standard', false]] as const)(
+    '%s sets data-filled: %s',
+    (variant, filled) => {
+      render(
+        <IconButton label="Go" variant={variant}>
+          <Bell />
+        </IconButton>,
+      )
+      expect(screen.getByRole('button', { name: 'Go' }).hasAttribute('data-filled')).toBe(filled)
+    },
+  )
+
   it('carries a badge inside the name', () => {
     render(
       <IconButton label="Notifications" variant="tonal" badge={<Badge count={3} label="3 unread" />}>

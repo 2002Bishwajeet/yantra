@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { GitPullRequest, Laptop, Radio } from 'lucide-react'
+import { GitPullRequest, Laptop, MessageSquareReply, Radio } from 'lucide-react'
 import { asApiError } from '@/api/errors'
 import { useAbout, useNotifications } from '@/api/hooks'
 import { ago } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
+import { IconButton } from '@/m3/icon-button/IconButton'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -31,7 +32,7 @@ function EntryTile(props: { tile: Entry['tile'] }) {
  *  the shared `.m3-wrap` utility on plain spans instead. */
 function EntryText(props: { entry: Entry; supporting: ReactNode }) {
   const { entry, supporting } = props
-  if (!entry.wrap) return <RowText headline={entry.headline} supporting={supporting} />
+  if (!entry.wrap && !entry.answer) return <RowText headline={entry.headline} supporting={supporting} />
   return (
     <div className="m3-row__text">
       <span className="m3-row__headline m3-wrap">{entry.headline}</span>
@@ -59,24 +60,25 @@ function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
   ) : undefined
   return (
     <li>
-      <Row render={render} tone="lowest">
-        <EntryTile tile={entry.tile} />
-        <EntryText entry={entry} supporting={supporting} />
-        <Num className="notifications__age">{ago(now / 1000 - entry.at, now).text}</Num>
-      </Row>
-      {entry.answer ? (
-        <div className="notifications__answer">
-          <Button
+      <div className="notifications__item">
+        <Row className={entry.answer ? 'notifications__row--answer' : undefined} render={render} tone="lowest">
+          <EntryTile tile={entry.tile} />
+          <EntryText entry={entry} supporting={supporting} />
+          <Num className="notifications__age">{ago(now / 1000 - entry.at, now).text}</Num>
+        </Row>
+        {entry.answer ? (
+          <IconButton
+            className="notifications__answer"
+            label="Answer"
             onClick={onOpen}
             role="link"
             render={<Link params={{ name: entry.answer }} search={{ view: 'chat' }} to="/w/$name" />}
-            size="s"
             variant="tonal"
           >
-            Answer
-          </Button>
-        </div>
-      ) : null}
+            <MessageSquareReply />
+          </IconButton>
+        ) : null}
+      </div>
       {commands.length ? (
         <div className="notifications__commands">
           {commands.map((command, index) => (
@@ -123,13 +125,11 @@ export function NotificationsList(props: { onOpen?: () => void }) {
           </Segment>
           <Segment value="all">All</Segment>
         </Segmented>
-        <Button
-          disabled={newest === null || fresh.length === 0}
-          onClick={() => writePrefs({ seenAt: newest })}
-          variant="text"
-        >
-          Mark all read
-        </Button>
+        {newest !== null && fresh.length > 0 ? (
+          <Button onClick={() => writePrefs({ seenAt: newest })} variant="text">
+            Mark all read
+          </Button>
+        ) : null}
       </div>
       {shown.today.length + shown.earlier.length === 0 ? (
         filter === 'unread' ? (

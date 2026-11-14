@@ -225,3 +225,23 @@ describe('the seam', () => {
     expect(css).not.toContain('material-color-utilities')
   })
 })
+
+describe('disabled controls without a container', () => {
+  const rule = /\.m3-pill\.m3-pill:not\(\[data-selected\]\)[^{]*\{([^}]*)\}/.exec(css)?.[1] ?? ''
+
+  it('goes grey at full opacity, not faded', () => {
+    expect(rule).toMatch(/opacity: 1;/)
+    expect(rule).toMatch(/color-mix\(in srgb, var\(--md-sys-color-on-surface\) 38%, transparent\)/)
+  })
+
+  it('covers text and outlined buttons, standard icon buttons and unselected pills', () => {
+    const selector = /(\.m3-button\.m3-button\[data-variant="text"\][^{]*)\{/.exec(css)?.[1] ?? ''
+    for (const part of ['data-variant="outlined"', 'm3-icon-button[data-variant="standard"]', 'm3-pill']) {
+      expect(css.slice(css.indexOf(selector))).toContain(part)
+    }
+  })
+
+  it('draws the outlined border at 12 %', () => {
+    expect(css).toMatch(/\[data-variant="outlined"\]:is\([^)]*\) \{\s*border-color: color-mix\(in srgb, var\(--md-sys-color-on-surface\) 12%/)
+  })
+})
