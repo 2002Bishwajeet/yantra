@@ -18,9 +18,10 @@
   overflow-y: auto;
   outline: none;
   transform-origin: var(--transform-origin);
+  /* Not the spring tokens: Safari below 27.3 runs a linear() easing on the main thread (R14 §5). */
   transition:
-    transform var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-spring-fast-spatial),
-    opacity var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+    transform var(--md-sys-motion-duration-fast-spatial) var(--md-sys-motion-easing-emphasized-decelerate),
+    opacity var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-easing-standard-decelerate);
 }
 
 .m3-menu[data-starting-style],
