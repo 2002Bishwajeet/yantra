@@ -14,6 +14,8 @@
 #                                       a branch that changes the session screen also gets the first live session,
 #                                       light and dark (Y-770); the picture shows what that pane holds
 #                                       /machines also shoots the page of each machine whose card lists a failing check (Y-740)
+#                                       or what ssh said, and the page of each phone, tablet and Windows PC of the owner's,
+#                                       which the list hides (Y-775)
 #   walk.sh down <worktree>
 #   walk.sh mac <worktree>              runs `just test-mac` against the real Mac; exit 2 when the Mac is unreachable
 #   walk.sh publish <worktree> <pr>     pushes the screenshots to the `walks` branch and comments them on the PR
