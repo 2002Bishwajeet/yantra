@@ -75,7 +75,8 @@ test('Remove closes the thread and starts a fresh one', async ({ page }) => {
   await page.goto(PATH)
   await turn(page)
   await finish(page)
-  await page.getByRole('button', { name: 'Remove', exact: true }).click()
+  await page.getByRole('button', { name: /^Threads, / }).click()
+  await page.getByRole('menuitem', { name: 'Remove thread' }).click()
   await page.getByRole('dialog', { name: 'Remove this thread' }).getByRole('button', { name: 'Remove', exact: true }).click()
   await expect(page).not.toHaveURL(/thread=/)
   await expect(page.getByText(`Claude works in the home folder on ${MACHINE}, with no repository.`)).toBeVisible()
@@ -85,7 +86,7 @@ test('Remove closes the thread and starts a fresh one', async ({ page }) => {
 
 test('a machine the tailnet does not have is a typed not-found surface', async ({ page }) => {
   await page.goto('/m/no-such-box/home')
-  await expect(page.getByRole('heading', { name: 'No such machine' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No machine is called no-such-box' })).toBeVisible()
   await expect(page.getByText('The tailnet has no machine called no-such-box.', { exact: true })).toBeVisible()
 })
 

@@ -59,9 +59,8 @@ test.describe('rooms', () => {
 
   test('a room the daemon does not hold is named, with a way back', async ({ page }) => {
     await page.goto('/rooms/gone')
-    const alert = page.getByRole('alert')
-    await expect(alert.getByRole('heading', { name: 'No room is called gone' })).toBeVisible()
-    await alert.getByRole('link', { name: 'All rooms' }).click()
+    await expect(page.getByRole('heading', { name: 'No room is called gone' })).toBeVisible()
+    await page.getByRole('link', { name: 'All rooms' }).click()
     await expect(heading(page, 'Rooms')).toBeVisible()
   })
 

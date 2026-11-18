@@ -96,6 +96,37 @@
   max-width: 60%;
 }
 
+/* With a mouse a trailing select matches the 40 px segmented controls; a touch
+   screen keeps the 56 px field for its 44 px hit area. */
+@media (min-width: 600px) and (pointer: fine) {
+  .m3-list__row[data-stack] .m3-select {
+    height: 40px;
+  }
+}
+
+/* Below the phone breakpoint (formFactor.ts) a wide control drops under the
+   headline, inset to the text. */
+@media (max-width: 599px) {
+  .m3-list__row[data-stack] {
+    flex-wrap: wrap;
+    padding: 0 16px 12px;
+  }
+
+  .m3-list__row[data-stack] > .m3-list-item {
+    flex: 1 0 100%;
+    padding: 8px 0;
+  }
+
+  .m3-list__row[data-stack] > .m3-list-item__trailing {
+    flex: 1 0 100%;
+    max-width: none;
+  }
+
+  .m3-list__row[data-stack] > .m3-list-item__trailing > * {
+    flex: 1;
+  }
+}
+
 .m3-list-value {
   min-width: 0;
   /* `break-word` breaks the long token the cap cannot fit, and unlike

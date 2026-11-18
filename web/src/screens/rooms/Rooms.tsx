@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 import type { RoomSummary } from '@/api'
 import { asApiError } from '@/api/errors'
 import { roomsQuery } from '@/api/queries'
+import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -19,9 +20,15 @@ function List({ rooms }: { rooms: RoomSummary[] }) {
   if (rooms.length === 0) {
     return (
       <Card className="rooms__empty">
-        <EmptyState title="No rooms">
-          A restart keeps a room the owner defined (yantra room new) and clears its messages. A room
-          an agent made ends on a restart.
+        <EmptyState
+          action={
+            <Button render={<Link to="/new" />} role="link">
+              New session
+            </Button>
+          }
+          title="No rooms"
+        >
+          Agents share a room to work on one project together.
         </EmptyState>
       </Card>
     )

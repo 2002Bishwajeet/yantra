@@ -48,7 +48,7 @@ test.describe('usage on a busy fleet', () => {
     })
     await page.getByRole('radio', { name: '7 days' }).click()
     await expect(page).toHaveURL('/usage?window=7d')
-    await expect(page.getByText('as read · responses in the last 7 days')).toBeVisible()
+    await expect(page.getByText(/^as read/)).toHaveCount(0)
     expect(reads).toBe(0)
 
     const posted = page.waitForRequest((request) => request.url().endsWith('/tokens'))

@@ -657,7 +657,7 @@ describe('the chat', () => {
       expect(row().getAttribute('aria-expanded')).toBe('true')
       expect(row().getAttribute('aria-controls')).toBe(screen.getByText('cargo test').closest('.chat__work-body')!.id)
       expect(screen.getByText('cargo test').closest('[hidden]')).toBeNull()
-      fireEvent.click(screen.getByText('Output'))
+      fireEvent.click(screen.getByRole('button', { name: /Output/ }))
       expect(screen.getByText('test result: ok')).toBeTruthy()
     })
 

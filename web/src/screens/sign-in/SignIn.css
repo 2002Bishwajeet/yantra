@@ -113,3 +113,19 @@
   text-align: start;
   touch-action: manipulation;
 }
+
+/* A phone has no room for a card on a card: the form sits on the surface,
+   under the notch, where a thumb reaches it. */
+@media (max-width: 599px) {
+  .sign-in {
+    align-content: start;
+    place-items: start stretch;
+    padding-block-start: calc(16px + env(safe-area-inset-top, 0px));
+  }
+
+  .sign-in__card {
+    padding: 0;
+    border-radius: 0;
+    background: none;
+  }
+}

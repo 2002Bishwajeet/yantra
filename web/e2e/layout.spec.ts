@@ -234,6 +234,8 @@ test('the fleet keeps its stamp and its action in one row on a phone', async ({ 
   const stamp = page.locator('.m3-page-header__stamp')
   const action = page.locator('.m3-page-header__actions')
   await expect(stamp).toBeVisible()
+  // Y-760: Reorder hides until a change applies, so a calm fleet has no action to wrap.
+  if ((await action.count()) === 0) return
   const [a, b] = [(await stamp.boundingBox())!, (await action.boundingBox())!]
   expect(Math.abs(a.y + a.height / 2 - (b.y + b.height / 2))).toBeLessThanOrEqual(2)
 })

@@ -67,8 +67,8 @@ test.describe('the fleet on a busy fleet', () => {
 
   /* D3 §4.4: the order recomputes only when a person asks, so with nothing
      changed the pill has nothing to apply. */
-  test('offers Reorder, disabled while no row has moved', async ({ page }) => {
-    await expect(page.getByRole('button', { name: /^Reorder/ })).toBeDisabled()
+  test('offers Reorder only once a row has moved', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /^Reorder/ })).toHaveCount(0)
   })
 
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {

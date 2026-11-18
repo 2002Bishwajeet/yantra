@@ -10,6 +10,9 @@
 #                                       a check that only the hub's own account or an agent's report can fail (Y-740)
 #   walk.sh shoot <worktree> <route>... screenshots and the visible text of each route, WebKit at 390 px, Chromium at
 #                                       1440 px, and of the sign-in screen when WALK_PORT+1 answers
+#                                       a route that ends in @dark is shot in the dark scheme (Y-770)
+#                                       a branch that changes the session screen also gets the first live session,
+#                                       light and dark (Y-770); the picture shows what that pane holds
 #                                       /machines also shoots the page of each machine whose card lists a failing check (Y-740)
 #   walk.sh down <worktree>
 #   walk.sh mac <worktree>              runs `just test-mac` against the real Mac; exit 2 when the Mac is unreachable
@@ -111,6 +114,21 @@ shoot)
   wt=$(realpath "$1") dir="$(realpath "$1")/.walk"
   shift
   [ $# -gt 0 ] || { echo "walk: name at least one route" >&2; exit 1; }
+  # Y-770: the walker knows no session name, so a branch that changes the terminal was walked without one.
+  if git -C "$wt" diff --name-only origin/main...HEAD | grep -qE '^web/src/screens/session(-terminal)?/'; then
+    live=$(curl -sf "http://127.0.0.1:$port/api/sessions" | python3 -c '
+import json, sys
+from urllib.parse import quote
+live = [(m["machine"], s["name"]) for m in json.load(sys.stdin).get("data") or [] for s in m.get("sessions") or []]
+if live: print("/m/%s/s/%s" % tuple(quote(part, safe="") for part in live[0]))' 2>/dev/null) || live=
+    if [ -n "$live" ]; then
+      for route in "$live" "$live@dark"; do
+        case " $* " in *" $route "*) ;; *) set -- "$@" "$route" ;; esac
+      done
+    else
+      echo "walk: the fleet has no live session, so no terminal is shot" >&2
+    fi
+  fi
   rm -rf "$dir/shots" && mkdir -p "$dir/shots"
   image=$(grep -m1 -oE 'mcr.microsoft.com/playwright:v[0-9.]+-noble' "$wt/.github/workflows/web.yml")
   nm=$(readlink -f "$wt/web/node_modules")

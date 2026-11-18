@@ -444,7 +444,7 @@ describe('what `/w/{name}` draws when there is no session behind it', () => {
     await open('nowhere')
 
     expect((await screen.findByRole('heading', { level: 2 })).textContent).toBe(
-      'No workspace is called nowhere.',
+      'No workspace is called nowhere',
     )
     expect(screen.getByRole('link', { name: 'Fleet' }).getAttribute('href')).toBe('/fleet')
   })

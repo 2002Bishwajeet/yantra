@@ -2,6 +2,7 @@ import { useMachines } from '@/api/hooks'
 import { useEnterSends } from '@/composer/enterSends'
 import { Button } from '@/m3/button/Button'
 import { ListItem } from '@/m3/list/List'
+import { Select } from '@/m3/select/Select'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
 import { Switch } from '@/m3/switch/Switch'
 import { readPrefs, usePrefs, writePrefs } from '@/shell/prefs'
@@ -32,6 +33,7 @@ export function General() {
       <Group label="New session">
         <ListItem
           headline="Home directory for clones"
+          stack
           supporting="Where a clone lands on the machine"
           trailing={
             <Segmented label="Home directory for clones" onValueChange={(value) => write({ cloneHome: value as Held['cloneHome'] })} value={held.cloneHome}>
@@ -45,21 +47,15 @@ export function General() {
         />
         <ListItem
           headline="Default machine for new sessions"
+          stack
           supporting="Preselected in New session when reachable"
           trailing={
-            <select
-              aria-label="Default machine for new sessions"
-              className="settings__select"
-              onChange={(event) => write({ defaultMachine: event.target.value || null })}
+            <Select
+              label="Default machine for new sessions"
+              onValueChange={(value) => write({ defaultMachine: value || null })}
+              options={[{ value: '', label: 'None' }, ...options.map((name) => ({ value: name, label: name }))]}
               value={held.defaultMachine ?? ''}
-            >
-              <option value="">none</option>
-              {options.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+            />
           }
         />
       </Group>
@@ -73,6 +69,7 @@ export function General() {
       <Group label="Dashboard">
         <ListItem
           headline="Time format"
+          stack
           supporting="Age: 12m, 6h. Clock: wall time"
           trailing={
             <Segmented label="Time format" onValueChange={(value) => write({ time: value as Held['time'] })} value={held.time}>

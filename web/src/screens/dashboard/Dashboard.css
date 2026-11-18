@@ -109,22 +109,13 @@
   padding-bottom: 4px;
 }
 
-.dash__hero-empty {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: var(--m3-measure);
+.dash__hero .m3-empty {
+  align-items: flex-start;
+  padding: 0;
+  text-align: start;
 }
 
-.dash__hero-empty-title {
-  gap: 10px;
-  font: var(--md-sys-typescale-emphasized-headline-small);
-  letter-spacing: var(--md-sys-typescale-emphasized-headline-small-tracking);
-}
-
-.dash__hero-empty-title .m3-mark {
-  width: 12px;
-  height: 12px;
+.dash__hero .m3-empty__title .m3-mark {
   border-color: currentColor;
 }
 
@@ -189,11 +180,6 @@
 
 .dash__running {
   flex: 1;
-}
-
-/* D7 N5: an empty band takes its content height. */
-.dash__running[data-empty] {
-  flex: none;
 }
 
 /* Idle, Not read yet, Recent. */
@@ -402,17 +388,6 @@
 
 [data-shell="phone"] .dash__line {
   padding: 4px 8px 4px 20px;
-}
-
-.dash__idle-empty {
-  display: flex;
-  align-items: center;
-}
-
-.dash__line .m3-empty[data-compact],
-.dash__idle-empty .m3-empty[data-compact] {
-  flex: 1;
-  padding: 0;
 }
 
 /* D7 §4.9: above Needs you until the steps for later are done or it is hidden. */

@@ -38,6 +38,7 @@ import { useImages } from '@/composer/useImages'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
+import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { Eyebrow } from '@/m3/text/Text'
 import { BackgroundWork } from './BackgroundWork'
@@ -75,10 +76,9 @@ function Said(props: { message: Message; agent: string; machine: string; worktre
   const { message, agent, machine, worktree } = props
   if (message.who === 'thinking') {
     return (
-      <details className="chat__thinking">
-        <summary>Thinking</summary>
+      <Disclosure className="chat__thinking" summary="Thinking" variant="quiet">
         <p>{message.text}</p>
-      </details>
+      </Disclosure>
     )
   }
   return (

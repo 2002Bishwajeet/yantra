@@ -20,6 +20,18 @@ describe('List', () => {
     expect(screen.getByRole('switch', { name: 'Push to phone', checked: true })).toBeTruthy()
   })
 
+  it('marks a stacked row so a phone wraps its trailing under the text', () => {
+    render(
+      <List>
+        <ListItem headline="Time format" stack trailing={<ListValue>Age</ListValue>} />
+        <ListItem headline="Clone home" trailing={<ListValue>Set</ListValue>} />
+      </List>,
+    )
+    const [stacked, plain] = screen.getAllByRole('listitem')
+    expect(stacked.hasAttribute('data-stack')).toBe(true)
+    expect(plain.hasAttribute('data-stack')).toBe(false)
+  })
+
   it('is a button when it opens a sheet', () => {
     const onClick = vi.fn()
     render(

@@ -212,9 +212,11 @@ describe('beat 2, joined', () => {
   it('names the key the command adds, and keeps its path in collapsed diagnostics', async () => {
     mountSettings('desktop', joinAt, fleet([laptop], []))
     expect(await screen.findByText(/The command adds this key: ed25519 · SHA256:<fingerprint>/)).toBeTruthy()
-    const diagnostics = screen.getByText('Diagnostics').closest('details')!
-    expect(diagnostics.open).toBe(false)
-    expect(within(diagnostics).getByText(/The key is at \/home\/<user>\/\.ssh\/id_yantra on the appliance/)).toBeTruthy()
+    const trigger = screen.getByRole('button', { name: /Diagnostics/ })
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(trigger)
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByText(/The key is at \/home\/<user>\/\.ssh\/id_yantra on the appliance/)).toBeTruthy()
     expect(screen.queryByText(/ssh-ed25519 AAAA/)).toBeNull()
   })
 

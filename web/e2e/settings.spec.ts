@@ -126,15 +126,12 @@ test.describe('the settings shell', () => {
     await keyboardWalk(page, 12)
   })
 
-  test('says a category it does not know is nowhere', async ({ page, size }) => {
+  test('says a category it does not know is nowhere', async ({ page }) => {
     await scenario(page, 'busy')
     await page.goto('/settings/plugins')
     await expect(page.getByText('The dashboard is where the sessions and machines are.')).toBeVisible()
-    // The phone hides every screen's h1 under the app bar's, and Nowhere puts
-    // its sentence in one (shell/Shell.tsx), so only the line under it shows.
-    if (size !== 'phone') {
-      await expect(page.getByText('Nothing is at /settings/plugins')).toBeVisible()
-    }
+    // The headline is an h2, so the phone's hidden h1 does not take it.
+    await expect(page.getByRole('heading', { name: 'Nothing is at /settings/plugins' })).toBeVisible()
   })
 })
 
@@ -157,7 +154,7 @@ test.describe('settings · inputs on a touch screen', () => {
       const found = await page.evaluate(() => {
         const controls = [
           ...document.querySelectorAll<HTMLElement>(
-            '[role=radio], [role=switch], select, input:not([aria-hidden=true]), textarea',
+            '[role=radio], [role=switch], [role=combobox], select, input:not([aria-hidden=true]), textarea',
           ),
         ].filter((el) => el.getClientRects().length > 0)
         const name = (el: HTMLElement) =>
@@ -193,6 +190,55 @@ test.describe('settings · inputs on a touch screen', () => {
       if (['general', 'appearance'].includes(one.id)) expect(found.count).toBeGreaterThan(0)
     })
   }
+})
+
+test.describe('settings · phone rows', () => {
+  for (const one of CATEGORIES) {
+    test(`${one.label} stacks a wide trailing control under its text`, async ({ page, size }) => {
+      test.skip(size !== 'phone', 'the stack is the phone layout')
+      await scenario(page, 'busy')
+      await page.goto(`/settings/${one.id}`)
+      await opened(page, one.label, size)
+      await expect(page.getByText(one.shows, { exact: true }).first()).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      const failures = await page.evaluate(() => {
+        const out: string[] = []
+        for (const row of document.querySelectorAll('.m3-list__row')) {
+          const text = row.querySelector('.m3-list-item__text')
+          const trailing = row.querySelector('.m3-list-item__trailing')
+          if (!text) continue
+          for (const line of text.children) {
+            const style = getComputedStyle(line)
+            const lh = parseFloat(style.lineHeight)
+            if (line.getBoundingClientRect().height > lh * 2 + 1) out.push(`${line.textContent}: taller than two lines`)
+          }
+          if (!trailing) continue
+          const t = trailing.getBoundingClientRect()
+          if (t.width <= 120) continue
+          if (t.top < text.getBoundingClientRect().bottom - 0.5)
+            out.push(`${text.textContent}: trailing ${Math.round(t.width)} px wide beside the text`)
+        }
+        return out
+      })
+      expect(failures).toEqual([])
+    })
+  }
+
+  test('each Appearance choice and preview is 160 px tall or less', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the phone layout is the one that stacks')
+    await scenario(page, 'busy')
+    await page.goto('/settings/appearance')
+    await opened(page, 'Appearance', size)
+    await expect(page.getByText('Colour', { exact: true }).first()).toBeVisible()
+    const heights = await page.evaluate(() =>
+      [...document.querySelectorAll('.settings__choice, .settings__preview')].map((el) => ({
+        name: el.className,
+        height: el.getBoundingClientRect().height,
+      })),
+    )
+    expect(heights.length).toBe(4)
+    for (const one of heights) expect(one.height, one.name).toBeLessThanOrEqual(160)
+  })
 })
 
 test.describe('settings · Appearance recolours everything', () => {
@@ -318,7 +364,7 @@ test.describe('settings · Providers', () => {
     await page.goto('/settings/providers')
     await opened(page, 'Providers', size)
     await expect(page.getByText('Connected as 2002Bishwajeet')).toBeVisible()
-    await expect(page.getByText('nothing uses it yet')).toBeVisible()
+    await expect(page.getByText('nothing uses it yet · Later')).toBeVisible()
     await expect(page.getByText(/repositories, reviews, issues/)).toHaveCount(0)
     await expect(page.getByText(/for a future agent/)).toHaveCount(0)
   })
@@ -329,7 +375,7 @@ test.describe('settings · Providers', () => {
     await scenario(page, 'busy')
     await page.goto('/settings/providers')
     await opened(page, 'Providers', size)
-    await expect(page.getByText('Later', { exact: true })).toHaveCount(2)
+    await expect(page.getByText(/ · Later$/)).toHaveCount(2)
     await expect(page.getByRole('button', { name: 'Connect', disabled: true })).toHaveCount(0)
   })
 

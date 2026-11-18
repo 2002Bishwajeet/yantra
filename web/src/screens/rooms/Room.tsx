@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useParams } from '@tanstack/react-router'
+import { useParams } from '@tanstack/react-router'
 import type { Room as RoomData, RoomMessage } from '@/api'
 import { asApiError } from '@/api/errors'
 import { usePostToRoom, useResumeRoom } from '@/api/mutations'
@@ -16,6 +16,7 @@ import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { announce } from '@/m3/live/live'
+import { NotFound } from '@/m3/not-found/NotFound'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -147,28 +148,8 @@ function Body({ room }: { room: RoomData }) {
   )
 }
 
-function Unread({ name, error, reset }: { name: string; error: unknown; reset: () => void }) {
-  const said = asApiError(error)
-  if (said.kind === 'missing') {
-    return (
-      <ErrorSurface.Page
-        action={
-          <Button role="link" render={<Link to="/rooms" />} variant="tonal">
-            All rooms
-          </Button>
-        }
-        error={{
-          kind: said.kind,
-          said: said.said,
-          retryable: false,
-          describe: () => 'No one made this room, the owner ended it, or it was made by an agent and a restart ended it.',
-        }}
-        eyebrow="Rooms"
-        title={`No room is called ${name}`}
-      />
-    )
-  }
-  return <ErrorSurface.Page eyebrow="Rooms" error={said} reset={reset} title="The room could not be read" />
+function Unread({ error, reset }: { error: unknown; reset: () => void }) {
+  return <ErrorSurface.Page eyebrow="Rooms" error={asApiError(error)} reset={reset} title="The room could not be read" />
 }
 
 /** `/rooms/$room` (ADR-0038 decision 5): what the agents said, and the two
@@ -178,6 +159,13 @@ export function Room() {
   const room = useQuery(roomQuery(name))
   // A 404 on a later poll is a room the daemon lost, so it wins over what was drawn.
   const lost = room.error && (!room.data || asApiError(room.error).kind === 'missing')
+  if (lost && asApiError(room.error).kind === 'missing') {
+    return (
+      <NotFound headline={`No room is called ${name}`} label="All rooms" to="/rooms">
+        No one made this room, the owner ended it, or it was made by an agent and a restart ended it.
+      </NotFound>
+    )
+  }
   return (
     <Page width="reading">
       <PageHeader
@@ -185,7 +173,7 @@ export function Room() {
         title={name}
       />
       {lost ? (
-        <Unread error={room.error} name={name} reset={() => void room.refetch()} />
+        <Unread error={room.error} reset={() => void room.refetch()} />
       ) : room.data ? (
         <ErrorBoundary layout="card" title="The room could not be drawn">
           <Body room={room.data} />

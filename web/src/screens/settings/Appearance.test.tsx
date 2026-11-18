@@ -20,6 +20,15 @@ describe('Appearance', () => {
     expect(screen.getByRole('button', { name: /^Compact/ }).getAttribute('aria-pressed')).toBe('true')
   })
 
+  it('marks the chosen layout with a check, not the word selected', async () => {
+    mountSettings('desktop', '/settings/appearance')
+    const clean = await screen.findByRole('button', { name: /^Clean/ })
+    expect(clean.getAttribute('aria-pressed')).toBe('true')
+    expect(clean.querySelector('.settings__choice-check svg')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Compact/ }).querySelector('.settings__choice-check')).toBeNull()
+    expect(screen.queryByText('selected')).toBeNull()
+  })
+
   it('writes a named seed, and the chips show the scheme the engine made from it', async () => {
     mountSettings('desktop', '/settings/appearance')
     expect((await screen.findByRole('button', { name: 'brass' })).getAttribute('aria-pressed')).toBe('true')

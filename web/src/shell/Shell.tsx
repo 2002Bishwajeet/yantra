@@ -5,19 +5,15 @@ import { useGithub, useGithubReadiness, useResetOnRouteChange, useViewing } from
 import { grant, REFUSED } from '@/lib/github'
 import { useIdle } from '@/lib/useIdle'
 import { Badge } from '@/m3/badge/Badge'
-import { Button } from '@/m3/button/Button'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ExtendedFab, Fab } from '@/m3/fab/Fab'
 import { IconButton } from '@/m3/icon-button/IconButton'
 import { LiveRegion } from '@/m3/live/Live'
 import { BarDestination, NavigationBar } from '@/m3/navigation-bar/NavigationBar'
 import { NavigationRail, RailDestination } from '@/m3/navigation-rail/NavigationRail'
-import { Page } from '@/m3/page/Page'
-import { PageHeader } from '@/m3/page/PageHeader'
+import { NotFound } from '@/m3/not-found/NotFound'
 import { Pill, PillGroup } from '@/m3/pill/Pill'
 import { SideSheet } from '@/m3/side-sheet/SideSheet'
-import { EmptyState } from '@/m3/empty-state/EmptyState'
-import { Card } from '@/m3/card/Card'
 import { TopAppBar } from '@/m3/top-app-bar/TopAppBar'
 import { useSetupHome } from '@/screens/setup/progress'
 import { StatusAnnouncer } from './Announce'
@@ -38,7 +34,7 @@ import { Reconnecting } from './Reconnecting'
 import { UpdateNotice } from './UpdateNotice'
 import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
-import { useScreenTitle, useScreenTitleOverride } from './title'
+import { useScreenTitleOverride } from './title'
 import { paintThemeColor, syncThemeColor } from './themeColor'
 import './Shell.css'
 
@@ -521,23 +517,9 @@ export function Shell() {
  *  with `index.html`, so a mistyped URL arrives here as a page rather than a
  *  404 — and drawing the dashboard under it would make the address bar a lie. */
 export function Nowhere() {
-  useScreenTitle('Nowhere')
   return (
-    <Page width="reading">
-      <PageHeader title="Nowhere" />
-      <Card>
-        <EmptyState
-          action={
-            <Button role="link" render={<Link to="/" />} variant="tonal">
-              Dashboard
-            </Button>
-          }
-          state="unknown"
-          title={`Nothing is at ${location.pathname}`}
-        >
-          The dashboard is where the sessions and machines are.
-        </EmptyState>
-      </Card>
-    </Page>
+    <NotFound headline={`Nothing is at ${location.pathname}`} label="Dashboard" to="/">
+      The dashboard is where the sessions and machines are.
+    </NotFound>
   )
 }

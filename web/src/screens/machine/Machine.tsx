@@ -14,7 +14,6 @@ import {
   useWorkspaces,
 } from '@/api/hooks'
 import { at } from '@/lib/time'
-import { Button } from '@/m3/button/Button'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
 import { Disclosure } from '@/m3/disclosure/Disclosure'
@@ -22,6 +21,7 @@ import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { List, ListItem } from '@/m3/list/List'
 import { Mark, State } from '@/m3/mark/Mark'
+import { NotFound } from '@/m3/not-found/NotFound'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -220,24 +220,9 @@ export function Machine() {
 
   if (machines.looked === 'ok' && !one) {
     return (
-      <Page>
-        <PageHeader title={name} />
-        <ErrorSurface.Page
-          error={{
-            kind: 'missing',
-            said: `the tailnet lists no node called \`${name}\``,
-            retryable: false,
-            describe: () => `No machine is called ${name}.`,
-          }}
-          eyebrow="Machines"
-          title="No such machine"
-          action={
-            <Button render={<Link to="/machines" />} role="link" variant="text">
-              Machines
-            </Button>
-          }
-        />
-      </Page>
+      <NotFound headline={`No machine is called ${name}`} label="Machines" to="/machines">
+        The tailnet lists no node with that name.
+      </NotFound>
     )
   }
 

@@ -86,7 +86,7 @@ export function SignIn() {
         </span>
         <h1 className="sign-in__title">Sign in to Yantra</h1>
         <Text render={<p />} scale="body-medium" tone="variant" className="sign-in__lead">
-          Yantra opens only for the owner&apos;s passkey. Use the passkey on this device, or the phone that holds it.
+          Yantra opens only for your passkey. Use the passkey on this device, or the phone that holds it.
         </Text>
 
         <TextField

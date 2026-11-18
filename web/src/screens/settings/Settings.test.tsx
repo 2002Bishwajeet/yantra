@@ -50,6 +50,6 @@ describe('the settings screen', () => {
 
   it('says a category it does not know is nowhere', async () => {
     mountSettings('desktop', '/settings/plugins')
-    expect(await screen.findByText(/Nothing is at \/settings\/plugins/)).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Nothing is at /settings/plugins' })).toBeTruthy()
   })
 })

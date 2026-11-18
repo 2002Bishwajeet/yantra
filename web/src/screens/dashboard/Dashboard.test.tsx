@@ -366,37 +366,115 @@ const ready = (machine: string): Readiness => ({
 })
 
 describe('the Dashboard on an empty fleet', () => {
-  it('draws each block saying what would be there, and one New session', async () => {
+  it('draws one line saying there is no workspace, with one New session, and no empty band', async () => {
     mount('desktop', '/', keyed(scenario('empty')))
     await drawn()
-    expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
-    expect(region('Running').getByText('Nothing is running')).toBeTruthy()
-    expect(reads('Worth a look')).toContain(
-      'every tmux session on the machines that answered belongs to a workspace',
-    )
-    expect(screen.getByText('No workspaces yet')).toBeTruthy()
-    expect(screen.getAllByRole('link', { name: /New/ }).length).toBeGreaterThan(0)
+    const hero = region('Needs you')
+    expect(hero.getByText('No workspaces yet')).toBeTruthy()
+    expect(hero.getByText('Start a session and it shows here.')).toBeTruthy()
+    expect(hero.getAllByRole('link', { name: 'New session' })).toHaveLength(1)
+    for (const name of ['Running', 'Worth a look', 'Idle']) {
+      expect(screen.queryByRole('region', { name }), name).toBeNull()
+    }
+    expect(screen.queryByText(/Nothing is running|belongs to a workspace/)).toBeNull()
   })
 
   /** Y-745: "nothing" from an old reading says that it is old. */
-  it('marks Nothing needs you as old when the empty GitHub reading is a kept one', async () => {
+  it('marks the quiet line as old when the empty GitHub reading is a kept one', async () => {
     const state = keyed(scenario('empty'))
     state.attention = { ...state.attention!, age_seconds: 372, retrying: contract.attentionRetrying.retrying } as never
     mount('phone', '/', state)
     const stamp = await screen.findByRole('button', { name: 'as of 6m · retrying' })
     const hero = region('Needs you')
-    expect(hero.getByText('Nothing needs you')).toBeTruthy()
+    expect(hero.getByText('No workspaces yet')).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Needs you' }).contains(stamp)).toBe(true)
     expect(reads('Needs you')).not.toMatch(/failed|could not be/)
   })
 
-  it('offers New in the compact Idle card on the phone', async () => {
+  it('draws no Idle card in Compact, and no empty pair', async () => {
     writePrefs({ density: 'compact' })
     mount('phone', '/', keyed(scenario('empty')))
     await drawn()
-    const idle = region('Idle')
-    expect(idle.getByText('No workspaces yet')).toBeTruthy()
-    expect(idle.getByRole('link', { name: 'New →' }).getAttribute('href')).toBe('/new')
+    expect(screen.queryByRole('region', { name: 'Idle' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Recent' })).toBeNull()
+    expect(document.querySelector('.dash__pair')).toBeNull()
+  })
+})
+
+/** The busy fleet with nothing waiting, running or unclaimed: every workspace has no session. */
+const quiet = (): Scenario => {
+  const state = scenario('busy')
+  const names = (state.workspaces!.data as { name: string; machine: string }[]).map((one) => one)
+  state.status = Object.fromEntries(
+    names.map((one) => [
+      one.name,
+      looked.ok({ workspace: one.name, machine: one.machine, reached: 'yes', status: { state: 'no_session' } }),
+    ]),
+  ) as never
+  state.sessions = looked.ok(
+    (state.sessions!.data as { machine: string; reached: string }[]).map((one) =>
+      one.reached === 'yes' ? { ...one, sessions: [] } : one,
+    ),
+  ) as never
+  state.attention = looked.ok({ reviews: [], issues: [], notifications: 0 }) as never
+  return state
+}
+
+describe('the Dashboard hides the bands that have nothing to say', () => {
+  it('hides Needs you, Running and Worth a look when only Idle has rows', async () => {
+    mount('desktop', '/', quiet())
+    await drawn()
+    expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Running' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Worth a look' })).toBeNull()
+    expect(screen.getByText(/10 workspaces, nothing running/)).toBeTruthy()
+    expect(screen.queryByText('Nothing needs you')).toBeNull()
+  })
+
+  it('draws the other quiet line when a workspace exists but sits in no band', async () => {
+    const state = quiet()
+    state.workspaces = looked.ok([{ loaded: 'yes', name: 'cargo-zig', machine: 'cachyos-g14', repo: '/r', startup: null }]) as never
+    state.status = {
+      'cargo-zig': looked.ok({ workspace: 'cargo-zig', machine: 'cachyos-g14', reached: 'no', error: 'ssh failed' }),
+    } as never
+    mount('desktop', '/', keyed(state))
+    await drawn()
+    const hero = region('Needs you')
+    expect(hero.getByText('Nothing needs you')).toBeTruthy()
+    expect(hero.getByText('A request shows here first.')).toBeTruthy()
+    expect(hero.queryByText(/Nothing runs/)).toBeNull()
+    expect(hero.getAllByRole('link', { name: 'New session' })).toHaveLength(1)
+  })
+
+  it('hides Running when nothing runs and Needs you has rows', async () => {
+    const state = quiet()
+    ;(state.status['yantra-web'] as { data: { status: unknown } }).data.status = { state: 'awaiting_trust' }
+    mount('desktop', '/', state)
+    await drawn()
+    expect(region('Needs you').getByText('yantra-web is waiting for trust')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Running' })).toBeNull()
+  })
+
+  it('keeps Worth a look when a session is unclaimed, and hides the quiet line', async () => {
+    const state = quiet()
+    ;(state.sessions!.data as { sessions?: unknown[] }[])[0]!.sessions = [
+      { name: 'scratch', windows: 1, attached: 0, created: 'Sun Sep  6 10:02:41 2026', created_at: 1788688961 },
+    ]
+    mount('desktop', '/', state)
+    await drawn()
+    expect(region('Worth a look').getByText('scratch')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Needs you' })).toBeNull()
+  })
+
+  it('draws no Recent card in Compact when no event has happened', async () => {
+    writePrefs({ density: 'compact' })
+    const state = quiet()
+    state.notifications = looked.ok([]) as never
+    mount('desktop', '/', state)
+    await drawn()
+    expect(screen.getByRole('region', { name: 'Idle' })).toBeTruthy()
+    expect(screen.queryByRole('region', { name: 'Recent' })).toBeNull()
+    expect(screen.queryByText(/Nothing has happened/)).toBeNull()
   })
 })
 
@@ -436,7 +514,7 @@ describe('the Dashboard on the first run', () => {
     mount('desktop', '/', keyed(firstRun([aMachine({ online: true })], [ready('cachyos-g14')])))
     await drawn()
     expect(screen.queryByRole('heading', { name: 'Set up Yantra' })).toBeNull()
-    expect(region('Needs you').getByText('Nothing needs you')).toBeTruthy()
+    expect(region('Needs you').getByText('No workspaces yet')).toBeTruthy()
   })
 
   /** D7 §4.9: the steps for later, until they are done or the card is hidden. */

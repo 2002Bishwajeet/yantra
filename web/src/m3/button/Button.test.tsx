@@ -25,6 +25,11 @@ describe('Button', () => {
     expect(button.hasAttribute('data-filled')).toBe(variant === 'filled' || variant === 'tonal')
   })
 
+  it('has no data-filled on a text button', () => {
+    render(<Button variant="text">Cancel</Button>)
+    expect(screen.getByRole('button', { name: 'Cancel' }).hasAttribute('data-filled')).toBe(false)
+  })
+
   /** jsdom fires no click for Enter or Space on a native button, and neither
    *  does Base UI: the browser does. So this proves the click and that the
    *  element is the native button that gives the keys for free. */

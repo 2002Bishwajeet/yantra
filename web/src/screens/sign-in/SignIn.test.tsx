@@ -48,6 +48,13 @@ function hub(extra: Answers = {}) {
 }
 
 describe('the sign-in screen', () => {
+  it('speaks to the person at the screen, never of an owner', async () => {
+    hub()
+    const lead = await screen.findByText(/Yantra opens only for/)
+    expect(lead.textContent).toContain('your passkey')
+    expect(document.body.textContent).not.toMatch(/owner/i)
+  })
+
   it('takes the page on a 401, and a tapped passkey lands back on the route', async () => {
     const asked = hub()
     const button = await screen.findByRole('button', { name: 'Sign in with a passkey' })

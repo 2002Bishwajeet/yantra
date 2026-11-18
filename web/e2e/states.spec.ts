@@ -8,14 +8,14 @@ import { ROUTES, type RouteId } from './lib/routes'
 
 /** What a route draws on `empty`, or null where no board has a block. */
 const EMPTY: Record<RouteId, readonly string[] | null> = {
-  dashboard: ['Nothing needs you', 'Nothing is running', 'No workspaces yet'],
+  dashboard: ['No workspaces yet'],
   fleet: ['No workspaces yet'],
   machines: null,
   machine: null,
   'session-terminal': null,
   usage: ['No spend yet'],
-  session: ['No workspace is called landing.', 'The fleet lists the ones there are.'],
-  repair: ['No workspace is called price-table.', 'The fleet lists the ones there are.'],
+  session: ['No workspace is called landing', 'The fleet lists the ones there are.'],
+  repair: ['No workspace is called price-table', 'The fleet lists the ones there are.'],
   new: null,
   settings: null,
   'settings-category': null,
@@ -107,7 +107,10 @@ for (const one of ROUTES) {
       pending(one.id, 'unreachable')
       await scenario(page, 'unreachable')
       await page.goto(one.path)
-      const alert = page.getByRole('alert').first()
+      const alert =
+        kind === 'missing' && one.id !== 'setup-route'
+          ? page.getByRole('heading', { name: 'Not found' })
+          : page.getByRole('alert').first()
       await expect(alert).toBeVisible()
       if (kind === 'page') {
         await expect(page.getByRole('button', { name: 'Try again' }).first()).toBeVisible()

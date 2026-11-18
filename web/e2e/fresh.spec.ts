@@ -79,7 +79,7 @@ const SHELL: Record<string, Expect> = {
 }
 
 // One ready machine ends the checklist, so a check on `/` lands on the dashboard.
-const CHECKED: Rule = text('Nothing is running', 'Set up Yantra')
+const CHECKED: Rule = text('No workspaces yet', 'Set up Yantra')
 const SETTINGS_NAV = Object.fromEntries(CATEGORIES.map(([id, label]) => [label, url(`/settings/${id}`)]))
 const MACHINE_PAGE: Record<string, Expect> = {
   Check: text('Ready for sessions', 'Not checked yet'),
@@ -102,7 +102,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     'Admin console': url('https://login.tailscale.com/admin/machines'),
     'Skip for now': url('/fleet'),
   },
-  fleet: { Reorder: disabled, 'New session': url('/new'), 'Sign in': url('/settings/providers') },
+  fleet: { 'New session': url('/new'), 'Sign in': url('/settings/providers') },
   machines: {
     Open: url('/m/yantra-box'),
     Check: text('ready'),
@@ -146,11 +146,12 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     Source: url('https://github.com/2002Bishwajeet/yantra'),
     'Dictation model': url('https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2'),
   },
-  notifications: { Settings: url('/settings/notifications'), 'Mark all read': disabled },
-  rooms: {},
+  notifications: { Settings: url('/settings/notifications') },
+  rooms: { 'New session': url('/new') },
   'add-device': {
     Copy: text('Copied'),
     'Show key': dialog,
+    Show: expanded,
     'Show QR code': expanded,
     'tailscale.com/download': url('https://tailscale.com/download'),
     ...Object.fromEntries(['pi-5', 'nas'].map((n) => [n, url(`/machines/add?platform=linux&machine=${n}`)])),

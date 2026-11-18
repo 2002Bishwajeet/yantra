@@ -10,6 +10,7 @@ import { Card } from '@/m3/card/Card'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
 import { ErrorSurface, type Described } from '@/m3/error-surface/ErrorSurface'
 import { Mark, State } from '@/m3/mark/Mark'
+import { NotFound } from '@/m3/not-found/NotFound'
 import { Page, PagePending } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
@@ -17,45 +18,28 @@ import { Mono, Num, Text } from '@/m3/text/Text'
 import { errorLine, shortError } from './line'
 import './Repair.css'
 
-/** ADR-0020's first bound, read: the daemon hands over no file that loads,
- *  and a name it does not know is the not-found board. */
+/** ADR-0020's first bound, read: the daemon hands over no file that loads.
+ *  A name it does not know is the NotFound screen, drawn by Repair. */
 function Refused(props: { name: string; error: unknown; reset: () => void }) {
   const { name, error, reset } = props
   const said = asApiError(error)
   const loads = said.status === 409
-  const missing = said.kind === 'missing'
   const described: Described = {
     kind: said.kind,
     said: said.said,
     retryable: said.retryable,
-    describe: loads
-      ? () => 'That file loads, so there is nothing to repair.'
-      : missing
-        ? () => 'The fleet lists the ones there are.'
-        : () => said.describe(),
+    describe: loads ? () => 'That file loads, so there is nothing to repair.' : () => said.describe(),
   }
   return (
     <ErrorSurface.Page
       eyebrow="Repair"
-      title={
-        loads
-          ? `${name} loads`
-          : missing
-            ? `No workspace is called ${name}.`
-            : 'The file could not be read'
-      }
+      title={loads ? `${name} loads` : 'The file could not be read'}
       error={described}
       reset={reset}
       action={
-        missing ? (
-          <Button role="link" render={<Link to="/fleet" />} variant="tonal">
-            Fleet
-          </Button>
-        ) : (
-          <Button role="link" render={<Link params={{ name }} to="/w/$name" />} variant="tonal">
-            Open {name}
-          </Button>
-        )
+        <Button role="link" render={<Link params={{ name }} to="/w/$name" />} variant="tonal">
+          Open {name}
+        </Button>
       }
     />
   )
@@ -200,6 +184,13 @@ export function Repair() {
   // A save invalidates this read, and the refetch answers 409 while the
   // mutation is still pending: the editor stays until the navigation.
   if (opened.error && !opened.isFetching && !save.isPending) {
+    if (asApiError(opened.error).kind === 'missing') {
+      return (
+        <NotFound headline={`No workspace is called ${name}`} label="Fleet" to="/fleet">
+          The fleet lists the ones there are.
+        </NotFound>
+      )
+    }
     return (
       <Page>
         {heading}

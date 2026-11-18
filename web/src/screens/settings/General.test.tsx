@@ -39,16 +39,18 @@ describe('General', () => {
   it('offers the machines the daemon lists as the default, and writes the one picked', async () => {
     mountSettings('desktop', '/settings/general')
     const select = await screen.findByRole('combobox', { name: 'Default machine for new sessions' })
-    await screen.findByRole('option', { name: 'pi' })
-    fireEvent.change(select, { target: { value: 'pi' } })
-    expect(readPrefs().general.defaultMachine).toBe('pi')
-    expect((select as HTMLSelectElement).value).toBe('pi')
+    fireEvent.click(select)
+    const item = await screen.findByRole('option', { name: 'pi' })
+    fireEvent.pointerDown(item)
+    fireEvent.click(item)
+    await waitFor(() => expect(readPrefs().general.defaultMachine).toBe('pi'))
+    await waitFor(() => expect(select.textContent).toBe('pi'))
   })
 
   it('says no machine is the default when none is set', async () => {
     mountSettings('desktop', '/settings/general')
     const select = await screen.findByRole('combobox', { name: 'Default machine for new sessions' })
-    expect((select as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('none')
+    expect(select.textContent).toBe('None')
     expect(screen.getByText(/Preselected in New session when reachable/)).toBeTruthy()
   })
 

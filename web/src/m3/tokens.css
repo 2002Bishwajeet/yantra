@@ -663,6 +663,21 @@
   background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
 }
 
+/* M3's disabled control with no container: content at 38 % of on-surface at
+   full opacity, so a primary or error tint goes grey instead of fading to pink.
+   [data-tone] and the doubled class keep this above the tone rules in Button.css. */
+.m3-button.m3-button[data-variant="text"]:is(:disabled, [data-disabled], [aria-disabled="true"]),
+.m3-button.m3-button[data-variant="outlined"]:is(:disabled, [data-disabled], [aria-disabled="true"]),
+.m3-icon-button.m3-icon-button[data-variant="standard"]:is(:disabled, [data-disabled], [aria-disabled="true"]),
+.m3-pill.m3-pill:not([data-selected]):is(:disabled, [data-disabled], [aria-disabled="true"]) {
+  opacity: 1;
+  color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
+}
+
+.m3-button.m3-button[data-variant="outlined"]:is(:disabled, [data-disabled], [aria-disabled="true"]) {
+  border-color: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+}
+
 /* BRIEF.md: icons are stroke 1.5. lucide writes 2 as an attribute, and the
    property wins; non-scaling keeps 1.5 px when CSS draws the 24-unit box at
    18 or 20. */

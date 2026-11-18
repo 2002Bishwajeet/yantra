@@ -107,37 +107,6 @@
   word-break: break-word;
 }
 
-.settings__select {
-  box-sizing: border-box;
-  min-height: 40px;
-  max-width: 100%;
-  min-width: 0;
-  padding: 0 32px 0 12px;
-  text-overflow: ellipsis;
-  appearance: none;
-  background: transparent
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/%3E%3C/svg%3E")
-    no-repeat right 12px center / 10px 6px;
-  border: 1px solid var(--md-sys-color-outline);
-  border-radius: var(--md-sys-shape-corner-full);
-  font: var(--md-sys-typescale-label-large);
-  letter-spacing: var(--md-sys-typescale-label-large-tracking);
-  color: var(--md-sys-color-on-surface);
-}
-
-@media (pointer: coarse) {
-  .settings__select {
-    min-height: 44px;
-    font: var(--md-sys-typescale-body-large);
-    letter-spacing: var(--md-sys-typescale-body-large-tracking);
-  }
-}
-
-.settings__select:focus-visible {
-  outline: var(--md-sys-focus-ring-width) solid var(--md-sys-color-secondary);
-  outline-offset: 2px;
-}
-
 /* The sheets. */
 
 .settings__form {
@@ -320,6 +289,23 @@
   gap: 12px;
 }
 
+.settings__choice-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--md-sys-shape-corner-full);
+  color: var(--md-sys-color-on-primary);
+  background: var(--md-sys-color-primary);
+}
+
+.settings__choice-check > svg {
+  width: 14px;
+  height: 14px;
+}
+
 .settings__schematic {
   width: 100%;
   height: auto;
@@ -456,9 +442,47 @@
 
 /* Phone. */
 
-[data-shell="phone"] .settings__choices,
-[data-shell="phone"] .settings__previews {
+[data-shell="phone"] .settings__choices {
   flex-direction: column;
+}
+
+/* A choice is a row on a phone: a thumbnail, then the title and the why. */
+[data-shell="phone"] .settings__choice {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-content: center;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+[data-shell="phone"] .settings__schematic {
+  grid-row: 1 / span 2;
+  padding: 8px;
+}
+
+/* The two previews sit side by side so each stays short. */
+[data-shell="phone"] .settings__previews {
+  gap: 12px;
+}
+
+[data-shell="phone"] .settings__preview {
+  gap: 4px;
+  padding: 8px;
+}
+
+[data-shell="phone"] .settings__hero {
+  padding: 12px;
+}
+
+[data-shell="phone"] .settings__hero-number {
+  font: var(--md-sys-typescale-headline-small);
+}
+
+[data-shell="phone"] .settings__hero-line {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 [data-shell="phone"] .settings__pane {

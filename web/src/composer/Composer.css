@@ -350,7 +350,9 @@
 }
 
 .composer-action:is(:disabled, [aria-disabled="true"]) .composer-action__disc {
-  opacity: 0.38;
+  opacity: 1;
+  color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
 }
 
 .composer-action:focus-visible {

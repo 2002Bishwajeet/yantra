@@ -8,6 +8,7 @@
 import { useId, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { Harness, ItemType } from '@/api/thread'
+import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { State, type MarkState } from '@/m3/mark/Mark'
 import { Mono, Text } from '@/m3/text/Text'
 import type { Message, Tool } from './timeline'
@@ -47,10 +48,9 @@ function Call(props: { tool: Tool; alone: boolean; turn: MarkState; machine: str
       {tool.title ? <Mono className="chat__tool-title chat__code">{tool.title}</Mono> : null}
       {sudo ? <RunAsOwner machine={machine} sudo={sudo} /> : null}
       {tool.output ? (
-        <details className="chat__tool-output">
-          <summary>Output</summary>
+        <Disclosure className="chat__tool-output" summary="Output" variant="quiet">
           <pre>{tool.output}</pre>
-        </details>
+        </Disclosure>
       ) : null}
     </article>
   )

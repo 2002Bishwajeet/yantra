@@ -1,6 +1,5 @@
 import { Bot } from 'lucide-react'
 import { useReadiness } from '@/api/hooks'
-import { Chip } from '@/m3/chip/Chip'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
 import { Group, Note } from './Group'
@@ -18,8 +17,7 @@ export function Agents() {
               <Bot />
             </Lead>
           }
-          supporting={`${onMachines(presentOn(readiness, 'agent-cli'), 'present')} · trust prompts are answered from the dashboard`}
-          trailing={<Chip tone="primary">Default</Chip>}
+          supporting={`Default · ${onMachines(presentOn(readiness, 'agent-cli'), 'present')} · trust prompts are answered from the dashboard`}
         />
       </Group>
       <Note>How an agent behaves is set on the machine that runs it; the daemon holds no switch for it.</Note>
