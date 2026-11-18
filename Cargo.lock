@@ -4208,7 +4208,7 @@ dependencies = [
  "etcetera",
  "getrandom 0.4.3",
  "include_dir",
- "nix 0.28.0",
+ "nix 0.31.3",
  "rusqlite",
  "serde",
  "serde_json",
