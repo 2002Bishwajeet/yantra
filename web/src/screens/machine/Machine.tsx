@@ -150,7 +150,7 @@ function Apart(props: { machine: OneMachine; lastSeen: string | null; name: stri
       <Card aria-labelledby="machine-device" className="machine__card" surface="container">
         <div className="machine__head">
           <Text render={<h2 />} emphasized id="machine-device" scale="title-large">
-            This device
+            Device
           </Text>
         </div>
         <dl className="machine__facts">
