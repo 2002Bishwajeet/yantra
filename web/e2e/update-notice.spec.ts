@@ -28,10 +28,10 @@ test.describe('the update snackbar', () => {
     await expect(page).toHaveURL(/\/settings\/about$/)
     await expect(page.getByRole('link', { name: 'v0.4.0 is out' })).toBeVisible()
     await expect(snackbar).toBeHidden()
-    await expect(page.getByRole('button', { name: 'Account' })).toBeVisible()
 
     await page.goto('/machines')
     await expect(page.getByRole('main')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Account', exact: true })).toBeVisible()
     await expect(snackbar).toBeHidden()
   })
 
