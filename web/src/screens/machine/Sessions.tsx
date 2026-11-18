@@ -72,8 +72,13 @@ export function Sessions(props: {
           </Text>
           <SshSaid detail={failure.detail} kind="listing" />
         </div>
+      ) : failure === verdict ? (
+        // Y-775: Readiness showed this cause and its one "What ssh said", so say it only once.
+        <div className="machine__failed" role="status">
+          <State state="unknown">The sessions cannot be listed</State>
+        </div>
       ) : failure && answer?.reached === 'no' ? (
-        // R-23: a machine that did not answer is data about the machine.
+        // R-23: Readiness did not show this cause, so Sessions does.
         <div className="machine__failed" role="status">
           <State state={chipOf(failure, null).state}>{titleOf(failure, machine)}</State>
           <SshSaid detail={answer.error} />
