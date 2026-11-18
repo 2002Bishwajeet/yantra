@@ -283,7 +283,7 @@ function Update(props: {
             </Button>
           </>
         }
-        description={`yantrad installs v${version} and restarts. A chat turn in flight dies with it. Open terminals reconnect to the same sessions, which keep running on their machines.`}
+        description={`Yantra installs v${version} and restarts. A chat turn in flight dies with it. Open terminals reconnect to the same sessions, which keep running on their machines.`}
         onOpenChange={(next) => {
           setOpen(next)
           if (!next) update.reset()
