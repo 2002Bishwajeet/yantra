@@ -98,6 +98,24 @@ describe('Menu', () => {
     expect(item.tagName).toBe('A')
     expect(item.getAttribute('href')).toBe('/')
   })
+
+  /** Y-806: Safari below 27.3 runs a `linear()` easing on the main thread, so the open stuttered
+   *  on an iPhone. jsdom applies no stylesheet, so the CSS is read as text. */
+  it('eases the open on transform and opacity with cubic-bezier tokens', () => {
+    const read = (file: string) => readFileSync(resolve(process.cwd(), file), 'utf8')
+    const tokens = read('src/m3/tokens.css')
+    const transition = /\.m3-menu \{[^}]*?transition:([^;]+);/.exec(read('src/m3/menu/Menu.css'))?.[1] ?? ''
+    const parts = transition.split(',').map((part) => part.trim().split(/\s+/))
+    expect(parts.map(([property, duration]) => `${property} ${duration}`)).toEqual([
+      'transform var(--md-sys-motion-duration-fast-spatial)',
+      'opacity var(--md-sys-motion-duration-fast-effects)',
+    ])
+    for (const [, , easing] of parts) {
+      const token = /^var\((--md-sys-motion-easing-[\w-]+)\)$/.exec(easing)?.[1]
+      expect(token, `${easing} is not an easing token`).toBeDefined()
+      expect(new RegExp(`${token}: ([^;]+);`).exec(tokens)?.[1]).toMatch(/^cubic-bezier\(/)
+    }
+  })
 })
 
 describe('a disabled item (CSS read as text; jsdom applies none)', () => {

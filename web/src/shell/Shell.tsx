@@ -31,7 +31,7 @@ import { usePrefs } from './prefs'
 import { keyOf, usePrimary, usePublishDrawn, usePublishRoute, useRouteAction, type Primary } from './primary'
 import { NotReached } from './NotReached'
 import { Reconnecting } from './Reconnecting'
-import { UpdateNotice } from './UpdateNotice'
+import { UpdateSnackbar, useUpdateBadge } from './UpdateNotice'
 import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
 import { useScreenTitleOverride } from './title'
@@ -81,11 +81,6 @@ function Main({ down, reconnecting }: { down: ReactNode; reconnecting: boolean }
   return (
     // Focusable, not tabbable: where focus lands when a focused FAB goes away.
     <main className="shell__main" data-scroll-restoration-id="main" tabIndex={-1}>
-      {down === null ? (
-        <Guarded title="The update notice could not be drawn">
-          <UpdateNotice />
-        </Guarded>
-      ) : null}
       <ErrorBoundary layout="page" {...useResetOnRouteChange()}>
         {down ?? (
           <>
@@ -168,6 +163,7 @@ function Guarded(props: { title: string; children: ReactNode }) {
 function AccountButton() {
   const github = useGithub()
   const refused = grant(github.data, useGithubReadiness()).kind === 'refused'
+  const update = useUpdateBadge()
   const ref = useRef<HTMLButtonElement>(null)
   const [armed, setArmed] = useState(false)
   const [open, setOpen] = useState(false)
@@ -178,7 +174,7 @@ function AccountButton() {
       <IconButton
         aria-expanded={open}
         aria-haspopup="menu"
-        badge={refused ? <Badge label={REFUSED} /> : undefined}
+        badge={refused ? <Badge label={REFUSED} /> : update ? <Badge label="Update available" /> : undefined}
         label="Account"
         onClick={() => {
           setArmed(true)
@@ -196,7 +192,7 @@ function AccountButton() {
       {armed || idle ? (
         <Guarded title="Account could not be drawn">
           <Suspense fallback={null}>
-            <AccountMenu anchor={ref} onOpenChange={setOpen} open={open} refused={refused} />
+            <AccountMenu anchor={ref} onOpenChange={setOpen} open={open} refused={refused} update={update} />
           </Suspense>
         </Guarded>
       ) : null}
@@ -507,6 +503,11 @@ export function Shell() {
           <Palette pill={false} />
         </Guarded>
       )}
+      {down === null ? (
+        <Guarded title="The update snackbar could not be drawn">
+          <UpdateSnackbar />
+        </Guarded>
+      ) : null}
       <StatusAnnouncer />
       <LiveRegion />
     </>

@@ -73,12 +73,23 @@ test.describe('Add a device', () => {
     const joined = beat(page, 'Joined')
     await expect(joined.getByText(/The command adds this key: ed25519 · SHA256:/)).toBeVisible()
     await expect(joined.getByText('/home/<user>/.ssh/id_yantra')).toBeHidden()
-    await joined.getByRole('button', { name: /Diagnostics/ }).click()
+    await joined.getByRole('button', { name: /If it fails/ }).click()
     await expect(joined.getByText('/home/<user>/.ssh/id_yantra')).toBeVisible()
     await axe(page)
     await joined.getByRole('button', { name: 'Show key' }).click()
     const sheet = page.getByRole('dialog', { name: 'Public key' })
     await expect(sheet.getByText(/^ssh-ed25519 AAAA/)).toBeVisible()
+  })
+
+  test('draws the platform choice on one line at phone size', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'only a phone wrapped the four segments')
+    await scenario(page, 'adding')
+    await page.goto(flow('new-box'))
+    const segments = page.getByRole('radiogroup', { name: 'Platform' }).locator('.m3-segment')
+    await expect(segments).toHaveCount(4)
+    const tops = await segments.evaluateAll((all) => all.map((one) => Math.round(one.getBoundingClientRect().top)))
+    expect(tops).toHaveLength(4)
+    expect(new Set(tops).size).toBe(1)
   })
 
   test('a joined device goes ready when Check again asks it', async ({ page }) => {
