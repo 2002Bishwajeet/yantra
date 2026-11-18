@@ -929,7 +929,7 @@ src/
     Bell.tsx  BellPopover.tsx  NotificationsScreen.tsx
                      one set of notifications, at three widths
     formFactor.ts    phone / tablet / desktop, from three media queries
-    UpdateNotice.tsx a banner on every page but About when a newer release is out; Dismiss is a pref
+    UpdateNotice.tsx a snackbar once per release, then a badge on Account and a row in About; two prefs remember it
     Reconnecting.tsx the mark a page wears while it keeps its readings and the daemon does not answer (Y-744)
     prefs.ts         `localStorage` under one versioned key (ADR-0024 §5)
   screens/
@@ -982,6 +982,9 @@ a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1.
   sheet's list starts the import on pointer or focus and mounts on the click.
   The trigger is one element for the shell's life; the lazy chunk draws only
   the popup, anchored to it, and focus returns to it (`Palette` does the same).
+  A menu eases with the cubic-bezier tokens and not the springs, because Safari
+  below 27.3 runs a `linear()` easing on the main thread
+  ([R14 §5](../docs/research/14-material-3-expressive-on-the-web.md#5-motion-on-the-web), Y-806).
 - **A loader warms its screen's reads and is never awaited.** `prefetchQuery`
   rather than `ensureQueryData`, so a warm read is cancelled when the last
   observer leaves, and `defaultPreload: 'intent'` starts it on a hover. The

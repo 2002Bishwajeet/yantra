@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { PREFS_KEY, readPrefs, writePrefs } from './prefs'
 
 afterEach(() => {
-  writePrefs({ seenAt: null, theme: 'system', density: 'clean', seed: null, updateDismissed: null, general: {} })
+  writePrefs({ seenAt: null, theme: 'system', density: 'clean', seed: null, updateDismissed: null, updateOpened: null, general: {} })
   localStorage.clear()
 })
 
@@ -16,6 +16,7 @@ describe('prefs', () => {
       density: 'compact',
       seed: null,
       updateDismissed: null,
+      updateOpened: null,
       general: {},
     })
     expect(readPrefs().theme).toBe('dark')

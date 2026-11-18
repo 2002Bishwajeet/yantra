@@ -16,7 +16,7 @@
 .session__meta a,
 .session__banner a,
 .transcript__foot a,
-.spend__ask a {
+.spend__note a {
   color: var(--md-sys-color-primary);
   /* A link inside a sentence needs more than its colour (WCAG 1.4.1). */
   text-decoration: underline;
@@ -451,11 +451,18 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 8px 16px;
 }
 
 .spend__ask > p {
   margin: 0;
+}
+
+.spend__aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
 
@@ -483,12 +490,6 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 12px;
-}
-
-.spend__number {
-  font-size: 57px;
-  font-weight: 500;
-  line-height: 64px;
 }
 
 .spend__hero p {
@@ -558,12 +559,6 @@
   gap: 12px;
 }
 
-.spend__model-cost {
-  font-size: 36px;
-  font-weight: 500;
-  line-height: 44px;
-}
-
 .spend__fast {
   flex-direction: row;
   flex-wrap: wrap;
@@ -573,7 +568,7 @@
   border-radius: var(--m3-row-radius);
 }
 
-.spend > p {
+.spend__note {
   margin: 0;
   padding: 0 8px;
 }
@@ -622,11 +617,6 @@
 
 [data-shell="phone"] .session__banner {
   padding: 0;
-}
-
-[data-shell="phone"] .spend__number {
-  font-size: 36px;
-  line-height: 44px;
 }
 
 /* Y-633: the Chat tab's top line, as T3 Code's header sits above its chat. */

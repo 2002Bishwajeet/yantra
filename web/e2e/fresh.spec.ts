@@ -92,11 +92,14 @@ const MACHINE_PAGE: Record<string, Expect> = {
 
 const PRESSES: Record<string, Record<string, Expect>> = {
   setup: {
-    Open: url('/settings/about'),
+    'Open yantra-box': url('/m/yantra-box'),
+    'Tailnet settings': url('/settings/about'),
+    How: expanded,
     'Add a device': url('/machines/add'),
     'Check all': CHECKED,
     Check: CHECKED,
     'New session': url('/new'),
+    Copy: text('Copied'),
     Connect: url('/settings/providers'),
     'Set up': dialog,
     'Admin console': url('https://login.tailscale.com/admin/machines'),
@@ -152,6 +155,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     Copy: text('Copied'),
     'Show key': dialog,
     Show: expanded,
+    How: expanded,
     'Show QR code': expanded,
     'tailscale.com/download': url('https://tailscale.com/download'),
     ...Object.fromEntries(['pi-5', 'nas'].map((n) => [n, url(`/machines/add?platform=linux&machine=${n}`)])),
