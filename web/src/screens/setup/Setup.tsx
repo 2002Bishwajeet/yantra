@@ -18,7 +18,7 @@ import { State, type MarkState } from '@/m3/mark/Mark'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Num, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 import { Track } from '@/m3/track/Track'
 import { useFab } from '@/shell/primary'
 import { PrimaryAction } from '@/shell/PrimaryAction'
@@ -158,7 +158,7 @@ function HubLine(props: { machine: Machine; line: Line | null }) {
           {apart(machine)}
         </Text>
         <Button render={<Link params={{ machine: machine.name }} to="/m/$machine" />} role="link" variant="text">
-          Open
+          Open {machine.name}
         </Button>
       </li>
     )
@@ -179,11 +179,11 @@ function HubLine(props: { machine: Machine; line: Line | null }) {
         <Text scale="body-small" tone="variant">
           {beat ? `${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy` : 'no beat has arrived'}
         </Text>
-        {bad(said) ? <SshSaid detail={said.detail} /> : null}
+        {bad(said) ? <SshSaid detail={said.detail} quiet /> : null}
       </div>
       {said.kind === 'ready' ? null : (
         <Button render={<Link params={{ machine: machine.name }} to="/m/$machine" />} role="link" variant="text">
-          Open
+          Open {machine.name}
         </Button>
       )}
     </li>
@@ -277,7 +277,7 @@ function MachineLine(props: {
           </Text>
         ) : null}
         {bad(said) && joinFixes(said.kind) ? join : null}
-        {bad(said) ? <SshSaid detail={said.detail} /> : null}
+        {bad(said) ? <SshSaid detail={said.detail} quiet /> : null}
         {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)
@@ -386,7 +386,7 @@ export function Setup() {
               title={TITLES.tailnet}
               trailing={
                 <Button render={<Link params={{ category: 'about' }} to="/settings/$category" />} role="link" variant="text">
-                  Open
+                  Tailnet settings
                 </Button>
               }
             />
@@ -422,15 +422,16 @@ export function Setup() {
                   reset={() => void identity.refetch()}
                   title="The appliance's key could not be read"
                 />
+              ) : identity.data ? (
+                <>
+                  <Text scale="label-large" tone="variant">
+                    This appliance's key
+                  </Text>
+                  <Copyable text={identity.data.fingerprint} what="this appliance's key" />
+                </>
               ) : (
                 <Text scale="body-small" tone="variant">
-                  {identity.data ? (
-                    <>
-                      this appliance's key · <Mono title={identity.data.fingerprint}>{identity.data.fingerprint}</Mono>
-                    </>
-                  ) : (
-                    'the key is made when the first machine joins'
-                  )}
+                  the key is made when the first machine joins
                 </Text>
               )}
               {machines.looked === 'failed' ? (

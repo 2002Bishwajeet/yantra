@@ -8,9 +8,9 @@ import { Text } from '@/m3/text/Text'
 
 /** The raw error, one press away from every surface that fails on it. Only
  *  ssh's own words are called ssh's (Y-585), and never a dead sign-in link (Y-621). */
-export function SshSaid(props: { detail: string; kind?: AnswerFailure; children?: ReactNode }) {
+export function SshSaid(props: { detail: string; kind?: AnswerFailure; quiet?: boolean; children?: ReactNode }) {
   return (
-    <Disclosure summary={props.kind === 'listing' ? 'The full error' : 'What ssh said'}>
+    <Disclosure summary={props.kind === 'listing' ? 'The full error' : 'What ssh said'} variant={props.quiet ? 'quiet' : undefined}>
       <Text className="m3-wrap" render={<div />} scale="body-small">
         {withoutSignIn(props.detail)}
       </Text>
