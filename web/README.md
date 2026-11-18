@@ -982,6 +982,9 @@ a package is not worth it — [CLAUDE.md](../CLAUDE.md) §B1.
   sheet's list starts the import on pointer or focus and mounts on the click.
   The trigger is one element for the shell's life; the lazy chunk draws only
   the popup, anchored to it, and focus returns to it (`Palette` does the same).
+  A menu eases with the cubic-bezier tokens and not the springs, because Safari
+  below 27.3 runs a `linear()` easing on the main thread
+  ([R14 §5](../docs/research/14-material-3-expressive-on-the-web.md#5-motion-on-the-web), Y-806).
 - **A loader warms its screen's reads and is never awaited.** `prefetchQuery`
   rather than `ensureQueryData`, so a warm read is cancelled when the last
   observer leaves, and `defaultPreload: 'intent'` starts it on a hover. The
