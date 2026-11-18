@@ -43,13 +43,14 @@ export function useCopy(text: string) {
 }
 
 /** Text a person copies. A caller that needs the same copy elsewhere passes
- *  its own `useCopy` result as `copier`. `line` keeps a command on one line that scrolls sideways. */
-export function Copyable(props: { text: string; what: string; line?: boolean; copier?: ReturnType<typeof useCopy> }) {
+ *  its own `useCopy` result as `copier`. `line` keeps a command on one line that scrolls sideways.
+ *  `hero` is the step's one action: a larger surface and a filled Copy. */
+export function Copyable(props: { text: string; what: string; line?: boolean; hero?: boolean; copier?: ReturnType<typeof useCopy> }) {
   const { text, what } = props
   const own = useCopy(text)
   const { ref, said, copy, clean } = props.copier ?? own
   return (
-    <div className="m3-copyable">
+    <div className="m3-copyable" data-hero={props.hero ? '' : undefined}>
       <div className="m3-copyable__row">
         <Mono
           className={clsx('m3-copyable__text', props.line && 'm3-copyable__text--line')}
@@ -64,7 +65,7 @@ export function Copyable(props: { text: string; what: string; line?: boolean; co
           aria-label={`${said === 'copied' ? 'Copied' : 'Copy'} ${what}`}
           icon={said === 'copied' ? <Check /> : <Copy />}
           onClick={copy}
-          variant="text"
+          variant={props.hero ? 'filled' : 'text'}
         >
           {said === 'copied' ? 'Copied' : 'Copy'}
         </Button>
