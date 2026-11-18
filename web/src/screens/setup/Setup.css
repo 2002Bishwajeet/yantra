@@ -49,7 +49,6 @@
 .setup__lines {
   display: flex;
   flex-direction: column;
-  gap: 4px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -61,9 +60,12 @@
   gap: 12px;
   box-sizing: border-box;
   min-height: 44px;
-  padding: 6px 4px 6px 12px;
-  border-radius: var(--m3-row-radius);
-  background: var(--md-sys-color-surface);
+  padding: 8px 0;
+}
+
+/* Plain rows under their step, divided the way list rows are. */
+.setup__line + .setup__line {
+  border-top: 1px solid var(--md-sys-color-outline-variant);
 }
 
 .setup__line[data-kind="refused"] {
@@ -111,11 +113,7 @@
 }
 
 [data-shell="phone"] .setup__sub {
-  padding: 8px 8px 12px 16px;
-}
-
-[data-shell="phone"] .setup__line {
-  flex-wrap: wrap;
+  padding: 0 8px 12px 58px;
 }
 
 [data-shell="phone"] .setup__machine {
@@ -146,16 +144,15 @@
 }
 
 /* D7 S14: on a phone a line stacks — mark and name, then the words, then the
-   action at full width — rather than squeezing the words into a column. */
+   action left-aligned under them, at the indent a step's action has. */
 [data-shell="phone"] .setup__line {
   flex-direction: column;
-  align-items: stretch;
+  align-items: flex-start;
   gap: 6px;
-  padding: var(--m3-row-padding);
 }
 
-[data-shell="phone"] .setup__line > .m3-button {
-  justify-content: center;
+[data-shell="phone"] .setup__line > .setup__said {
+  align-self: stretch;
 }
 
 /* On a phone a step's action goes under its words, past the lead, so the

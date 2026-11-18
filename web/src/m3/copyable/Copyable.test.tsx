@@ -30,6 +30,13 @@ describe('Copyable', () => {
     expect(screen.getByText(TEXT).classList.contains('m3-copyable__text--line')).toBe(true)
   })
 
+  it('draws a text Copy, and a filled one for a hero', () => {
+    const { rerender } = render(<Copyable text={TEXT} what="the join command" />)
+    expect(screen.getByRole('button', { name: 'Copy the join command' }).getAttribute('data-variant')).toBe('text')
+    rerender(<Copyable hero text={TEXT} what="the join command" />)
+    expect(screen.getByRole('button', { name: 'Copy the join command' }).getAttribute('data-variant')).toBe('filled')
+  })
+
   it('says nothing before a copy, and the hint holds no text node', () => {
     render(<Copyable text={TEXT} what="the join command" />)
     expect(screen.getByText(TEXT)).toBeTruthy()
