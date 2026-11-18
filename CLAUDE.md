@@ -307,6 +307,10 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   A row's own extra checks go through [`gate.sh`](.claude/workflows/gate.sh) to an idle tailnet
   machine, one gate at a time on each machine, under `nice` and a memory cap. The laptop is the
   fallback, and the report names the machine (Y-703).
+- **Nobody waits for CI.** After a push, a background watcher follows the PR's checks, and the
+  session goes on to the next row. A red check wakes the session, and it starts a fix agent for that
+  PR. All green wakes it, and it merges through [`merge-when-green.sh`](.claude/workflows/merge-when-green.sh), which updates a branch behind main and merges one PR at a time. Do not run full suites locally.
+  Owner, 2026-11-18 (Y-816).
 - **It parks what it may not decide.** It skips or parks a row that needs the owner, a phone, a Pi,
   audio hardware, the Mac's keyboard or screen, Figma or Claude Design, a release cut, a new or amended ADR, a changed
   invariant, or an answer to an open question. A parked row keeps its branch and appears in the

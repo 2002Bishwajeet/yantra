@@ -121,19 +121,49 @@ test.describe('one machine on a busy fleet', () => {
 })
 
 test.describe('one machine that is off', () => {
-  test('is asleep, not failed, and its ssh error wraps inside the screen', async ({ page }) => {
+  test('is asleep, not failed, and its ssh error wraps inside the screen', async ({ page, size }) => {
     await scenario(page, 'busy')
     await page.goto('/m/thinkpad')
     const ready = card(page, 'Readiness')
     await expect(ready.getByRole('heading', { name: 'thinkpad is asleep' })).toBeVisible({ timeout: 15_000 })
     await expect(ready.getByRole('button', { name: 'Check again' })).toHaveCount(0)
     const sessions = card(page, 'Sessions')
-    await expect(sessions.getByText('thinkpad is asleep')).toBeVisible()
+    await expect(sessions.getByText('The sessions cannot be listed')).toBeVisible()
     await expect(sessions.getByText(/No route to host/)).toHaveCount(0)
-    await sessions.getByRole('button', { name: /What ssh said/ }).click()
-    await expect(sessions.getByText(/No route to host/)).toBeVisible()
+    await expect(sessions.getByRole('button', { name: /What ssh said/ })).toHaveCount(0)
     await fits(page)
     await axe(page)
+    await screenshot(page, 'machine-off', 'busy', size)
+  })
+})
+
+/** Y-775: a phone, tablet or Windows PC runs no session, so nothing on its page uses ssh or sudo. */
+test.describe('one device that runs no session', () => {
+  test.beforeEach(async ({ page }) => {
+    await scenario(page, 'setup')
+    await page.goto('/m/iphone')
+    await expect(page.getByText('Last seen')).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('shows its state and offers no ssh or sudo', async ({ page }) => {
+    await expect(page.getByText('opens the dashboard · runs no session')).toBeVisible()
+    for (const name of ['Readiness', 'Sessions', 'Owner terminal']) {
+      await expect(card(page, name)).toHaveCount(0)
+    }
+    await expect(page.getByRole('button', { name: /^Check/ })).toHaveCount(0)
+    await expect(page.getByText(/ssh|sudo/i)).toHaveCount(0)
+  })
+
+  test('fits the screen', async ({ page }) => {
+    await fits(page)
+  })
+
+  test('passes axe', async ({ page }) => {
+    await axe(page)
+  })
+
+  test('looks like the board', async ({ page, size }) => {
+    await screenshot(page, 'machine-device', 'setup', size)
   })
 })
 

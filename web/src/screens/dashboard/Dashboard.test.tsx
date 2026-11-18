@@ -182,18 +182,16 @@ describe('the Dashboard on a busy fleet', () => {
     expect(reads('Needs you')).toMatch(/asked \d{1,2} \w{3} · Claude wants cargo test/)
   })
 
-  it('gives every running row its elapsed time, a track against the longest, and Open', async () => {
+  it('gives every running row its elapsed time and Open, and draws no bar', async () => {
     mount('desktop', '/')
     await drawn()
     const running = region('Running')
     expect(reads('Running')).toContain('3 sessions · longest 4h 11m')
     expect(running.getAllByRole('link', { name: 'Open' })).toHaveLength(3)
-    const bars = running.getAllByRole('progressbar')
-    expect(bars).toHaveLength(3)
+    expect(running.queryAllByRole('progressbar')).toHaveLength(0)
     expect(running.getByText('39m')).toBeTruthy()
-    // homelab-k8s has run longest, so its bar is the full one.
-    expect(bars[0]!.getAttribute('aria-valuenow')).toBe('100')
-    expect(bars[0]!.getAttribute('aria-label')).toBe('elapsed, 4h 11m of the longest 4h 11m')
+    // Once in the card head's "longest", once on homelab-k8s's row.
+    expect(running.getAllByText('4h 11m')).toHaveLength(2)
   })
 
   it('offers Attach and Kill on an unclaimed session, and never Adopt', async () => {

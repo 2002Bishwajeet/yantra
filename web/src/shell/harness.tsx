@@ -25,11 +25,14 @@ export function mount(
   options: {
     down?: boolean
     flaky?: boolean
+    /** Y-752: keep the Account badge for the newer release the fixture holds. */
+    update?: boolean
     wire?: () => { status: number; body?: unknown } | undefined
     overrides?: Record<string, { status?: number; body?: unknown }>
   } = {},
 ) {
   const asked: string[] = []
+  if (!options.update) writePrefs({ updateOpened: '0.4.0' })
   const width = WIDTH[size]
   vi.stubGlobal('scrollTo', () => {})
   vi.stubGlobal('matchMedia', (query: string) => ({
@@ -83,6 +86,6 @@ export function mount(
 export function unmount() {
   vi.unstubAllGlobals()
   history.pushState(null, '', '/')
-  writePrefs({ seenAt: null, theme: 'system', density: 'clean', seed: null, updateDismissed: null, general: {} })
+  writePrefs({ seenAt: null, theme: 'system', density: 'clean', seed: null, updateDismissed: null, updateOpened: null, general: {} })
   localStorage.clear()
 }

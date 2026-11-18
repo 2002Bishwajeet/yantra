@@ -337,8 +337,7 @@ test.describe('the session screen, the other two views', () => {
     await expect(page.getByRole('button', { name: 'Read spend' })).toBeVisible()
     await expect(page.getByText('This session')).toBeVisible()
     await expect(page.getByText('tokens, unpriced')).toBeVisible()
-    await expect(page.getByText('There is no fleet total')).toBeVisible()
-    await expect(page.getByText('Counts the agent in the Terminal tab. Chat turns are not counted.')).toBeVisible()
+    await expect(page.getByText(/Read over ssh from the Terminal agent's transcript on .*, only when you ask; chat turns and other workspaces are not counted\./)).toBeVisible()
     await expect(page.getByText('.jsonl')).toHaveCount(0)
     // Finding 128: the board dates the price table `4 Sep`, not `2026-08-11`.
     await expect(page.getByText('prices as of 2 Nov')).toBeVisible()
