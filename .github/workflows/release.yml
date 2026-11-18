@@ -149,7 +149,7 @@ jobs:
       - name: Install mold
         if: runner.os == 'Linux'
         # Y-724: from GitHub releases; the runners' Ubuntu mirror failed DNS for hours on 2026-11-11.
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: mold
 
@@ -176,7 +176,7 @@ jobs:
 
       - name: Install cargo-zigbuild
         if: matrix.zigbuild
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-zigbuild@0.23.0
 
@@ -346,11 +346,11 @@ jobs:
 
       - name: Install mold
         # Y-724: from GitHub releases; the runners' Ubuntu mirror failed DNS for hours on 2026-11-11.
-        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: mold
 
-      - uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest
 
