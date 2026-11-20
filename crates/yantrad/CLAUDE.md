@@ -990,10 +990,14 @@ the wait and the wakes.
 - **The budget is 20 agent messages.** The 20th pauses the room and wakes nothing. Later sends are
   refused, and the owner gets one ntfy notification that names the room and no text. `POST
   /api/rooms/{room}/resume`, behind `allowed()`, sets the count to 0; an unknown room is `404`.
+  Only the owner resumes: an agent token gets `403` from the gate and from the handler (Y-783).
 - **A person's post also sets the count to 0** (Y-536). `POST /api/rooms/{room}/messages` takes
   `{text}`, and the label is `owner on <machine>` from identity. It never makes a room, and the
   dashboard never joins one, so every member counts as delivered and every member thread wakes. An
   unknown room is `404`, and an empty text or one over 16 KiB is `400`.
+- **An agent token's post is an agent's message** (Y-783). It goes through `Rooms::scoped` and
+  `send`, as `room_send` with no thread does: it adds 1 to the count, the label is `<machine> ·
+  <workspace>`, and a paused room answers `409`. It never sets the count to 0.
 - **The dashboard reads rooms through `GET /api/rooms` and `GET /api/rooms/{room}`** (Y-536). Both
   are behind `allowed()`, both read memory, and both drop expired members first. Each summary
   carries the room's `workspace`, `brief` and `base`, `null` for a room an agent made, and each
