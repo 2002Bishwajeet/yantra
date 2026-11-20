@@ -315,6 +315,24 @@ reaches the phone ([M16](../../docs/plans/m16-the-coding-loop.md) §3.6).
 so `/api`, `/healthz` and `/heartbeat` keep winning and everything else is the app. Unknown paths get
 `index.html` rather than a 404, which is what makes a deep link work.
 
+**Every answer carries the security headers** (Y-785, F-09 of the 2026-11-12 audit). `main.rs`'s
+`secured` is the last layer on `app`, so it covers the routes, the gate's refusals, the JSON 404 and
+the dashboard. It sends a `Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`.
+It sends `Cache-Control: no-store` on `/api` and under it. The policy is
+[`src/web/policy.txt`](src/web/policy.txt). `web::policy` adds the https origin About serves to
+`connect-src`, the file's last directive, because the plain page asks that origin for `/healthz`
+before it moves there. `web/vite.config.ts` reads the same file, so the e2e suite runs every screen
+under the policy.
+
+- **`Referrer-Policy` is `same-origin`, and not the audit's `no-referrer`.** `same-origin` sends no
+  `Referer` to another origin. `no-referrer` makes a browser send `Origin: null` on some same-origin
+  writes, and the gate refuses that.
+- **`index.html` has no inline script.** `script-src` names no hash, so an inline script does not
+  run. The theme script is `web/public/theme.js`, and `themeColor.test.ts` fails on an inline one.
+- **Do not add `upgrade-insecure-requests`.** The plain page on `:7717` would stop working. The
+  build has no eval and no wasm, so the policy has no `unsafe-eval`.
+
 **Both halves answer `Accept-Encoding: gzip` with a file gzipped at build time** (Y-357).
 `npm run build` writes a `.gz` beside every `.js`, `.css`, `.svg` and `.html` in `dist`; the directory half
 reads it through `ServeDir::precompressed_gzip`, and the embedded half carries both files and picks
