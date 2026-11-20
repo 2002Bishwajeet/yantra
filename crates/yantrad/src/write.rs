@@ -750,7 +750,7 @@ fn agent_may(method: &axum::http::Method, path: &str) -> bool {
     let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     match parts.as_slice() {
         ["mcp"] | ["tasks"] | ["tasks", _] | ["tasks", _, _] => true,
-        ["rooms", _, "messages" | "resume"] => method == axum::http::Method::POST,
+        ["rooms", _, "messages"] => method == axum::http::Method::POST,
         _ => false,
     }
 }
@@ -5026,11 +5026,11 @@ mod tests {
             (Method::GET, "/tasks/t1"),
             (Method::GET, "/tasks/t1/wait"),
             (Method::POST, "/rooms/r1/messages"),
-            (Method::POST, "/rooms/r1/resume"),
         ] {
             assert!(agent_may(&method, path), "{method} {path}");
         }
         for (method, path) in [
+            (Method::POST, "/rooms/r1/resume"),
             (Method::GET, "/rooms"),
             (Method::GET, "/rooms/r1"),
             (Method::DELETE, "/rooms/r1"),
