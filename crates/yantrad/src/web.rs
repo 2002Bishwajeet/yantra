@@ -24,8 +24,6 @@ use axum::Router;
 use axum::http::StatusCode;
 use axum::middleware::map_response;
 use axum::response::{IntoResponse, Response};
-use base64::Engine as _;
-use sha2::{Digest, Sha256};
 use tower_http::services::{ServeDir, ServeFile};
 
 #[cfg(feature = "embed-dashboard")]
@@ -34,43 +32,19 @@ mod embedded;
 /// The built dashboard's directory — `web/dist` after `npm run build`.
 const DIR: &str = "YANTRA_WEB";
 
-/// The part of the Content-Security-Policy that never changes. It is a file so
-/// that `web/e2e/policy.spec.ts` runs the dashboard under the same text.
+/// The Content-Security-Policy. It is a file so that `web/vite.config.ts`
+/// serves the e2e suite's pages under the same text. `script-src` names no
+/// hash, so `index.html` has no inline script.
 const POLICY: &str = include_str!("web/policy.txt");
 
-/// The whole policy. `scripts` comes from [`scripts_in`]. `origin` is the https
-/// origin About serves, which a plain-HTTP page asks for `/healthz` before it
-/// moves there (`web/src/lib/secure.ts`).
-pub fn policy(scripts: &str, origin: Option<&str>) -> String {
-    let origin = origin
-        .map(|origin| format!(" {origin}"))
-        .unwrap_or_default();
-    format!(
-        "{}; script-src 'self'{scripts}; connect-src 'self'{origin}",
-        POLICY.trim()
-    )
-}
-
-/// One `'sha256-…'` source for each `<script>` with no attribute, because the
-/// policy runs an inline script only when it names the script's hash.
-fn script_sources(index: &str) -> String {
-    index
-        .split("<script>")
-        .skip(1)
-        .filter_map(|rest| rest.split_once("</script>"))
-        .map(|(script, _)| {
-            let hash = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(script));
-            format!(" 'sha256-{hash}'")
-        })
-        .collect()
-}
-
-/// Read once at start, so a rebuilt `index.html` with another inline script
-/// needs a restart.
-pub fn scripts_in(dir: &Path) -> String {
-    std::fs::read_to_string(dir.join("index.html"))
-        .map(|index| script_sources(&index))
-        .unwrap_or_default()
+/// `origin` is the https origin About serves, which a plain-HTTP page asks for
+/// `/healthz` before it moves there (`web/src/lib/secure.ts`). It lands in
+/// `connect-src`, which is the file's last directive for that reason.
+pub fn policy(origin: Option<&str>) -> String {
+    match origin {
+        Some(origin) => format!("{} {origin}", POLICY.trim()),
+        None => POLICY.trim().to_owned(),
+    }
 }
 
 /// The advice is here rather than at the call site because both the refusal and
@@ -158,12 +132,12 @@ async fn still_there(index: PathBuf, quiet: Arc<AtomicBool>, answer: Response) -
 /// The dashboard this binary carries, which is `None` for every build that
 /// leaves `embed-dashboard` off — meaning every build the Rust gate makes.
 #[cfg(feature = "embed-dashboard")]
-pub fn embedded() -> Option<(Router, String)> {
-    Some((embedded::router(), script_sources(embedded::INDEX)))
+pub fn embedded() -> Option<Router> {
+    Some(embedded::router())
 }
 
 #[cfg(not(feature = "embed-dashboard"))]
-pub fn embedded() -> Option<(Router, String)> {
+pub fn embedded() -> Option<Router> {
     None
 }
 
@@ -403,41 +377,6 @@ mod tests {
         assert_eq!(body, "ok");
 
         assert_eq!(get(app, "/").await.0, StatusCode::SERVICE_UNAVAILABLE);
-    }
-
-    /// `printf %s "document.title = 'Yantra'" | openssl dgst -sha256 -binary | base64`
-    #[test]
-    fn an_inline_script_is_named_by_its_hash_and_a_script_with_a_source_is_not() {
-        let index = "<head><script>document.title = 'Yantra'</script>\
-                     <script type=\"module\" src=\"/assets/index.js\"></script></head>";
-
-        assert_eq!(
-            script_sources(index),
-            " 'sha256-u9xSz03hlDoFREc6DUD2RleDiBfsXLxNAD7tIMTqCyU='"
-        );
-        assert_eq!(script_sources("<title>Yantra</title>"), "");
-    }
-
-    /// The page has one inline script. A second one, or an attribute on this
-    /// one, must change the scan before it ships blocked.
-    #[test]
-    fn the_checked_in_index_has_one_inline_script() {
-        let index = include_str!("../../../web/index.html");
-
-        assert_eq!(script_sources(index).matches("'sha256-").count(), 1);
-        assert_eq!(
-            index.matches("<script").count(),
-            2,
-            "the module entry is the other"
-        );
-    }
-
-    #[cfg(feature = "embed-dashboard")]
-    #[test]
-    fn the_embedded_index_has_one_inline_script() {
-        let (_, scripts) = embedded().expect("the binary carries a dashboard");
-
-        assert_eq!(scripts.matches("'sha256-").count(), 1);
     }
 
     #[tokio::test]

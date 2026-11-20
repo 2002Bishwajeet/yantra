@@ -1,13 +1,14 @@
 # Separate from ci.yml on purpose: no Rust job may ever acquire a Node
 # dependency (R-24), and the path filter keeps this off Rust-only pull requests.
+# policy.txt is the one Rust-side file here: the e2e pages are served under it (Y-785).
 name: web
 
 on:
   pull_request:
-    paths: ['web/**', '.github/workflows/web.yml']
+    paths: ['web/**', 'crates/yantrad/src/web/policy.txt', '.github/workflows/web.yml']
   push:
     branches: [main]
-    paths: ['web/**', '.github/workflows/web.yml']
+    paths: ['web/**', 'crates/yantrad/src/web/policy.txt', '.github/workflows/web.yml']
   workflow_dispatch:
 
 concurrency:

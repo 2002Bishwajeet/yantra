@@ -64,7 +64,10 @@ async function serve(context: BrowserContext, { healthz }: { healthz: 'answers' 
     if (url.pathname === '/api/about') {
       return route.fulfill({ response, json: { ...(await response.json()), https: HTTPS } })
     }
-    return route.fulfill({ response })
+    // Y-785: yantrad adds About's `https` to the policy's last directive, `connect-src`. The preview server knows none.
+    const headers = response.headers()
+    const policy = headers['content-security-policy']
+    return route.fulfill({ response, headers: policy ? { ...headers, 'content-security-policy': `${policy} ${HTTPS}` } : headers })
   })
 }
 

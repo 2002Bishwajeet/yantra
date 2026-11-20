@@ -19,7 +19,7 @@ static DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../web/dist");
 /// `include_str!` rather than a lookup in `DIST`, so a `web/dist` with no
 /// `index.html` is a **build** error. That is where the directory half's
 /// startup refusal belongs once the directory is chosen at build time.
-pub(super) const INDEX: &str = include_str!(concat!(
+const INDEX: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../web/dist/index.html"
 ));

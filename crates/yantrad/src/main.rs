@@ -15,7 +15,6 @@
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::State;
@@ -167,32 +166,29 @@ fn report(error: &Error) {
 ///
 /// The directory is taken as an argument rather than read here, so the
 /// precedence is testable without an environment variable.
-///
-/// The string beside the router names the page's inline scripts for [`secured`].
-fn dashboard(configured: Option<PathBuf>) -> Result<(Router, String), Error> {
+fn dashboard(configured: Option<PathBuf>) -> Result<Router, Error> {
     if let Some(dir) = configured {
         let router = web::router(&dir).map_err(Error::Dashboard)?;
         tracing::info!("serving the dashboard from {}", dir.display());
-        return Ok((router, web::scripts_in(&dir)));
+        return Ok(router);
     }
     match web::embedded() {
-        Some(dashboard) => {
+        Some(router) => {
             tracing::info!("serving the dashboard embedded in this binary");
-            Ok(dashboard)
+            Ok(router)
         }
         None => {
             tracing::info!("no dashboard — {}", web::advice());
-            Ok((web::placeholder(), String::new()))
+            Ok(web::placeholder())
         }
     }
 }
 
-/// F-09 of the 2026-11-12 audit: every answer forbids framing, sniffing and a
-/// script or connection the policy does not name, and no `/api` answer is kept.
-/// `Referrer-Policy` is `same-origin` and not `no-referrer`, so a same-origin
-/// write never carries `Origin: null`, which the gate refuses.
+/// Y-785: the security headers on every answer, and `no-store` under `/api`.
+/// `same-origin`, because `no-referrer` can put `Origin: null` on a same-origin
+/// write, which the gate refuses.
 async fn secured(
-    State((fleet, scripts)): State<(heartbeat::Fleet, Arc<str>)>,
+    State(fleet): State<heartbeat::Fleet>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
@@ -201,7 +197,7 @@ async fn secured(
     let mut response = next.run(request).await;
     let origin = api::https(&*fleet.model.read().await, &fleet.facts.listening_on);
     let headers = response.headers_mut();
-    if let Ok(policy) = HeaderValue::from_str(&web::policy(&scripts, origin.as_deref())) {
+    if let Ok(policy) = HeaderValue::from_str(&web::policy(origin.as_deref())) {
         headers.insert(header::CONTENT_SECURITY_POLICY, policy);
     }
     for (name, value) in [
@@ -228,10 +224,9 @@ async fn secured(
 fn app<I: Inventory + Clone + Send + Sync + 'static>(
     fleet: heartbeat::Fleet,
     authoriser: write::Authoriser<I>,
-    (dashboard, scripts): (Router, String),
+    dashboard: Router,
 ) -> Router {
-    let secured =
-        axum::middleware::from_fn_with_state((fleet.clone(), Arc::from(scripts)), secured);
+    let secured = axum::middleware::from_fn_with_state(fleet.clone(), secured);
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         // Y-387: `curl …/join | sh` is the command a person types, so it sits
@@ -823,7 +818,7 @@ mod tests {
         app(
             named_hub(),
             write::Authoriser::new(tailnet(), &[], Path::new(SOCKET), passkeys),
-            (web::placeholder(), String::new()),
+            web::placeholder(),
         )
     }
 
@@ -864,11 +859,7 @@ mod tests {
         let dir = std::env::temp_dir().join("yantra-web-y785");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a temp dir");
-        std::fs::write(
-            dir.join("index.html"),
-            "<title>Yantra</title><script>document.title = 'Yantra'</script>",
-        )
-        .expect("index");
+        std::fs::write(dir.join("index.html"), "<title>Yantra</title>").expect("index");
         let (passkeys, cookie) = signed_in();
         let app = app(
             named_hub(),
@@ -897,7 +888,7 @@ mod tests {
                 false,
             ),
         ] {
-            let (answered, headers, body) = answered(&app, "GET", path, with).await;
+            let (answered, headers, body) = answered(&app, PHONE, "GET", path, with, None).await;
             assert_eq!(answered, status, "{path}: {body}");
             let header = |name: &str| {
                 headers
@@ -914,8 +905,7 @@ mod tests {
                 "object-src 'none'",
                 "base-uri 'none'",
                 "frame-ancestors 'none'",
-                // `printf %s "document.title = 'Yantra'" | openssl dgst -sha256 -binary | base64`
-                "script-src 'self' 'sha256-u9xSz03hlDoFREc6DUD2RleDiBfsXLxNAD7tIMTqCyU='",
+                "script-src 'self'",
                 // About's `https`, which the plain page asks before it moves,
                 // and not the configured origin.
                 "connect-src 'self' https://hub.example.ts.net:8443",
@@ -942,7 +932,7 @@ mod tests {
             );
         }
 
-        let (_, _, about) = answered(&app, "GET", "/api/about", &[]).await;
+        let (_, about) = send(&app, "GET", "/api/about", &[]).await;
         assert!(
             about.contains("\"https\":\"https://hub.example.ts.net:8443\""),
             "the policy must name the origin About serves: {about}"
@@ -960,10 +950,10 @@ mod tests {
                 Path::new(SOCKET),
                 passkey::Passkeys::memory(),
             ),
-            (web::placeholder(), String::new()),
+            web::placeholder(),
         );
 
-        let (_, headers, _) = answered(&app, "GET", "/", &[]).await;
+        let (_, headers, _) = answered(&app, PHONE, "GET", "/", &[], None).await;
 
         let policy = headers["content-security-policy"].to_str().expect("ascii");
         assert!(
@@ -1165,7 +1155,6 @@ mod tests {
 
         let response = dashboard(None)
             .expect("the binary carries one")
-            .0
             .oneshot(
                 Request::builder()
                     .uri("/")
