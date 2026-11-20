@@ -27,6 +27,11 @@ beneath it in mono. `error.status` is there where a code arrived.
 | `stopped` | the browser or iOS ended the microphone's track mid-press | "The browser took the microphone away, so the stream stopped." |
 
 | `dictation-off`, `stt-unreachable`, `too-long`, `silent`, `stt-failed` | dictation's text frame, `{error, said}`, as `dictateError` maps it | "Dictation is off: yantra-box does not answer." and four more, in `errors.ts` |
+| `push` | the browser's push manager refused to subscribe or to leave ([ADR-0047](../../../docs/adr/0047-the-dashboard-gets-web-push.md)) | "This browser could not change its notifications." |
+
+`push.ts` is ADR-0047's Web Push for the browser that shows the page: `pushState` reads the browser's
+push manager, `turnOn` takes the daemon's key, subscribes and posts the subscription, `turnOff` and
+`sendTest` are the other two writes, and `usePush` holds the state under `keys.push()`.
 
 The microphone also uses `refused` for a socket that never opened, and `socket` for the daemon's text
 frame, each with a microphone sentence from `mic.ts`.

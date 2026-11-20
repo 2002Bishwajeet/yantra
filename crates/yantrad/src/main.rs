@@ -42,6 +42,7 @@ mod mic;
 mod notify;
 mod passkey;
 mod placement;
+mod push;
 mod refresh;
 mod room;
 mod store;
@@ -280,11 +281,21 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
             }
         },
     };
+    let env = std::sync::Arc::<tokio::sync::Mutex<()>>::default();
+    let push = push::Push::new(
+        store.clone(),
+        env.clone(),
+        Path::new(yantra_core::notify::RELAY_FILE),
+        std::env::var(yantra_core::notify::VAPID_KEY)
+            .ok()
+            .as_deref(),
+    );
     let chats = chats(
         yantra_core::join::daemon_address(&ips).ok(),
         &store,
         base,
         authoriser.passkeys().clone(),
+        push.clone(),
     );
     let fleet = heartbeat::Fleet {
         facts: std::sync::Arc::new(heartbeat::Facts {
@@ -300,8 +311,10 @@ async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> R
         }),
         github: github::Grant::from_env(),
         store: Some(store),
-        rooms: rooms(chats.clone()),
+        rooms: rooms(chats.clone(), push.clone()),
         chats,
+        env,
+        push: Some(push),
         ..heartbeat::Fleet::default()
     };
 
@@ -427,44 +440,37 @@ async fn listen_on<I: Inventory>(inventory: &I) -> Result<Vec<SocketAddr>, Error
         .collect())
 }
 
-/// The chat registry, whose waits go to the relay when there is one, each
-/// linked to its thread under `base`, and whose Claude turns reach the room
-/// tools at `daemon` with a token from `passkeys`. The relay is read again because a `Relay` is not
-/// `Clone`, by design.
+/// The chat registry, whose waits go to the installed dashboards and to the
+/// relay when there is one, each linked to its thread under `base`, and whose
+/// Claude turns reach the room tools at `daemon` with a token from `passkeys`.
+/// The relay is read again because a `Relay` is not `Clone`, by design.
 fn chats(
     daemon: Option<SocketAddr>,
     store: &store::Store,
     base: Option<String>,
     passkeys: passkey::Passkeys,
+    push: push::Push,
 ) -> chat::Registry {
-    let registry = match yantra_core::notify::from_env() {
-        Some(relay) => {
-            let (waits, heard) = tokio::sync::mpsc::unbounded_channel();
-            tokio::spawn(chat::tell(relay, store.clone(), base, heard));
-            chat::Registry::telling(waits)
-        }
-        None => chat::Registry::default(),
-    }
-    .storing(store.clone());
+    let relay = yantra_core::notify::from_env();
+    let (waits, heard) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(chat::tell(Some(push), relay, store.clone(), base, heard));
+    let registry = chat::Registry::telling(waits).storing(store.clone());
     match daemon {
         Some(daemon) => registry.reaching(daemon, passkeys),
         None => registry,
     }
 }
 
-/// The rooms, whose pauses go to the relay when there is one.
-fn rooms(chats: chat::Registry) -> room::Rooms {
+/// The rooms, whose pauses go to the installed dashboards and to the relay
+/// when there is one.
+fn rooms(chats: chat::Registry, push: push::Push) -> room::Rooms {
     let dir = yantra_core::room_file::rooms_dir()
         .inspect_err(|error| tracing::warn!("no room can be defined: {error}"))
         .ok();
-    match yantra_core::notify::from_env() {
-        Some(relay) => {
-            let (pauses, heard) = tokio::sync::mpsc::unbounded_channel();
-            tokio::spawn(room::tell(relay, heard));
-            room::Rooms::new(chats, Some(pauses), dir)
-        }
-        None => room::Rooms::new(chats, None, dir),
-    }
+    let relay = yantra_core::notify::from_env();
+    let (pauses, heard) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(room::tell(Some(push), relay, heard));
+    room::Rooms::new(chats, Some(pauses), dir)
 }
 
 /// M7 runs this under a supervisor, and I-27 is a standing reminder about

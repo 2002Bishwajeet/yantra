@@ -572,13 +572,19 @@ fn paused(name: &str) -> notify::Message {
         title: Some("A room waits for you".to_owned()),
         priority: None,
         click: None,
+        path: Some(format!("/rooms/{}", notify::encoded(name))),
     }
 }
 
-/// Sends each pause to the relay, one at a time, for the life of the daemon.
-pub async fn tell(relay: Relay, mut pauses: mpsc::UnboundedReceiver<notify::Message>) {
+/// Sends each pause to the installed dashboards and the relay, one at a time,
+/// for the life of the daemon.
+pub async fn tell(
+    push: Option<crate::push::Push>,
+    relay: Option<Relay>,
+    mut pauses: mpsc::UnboundedReceiver<notify::Message>,
+) {
     while let Some(message) = pauses.recv().await {
-        if let Err(error) = notify::post(&relay, message).await {
+        if let Err(error) = crate::notify::told(push.as_ref(), relay.as_ref(), message).await {
             tracing::warn!("a room's pause was not notified: {error}");
         }
     }

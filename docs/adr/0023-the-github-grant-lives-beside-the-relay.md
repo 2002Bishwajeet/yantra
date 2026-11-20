@@ -151,3 +151,11 @@ its environment either way, so the move is an installer change.
 > starts, the daemon copies the task's commits to the hub and pushes them there with this grant, because the
 > task's account holds no git credential. The token still never crosses ssh:
 > [ADR-0040](0040-an-agent-caller-is-scoped-and-the-owner-approves-each-task.md).
+
+> **Reread on 2026-11-20 (Y-825), and a third credential went in.**
+> [ADR-0047](0047-the-dashboard-gets-web-push.md) decision 2 puts the Web Push signing key beside the
+> relay and the grant. What changed upstream is the owner's decision to notify through the installed
+> dashboard and not through a second app. The key signs pushes and grants access to nothing: a reader
+> of the file who also reads the thread store can show a false notification on the owner's devices,
+> and that reader already holds this grant. The exposure paragraph now covers three credentials with
+> one mode. A fourth is again a reason to reread this ADR.

@@ -47,6 +47,8 @@ export const keys = {
   /** The appliance's PR watch, one list for every thread's Checks. */
   pulls: () => ['pulls'] as const,
   about: () => ['about'] as const,
+  /** What this browser's own push manager says (ADR-0047); no daemon read. */
+  push: () => ['push'] as const,
   dictation: () => ['dictation'] as const,
   here: () => ['here'] as const,
   sshIdentity: () => ['ssh-identity'] as const,

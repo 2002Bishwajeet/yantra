@@ -261,7 +261,7 @@ run. The token is never a workspace field, never written to disk, never logged a
 which is ADR-0013 §4's rule for `YANTRA_DAEMON` applied to the first byte that leaves the tailnet.
 The startup line saying which of the two it got is there because a unit's environment is not the
 shell's, and a headless box has only the journal to say so. **No process the daemon starts receives
-`YANTRA_GITHUB_TOKEN`, `YANTRA_NTFY_TOKEN` or `YANTRA_NTFY_URL`** (Y-647): every spawn removes
+`YANTRA_GITHUB_TOKEN`, `YANTRA_NTFY_TOKEN`, `YANTRA_NTFY_URL` or `YANTRA_VAPID_KEY`** (Y-647): every spawn removes
 `yantra_core::SECRETS`, and [`tests/secrets.rs`](tests/secrets.rs) reads a real child's environment
 to prove it.
 
@@ -290,6 +290,29 @@ remembered first, not pushed while a dashboard is open, one 5 s budget, no retry
 `{workspace}: PR #{n} …`, cut at 160 characters, with no repo, no check output and no review text.
 **Its reads are conditional**: each sends the last `ETag` back as `If-None-Match`, so an unchanged PR
 costs GitHub no quota, and a 304 reuses what the watch already holds.
+
+**Every message also goes to the installed dashboards by Web Push** (Y-825,
+[ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md), [`push.rs`](src/push.rs)).
+`notify::told` is the one send: `Push::send` to every device in the store, then the relay when one
+is set. The agents notifier, the PR watch, the chat's waits and the rooms' pauses all call it, and
+each keeps its own rules. The payload is `{title, body, url}`, where `url` is `Message::path`, a path
+in the dashboard. Four rules bind `push.rs`:
+
+- **The crypto is composed here, and RFC 8291's example is the test.** No published Web Push crate
+  passes `cargo deny` (the module's header says why), so `encrypt` and `Key::authorization` use
+  `p256`, `hkdf`, `aes-gcm` and `sha2`, which `webauthn-rs` already brings. Do not add an `ignore`
+  to `deny.toml` to swap in a crate.
+- **The key is made once, on the first `GET /api/push/key`, and written before it is used.**
+  `Push::public_key` takes `Fleet::env`, and `notify::write_vapid` takes the `flock`. A key that
+  cannot be written is a 500 and is not kept. A new key removes every stored device.
+- **The endpoint is never logged and never in an error.** It is a capability URL. A failure names
+  a status or a kind, as the relay's does.
+- **A 404 or a 410 from a push service removes the device.** Any other failure drops the push.
+
+**The four routes have no CLI verb**: `GET /api/push/key`, `POST` and `DELETE
+/api/push/subscriptions` and `POST /api/push/test`. A browser's push manager makes a subscription
+for that browser, so a terminal has none to give, as with `POST /api/viewing`. Each calls
+`allowed()`, so an agent token is 403 and no session is 401. No route reads the list back.
 
 ## The PR watch
 
@@ -499,7 +522,7 @@ own `flock` — one file handle, held from the read to the write — is what mak
 itself safe against the CLI; `Fleet::env` is what stops that turning into several tokio workers
 blocked on the same syscall, since a task already waiting on it `await`s instead. Any new writer of
 this file must take both: the daemon's `Mutex` for its own workers, and `rewrite`'s `flock` for the
-one it does not control.
+one it does not control. `Push::public_key` is the sixth writer, and it takes both (ADR-0047).
 
 **`POST /api/viewing` is a write with no verb behind it**, and it is not an exception to that
 rule so much as a thing a keyboard cannot mean: it says *a browser is showing this page now* (D3
@@ -1254,7 +1277,8 @@ unreachable GitHub that stays shows after 5 s. A status error that stays shows o
   a row per Chat thread in `~/.local/state/yantra/threads.sqlite` ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md),
   Y-688). It answers the first question about the past, which threads a machine had and what they
   were called, and the store wins over git config for a session id. Only `DELETE …/threads/{thread}`
-  forgets a row: the web's *Forget thread* and `yantra chat rm --daemon` send it for a `gone` thread. `rusqlite` with hand-written SQL,
+  forgets a row: the web's *Forget thread* and `yantra chat rm --daemon` send it for a `gone` thread. A second table,
+  `push_devices`, holds each device that gets Web Push ([ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md)). `rusqlite` with hand-written SQL,
   every call on a blocking thread, and the pragmas on every connection (I-12, I-13, I-14). The daemon
   refuses to start when the store does not open. Everything else is still declared in the workspace
   TOML, derived from tmux, or held in memory and re-read every 30 s.

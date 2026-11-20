@@ -123,6 +123,7 @@ impl Notification {
             title: Some(phase.headline().to_owned()),
             priority: None,
             click: None,
+            path: Some(format!("/w/{}", encoded(&self.workspace))),
         }
     }
 }
@@ -239,6 +240,22 @@ pub struct Message {
     pub title: Option<String>,
     pub priority: Option<u8>,
     pub click: Option<String>,
+    /// The page in the dashboard that a tap opens, as a path. Web Push sends
+    /// it (ADR-0047); ntfy has `click`, which needs the whole address.
+    pub path: Option<String>,
+}
+
+/// RFC 3986's unreserved characters stay; every other byte is `%XX`.
+pub fn encoded(segment: &str) -> String {
+    segment
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                char::from(byte).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
 }
 
 /// Where a message goes.
@@ -368,6 +385,18 @@ pub fn write_client_id(path: &std::path::Path, id: Option<&str>) -> Result<(), N
     rewrite(path, &[(crate::github::CLIENT_ID, id)])
 }
 
+/// The key that signs each Web Push, beside the relay and the grant
+/// ([ADR-0047](../../../docs/adr/0047-the-dashboard-gets-web-push.md)
+/// decision 2): 32 bytes in URL-safe base64.
+pub const VAPID_KEY: &str = "YANTRA_VAPID_KEY";
+
+/// Writes the Web Push signing key for the daemon's next start. The daemon
+/// that made it holds it in memory from then on.
+pub fn write_vapid(path: &std::path::Path, key: &str) -> Result<(), NotWritten> {
+    holdable("key", key)?;
+    rewrite(path, &[(VAPID_KEY, Some(key))])
+}
+
 /// Replaces the lines for `changes`' keys and keeps every other line verbatim,
 /// because three writers share this file (ADR-0021, ADR-0023) and an operator
 /// may still put a line in it by hand. `0600` applies when this creates
@@ -481,6 +510,7 @@ pub fn test_message() -> Message {
         title: Some("yantra".to_owned()),
         priority: None,
         click: None,
+        path: None,
     }
 }
 
@@ -545,7 +575,7 @@ fn send(url: &str, token: Option<&str>, message: &Message) -> Result<(), Error> 
 /// The kind, never the message, for everything that could quote the destination
 /// back: `BadUri` and `RequireHttpsOnly` both do, and the topic in it is the
 /// only password a public relay has.
-pub(crate) fn reason(error: &ureq::Error) -> String {
+pub fn reason(error: &ureq::Error) -> String {
     match error {
         ureq::Error::Io(io) => io.to_string(),
         ureq::Error::Timeout(_) => "it did not answer in time".to_owned(),
@@ -979,6 +1009,7 @@ mod tests {
                 title: Some("y-147".to_owned()),
                 priority: Some(4),
                 click: Some("https://box.example.ts.net:8443/w/api?thread=ab12".to_owned()),
+                path: None,
             },
         )
         .await
@@ -1018,6 +1049,7 @@ mod tests {
                 title: None,
                 priority: None,
                 click: None,
+                path: None,
             },
         )
         .await
@@ -1047,6 +1079,7 @@ mod tests {
                 title: None,
                 priority: None,
                 click: None,
+                path: None,
             },
         )
         .await

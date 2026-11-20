@@ -120,8 +120,9 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     let agents = model.clone();
     let remembered = fleet.events.clone();
     let woken = fleet.look_at_agents.clone();
+    let push = fleet.push.clone();
     tokio::spawn(async move {
-        let mut notifier = Notifier::new(relay);
+        let mut notifier = Notifier::new(relay).pushing(push);
         let mut settling = false;
         loop {
             look_at_agents(&agents, &mut notifier, &viewers, &remembered).await;
@@ -187,8 +188,9 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     let pulls = fleet.pulls.clone();
     let reading = grant.clone();
     let (watchers, told) = (fleet.viewers.clone(), fleet.events.clone());
+    let push = fleet.push.clone();
     tokio::spawn(async move {
-        let mut teller = Teller::new(pulls_relay);
+        let mut teller = Teller::new(pulls_relay).pushing(push);
         let github = Github::default();
         loop {
             let token = reading.token().await;

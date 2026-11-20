@@ -102,6 +102,9 @@ pub struct Fleet {
     pub look_at_release: Arc<tokio::sync::Notify>,
     /// What a page on `:7717` hands to itself on `:8443` (Y-652), in memory only.
     pub carry: crate::carry::Slots,
+    /// Web Push to the installed dashboards (ADR-0047). `None` only in a
+    /// test that needs none.
+    pub push: Option<crate::push::Push>,
 }
 
 /// What `serve` knew at start and no look changes: for `GET /api/about` and
@@ -160,6 +163,7 @@ impl Default for Fleet {
             look_at_agents: Arc::default(),
             look_at_release: Arc::default(),
             carry: crate::carry::Slots::default(),
+            push: None,
         }
     }
 }

@@ -16,16 +16,21 @@ workspace = true
 embed-dashboard = ["dep:include_dir"]
 
 [dependencies]
+# Web Push's encryption and signature (ADR-0047 decision 1), with `hkdf` and
+# `p256` below. `webauthn-rs` already brings all three, so the lock is unchanged.
+aes-gcm = "0.11"
 axum.workspace = true
 # A session token is 32 random bytes in URL-safe base64 (ADR-0044 decision 4).
 base64.workspace = true
 # `state_dir()` for the thread store's path (ADR-0045 decision 1).
 etcetera.workspace = true
 getrandom.workspace = true
+hkdf = "0.13"
 include_dir = { workspace = true, optional = true }
 # The socket's peer account and the `yantra` group (ADR-0042), since
 # `unsafe_code = forbid` rules out libc. 0.28 is already in the lock.
 nix = { version = "0.31", default-features = false, features = ["user"] }
+p256 = { version = "0.14", features = ["ecdh"] }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

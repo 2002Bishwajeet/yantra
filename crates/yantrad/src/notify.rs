@@ -20,7 +20,11 @@
 //! [`crate::events`] first, so a send that is dropped, or never configured, is
 //! still a remembered event.
 //!
+//! **A message goes two ways** ([ADR-0047]): to each installed dashboard by
+//! Web Push, and to the ntfy relay when one is set. Every rule above binds both.
+//!
 //! [ADR-0025]: ../../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md
+//! [ADR-0047]: ../../../docs/adr/0047-the-dashboard-gets-web-push.md
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,6 +34,7 @@ use yantra_core::notify::{BODY_MAX, Message, Notification, Relay, Watch, post};
 use yantra_core::status::Fleet;
 
 use crate::events::{self, Event, Events};
+use crate::push::Push;
 
 /// The whole of what one look may spend telling someone, well under
 /// `refresh::EVERY`. Without it a fleet where several things changed at once,
@@ -67,6 +72,14 @@ impl Notifier {
         }
     }
 
+    #[must_use]
+    pub fn pushing(self, push: Option<Push>) -> Self {
+        Self {
+            teller: self.teller.pushing(push),
+            ..self
+        }
+    }
+
     /// Called once the reading is already in the model, so nothing a browser
     /// reads is waiting on a relay.
     ///
@@ -84,11 +97,12 @@ impl Notifier {
     }
 }
 
-/// The relay and its quiet log: the rules every send from a refresh task
-/// keeps. `None` is a daemon with no relay, which still remembers.
+/// The relay, the installed dashboards and their quiet log: the rules every
+/// send from a refresh task keeps. With neither, the daemon still remembers.
 #[derive(Debug)]
 pub struct Teller {
     relay: Option<Relay>,
+    push: Option<Push>,
     log: Log,
 }
 
@@ -96,8 +110,14 @@ impl Teller {
     pub fn new(relay: Option<Relay>) -> Self {
         Self {
             relay,
+            push: None,
             log: Log::default(),
         }
+    }
+
+    #[must_use]
+    pub fn pushing(self, push: Option<Push>) -> Self {
+        Self { push, ..self }
     }
 
     /// What the PR watch saw (Y-494): remembered, then sent as the agents'
@@ -115,10 +135,7 @@ impl Teller {
     }
 
     async fn deliver(&mut self, messages: Vec<Message>, watched: bool) {
-        let Some(relay) = &self.relay else {
-            return;
-        };
-        if messages.is_empty() {
+        if (self.relay.is_none() && self.push.is_none()) || messages.is_empty() {
             return;
         }
         if watched {
@@ -128,7 +145,8 @@ impl Teller {
             );
             return;
         }
-        let outcome = tokio::time::timeout(BUDGET, send(relay, messages))
+        let sending = send(self.push.as_ref(), self.relay.as_ref(), messages);
+        let outcome = tokio::time::timeout(BUDGET, sending)
             .await
             .unwrap_or(Err("the budget for this look ran out".to_owned()));
         if let Some(line) = self.log.line(outcome) {
@@ -191,19 +209,46 @@ impl PrNote {
             title: Some(self.phase.headline().to_owned()),
             priority: None,
             click: None,
+            path: Some(format!(
+                "/w/{}",
+                yantra_core::notify::encoded(&self.workspace)
+            )),
         }
     }
 }
 
 /// The first failure ends the pass: the rest of this look's notifications are
 /// dropped rather than retried against a relay that has just said no.
-async fn send(relay: &Relay, messages: Vec<Message>) -> Result<(), String> {
+async fn send(
+    push: Option<&Push>,
+    relay: Option<&Relay>,
+    messages: Vec<Message>,
+) -> Result<(), String> {
     for message in messages {
-        post(relay, message)
-            .await
-            .map_err(|error| error.to_string())?;
+        told(push, relay, message).await?;
     }
     Ok(())
+}
+
+/// One message to every installed dashboard and to the relay, where each
+/// exists (ADR-0047 decision 5). Both are tried, and the first failure is the
+/// answer.
+pub async fn told(
+    push: Option<&Push>,
+    relay: Option<&Relay>,
+    message: Message,
+) -> Result<(), String> {
+    let pushed = match push {
+        Some(push) => push.send(&message).await,
+        None => Ok(()),
+    };
+    let relayed = match relay {
+        Some(relay) => post(relay, message)
+            .await
+            .map_err(|error| error.to_string()),
+        None => Ok(()),
+    };
+    pushed.and(relayed)
 }
 
 /// `yantra-agent`'s `Log` is the precedent: the first failure is said out loud
@@ -432,6 +477,48 @@ mod tests {
             1,
             "dropped from the relay, and still on the page's list"
         );
+    }
+
+    /// ADR-0047 decision 5: an installed dashboard gets the same words with
+    /// the page a tap opens, and nothing for a look that a dashboard watched.
+    #[tokio::test]
+    async fn a_change_is_pushed_to_an_installed_dashboard_unless_one_is_watched() {
+        let (push, _, secret, auth, served) =
+            crate::push::tests::pushing_to(&["201 Created"]).await;
+        let mut notifier = Notifier::new(None).pushing(Some(push));
+        let events = Events::default();
+
+        notifier
+            .tell(&fleet("api", Verdict::Running), false, &events)
+            .await;
+        notifier
+            .tell(&fleet("api", Verdict::AwaitingTrust), true, &events)
+            .await;
+        notifier
+            .tell(&fleet("api", Verdict::Running), false, &events)
+            .await;
+        notifier
+            .tell(
+                &fleet("api", Verdict::Crashed { status: 1 }),
+                false,
+                &events,
+            )
+            .await;
+
+        let seen = served.join().expect("the listener thread");
+        let text: serde_json::Value =
+            serde_json::from_slice(&crate::push::tests::decrypt(&seen[0].1, &secret, &auth))
+                .expect("JSON");
+        assert_eq!(
+            text,
+            serde_json::json!({
+                "title": "Agent failed",
+                "body": "api: The agent run failed.",
+                "url": "/w/api",
+            }),
+            "the watched trust prompt was dropped, and the crash was pushed"
+        );
+        assert_eq!(events.read().await.len(), 2);
     }
 
     /// The window is what makes the beacon a *last seen* rather than a switch

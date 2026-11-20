@@ -28,6 +28,14 @@ the page is already showing (D3 §13). `useViewing` posts `/api/viewing` every
 20 s. It is an explicit beacon rather than a read counted as presence: a
 background tab still polls, and a poll is not a person watching.
 
+**The installed dashboard gets notifications by Web Push** (Y-825,
+[ADR-0047](../docs/adr/0047-the-dashboard-gets-web-push.md)). Settings → Notifications → *This
+device* asks the permission from the tap, subscribes with the daemon's key and posts the
+subscription ([`api/push.ts`](src/api/push.ts)). [`public/sw.js`](public/sw.js) shows each push and,
+on a tap, moves an open dashboard to the push's page or opens a window there. It opens only its own
+origin. On an iPhone this works only from the Home Screen app. The ntfy relay below it is the
+fallback.
+
 **`/` opens on work, not on an inventory.** Four groups ordered by who must act
 next — you, the agent, nobody, and *not read yet* for a workspace nothing has
 answered about. The order recomputes only when you ask

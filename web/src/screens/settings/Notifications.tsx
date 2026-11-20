@@ -6,6 +6,7 @@ import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
 import { Group, Note } from './Group'
 import { PushSetup } from './PushSetup'
+import { ThisDevice } from './ThisDevice'
 
 /** `about.relay` says whether the running daemon holds one; `saved` says a
  *  save happened in this session (§B4: nothing reads the relay itself back,
@@ -13,7 +14,7 @@ import { PushSetup } from './PushSetup'
  *  again, ADR-0021). */
 function relaySupporting(relay: boolean | undefined, saved: boolean): string {
   if (relay === undefined) return 'asking the daemon'
-  const base = relay ? 'On · pushes to your relay' : 'Off · nothing is pushed'
+  const base = relay ? 'On · pushes to your relay' : 'Off · no relay is set'
   return saved ? `${base} · saved, used after a restart` : base
 }
 
@@ -33,7 +34,8 @@ export function Notifications() {
 
   return (
     <>
-      <Group label="Relay">
+      <ThisDevice />
+      <Group label="Fallback">
         <ListItem
           headline="Push relay"
           leading={
@@ -49,7 +51,7 @@ export function Notifications() {
           }
         />
       </Group>
-      <Note>Yantra pushes when an agent needs you or a session ends. It stays quiet while a dashboard is open.</Note>
+      <Note>The relay sends the same alerts through the ntfy app, for a device that cannot install Yantra.</Note>
       <PushSetup onOpenChange={setOpen} onSaved={() => setSavedAtUptime(about.data?.uptime_seconds ?? 0)} open={open} />
     </>
   )

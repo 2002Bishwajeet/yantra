@@ -178,3 +178,12 @@ Accessed 2026-11-09.
 >
 > **What changed upstream of the reasoning:** the build loop runs agents in the owner's worktrees,
 > and the 2026-11-12 audit showed one could redirect a merge.
+
+> **ADR-0045, decision 2, 2026-11-20 ([Y-825](../../tracker.md), owner):** the store gets a second
+> table, `push_devices`, with one row per device that gets Web Push: the endpoint, the device's
+> public key and its 16-byte `auth` secret
+> ([ADR-0047](0047-the-dashboard-gets-web-push.md) decision 3). The `threads` table is unchanged and
+> still holds no message text. **What changed upstream of the reasoning:** the owner asked for
+> notifications in the installed dashboard, and the daemon must remember each device across a
+> restart. The row is not fleet state. It is the first value in the store that is a secret of a
+> kind: it sends nothing without the signing key, which is not in the store.

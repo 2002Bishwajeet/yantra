@@ -1,10 +1,12 @@
 //! The thread store ([ADR-0045]): one SQLite file on the hub, one row per Chat
-//! thread, and no message text and no secret.
+//! thread, and no message text and no secret. Since [ADR-0047] it also holds
+//! one row per device that gets Web Push.
 //!
 //! Hand-written SQL and no ORM (I-14). Every connection sets the pragmas
 //! [`open`] names (I-12), and every call runs on a blocking thread (I-13).
 //!
 //! [ADR-0045]: ../../../docs/adr/0045-the-hub-keeps-a-thread-store.md
+//! [ADR-0047]: ../../../docs/adr/0047-the-dashboard-gets-web-push.md
 
 use std::fs::{DirBuilder, OpenOptions, Permissions};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
@@ -21,7 +23,8 @@ const TITLE: usize = 80;
 const FOUND: usize = 20;
 
 /// Run in order under `PRAGMA user_version`. Append; never edit one that shipped.
-const MIGRATIONS: &[&str] = &["CREATE TABLE threads (
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE threads (
         workspace TEXT NOT NULL,
         id TEXT NOT NULL,
         machine TEXT NOT NULL,
@@ -37,7 +40,14 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE threads (
         seen INTEGER,
         tasks TEXT NOT NULL DEFAULT '[]',
         PRIMARY KEY (workspace, id)
-    ) STRICT"];
+    ) STRICT",
+    "CREATE TABLE push_devices (
+        endpoint TEXT PRIMARY KEY NOT NULL,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        created INTEGER NOT NULL
+    ) STRICT",
+];
 
 const COLUMNS: &str = "workspace, id, machine, branch, worktree, harness, session, title, status, created, active, seen";
 
@@ -106,6 +116,29 @@ pub struct Row {
     pub active: i64,
     /// The last time the machine answered.
     pub seen: Option<i64>,
+}
+
+/// One device's Web Push subscription, as its browser gave it (ADR-0047
+/// decision 3). The endpoint is a capability, so `Debug` prints no field.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Device {
+    pub endpoint: String,
+    pub p256dh: String,
+    pub auth: String,
+}
+
+impl std::fmt::Debug for Device {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Device").finish_non_exhaustive()
+    }
+}
+
+fn device(at: &rusqlite::Row<'_>) -> rusqlite::Result<Device> {
+    Ok(Device {
+        endpoint: at.get(0)?,
+        p256dh: at.get(1)?,
+        auth: at.get(2)?,
+    })
 }
 
 fn row(at: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
@@ -202,6 +235,71 @@ impl Store {
         })
         .await?;
         Ok(done?)
+    }
+
+    /// Keeps `device`, or replaces its keys. `false` when the store already
+    /// holds `limit` other devices.
+    pub async fn put_device(&self, device: Device, limit: usize) -> Result<bool, Error> {
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            let others: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM push_devices WHERE endpoint != ?1",
+                params![device.endpoint],
+                |at| at.get(0),
+            )?;
+            if others >= limit as i64 {
+                return Ok(false);
+            }
+            tx.execute(
+                "INSERT INTO push_devices (endpoint, p256dh, auth, created) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth",
+                params![device.endpoint, device.p256dh, device.auth, now()],
+            )?;
+            tx.commit()?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// `false` when the store held no such device.
+    pub async fn remove_device(&self, endpoint: &str) -> Result<bool, Error> {
+        let endpoint = endpoint.to_owned();
+        self.call(move |db| {
+            db.execute(
+                "DELETE FROM push_devices WHERE endpoint = ?1",
+                params![endpoint],
+            )
+            .map(|removed| removed > 0)
+        })
+        .await
+    }
+
+    /// Removes every device: a new signing key cannot push to them.
+    pub async fn remove_devices(&self) -> Result<(), Error> {
+        self.call(|db| db.execute("DELETE FROM push_devices", []).map(drop))
+            .await
+    }
+
+    pub async fn device(&self, endpoint: &str) -> Result<Option<Device>, Error> {
+        let endpoint = endpoint.to_owned();
+        self.call(move |db| {
+            db.query_row(
+                "SELECT endpoint, p256dh, auth FROM push_devices WHERE endpoint = ?1",
+                params![endpoint],
+                device,
+            )
+            .optional()
+        })
+        .await
+    }
+
+    pub async fn devices(&self) -> Result<Vec<Device>, Error> {
+        self.call(|db| {
+            db.prepare("SELECT endpoint, p256dh, auth FROM push_devices ORDER BY created")?
+                .query_map([], device)?
+                .collect()
+        })
+        .await
     }
 
     /// Keeps the session a keeper read from its harness (decision 3).

@@ -114,6 +114,7 @@ impl Host {
             .env(yantra_core::github::TOKEN, "gho_notarealtoken")
             .env(yantra_core::notify::RELAY_TOKEN, "tk_notarealtoken")
             .env(yantra_core::notify::RELAY_URL, "http://127.0.0.1:9/never")
+            .env(yantra_core::notify::VAPID_KEY, "notarealkey")
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)

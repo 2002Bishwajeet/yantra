@@ -866,3 +866,7 @@ export type RoomPosted = { seq: number; delivered: number }
 
 /** `DELETE /api/rooms/{room}`. `false` is a room already gone. */
 export type RoomRemoved = { removed: boolean }
+
+/** `GET /api/push/key` (ADR-0047): the key a browser subscribes to Web Push
+ *  with, as URL-safe base64. */
+export type PushKey = { key: string }

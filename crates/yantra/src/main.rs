@@ -740,6 +740,7 @@ async fn main() -> ExitCode {
                 title,
                 priority,
                 click: None,
+                path: None,
             })
             .await
         }
