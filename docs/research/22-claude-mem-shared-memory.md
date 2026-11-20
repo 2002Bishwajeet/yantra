@@ -4,6 +4,7 @@
 - **Question:** Can claude-mem run once on the appliance and serve a Linux laptop and a MacBook? Can it produce and serve the short handoff summaries that the owner now wants?
 - **Reads against:** [ADR-0032](../adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md), [R18](18-one-conversation-history.md), Y-426 to Y-432, Y-518.
 - **Owner update, 2026-10-19:** At-rest encryption (ADR-0032 decision 4, Y-429) is dropped. Redaction stays. The memory layer now serves handoffs. A session that continues on another machine starts fresh with a short summary, not the full transcript. This note does not weigh encryption.
+- **Update, 2026-11-20:** claude-mem 16 has a self-hosted server runtime. It ran on yantra-box with no cmem.ai login. [§10](#10-the-server-runtime-on-yantra-box-2026-11-20) has the test and replaces the "not viable" verdict of §7 option (a).
 - **How I checked:** I read the plugin installed on the owner's machine (`~/.claude/plugins/cache/thedotmack/claude-mem/13.39.0`) and its live data under `~/.claude-mem`, read-only. I read the upstream docs and GitHub. I did not run a worker on a second host, so every claim about a remote worker is from code and docs, and I label it.
 
 ## 1. Answer first
@@ -264,6 +265,104 @@ Y-529 must therefore set `CLAUDE_MEM_REDACT_ENABLED=true` and the pattern on eve
 
 Commands, in order: `git clone https://github.com/thedotmack/claude-mem` and `git checkout 3fae1eb` in `~/.cache/yantra-ref/claude-mem`; `podman pull docker.io/oven/bun:1.4-debian`; then for each of `off`, `defaults`, `generic` and `custom`: `podman run --rm -m 1g --network none -v <clone>:/cm:ro -v <harness>:/h:ro -e HOME=/tmp/home oven/bun:1.4-debian bun /h/run.ts <mode>`. The script writes `settings.json`, imports `/cm/src/utils/tag-stripping.ts` and calls `stripMemoryTags`. The live run: `podman run --rm -m 2g --network none ... bash /h/live.sh`, which starts the worker on port 37700 and posts to `/api/memory/save` and `/api/import`. Then it reads `~/.claude-mem/claude-mem.db` with `bun:sqlite`. The worker port is `37700 + uid % 100`, so root uses 37700.
 
+## 10. The server runtime on yantra-box, 2026-11-20
+
+The owner asked for one shared memory for every machine and account (Y-820). §1 and §7 said that claude-mem had no self-hosted route. That is no longer true. Upstream now ships a server runtime with a Docker Compose stack and a guide (`docs/server.md`, `docs/public/hosted-server.mdx`). I ran it on yantra-box and wrote to it from the laptop.
+
+**Result: the server runs on the box with no cmem.ai login, and a laptop session reaches it over the tailnet with a key. No provider key is reachable from the tailnet. Redaction runs on the client before the data leaves, but only when each machine turns it on.** Option (a) of §7 is now viable. Five conditions in §10.7 must be settled in an ADR first.
+
+### 10.1 What I ran
+
+- **Version.** `thedotmack/claude-mem` tag `v16.0.0`, commit `cc0fb9515`. The newest tag on 2026-11-20 was `v16.0.1`. The laptop client was the installed plugin, 16.0.0.
+- **Stack on the box.** Four rootless podman containers as `biswa`, on one private podman network: Postgres 17 with pgvector and pg_textsearch (built from `docker/postgres/Dockerfile`), `valkey/valkey:8-alpine`, the HTTP server and the generation worker (both from `docker/claude-mem/Dockerfile`). The environment was the one in upstream's `docker-compose.yml`. I used `podman run`, not `docker compose`.
+- **Bind.** Only the HTTP server published a port, on the tailnet address: `-p 100.95.169.83:37977:37877`. `ss -ltn` showed `100.95.169.83:37977` and no other new listener. Postgres, Valkey and the worker had no host port.
+- **Model.** I had no provider key and did not use one. The worker ran with `CLAUDE_MEM_SERVER_PROVIDER=custom` and a 20-line stub module that returns one fixed observation or summary. So the queue, the worker and the storage are tested. Observation quality from a real model is not.
+- **Client.** A throwaway `oven/bun:1.4-debian` container on the laptop, with the installed plugin mounted read-only and an empty data directory. It ran the real hook entry point: `bun scripts/hook-service.cjs hook claude-code <session-init|observation|summarize|session-end|context>`. The laptop's own `~/.claude-mem` and its worker were not touched.
+- **Data.** Test markers and the three fake secrets of Y-430 only. I removed every container, volume, network, image and test directory afterwards. `podman ps -a`, `podman volume ls`, `podman images` and `ss -ltn` on the box matched the state before the test.
+
+### 10.2 Question 1: does the server run without a cmem.ai login? Yes (verified)
+
+- The server started and `GET /healthz` answered `{"status":"ok","runtime":"server-beta"}`. No step asked for an account, a browser or a licence key.
+- The first API key comes from a command in the server container. It writes to Postgres and calls no outside service:
+
+```
+podman exec <server> bun /opt/claude-mem/scripts/server-service.cjs \
+  server api-key create --name <name> --scope memories:read,memories:write
+```
+
+- The command creates one team (`local-hook-team`) and one project (`local-hook-project`) and prints the raw `cmem_...` key once. Postgres keeps a SHA-256 hash.
+- I did not run `npx claude-mem install --runtime server`. A machine joins with four keys in `~/.claude-mem/settings.json` (§10.3), so the installer and its browser sign-in are not needed. Issue #4131 is closed: the help text now says which providers need a cmem.ai sign-in.
+- Idle memory: server 221 MB, worker 229 MB, Postgres 11 MB, Valkey 8 MB. The claude-mem image is 3.13 GB.
+
+### 10.3 Question 2: does a laptop session reach it with a key? Yes (verified)
+
+A machine uses the server when its `settings.json` holds these keys:
+
+```
+CLAUDE_MEM_RUNTIME=server
+CLAUDE_MEM_SERVER_URL=http://100.95.169.83:<port>
+CLAUDE_MEM_SERVER_API_KEY=cmem_...
+CLAUDE_MEM_SERVER_PROJECT_ID=<project uuid>
+```
+
+- **Hooks.** `session-init` called `POST /v1/sessions/start`. `observation` called `POST /v1/events`. `summarize` and `session-end` closed the session. Postgres then held 2 sessions, 4 events and 6 completed generation jobs. The stub's 4 observations and 2 summaries were stored.
+- **A second client.** A container with a new, empty data directory ran the `context` hook. The start context held both summaries from the first client's sessions. This is the handoff that §6 asks for.
+- **MCP.** `POST /v1/mcp` with the key listed five read-only tools: `search`, `timeline`, `get_observations`, `context`, `recent`. A `search` call from the laptop returned the hook-made observations.
+- **REST.** `POST /v1/memories` stored a note (201) and `POST /v1/search` found it.
+- **Auth.** No key: 401. A revoked key: 403 on the next request. A `memories:read` key: search 200, write 403, `POST /v1/keys` 403.
+- **Transport.** The client accepted plain `http://` to the tailnet address. WireGuard encrypts that hop. The server has no TLS of its own.
+
+### 10.4 Question 3: is a provider key reachable from the tailnet? No (verified)
+
+- I put a marked fake provider key in the worker's environment and a second one in the server's environment. I then sent 23 requests from the laptop to 19 routes, with no key and with a read and write key. No response body held either marker or the database URL.
+- `GET /api/settings` needs a key (401 without one) and returns `{}`. `POST /api/settings` does not exist (404). The server has no settings route that returns or changes a credential.
+- `/api/admin/*` answered 403 from the tailnet, with and without a key.
+- The design keeps the provider key away from the listener: only the worker container needs it, and the worker opens no port.
+- **These routes answer without a key:** `/healthz`, `/v1/info`, `/api/health`, `/api/version`, `/api/readiness`, `/api/instructions` and the viewer's HTML at `/`. `/api/health` shows the version, the Valkey host name and the queue prefix. None of them returns memory content or a credential.
+- **The old worker (code, not tested).** In 16.0.0 its `GET /api/settings` masks secret values (`SettingsRoutes.ts`). A worker on a non-loopback host with no `CLAUDE_MEM_LOCAL_API_TOKEN` binds to loopback and logs a `SECURITY` error (release notes for 16.0.0). §3 finding 3 described 13.39.0.
+
+### 10.5 Question 4: does redaction run before data leaves a machine? Only when the machine turns it on (verified)
+
+I pointed the hooks at a capture server inside the client container and read the request bodies. Each body carried the three Y-430 fixtures and one `<private>` section.
+
+| Client setting | `ghp_...` token | `API_TOKEN=...` | `DATABASE_PASSWORD=...` | `<private>` text |
+| --- | --- | --- | --- | --- |
+| Default (redaction off) | **sent** | **sent** | **sent** | not sent |
+| `CLAUDE_MEM_REDACT_ENABLED=true` | redacted | **sent** | **sent** | not sent |
+| The same, plus the §9.7 custom pattern | redacted | redacted | redacted | not sent |
+
+- The redaction runs in the hook, in `ServerClient.buildEventPayload` and `buildStartSessionPayload`, before the HTTP request. The table is the wire content, not the stored content.
+- It covers the prompt in the session metadata too. Upstream's auto-redaction page still says that it does not. The code and the capture say that it does in 16.0.0.
+- **Redaction is still off by default.** With the default, the server stored all three secrets in `server_sessions` and `agent_events`. I read the rows.
+- **The built-in patterns grew from 11 to 42 and still miss the two keyed fixtures.** The §9.7 custom pattern is still needed, and it still works unchanged.
+- **The server can also redact on ingest (code, not tested).** `agent-events.ts` and `server-sessions.ts` call the same functions with the server's own settings. That is a second net. It does not meet the ADR-0032 rule, because the secret has left the machine by then.
+- The stub model does not show what a real model writes. §9.7's point stands: a model can restate a secret that the patterns missed.
+
+### 10.6 Negative findings
+
+- **Upstream's Dockerfile does not build at `v16.0.0`.** `npm install` fails in `@derekstride/tree-sitter-sql`: its `tree-sitter` binary needs `GLIBC_2.39`, and `node:20` is Debian 12 with glibc 2.36. `podman build --from docker.io/library/node:20-trixie` built it. I found no upstream issue for the Docker case (#4758 is the same fault on Ubuntu 22.04).
+- **The generation worker needs a metered provider key.** The server's Claude provider sends `x-api-key` to `api.anthropic.com` and reads only `ANTHROPIC_API_KEY` or `CLAUDE_MEM_ANTHROPIC_API_KEY` (code). A comment in `docker-compose.yml` names a subscription mode. I found no code for it in the server providers. The other providers are Gemini, OpenRouter and a custom module. The OpenRouter provider takes `CLAUDE_MEM_OPENROUTER_BASE_URL`, so a local OpenAI-compatible model may work (code, not tested).
+- **One project for the whole fleet.** The bootstrap makes one project. `GET /v1/projects` and `POST /v1/projects` are in the guide's endpoint list and answered 404. I found no route and no command that creates a second project (code). A hook sends every repository to the one `CLAUDE_MEM_SERVER_PROJECT_ID` of its machine.
+- **A hook drops its event when the server is down.** With the server port closed and `CLAUDE_MEM_WORKER_AUTOSTART=false`, the hook logged `[server-fallback] reason=transport` and `skipped event`, and kept no file to retry. With autostart on (the default), the code falls back to the local worker, so the memory splits between the server and that machine's SQLite (code, not tested).
+- **Telemetry is on by default.** The client prints the notice at session start. `CLAUDE_MEM_TELEMETRY=0` or `DO_NOT_TRACK=1` turns it off. My test containers ran with the default, so they may have sent anonymous usage counts to upstream. No test content is in that data, by upstream's description.
+- **The viewer does not work in a browser.** Its page sends no key, so every data call gets 401. Upstream's answer is a reverse proxy that adds the header.
+- **Upstream calls the server beta.** The guide says that routes, variable names and the first-key flow may change. Releases still come several times a week.
+- **Not tested.** A real model in the worker. A Mac client. The plugin's own MCP server in server mode (code: `search`, `timeline`, `get_observations` and `observation_add` use the configured server). A move of each machine's existing SQLite memory into the server. Two machines writing at once. A restart of the stack with data in the queue. The remote-worker route of `docs/remote-worker-capture.md` (`CLAUDE_MEM_WORKER_URL`), which shares the old worker and requires `https` off loopback.
+
+### 10.7 Verdict for Y-821
+
+**Option (a), claude-mem central on the appliance, is viable.** It replaces the §9 hub with stubs: the server needs no stub, no cmem.ai call and no Pro licence. It also keeps one copy of the memory, where the §9 hub copies every row to every machine.
+
+Y-821 is a new service on the box, so an ADR comes first. The ADR must decide these points:
+
+1. **The model credential.** The worker needs an Anthropic, Gemini or OpenRouter API key on the box, or a local model. The owner's Claude login does not work there. A key on the box is a stored credential, so CLAUDE.md §B4 applies.
+2. **Redaction on every client.** Each machine and account must set `CLAUDE_MEM_REDACT_ENABLED=true` and the §9.7 pattern before its first session. One machine with the default puts raw secrets in Postgres. Something must check this (Y-819 is the place for a new account).
+3. **The project layout.** One project for the fleet, or rows that Yantra adds to Postgres by hand.
+4. **Behaviour when the box is off.** Lose the events, or let each machine fall back to its local worker and accept a split memory.
+5. **The build and the upgrades.** Pin a tag, carry the base-image override until upstream fixes the Dockerfile, and set telemetry off. The API is beta.
+
+Each account also keeps the server's API key in its own `~/.claude-mem/settings.json`, mode `0600`. That file is claude-mem's. A Yantra workspace must still hold no value (§B4).
+
 ## Sources
 
 All accessed 2026-10-19.
@@ -287,3 +386,6 @@ All accessed 2026-10-19.
 - Yantra: `docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md`, `docs/research/18-one-conversation-history.md` §8, §11, `tracker.md` rows Y-426 to Y-432 and Y-518.
 - claude-mem at commit `3fae1eb`: `services/sync-api/src/{index,auth,env,projection,schema,canonical-content}.ts`, `Dockerfile`, `test/helpers.ts`; client `src/services/sync/CloudSync.ts`, `src/services/worker/DatabaseManager.ts`, `src/shared/SettingsDefaultsManager.ts`, `src/utils/tag-stripping.ts`; `docs/public/cloud-sync.mdx`. Local run: `bun test test` in podman, 52 pass.
 - Redaction run, 2026-10-22 (§9.7), accessed 2026-10-22: claude-mem at `3fae1eb` (v14.0.1), `src/utils/redaction.ts`, `src/utils/tag-stripping.ts`, `src/services/memory/save-memory.ts`, `src/services/worker/http/routes/{DataRoutes,MemoryRoutes,MemoryIngestRoutes}.ts`, `src/services/sync/CloudSync.ts`, `src/services/worker/agents/ResponseProcessor.ts`, `docs/public/usage/auto-redaction.mdx`. Yantra: `crates/yantra/tests/history.rs`, `crates/yantra-core/src/history.rs`, `docs/research/18-one-conversation-history.md` §11.3.
+- Server re-test, 2026-11-20 (§10), accessed 2026-11-20: claude-mem at `cc0fb9515` (v16.0.0), `docs/server.md`, `docs/public/hosted-server.mdx`, `docs/public/usage/auto-redaction.mdx`, `docs/public/telemetry.mdx`, `docs/remote-worker-capture.md`, `docker-compose.yml`, `docker/claude-mem/Dockerfile`, `docker/postgres/Dockerfile`, `src/services/hooks/{runtime-selector,server-client,server-bootstrap}.ts`, `src/server/runtime/{ServerService,ServerViewerRoutes,create-server-service}.ts`, `src/server/routes/v1/ServerV1PostgresRoutes.ts`, `src/server/generation/providers/ClaudeObservationProvider.ts`, `src/storage/postgres/{agent-events,server-sessions}.ts`, `src/cli/handlers/observation.ts`, `src/services/worker/http/routes/SettingsRoutes.ts`; the installed plugin `~/.claude/plugins/cache/thedotmack/claude-mem/16.0.0/`; a run of the stack in rootless podman on yantra-box and of the hooks in a container on the laptop.
+- Hosted server guide, accessed 2026-11-20: https://docs.claude-mem.ai/hosted-server
+- Releases `v16.0.0` and `v16.0.1`, and issues 4131 and 4758, accessed 2026-11-20: https://github.com/thedotmack/claude-mem/releases/tag/v16.0.0, https://github.com/thedotmack/claude-mem/issues/4131, https://github.com/thedotmack/claude-mem/issues/4758
