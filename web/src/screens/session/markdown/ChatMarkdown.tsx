@@ -4,7 +4,8 @@
  * Copyright (c) 2026 T3 Tools Inc. Used under the MIT licence; the full text is in
  * THIRD_PARTY_NOTICES.md at the repository root.
  */
-import { memo, type ComponentProps, type ReactNode } from 'react'
+import { createContext, memo, use, type ComponentProps, type ReactNode } from 'react'
+import { Image } from 'lucide-react'
 import Markdown from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
@@ -43,6 +44,29 @@ function EditorLink(props: { machine: string; worktree: string; target: FilePath
   )
 }
 
+const InLink = createContext(false)
+
+/** A file in the worktree opens in the editor; any other address opens a new tab. */
+function MarkdownLink(props: { machine: string; worktree: string | null } & ComponentProps<'a'>) {
+  const { machine, worktree, href, children, ...rest } = props
+  // Only an image nests here, and an anchor holds no anchor: it draws its label.
+  if (use(InLink)) return children
+  const target = href === undefined ? null : linkTarget(href, worktree)
+  return (
+    <InLink value>
+      {target !== null && worktree !== null ? (
+        <EditorLink machine={machine} target={target} worktree={worktree}>
+          {children}
+        </EditorLink>
+      ) : (
+        <a {...rest} href={href} rel="noreferrer" target="_blank">
+          {children}
+        </a>
+      )}
+    </InLink>
+  )
+}
+
 function componentsFor(machine: string, worktree: string | null): Components {
   return {
     pre({ node, children }) {
@@ -71,18 +95,22 @@ function componentsFor(machine: string, worktree: string | null): Components {
       )
     },
     a({ node: _node, href, children, ...rest }) {
-      const target = href === undefined ? null : linkTarget(href, worktree)
-      if (target !== null && worktree !== null) {
-        return (
-          <EditorLink machine={machine} target={target} worktree={worktree}>
-            {children}
-          </EditorLink>
-        )
-      }
       return (
-        <a {...rest} href={href} rel="noreferrer" target="_blank">
+        <MarkdownLink {...rest} href={href} machine={machine} worktree={worktree}>
           {children}
-        </a>
+        </MarkdownLink>
+      )
+    },
+    // Y-785: an image is a link, so the browser never asks for its address.
+    img({ src, alt }) {
+      if (typeof src !== 'string' || src === '') return alt
+      return (
+        <MarkdownLink href={src} machine={machine} worktree={worktree}>
+          <span className="chat__image">
+            <Image aria-hidden className="chat__image-icon" />
+            {alt || 'Image'}
+          </span>
+        </MarkdownLink>
       )
     },
   }

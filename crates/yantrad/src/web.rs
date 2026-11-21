@@ -32,6 +32,21 @@ mod embedded;
 /// The built dashboard's directory — `web/dist` after `npm run build`.
 const DIR: &str = "YANTRA_WEB";
 
+/// The Content-Security-Policy. It is a file so that `web/vite.config.ts`
+/// serves the e2e suite's pages under the same text. `script-src` names no
+/// hash, so `index.html` has no inline script.
+const POLICY: &str = include_str!("web/policy.txt");
+
+/// `origin` is the https origin About serves, which a plain-HTTP page asks for
+/// `/healthz` before it moves there (`web/src/lib/secure.ts`). It lands in
+/// `connect-src`, which is the file's last directive for that reason.
+pub fn policy(origin: Option<&str>) -> String {
+    match origin {
+        Some(origin) => format!("{} {origin}", POLICY.trim()),
+        None => POLICY.trim().to_owned(),
+    }
+}
+
 /// The advice is here rather than at the call site because both the refusal and
 /// the placeholder body say it, and saying it differently twice is how one of
 /// them goes stale.

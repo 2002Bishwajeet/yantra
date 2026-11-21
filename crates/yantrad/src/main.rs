@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use axum::Router;
+use axum::extract::State;
+use axum::http::{HeaderName, HeaderValue, header};
 use axum::routing::get;
 use tracing_subscriber::filter::{FilterFn, filter_fn};
 use tracing_subscriber::layer::SubscriberExt;
@@ -181,6 +183,39 @@ fn dashboard(configured: Option<PathBuf>) -> Result<Router, Error> {
     }
 }
 
+/// Y-785: the security headers on every answer, and `no-store` under `/api`.
+/// `same-origin`, because `no-referrer` can put `Origin: null` on a same-origin
+/// write, which the gate refuses.
+async fn secured(
+    State(fleet): State<heartbeat::Fleet>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let path = request.uri().path();
+    let api = path == "/api" || path.starts_with("/api/");
+    let mut response = next.run(request).await;
+    let origin = api::https(&*fleet.model.read().await, &fleet.facts.listening_on);
+    let headers = response.headers_mut();
+    if let Ok(policy) = HeaderValue::from_str(&web::policy(origin.as_deref())) {
+        headers.insert(header::CONTENT_SECURITY_POLICY, policy);
+    }
+    for (name, value) in [
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::REFERRER_POLICY, "same-origin"),
+        (
+            HeaderName::from_static("cross-origin-opener-policy"),
+            "same-origin",
+        ),
+    ] {
+        headers.insert(name, HeaderValue::from_static(value));
+    }
+    if api {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    response
+}
+
 /// Apart from `serve` so a test can drive the whole tree without binding a
 /// port. What only the whole tree shows is the dashboard's reach: it is the
 /// fallback, so a path no route above it claims is answered by the app —
@@ -190,6 +225,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
     authoriser: write::Authoriser<I>,
     dashboard: Router,
 ) -> Router {
+    let secured = axum::middleware::from_fn_with_state(fleet.clone(), secured);
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         // Y-387: `curl …/join | sh` is the command a person types, so it sits
@@ -223,6 +259,8 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
         .merge(heartbeat::router())
         .with_state(fleet)
         .fallback_service(dashboard)
+        // Last, so it covers the routes, the gate's refusals and the dashboard.
+        .layer(secured)
 }
 
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
@@ -700,6 +738,19 @@ mod tests {
         headers: &[(&str, &str)],
         body: Option<serde_json::Value>,
     ) -> (axum::http::StatusCode, String) {
+        let (status, _, body) = answered(app, from, method, path, headers, body).await;
+        (status, body)
+    }
+
+    /// [`send_from`] with the answer's headers.
+    async fn answered(
+        app: &Router,
+        from: SocketAddr,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<serde_json::Value>,
+    ) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
         use axum::body::Body;
         use tower::ServiceExt;
 
@@ -719,11 +770,11 @@ mod tests {
             .extensions_mut()
             .insert(axum::extract::ConnectInfo(write::Peer::from(from)));
         let response = app.clone().oneshot(request).await.expect("infallible");
-        let status = response.status();
+        let (status, headers) = (response.status(), response.headers().clone());
         let body = axum::body::to_bytes(response.into_body(), 1 << 20)
             .await
             .expect("in memory");
-        (status, String::from_utf8_lossy(&body).into_owned())
+        (status, headers, String::from_utf8_lossy(&body).into_owned())
     }
 
     /// The owner's second device.
@@ -793,6 +844,116 @@ mod tests {
             let (status, body) = send(&app, "GET", path, &[]).await;
             assert_eq!(status, axum::http::StatusCode::OK, "{path}: {body}");
         }
+    }
+
+    /// Y-785, F-09: the headers are on the page, on an open API answer, and on
+    /// the answers that never reach a handler: the gate's 401 and the JSON 404.
+    #[tokio::test]
+    async fn every_answer_carries_the_security_headers_and_api_answers_are_not_stored() {
+        let dir = std::env::temp_dir().join("yantra-web-y785");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        std::fs::write(dir.join("index.html"), "<title>Yantra</title>").expect("index");
+        let (passkeys, cookie) = signed_in();
+        let app = app(
+            named_hub(),
+            write::Authoriser::new(owner_at(PHONE), &[], Path::new(SOCKET), passkeys)
+                .served_at(Some("https://yantra.example".to_owned())),
+            dashboard(Some(dir)).expect("a directory with an index"),
+        );
+        let ok = axum::http::StatusCode::OK;
+        let cookie = [("cookie", cookie.as_str())];
+
+        for (path, with, status, stored) in [
+            ("/", &[][..], ok, true),
+            ("/w/yantra", &[], ok, true),
+            ("/healthz", &[], ok, true),
+            ("/api/about", &[], ok, false),
+            (
+                "/api/workspaces",
+                &[],
+                axum::http::StatusCode::UNAUTHORIZED,
+                false,
+            ),
+            (
+                "/api/nosuch",
+                &cookie,
+                axum::http::StatusCode::NOT_FOUND,
+                false,
+            ),
+        ] {
+            let (answered, headers, body) = answered(&app, PHONE, "GET", path, with, None).await;
+            assert_eq!(answered, status, "{path}: {body}");
+            let header = |name: &str| {
+                headers
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+            };
+
+            let policy = header("content-security-policy");
+            for part in [
+                "default-src 'self'",
+                "style-src 'self' 'unsafe-inline'",
+                "img-src 'self' data: blob: https://avatars.githubusercontent.com",
+                "object-src 'none'",
+                "base-uri 'none'",
+                "frame-ancestors 'none'",
+                "script-src 'self'",
+                // About's `https`, which the plain page asks before it moves,
+                // and not the configured origin.
+                "connect-src 'self' https://hub.example.ts.net:8443",
+            ] {
+                assert!(
+                    policy.split("; ").any(|directive| directive == part),
+                    "{path}: no `{part}` in `{policy}`"
+                );
+            }
+            assert!(!policy.contains("unsafe-eval"), "{path}: {policy}");
+            assert_eq!(header("x-content-type-options"), "nosniff", "{path}");
+            assert_eq!(header("x-frame-options"), "DENY", "{path}");
+            assert_eq!(header("referrer-policy"), "same-origin", "{path}");
+            assert_eq!(
+                header("cross-origin-opener-policy"),
+                "same-origin",
+                "{path}"
+            );
+            assert_eq!(
+                header("cache-control") != "no-store",
+                stored,
+                "{path}: `{}`",
+                header("cache-control")
+            );
+        }
+
+        let (_, about) = send(&app, "GET", "/api/about", &[]).await;
+        assert!(
+            about.contains("\"https\":\"https://hub.example.ts.net:8443\""),
+            "the policy must name the origin About serves: {about}"
+        );
+    }
+
+    /// Before the first tailnet look there is no origin to name.
+    #[tokio::test]
+    async fn a_daemon_that_knows_no_https_origin_names_only_itself() {
+        let app = app(
+            heartbeat::Fleet::default(),
+            write::Authoriser::new(
+                owner_at(PHONE),
+                &[],
+                Path::new(SOCKET),
+                passkey::Passkeys::memory(),
+            ),
+            web::placeholder(),
+        );
+
+        let (_, headers, _) = answered(&app, PHONE, "GET", "/", &[], None).await;
+
+        let policy = headers["content-security-policy"].to_str().expect("ascii");
+        assert!(
+            policy.ends_with("; script-src 'self'; connect-src 'self'"),
+            "{policy}"
+        );
     }
 
     fn signed_in() -> (passkey::Passkeys, String) {
