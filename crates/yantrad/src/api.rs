@@ -121,7 +121,7 @@ fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
 pub(crate) const HTTPS_PORT: u16 = 8443;
 
 /// Where the microphone works: a browser needs a secure context (ADR-0031 §4).
-fn https(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
+pub(crate) fn https(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
     https_of(
         snapshot.machines.as_deref()?.value().as_ref().ok()?,
         listening_on,

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::Router;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::map_response;
 use axum::response::{IntoResponse, Response};
 use tower_http::services::{ServeDir, ServeFile};
@@ -31,6 +31,26 @@ mod embedded;
 
 /// The built dashboard's directory — `web/dist` after `npm run build`.
 const DIR: &str = "YANTRA_WEB";
+
+/// The Content-Security-Policy. It is a file so that `web/vite.config.ts`
+/// serves the e2e suite's pages under the same text. `script-src` names no
+/// hash, so `index.html` has no inline script.
+const POLICY: &str = include_str!("web/policy.txt");
+
+/// `origin` is the https origin About serves, which a plain-HTTP page asks for
+/// `/healthz` before it moves there (`web/src/lib/secure.ts`). It lands in
+/// `connect-src`, which is the file's last directive for that reason. An origin
+/// that would add a source or a directive, or that no header value holds, is
+/// left out: the policy is always sent.
+pub fn policy(origin: Option<&str>) -> HeaderValue {
+    let fixed = POLICY.trim();
+    origin
+        .filter(|origin| {
+            !origin.contains(|c: char| c.is_ascii_whitespace() || c == ';' || c == ',')
+        })
+        .and_then(|origin| HeaderValue::from_str(&format!("{fixed} {origin}")).ok())
+        .unwrap_or_else(|| HeaderValue::from_static(fixed))
+}
 
 /// The advice is here rather than at the call site because both the refusal and
 /// the placeholder body say it, and saying it differently twice is how one of
@@ -181,6 +201,28 @@ mod tests {
             .await
             .expect("a body");
         (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    /// Y-785: the header layer fails closed, so a bad origin costs the plain
+    /// page its `/healthz` question and never the policy.
+    #[test]
+    fn an_origin_the_policy_cannot_hold_is_left_out() {
+        let sent = |origin| policy(origin).to_str().expect("ascii").to_owned();
+
+        assert!(sent(None).ends_with("; connect-src 'self'"));
+        assert!(
+            sent(Some("https://hub.example.ts.net:8443"))
+                .ends_with("; connect-src 'self' https://hub.example.ts.net:8443")
+        );
+        for origin in [
+            "https://hub.example\n.ts.net:8443",
+            "https://hub.example\u{7f}.ts.net:8443",
+            "https://hub.example *",
+            "https://hub.example; script-src-elem *",
+            "https://hub.example, default-src *",
+        ] {
+            assert_eq!(sent(Some(origin)), sent(None), "{origin:?}");
+        }
     }
 
     /// The content-encoding and the bytes, which `get` above does not carry.
