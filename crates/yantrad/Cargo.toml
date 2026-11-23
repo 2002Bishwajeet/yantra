@@ -29,7 +29,7 @@ hkdf = "0.13"
 include_dir = { workspace = true, optional = true }
 # The socket's peer account and the `yantra` group (ADR-0042), since
 # `unsafe_code = forbid` rules out libc. 0.28 is already in the lock.
-nix = { version = "0.31", default-features = false, features = ["user"] }
+nix = { version = "0.32", default-features = false, features = ["user"] }
 p256 = { version = "0.14", features = ["ecdh"] }
 rusqlite.workspace = true
 serde.workspace = true
