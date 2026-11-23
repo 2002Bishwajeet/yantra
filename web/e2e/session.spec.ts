@@ -219,8 +219,9 @@ test.describe('the session screen, chat first', () => {
     const picker = await page.getByRole('button', { name: /^Threads,/ }).boundingBox()
     const split = await page.locator('.git__split').boundingBox()
     expect(Math.abs(picker!.y - split!.y)).toBeLessThan(8)
-    const first = await page.locator('.turn').first().boundingBox()
-    expect(first!.y).toBeLessThan(page.viewportSize()!.height * 0.4)
+    // The turns sit at the foot of the region (justify-end), so the region's top is where the thread begins.
+    const thread = await page.getByRole('region', { name: 'Conversation' }).boundingBox()
+    expect(thread!.y).toBeLessThan(page.viewportSize()!.height * 0.4)
   })
 
   /** **Finding 120.** `yantra-web` is waiting for trust, so Resume is off and
