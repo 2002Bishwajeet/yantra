@@ -51,7 +51,7 @@ test.describe('the session screen, chat first', () => {
     await expect(page.getByRole('heading', { level: 1, name: NAME }).first()).toBeVisible()
   })
 
-  test('opens on Chat, with the three views as links', async ({ page }) => {
+  test('opens on Chat, with the three views as links', async ({ page, size }) => {
     const links = views(page).getByRole('link')
     await expect(links).toHaveText(['Chat', 'Terminal', 'Spend'])
     await expect(views(page).getByRole('link', { name: 'Chat' })).toHaveAttribute(
@@ -60,7 +60,12 @@ test.describe('the session screen, chat first', () => {
     )
     // The header, because the reason Resume gives for being off names the
     // state too, and that reason is not on screen.
-    await expect(page.locator('.m3-page-header')).toContainText('waiting for trust')
+    if (size === 'phone') {
+      await page.getByRole('button', { name: 'More actions' }).click()
+      await expect(page.getByRole('menu')).toContainText('waiting for trust')
+    } else {
+      await expect(page.locator('.m3-page-header')).toContainText('waiting for trust')
+    }
   })
 
   test("streams a turn, and draws Claude's request with its answers at the composer", async ({ page }) => {
@@ -193,10 +198,29 @@ test.describe('the session screen, chat first', () => {
   })
 
   /** Y-717: one tonal verb and one menu; the other verb and Delete wait in the menu. */
-  test('keeps one tonal or filled button and one menu in the page header', async ({ page }) => {
+  test('keeps one tonal or filled button and one menu in the page header', async ({ page, size }) => {
+    test.skip(size === 'phone', 'the phone keeps them in the app bar (Y-757)')
     const header = page.locator('.m3-page-header')
     await expect(header.locator('[data-variant="tonal"], [data-variant="filled"]')).toHaveCount(1)
     await expect(header.locator('[aria-haspopup="menu"]')).toHaveCount(1)
+  })
+
+  /** Y-757: on the phone the verb and the menu sit in the app bar, the status is in the menu, and the
+   *  picker and the git split share a row above a thread that starts in the top 40 %. */
+  test('cuts the phone header to the app bar and one chat row', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the app bar slot is the phone board')
+    const bar = page.locator('.m3-top-app-bar')
+    await expect(bar.getByRole('button', { name: /^(Stop|Resume)$/ })).toBeVisible()
+    await bar.getByRole('button', { name: 'More actions' }).click()
+    await expect(page.getByRole('menu')).toContainText('waiting for trust')
+    await page.keyboard.press('Escape')
+
+    await page.goto(`${PATH}?thread=${THREAD}`)
+    const picker = await page.getByRole('button', { name: /^Threads,/ }).boundingBox()
+    const split = await page.locator('.git__split').boundingBox()
+    expect(Math.abs(picker!.y - split!.y)).toBeLessThan(8)
+    const first = await page.locator('.turn').first().boundingBox()
+    expect(first!.y).toBeLessThan(page.viewportSize()!.height * 0.4)
   })
 
   /** **Finding 120.** `yantra-web` is waiting for trust, so Resume is off and

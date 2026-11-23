@@ -4,11 +4,21 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import type { WorkspaceStatus } from '@/api'
 import { answer } from '@/test/daemon'
 import { renderInApp } from '@/test/inApp'
+import { setAppBarSlot } from '@/shell/appBarSlot'
 import { Header } from './Header'
 
 const workspace = { loaded: 'yes', name: 'api', machine: 'pi', repo: '/home/biswa/api', startup: null } as const
 
 const unreached = (error: string): WorkspaceStatus => ({ workspace: 'api', machine: 'pi', reached: 'no', error })
+
+/** The width the form factor reads: true is the desktop, false the phone. */
+const media = (wide: boolean) =>
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: wide && query === '(min-width: 1240px)',
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
 
 const open = (error: string) =>
   renderInApp(
@@ -22,12 +32,7 @@ const open = (error: string) =>
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(answer(404, 'no'))))
-  vi.stubGlobal('matchMedia', (media: string) => ({
-    matches: false,
-    media,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-  }))
+  media(true)
 })
 
 afterEach(() => {
@@ -126,5 +131,57 @@ describe('the session header actions (Y-717)', () => {
     await show(state)
     fireEvent.click(await screen.findByRole('button', { name: verb }))
     expect(await screen.findByText(new RegExp(`api ${title}`))).toBeTruthy()
+  })
+})
+
+/** Y-757: on a phone the verbs live in the app bar, and the status in its menu. */
+describe('the session header on a phone', () => {
+  const onPhone = (state: 'running' | 'stopped', status: WorkspaceStatus | null = reached(state)) => {
+    media(false)
+    return renderInApp(
+      <>
+        <header className="m3-top-app-bar">
+          <div ref={setAppBarSlot} />
+        </header>
+        <Header now={0} sessions={{ looked: 'pending' }} status={status} workspace={workspace} />
+      </>,
+    )
+  }
+  const bar = () => document.querySelector<HTMLElement>('.m3-top-app-bar')!
+
+  it.each([
+    ['running', 'Stop'],
+    ['stopped', 'Resume'],
+  ] as const)('puts %s’s verb %s in the app bar and draws no page header', async (state, verb) => {
+    await onPhone(state)
+    expect(await within(bar()).findByRole('button', { name: verb })).toBeTruthy()
+    expect(within(bar()).getByRole('button', { name: 'More actions' })).toBeTruthy()
+    expect(document.querySelector('.m3-page-header__actions')).toBeNull()
+    expect(document.querySelector('.m3-page-header')?.hasAttribute('data-bare')).toBe(true)
+  })
+
+  it('shows the state, the age, the machine and the path in the menu, not on the page', async () => {
+    await onPhone('running')
+    expect(screen.queryByText(/pi · ~/)).toBeNull()
+    fireEvent.click(await within(bar()).findByRole('button', { name: 'More actions' }))
+    const menu = await screen.findByRole('menu')
+    expect(menu.textContent).toContain('running')
+    expect(within(menu).getByText(/pi · ~\/api/)).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: /^Resume/ })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Delete' })).toBeTruthy()
+  })
+
+  it('keeps the reason of a verb that cannot run as its accessible description', async () => {
+    await onPhone('stopped', null)
+    const resume = await within(bar()).findByRole('button', { name: 'Resume' })
+    expect(resume).toHaveProperty('disabled', true)
+    expect(document.getElementById(resume.getAttribute('aria-describedby') ?? '')?.textContent).toContain('has not read api')
+  })
+
+  it('draws the refusal of a failed stop inline on the page', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(answer(500, 'boom'))))
+    await onPhone('running')
+    fireEvent.click(await within(bar()).findByRole('button', { name: 'Stop' }))
+    expect(await screen.findByText(/api was not stopped/)).toBeTruthy()
   })
 })

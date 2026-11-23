@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { Ellipsis } from 'lucide-react'
+import { Ellipsis, Play, Square } from 'lucide-react'
 import type { MachineSessions, Workspace, WorkspaceStatus } from '@/api'
 import { useDown, useResume } from '@/api/mutations'
 import type { Reading } from '@/api/hooks'
@@ -10,7 +11,7 @@ import { useIdle } from '@/lib/useIdle'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from '@/m3/menu/Menu'
+import { Menu, MenuItem, MenuLinkItem, MenuPopup, MenuSeparator, MenuTrigger } from '@/m3/menu/Menu'
 import { State } from '@/m3/mark/Mark'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Row, RowText } from '@/m3/row/Row'
@@ -18,6 +19,8 @@ import { Num, Text } from '@/m3/text/Text'
 import { Tile } from '@/m3/tile/Tile'
 import { DeleteWorkspace } from '@/screens/fleet/Confirm'
 import { SshSaid } from '@/screens/machine/ReachFailure'
+import { useAppBarSlot } from '@/shell/appBarSlot'
+import { useFormFactor } from '@/shell/formFactor'
 import { phrase } from '@/shell/phrase'
 import { home } from './format'
 import { Talk } from './Talk'
@@ -112,77 +115,130 @@ export function Header(props: HeaderProps) {
   }
   const [primary, other] = live.stop ? [verb.stop, verb.resume] : [verb.resume, verb.stop]
 
+  const phone = useFormFactor() === 'phone'
+  const slot = useAppBarSlot()
+  const age = started !== null ? <Num className="session__age"> · {ago(now / 1000 - started, now).text}</Num> : null
+
+  // A disabled verb reads as broken unless it says why, and the boards draw no
+  // line for the reason, so the reason is the description.
+  const reason = primary.enabled ? null : (
+    <span className="m3-sr-only" id={`${said}-verb`}>
+      {primary.why}
+    </span>
+  )
+  const reasonId = primary.enabled ? undefined : `${said}-verb`
+  const menu = (
+    <Menu>
+      <MenuTrigger render={<IconButton label="More actions" ref={more} />}>
+        <Ellipsis />
+      </MenuTrigger>
+      <MenuPopup align="end" keepMounted={idle}>
+        {phone ? (
+          <>
+            <div className="session__status">
+              <State state={mark}>
+                {words}
+                {age}
+              </State>
+              <Text scale="body-small" tone="variant" clip>
+                {workspace.machine} · {home(workspace.repo)}
+              </Text>
+            </div>
+            {URL.test(workspace.repo) ? (
+              <MenuLinkItem render={<a href={workspace.repo} rel="noreferrer" target="_blank" />}>
+                {workspace.repo.replace(URL, '')}
+              </MenuLinkItem>
+            ) : null}
+            <MenuSeparator />
+          </>
+        ) : null}
+        <MenuItem disabled={!other.enabled || other.pending} onClick={other.run}>
+          {other.pending ? other.busy : other.word}
+          {other.enabled ? null : (
+            <Text scale="body-small" tone="variant">
+              {' '}
+              · {other.why}
+            </Text>
+          )}
+        </MenuItem>
+        <MenuItem onClick={() => setDeleting(true)} tone="error">
+          Delete
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
+  )
+
   return (
     <>
+      {/* Y-757: the phone's app bar holds the verb and the menu, and the menu holds the status. */}
+      {phone && slot
+        ? createPortal(
+            <>
+              <IconButton
+                aria-describedby={reasonId}
+                disabled={!primary.enabled || primary.pending}
+                label={primary.pending ? primary.busy : primary.word}
+                onClick={primary.run}
+              >
+                {live.stop ? <Square /> : <Play />}
+              </IconButton>
+              {reason}
+              {menu}
+            </>,
+            slot,
+          )
+        : null}
       <PageHeader
         actions={
-          <>
-            {/* A disabled verb reads as broken unless it says why, and the boards
-                draw no line for the reason, so the reason is the description. */}
-            <Button
-              aria-describedby={primary.enabled ? undefined : `${said}-verb`}
-              disabled={!primary.enabled || primary.pending}
-              onClick={primary.run}
-              variant="tonal"
-            >
-              {primary.pending ? primary.busy : primary.word}
-            </Button>
-            {primary.enabled ? null : (
-              <span className="m3-sr-only" id={`${said}-verb`}>
-                {primary.why}
-              </span>
-            )}
-            <Menu>
-              <MenuTrigger render={<IconButton label="More actions" ref={more} />}>
-                <Ellipsis />
-              </MenuTrigger>
-              <MenuPopup align="end" keepMounted={idle}>
-                <MenuItem disabled={!other.enabled || other.pending} onClick={other.run}>
-                  {other.pending ? other.busy : other.word}
-                  {other.enabled ? null : (
-                    <Text scale="body-small" tone="variant">
-                      {' '}
-                      · {other.why}
-                    </Text>
-                  )}
-                </MenuItem>
-                <MenuItem onClick={() => setDeleting(true)} tone="error">
-                  Delete
-                </MenuItem>
-              </MenuPopup>
-            </Menu>
-            <Delete
-              onOpenChange={(next) => {
-                setDeleting(next)
-                if (!next) requestAnimationFrame(() => more.current?.focus())
-              }}
-              open={deleting}
-              status={status}
-              workspace={workspace}
-            />
-          </>
+          phone ? undefined : (
+            <>
+              <Button
+                aria-describedby={reasonId}
+                disabled={!primary.enabled || primary.pending}
+                onClick={primary.run}
+                variant="tonal"
+              >
+                {primary.pending ? primary.busy : primary.word}
+              </Button>
+              {reason}
+              {menu}
+            </>
+          )
         }
         subtitle={
-          <State state={mark}>
-            {words}
-            {started !== null ? <Num className="session__age"> · {ago(now / 1000 - started, now).text}</Num> : null}
-          </State>
+          phone ? undefined : (
+            <State state={mark}>
+              {words}
+              {age}
+            </State>
+          )
         }
         title={workspace.name}
       />
+      <Delete
+        onOpenChange={(next) => {
+          setDeleting(next)
+          if (!next) requestAnimationFrame(() => more.current?.focus())
+        }}
+        open={deleting}
+        status={status}
+        workspace={workspace}
+      />
       <div className="session__meta">
-        <Text render={<p />} scale="body-small" tone="variant" clip>
-          {workspace.machine} · {home(workspace.repo)}
-          {URL.test(workspace.repo) ? (
-            <>
-              {' '}
-              ·{' '}
-              <a className="m3-hit" href={workspace.repo} rel="noreferrer" target="_blank">
-                {workspace.repo.replace(URL, '')}
-              </a>
-            </>
-          ) : null}
-        </Text>
+        {phone ? null : (
+          <Text render={<p />} scale="body-small" tone="variant" clip>
+            {workspace.machine} · {home(workspace.repo)}
+            {URL.test(workspace.repo) ? (
+              <>
+                {' '}
+                ·{' '}
+                <a className="m3-hit" href={workspace.repo} rel="noreferrer" target="_blank">
+                  {workspace.repo.replace(URL, '')}
+                </a>
+              </>
+            ) : null}
+          </Text>
+        )}
         {status?.reached === 'no' ? <Unanswered error={status.error} machine={workspace.machine} /> : null}
         <Talk machine={workspace.machine} />
         {failed ? (

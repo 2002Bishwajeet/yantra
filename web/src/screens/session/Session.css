@@ -13,6 +13,18 @@
   margin: 0;
 }
 
+.session__meta:empty {
+  display: none;
+}
+
+/* Y-757: the first thing in the phone's More menu, read and not pressed. */
+.session__status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+}
+
 .session__meta a,
 .session__banner a,
 .transcript__foot a,
@@ -58,6 +70,21 @@
 .session__chatbar .chat__header {
   flex: 1;
   justify-content: flex-end;
+}
+
+/* Y-757: on the phone the picker, the two toggles and the git split share one row. The title takes what is
+   left and truncates; a git failure (.git__fail, a full-width basis) still wraps below, because it is an error. */
+[data-shell="phone"] .session__chatbar .chat__header {
+  gap: 4px;
+}
+
+[data-shell="phone"] .session__chatbar .chat__crumbs {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+[data-shell="phone"] .session__chatbar .chat__header > :not(.chat__crumbs, .git__fail) {
+  flex: none;
 }
 
 /* Y-498: beside the tabs, a long title truncates rather than drop Commit onto a second line. */
