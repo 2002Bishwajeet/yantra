@@ -73,6 +73,20 @@ test.describe('the dashboard on a busy fleet', () => {
       expect(one.lines).toBeLessThanOrEqual(2)
       expect(one.buttons).toBe(0)
     }
+    // The fixture titles fit on one line, so force a long one to prove the two-line wrap.
+    const long = await rows.first().evaluate((row) => {
+      const head = row.querySelector<HTMLElement>('.m3-row__headline')!
+      const was = head.textContent
+      head.textContent = 'a-very-long-workspace-name-that-cannot-fit-on-one-line is waiting for trust on this machine today'
+      const seen = {
+        cut: head.scrollWidth > head.clientWidth,
+        lines: Math.round(head.getBoundingClientRect().height / parseFloat(getComputedStyle(head).lineHeight)),
+      }
+      head.textContent = was
+      return seen
+    })
+    expect(long.cut).toBe(false)
+    expect(long.lines).toBe(2)
     await region(page, 'Needs you').getByRole('link', { name: /yantra-web is waiting for trust/ }).click()
     await expect(page).toHaveURL(/\/w\/yantra-web/)
   })
