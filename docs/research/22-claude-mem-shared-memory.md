@@ -363,6 +363,164 @@ Y-821 is a new service on the box, so an ADR comes first. The ADR must decide th
 
 Each account also keeps the server's API key in its own `~/.claude-mem/settings.json`, mode `0600`. That file is claude-mem's. A Yantra workspace must still hold no value (§B4).
 
+## 11. The 2026-11-23 model test (Y-821)
+
+§10.1 used a stub model, so it did not show whether the worker can use the owner's Claude login. I ran the real model on yantra-box as `biswa`, with claude-mem 16.0.0 and a custom provider module that runs `claude -p`.
+
+**Result: a self-hosted claude-mem 16.0.0 server generated real observations and a summary with no API key. The worker ran `claude -p` with `biswa`'s Claude login. REST and MCP search both found the stored observation. This answers §10.7 point 1.** I left nothing running.
+
+### 11.1 Setup
+
+- **Data stores.** Postgres and Valkey ran in rootless podman as `biswa`, on 127.0.0.1 only. Postgres came from upstream's `docker/postgres` at `v16.0.0` (commit `cc0fb95`). The build needed `--from docker.io/library/postgres:17-trixie`, because the bare base name did not resolve.
+- **Server and worker.** Both ran on the host as `biswa`, from the `v16.0.0` checkout. `npm install --omit=dev --legacy-peer-deps` in `plugin/` took 4 minutes, with Node 26. The worker logs the module path and its sha256 at start.
+- **Why not a container.** Upstream's image copies `CLAUDE_MEM_CREDENTIALS_FILE` to `~/.claude/.credentials.json` inside the container (`entrypoint.sh`). That is a second copy of the login token, and the two copies refresh apart.
+- **Environment.**
+
+```
+CLAUDE_MEM_RUNTIME=server-beta
+CLAUDE_MEM_DATA_DIR=<dir>
+CLAUDE_MEM_HOST=127.0.0.1  CLAUDE_MEM_SERVER_HOST=127.0.0.1  CLAUDE_MEM_WORKER_HOST=127.0.0.1
+CLAUDE_MEM_SERVER_PORT=37978  CLAUDE_MEM_WORKER_PORT=37978
+CLAUDE_MEM_QUEUE_ENGINE=bullmq  CLAUDE_MEM_QUEUE_REDIS_PREFIX=<prefix>
+CLAUDE_MEM_REDIS_URL=<valkey url>  CLAUDE_MEM_REDIS_MODE=external
+CLAUDE_MEM_SERVER_DATABASE_URL=<postgres url, generated password>
+CLAUDE_MEM_AUTH_MODE=api-key
+CLAUDE_MEM_CHROMA_ENABLED=false  CLAUDE_MEM_SERVER_VECTOR_SEARCH=false
+CLAUDE_MEM_TELEMETRY=0  DO_NOT_TRACK=1
+CLAUDE_MEM_SERVER_PROVIDER=custom
+CLAUDE_MEM_CUSTOM_PROVIDER_MODULE=/abs/path/claude-cli-provider.mjs
+```
+
+- **Commands.**
+
+```
+CLAUDE_MEM_GENERATION_DISABLED=true bun plugin/scripts/server-service.cjs --daemon   # server
+bun plugin/scripts/server-service.cjs worker start                                   # worker
+bun plugin/scripts/server-service.cjs server api-key create --name <n> --scope memories:read,memories:write
+```
+
+  The key command wrote the key to a `0600` file and never printed it. The client ran the real hook entry, `bun plugin/scripts/hook-service.cjs hook claude-code <session-init|observation|summarize|session-end>`, with these settings: `CLAUDE_MEM_RUNTIME=server`, the URL, the key, the project id, `CLAUDE_MEM_WORKER_AUTOSTART=false`, `CLAUDE_MEM_TELEMETRY=0` and `CLAUDE_MEM_REDACT_ENABLED=true`.
+
+### 11.2 The provider interface
+
+I read it in `src/server/runtime/create-server-service.ts` and `src/server/generation/providers/*`. A module exports `createProvider(helpers)`. It returns `{providerLabel, generate(context, signal)}`, and `generate` returns `{rawText, tokensUsed?, providerLabel, modelId?}`. The server retries only a `ServerClassifiedProviderError` of kind `rate_limit` or `transient`. The helpers carry `apiVersion` 1.
+
+The `claude` flags matter. `--bare` cannot be used, because it never reads the OAuth login. The chosen set below loaded no plugins, and `biswa`'s own claude-mem 15.7.0 hooks did not fire. `--system-prompt` cut the cached input from 3,037 to 603 tokens. The model resolved to `claude-haiku-5-5`.
+
+The module as it should be. The spike ran it with one difference: a missing binary (`ENOENT`) was `transient` and is now `unrecoverable` (see §11.4). I did not run the corrected line.
+
+```js
+// claude-mem 16.0.0 custom server provider: generation through `claude -p`
+// with the Claude login of the account that runs the worker. Spike for Y-821.
+import { spawn } from 'node:child_process';
+
+const CLAUDE_BIN = process.env.SPIKE_CLAUDE_BIN || 'claude';
+const MODEL = process.env.SPIKE_CLAUDE_MODEL || 'haiku';
+const CWD = process.env.SPIKE_CLAUDE_CWD || process.cwd();
+
+function runClaude(prompt, signal) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-p', '--output-format', 'json', '--model', MODEL,
+      '--tools', '', '--strict-mcp-config', '--setting-sources', '',
+      '--disable-slash-commands', '--no-session-persistence',
+      '--system-prompt', 'You are a memory observer. Follow the user instructions exactly and reply only in the requested XML.',
+    ];
+    // The CLI must not see a metered key or a gateway, or it would use them instead of the login.
+    const env = { ...process.env };
+    for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_MEM_ANTHROPIC_API_KEY',
+      'CLAUDE_MEM_SERVER_DATABASE_URL', 'CLAUDE_MEM_REDIS_URL']) delete env[k];
+    const child = spawn(CLAUDE_BIN, args, { cwd: CWD, env, stdio: ['pipe', 'pipe', 'pipe'], signal });
+    let out = '', err = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.on('data', d => { err += d; });
+    child.on('error', reject);
+    child.on('close', code => resolve({ code, out, err }));
+    child.stdin.end(prompt);
+  });
+}
+
+export function createProvider(helpers) {
+  const { apiVersion, buildServerGenerationPrompt, ServerClassifiedProviderError: E } = helpers;
+  if (apiVersion !== 1) throw new Error(`claude-cli provider written for helpers apiVersion 1, got ${apiVersion}`);
+
+  return {
+    providerLabel: 'claude',
+    async generate(context, signal) {
+      const { prompt, skippedAll, noEvents } = buildServerGenerationPrompt(context);
+      if (noEvents) return { rawText: '<skip_summary reason="no_events_loaded" />', providerLabel: 'claude', modelId: MODEL };
+      if (skippedAll) return { rawText: '<skip_summary reason="all_events_private" />', providerLabel: 'claude', modelId: MODEL };
+
+      let run;
+      try {
+        run = await runClaude(prompt, signal);
+      } catch (cause) {
+        // A missing binary never reached the API and retrying cannot help.
+        if (cause?.code === 'ENOENT') throw new E(`claude CLI not found: ${cause.message}`, { kind: 'unrecoverable', cause });
+        // Other spawn failures and aborts are ambiguous: the call may have reached the API.
+        throw new E(`claude CLI did not run: ${cause?.message ?? cause}`, { kind: 'transient', cause });
+      }
+
+      let data;
+      try {
+        data = JSON.parse(run.out);
+      } catch (cause) {
+        throw new E(`claude CLI exit ${run.code}, no JSON result: ${run.err.slice(0, 200)}`, { kind: 'transient', cause });
+      }
+
+      if (data.is_error || data.subtype !== 'success') {
+        const text = `${data.result ?? ''} ${data.api_error_status ?? ''} ${data.terminal_reason ?? ''}`.toLowerCase();
+        const cause = new Error(`claude CLI error: ${String(data.result ?? data.subtype).slice(0, 200)}`);
+        if (/rate.?limit|usage limit|429|limit reached|resets/.test(text)) throw new E('claude login rate limited', { kind: 'rate_limit', cause, retryAfterMs: 60_000 });
+        if (/overloaded|529|5\d\d/.test(text)) throw new E('claude upstream overloaded', { kind: 'transient', cause });
+        if (/login|auth|401|403|credential|oauth/.test(text)) throw new E('claude login invalid', { kind: 'auth_invalid', cause });
+        if (/prompt is too long|context/.test(text)) throw new E('claude context overflow', { kind: 'unrecoverable', cause });
+        throw new E(`claude CLI failed: ${String(data.result ?? data.subtype).slice(0, 200)}`, { kind: 'unrecoverable', cause });
+      }
+
+      const u = data.usage ?? {};
+      const tokensUsed = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.output_tokens ?? 0);
+      return {
+        rawText: String(data.result ?? '').trim(),
+        tokensUsed,
+        providerLabel: 'claude',
+        modelId: Object.keys(data.modelUsage ?? {})[0] ?? MODEL,
+      };
+    },
+  };
+}
+```
+
+### 11.3 Evidence
+
+- One `Edit` event became a `bugfix` observation, "Retry loop in uploader now treats HTTP 503 as retryable". The model was `claude-haiku-5-5`, and the job completed on attempt 1.
+- `summarize` produced a summary row in 4.7 s.
+- `POST /v1/search` for "503 retry uploader" returned the observation. MCP `tools/call search` for "backoff 503" returned 1 of 1, with the same id.
+- The database held 15 observations, all from the real model.
+
+| Setting | Result |
+| --- | --- |
+| One generation | 2.6 to 4.7 s, most about 3.5 s. A bare CLI call took about 1.5 s, of which about 1.0 s was the API. |
+| Concurrency 1 (default), six events at once | They queued. None failed. Each took 3.4 to 3.8 s. The last finished 20.9 s after arrival. |
+| `CLAUDE_MEM_SERVER_GENERATION_CONCURRENCY=4`, six events at once | All six finished in 6.9 s. None failed. |
+
+The concurrency setting is per lane, and there are two lanes (event and summary). A value of N therefore allows 2N `claude` processes.
+
+### 11.4 Faults
+
+- **A missing binary.** The spike module classified `ENOENT` as `transient`. The server tried twice, marked the job `failed`, and lost the event. It must be `unrecoverable`, and the box must alert on it. The module in §11.2 has that change.
+- **An invalid model name.** The CLI returned `is_error`, and the module classified it `unrecoverable`. The server did not retry. This is correct.
+- **A side effect.** Claude created an empty `~/.claude/projects/-home-biswa-spike-y821-cwd/memory` directory, although the module passes `--no-session-persistence`.
+- **The login file.** The first probe refreshed `~/.claude/.credentials.json`. I read its stat only. The worker therefore depends on the login on the box staying valid.
+
+### 11.5 What I did not verify
+
+- A rate limit, an expired login and an HTTP 529. The `rate_limit` mapping is a regular expression on the CLI's error text, and it has not run.
+- Two or more CLIs that refresh the token at the same moment.
+- Long batches. The module ignores `maxOutputTokens`, and I did not test `CLAUDE_MEM_SERVER_MAX_OUTPUT_TOKENS`.
+- A client on another machine over the tailnet with the real model. §10.3 tested that path with the stub.
+- The container route, vector search, a run of several hours, and a worker restart with jobs in the queue.
+
 ## Sources
 
 All accessed 2026-10-19.
@@ -389,3 +547,4 @@ All accessed 2026-10-19.
 - Server re-test, 2026-11-20 (§10), accessed 2026-11-20: claude-mem at `cc0fb9515` (v16.0.0), `docs/server.md`, `docs/public/hosted-server.mdx`, `docs/public/usage/auto-redaction.mdx`, `docs/public/telemetry.mdx`, `docs/remote-worker-capture.md`, `docker-compose.yml`, `docker/claude-mem/Dockerfile`, `docker/postgres/Dockerfile`, `src/services/hooks/{runtime-selector,server-client,server-bootstrap}.ts`, `src/server/runtime/{ServerService,ServerViewerRoutes,create-server-service}.ts`, `src/server/routes/v1/ServerV1PostgresRoutes.ts`, `src/server/generation/providers/ClaudeObservationProvider.ts`, `src/storage/postgres/{agent-events,server-sessions}.ts`, `src/cli/handlers/observation.ts`, `src/services/worker/http/routes/SettingsRoutes.ts`; the installed plugin `~/.claude/plugins/cache/thedotmack/claude-mem/16.0.0/`; a run of the stack in rootless podman on yantra-box and of the hooks in a container on the laptop.
 - Hosted server guide, accessed 2026-11-20: https://docs.claude-mem.ai/hosted-server
 - Releases `v16.0.0` and `v16.0.1`, and issues 4131 and 4758, accessed 2026-11-20: https://github.com/thedotmack/claude-mem/releases/tag/v16.0.0, https://github.com/thedotmack/claude-mem/issues/4131, https://github.com/thedotmack/claude-mem/issues/4758
+- The 2026-11-23 model test (§11), accessed 2026-11-23: `thedotmack/claude-mem` at `v16.0.0` (`cc0fb95`), `src/server/runtime/create-server-service.ts`, `src/server/generation/providers/*`, `docker/postgres`, `entrypoint.sh`; the `claude` CLI on yantra-box (`claude -p --output-format json`).
