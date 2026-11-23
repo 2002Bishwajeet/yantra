@@ -196,16 +196,17 @@ describe('the harness picker', () => {
     expect(screen.getByRole('button', { name: 'Stop opencode' })).toBeTruthy()
   })
 
-  it('draws a missing login with the machine and the command, and Retry reopens the socket', async () => {
+  it('draws a missing login with the account, the machine and the command, and Retry reopens the socket', async () => {
     await open()
     type('list the files')
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await settled(() => expect(frames()).toHaveLength(1))
     say(chatNotLoggedIn)
     const alert = await settled(() => screen.getByRole('alert'))
-    expect(within(alert).getByRole('heading').textContent).toBe('opencode is not logged in on cachyos-g14')
-    expect(alert.textContent).toContain('Run this on cachyos-g14, then retry.')
-    expect(within(alert).getByText('opencode auth login')).toBeTruthy()
+    expect(within(alert).getByRole('heading').textContent).toBe('opencode is not logged in as work on cachyos-g14')
+    expect(alert.textContent).toContain('as work on cachyos-g14')
+    expect(alert.textContent).toContain('Run this as work on cachyos-g14, then retry.')
+    expect(within(alert).getByText('sudo -iu work opencode auth login')).toBeTruthy()
     expect(within(alert).getByRole('button', { name: 'Copy how to log opencode in' })).toBeTruthy()
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()
     // Every turn would fail the same way until someone logs in.

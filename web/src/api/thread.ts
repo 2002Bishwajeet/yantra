@@ -245,7 +245,16 @@ export type ChatFailure =
       kind: 'unknownThread' | 'busy' | 'badFrame' | 'unreachable' | 'checkpoint' | 'diff' | 'stopTask'
       said: string
     }
-  | { type: 'error'; kind: 'notLoggedIn'; said: string; harness: Harness; machine: string; command: string }
+  | {
+      type: 'error'
+      kind: 'notLoggedIn'
+      said: string
+      harness: Harness
+      machine: string
+      /** The account the agent runs as, when ssh could say (Y-815). */
+      account?: string
+      command: string
+    }
 
 /** The one reply to each image the browser sends as a binary frame (Y-424),
  *  in the order they were sent. `path` is where the agent reads it. */

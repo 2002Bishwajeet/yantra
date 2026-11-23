@@ -108,14 +108,18 @@ impl std::str::FromStr for Harness {
 }
 
 /// What a person runs on the machine to log a harness in (R19 §1). `None` is
-/// Claude, which is not an ACP harness.
-pub fn login_command(harness: Option<Harness>) -> &'static str {
+/// Claude, which is not an ACP harness. `account` is the account the agent
+/// runs as, when it is not the person's own (Y-815).
+pub fn login_command(harness: Option<Harness>, account: Option<&str>) -> String {
+    let as_account = account
+        .map(|account| format!("sudo -iu {account} "))
+        .unwrap_or_default();
     match harness {
-        None => "run claude and type /login",
-        Some(Harness::Codex) => "codex login",
-        Some(Harness::Gemini) => "run gemini and sign in",
-        Some(Harness::Grok) => "run grok and sign in",
-        Some(Harness::Opencode) => "opencode auth login",
+        None => format!("run {as_account}claude and type /login"),
+        Some(Harness::Codex) => format!("{as_account}codex login"),
+        Some(Harness::Gemini) => format!("run {as_account}gemini and sign in"),
+        Some(Harness::Grok) => format!("run {as_account}grok and sign in"),
+        Some(Harness::Opencode) => format!("{as_account}opencode auth login"),
     }
 }
 
@@ -1642,11 +1646,32 @@ mod tests {
     #[test]
     fn each_harness_names_its_login() {
         assert_eq!(
-            login_command(Some(Harness::Opencode)),
+            login_command(Some(Harness::Opencode), None),
             "opencode auth login"
         );
-        assert_eq!(login_command(Some(Harness::Codex)), "codex login");
-        assert_eq!(login_command(None), "run claude and type /login");
+        assert_eq!(login_command(Some(Harness::Codex), None), "codex login");
+        assert_eq!(login_command(None, None), "run claude and type /login");
+    }
+
+    #[test]
+    fn a_login_for_another_account_runs_as_that_account() {
+        let work = Some("work");
+        assert_eq!(
+            login_command(Some(Harness::Opencode), work),
+            "sudo -iu work opencode auth login"
+        );
+        assert_eq!(
+            login_command(Some(Harness::Codex), work),
+            "sudo -iu work codex login"
+        );
+        assert_eq!(
+            login_command(Some(Harness::Gemini), work),
+            "run sudo -iu work gemini and sign in"
+        );
+        assert_eq!(
+            login_command(None, work),
+            "run sudo -iu work claude and type /login"
+        );
     }
 
     /// R19 §1's verified refusals, and two that are not about a login.

@@ -284,6 +284,13 @@ pub fn host_of(machine: &str) -> Option<String> {
     asked_in(&dir().ok()?, machine, "hostname")
 }
 
+/// The account ssh logs in as on `machine`, which `~/.ssh/config` decides
+/// (Y-815). `None` when ssh cannot say or the name is not one plain account.
+/// A blocking spawn (I-13).
+pub fn logs_in_as(machine: &str) -> Option<String> {
+    logs_in_as_in(&dir().ok()?, machine).filter(|user| usable_user(user))
+}
+
 fn logs_in_as_in(dir: &Path, machine: &str) -> Option<String> {
     asked_in(dir, machine, "user")
 }
@@ -645,6 +652,12 @@ mod tests {
         assert_eq!(unnamed_in(&dir, "cachyos-g14"), None);
         assert!(unnamed_in(&dir, "pi").is_some());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_machine_no_block_names_logs_in_as_this_account() {
+        let account = logs_in_as("yantra-test-no-such-alias").expect("ssh names an account");
+        assert!(usable_user(&account), "{account:?}");
     }
 
     /// ssh takes the first value it finds, so an owner's `Host *` with a `User`

@@ -1442,7 +1442,8 @@ export const chatDiffFailed = {
 } satisfies ChatFailure
 
 export const chatNotLoggedIn = {
-  "command": "opencode auth login",
+  "account": "work",
+  "command": "sudo -iu work opencode auth login",
   "harness": "opencode",
   "kind": "notLoggedIn",
   "machine": "cachyos-g14",

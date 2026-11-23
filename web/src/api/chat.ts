@@ -53,8 +53,13 @@ const sentences: Record<ChatErrorKind, string> = {
   turnFailed: 'The agent could not finish the turn.',
 }
 
-/** Whose login is missing, where, and what to run there. */
-export type Login = { harness: Harness; machine: string; command: string }
+/** Whose login is missing, where, as which account, and what to run there. */
+export type Login = { harness: Harness; machine: string; account?: string; command: string }
+
+/** Where the login goes: "as work on yantra-box", or "on yantra-box". */
+export function loginPlace(login: Login): string {
+  return login.account ? `as ${login.account} on ${login.machine}` : `on ${login.machine}`
+}
 
 /** The one error the chat client reports. `said` is the daemon's or the
  *  agent's own words, verbatim. */
@@ -203,14 +208,20 @@ const KINDS: ReadonlySet<string> = new Set([
 const NAMES: ReadonlySet<string> = new Set(HARNESSES)
 
 function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
-  const { harness, machine, command } = failure
+  const { harness, machine, account, command } = failure
   return typeof harness === 'string' &&
     NAMES.has(harness) &&
     typeof machine === 'string' &&
+    (account === undefined || (typeof account === 'string' && account !== '')) &&
     typeof command === 'string' &&
     command !== ''
-    ? { harness: harness as Harness, machine, command }
+    ? { harness: harness as Harness, machine, ...(account === undefined ? {} : { account }), command }
     : null
+}
+
+function errorOfLogin(frame: Extract<ChatFailure, { kind: 'notLoggedIn' }>): ChatError {
+  const { type: _, kind, said, ...login } = frame
+  return new ChatError(kind, said, `Run this ${loginPlace(login)}, then retry.`, login)
 }
 
 const isCount = (n: unknown) => n === undefined || (typeof n === 'number' && Number.isInteger(n) && n >= 0)
@@ -496,11 +507,7 @@ export function openChat(
         if (frame.kind === 'unreachable') attempts = tries
         onError(
           frame.kind === 'notLoggedIn'
-            ? new ChatError(frame.kind, frame.said, `Run this on ${frame.machine}, then retry.`, {
-                harness: frame.harness,
-                machine: frame.machine,
-                command: frame.command,
-              })
+            ? errorOfLogin(frame)
             : new ChatError(frame.kind, frame.said),
         )
         return
