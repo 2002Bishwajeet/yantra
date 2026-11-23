@@ -17,7 +17,7 @@ afterEach(() => {
 describe('Providers', () => {
   it('names the login the daemon holds, and counts the Claude sign-ins', async () => {
     mountSettings('desktop', '/settings/providers')
-    expect(await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')).toBeTruthy()
+    expect(await screen.findByText('Signed in as 2002Bishwajeet · repositories, reviews, issues')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Manage' })).toBeTruthy()
     // contract.readiness has no login-session check on any machine.
     expect(await screen.findByText(/Claude subscription · signed in on 0 of \d+ machines/)).toBeTruthy()
@@ -49,7 +49,7 @@ describe('Providers', () => {
   /** Y-583: the GitHub row leads with the profile image once connected. */
   it('leads the GitHub row with the profile image, and the icon when not connected', async () => {
     mountSettings('desktop', '/settings/providers')
-    const row = (await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')).closest('li')
+    const row = (await screen.findByText('Signed in as 2002Bishwajeet · repositories, reviews, issues')).closest('li')
     expect(row?.querySelector('img')?.getAttribute('src')).toBe(contract.github.avatar_url)
     cleanup()
     unmountSettings()
@@ -67,7 +67,7 @@ describe('Providers', () => {
 
   it('says only what the category has not said, and draws GitLab as unconnected', async () => {
     mountSettings('desktop', '/settings/providers')
-    await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')
+    await screen.findByText('Signed in as 2002Bishwajeet · repositories, reviews, issues')
     // §1 row 46: the footnote repeated the category blurb word for word.
     expect(screen.getAllByText(/Yantra signs in to GitHub itself/)).toHaveLength(1)
     expect(screen.getByText('Not connected · Later')).toBeTruthy()
@@ -97,7 +97,7 @@ describe('Providers', () => {
     // The sheet polls at the interval GitHub named; the next answer is the grant.
     expect(await sheet.findByText('Signed in as 2002Bishwajeet.')).toBeTruthy()
     fireEvent.click(sheet.getByRole('button', { name: 'Done' }))
-    expect(await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')).toBeTruthy()
+    expect(await screen.findByText('Signed in as 2002Bishwajeet · repositories, reviews, issues')).toBeTruthy()
     // Nothing that looks like a token crossed.
     expect(document.body.textContent).not.toMatch(/gho_|ghp_/)
   })

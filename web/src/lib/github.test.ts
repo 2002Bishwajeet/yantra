@@ -56,7 +56,7 @@ describe('words', () => {
   })
 
   it('keeps the string the baselines show when the login is known', () => {
-    expect(held({ kind: 'accepted', login: 'ada' }, false)).toBe('signed in as ada · repositories, reviews, issues')
+    expect(held({ kind: 'accepted', login: 'ada' }, false)).toBe('Signed in as ada · repositories, reviews, issues')
     expect(held({ kind: 'accepted', login: 'ada' }, true)).toBe('Connected as ada')
   })
 

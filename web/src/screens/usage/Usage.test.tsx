@@ -143,7 +143,7 @@ describe('/usage on the busy fleet', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(11)
     expect(within(table).queryByRole('columnheader', { name: /total/i })).toBeNull()
     expect(screen.queryByText(/^Total/i)).toBeNull()
-    expect(screen.getByText(/not added up/)).toBeTruthy()
+    expect(screen.getByText(/no total for the whole fleet/)).toBeTruthy()
   })
 })
 

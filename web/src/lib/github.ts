@@ -53,6 +53,6 @@ export const signedIn = (login: string | null) => (login ? `Signed in as ${login
 /** The Providers row's supporting text for a held grant. */
 export function held(g: Extract<Grant, { kind: 'accepted' | 'unasked' | 'refused' }>, phone: boolean): string {
   if (g.kind === 'refused') return REFUSED
-  if (g.login) return phone ? `Connected as ${g.login}` : `signed in as ${g.login} · repositories, reviews, issues`
+  if (g.login) return phone ? `Connected as ${g.login}` : `Signed in as ${g.login} · repositories, reviews, issues`
   return g.kind === 'unasked' ? 'Signed in · GitHub not asked yet' : 'Signed in · repositories, reviews, issues'
 }

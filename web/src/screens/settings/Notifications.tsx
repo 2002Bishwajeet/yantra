@@ -13,7 +13,7 @@ import { ThisDevice } from './ThisDevice'
  *  so a save cannot move `relay` until yantrad restarts and this page is read
  *  again, ADR-0021). */
 function relaySupporting(relay: boolean | undefined, saved: boolean): string {
-  if (relay === undefined) return 'asking the daemon'
+  if (relay === undefined) return 'Asking the daemon'
   const base = relay ? 'On · alerts go to your ntfy topic' : 'Off · no ntfy topic is set'
   return saved ? `${base} · saved, used after a restart` : base
 }

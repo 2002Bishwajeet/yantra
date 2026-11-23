@@ -19,7 +19,7 @@ const CATEGORIES = [
 const signedIn = (size: string) =>
   size === 'phone'
     ? 'Connected as 2002Bishwajeet'
-    : 'signed in as 2002Bishwajeet · repositories, reviews, issues'
+    : 'Signed in as 2002Bishwajeet · repositories, reviews, issues'
 
 /** The list on a desktop and a tablet; a phone pushes the screen instead. */
 const list = (page: Parameters<typeof axe>[0]) => page.getByRole('navigation', { name: 'Settings' })

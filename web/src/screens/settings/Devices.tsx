@@ -113,7 +113,7 @@ function NewDevice(props: { first: boolean }) {
             <Plus />
           </Lead>
         }
-        supporting="or run yantra passkey code on the hub"
+        supporting="Or run yantra passkey code on the hub"
         trailing={
           <Button variant="tonal" onClick={() => code.mutate()} disabled={code.isPending}>
             {code.data ? 'New code' : 'Make a code'}

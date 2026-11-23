@@ -25,6 +25,7 @@ const FILES = [
   'screens/usage/Usage.tsx',
   'screens/repair/Repair.tsx',
   'api/client.ts',
+  'lib/github.ts',
 ]
 
 const PHRASES = [
@@ -51,5 +52,10 @@ describe('the copy that named the plumbing', () => {
   it.each(FILES)('%s starts each supporting line, blurb, reason and note with a capital', (file) => {
     const lower = /(?:supporting=(?:["']|\{`)|blurb: ['"`]|why=["']|<Note>)[a-z]+[ ·]/g
     expect(read(file).match(lower) ?? []).toEqual([])
+  })
+
+  it.each(FILES)('%s returns no computed line that starts in lower case', (file) => {
+    const lower = /^\s*(?:return|if \(.*\) return|case .*: return) [`'"][a-z]+ [a-z]/
+    expect(read(file).split('\n').filter((line) => lower.test(line))).toEqual([])
   })
 })

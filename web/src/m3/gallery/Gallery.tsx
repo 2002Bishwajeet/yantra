@@ -268,7 +268,7 @@ function Catalogue() {
                 </Lead>
               }
               headline="GitHub"
-              supporting="signed in as 2002Bishwajeet · repositories, reviews, issues"
+              supporting="Signed in as 2002Bishwajeet · repositories, reviews, issues"
               trailing={<Button variant="text">Manage</Button>}
             />
             <ListItem

@@ -332,7 +332,7 @@ export function Usage() {
 
       {fanned.fanned === 'done' ? (
         <Text render={<p />} className="usage__note" scale="body-small" tone="variant">
-          Read from each machine when you ask. Each machine's spend is shown on its own and is not added up.
+          Read from each machine when you ask. The page shows no total for the whole fleet.
         </Text>
       ) : null}
     </Page>

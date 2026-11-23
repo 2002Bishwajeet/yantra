@@ -45,7 +45,7 @@ export function Providers() {
           }
           supporting={
             state.kind === 'asking' ? (
-              'asking the daemon'
+              'Asking the daemon'
             ) : state.kind === 'none' || state.kind === 'pending' ? (
               'Not connected'
             ) : state.kind === 'refused' ? (
@@ -150,7 +150,7 @@ function resolvePending(pending: AppPending, connection: Connection | undefined)
 function githubAppSupporting(connection: Connection | undefined, phone: boolean, pending: AppPending): string {
   if (pending?.kind === 'custom') return 'Your own · after yantrad restarts'
   if (pending?.kind === 'own') return "Yantra's own · after yantrad restarts"
-  if (connection === undefined) return 'asking the daemon'
+  if (connection === undefined) return 'Asking the daemon'
   if (connection.client_id === null) return phone ? 'None set up' : 'None configured'
   if (connection.client_id_custom) return phone ? 'Your own' : `Your own · ${connection.client_id}`
   return phone ? "Yantra's own" : `Yantra's own · ${connection.client_id}`

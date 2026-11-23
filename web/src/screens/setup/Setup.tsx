@@ -92,21 +92,21 @@ const mark: Record<View, MarkState> = {
 function wordsOf(said: Line, name: string): string {
   switch (said.kind) {
     case 'asleep':
-      return `asleep${said.since ? ` · last seen ${seen(said.since)}` : ''}`
+      return `Asleep${said.since ? ` · last seen ${seen(said.since)}` : ''}`
     case 'unchecked':
       return 'Not checked yet · a check takes a few seconds'
     case 'unreachable':
       return reachWords(said.kind, name).cause
     case 'refused':
-      return 'the key was refused · run the join command on it'
+      return 'The key was refused · run the join command on it'
     case 'unjoined':
-      return 'no account named for it · run the join command on it'
+      return 'No account named for it · run the join command on it'
     case 'browser':
       return 'Tailscale asks for a browser sign-in · run the join command on it'
     case 'changed':
-      return `its host key changed · run ${forgetHostKey(name)} once you know why`
+      return `Its host key changed · run ${forgetHostKey(name)} once you know why`
     case 'ready':
-      return `ready · ${said.present} of ${said.total}`
+      return `Ready · ${said.present} of ${said.total}`
     case 'missing':
       return said.installable ? said.words : `${said.words} · the machine page shows how`
   }
@@ -116,9 +116,9 @@ function wordsOf(said: Line, name: string): string {
 function hubWords(said: Line, name: string): string {
   switch (said.kind) {
     case 'refused':
-      return 'the key was refused · its machine page shows how'
+      return 'The key was refused · its machine page shows how'
     case 'unjoined':
-      return 'no account named for it · its machine page shows how'
+      return 'No account named for it · its machine page shows how'
     case 'browser':
       return 'Tailscale asks for a browser sign-in · its machine page shows how'
     default:

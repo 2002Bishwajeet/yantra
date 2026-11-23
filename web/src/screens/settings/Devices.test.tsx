@@ -116,7 +116,7 @@ describe('Devices', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Make a code' }))
     const row = await screen.findByRole('alert')
     expect(within(row).getByRole('heading', { name: 'The proxy hides who is calling' })).toBeTruthy()
-    expect(screen.getByText('or run yantra passkey code on the hub')).toBeTruthy()
+    expect(screen.getByText('Or run yantra passkey code on the hub')).toBeTruthy()
   })
 
   it('draws the read’s failure with the daemon’s words', async () => {

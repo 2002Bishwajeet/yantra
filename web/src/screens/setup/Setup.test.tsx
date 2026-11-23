@@ -364,7 +364,7 @@ describe('the hub', () => {
     })
     const hub = hubList()
     expect(hub.getByText('yantra-box')).toBeTruthy()
-    expect(hub.getByText('ready · 7 of 7')).toBeTruthy()
+    expect(hub.getByText('Ready · 7 of 7')).toBeTruthy()
     expect(hub.getByText('19,942 MB free · 15% busy')).toBeTruthy()
     expect(hub.queryByRole('button')).toBeNull()
     expect(hub.queryByRole('link')).toBeNull()
@@ -431,7 +431,7 @@ describe('the hub', () => {
     const refused = { machine: box.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([box]), ...keyed, 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
     const hub = hubList()
-    expect(hub.getByText('the key was refused · its machine page shows how')).toBeTruthy()
+    expect(hub.getByText('The key was refused · its machine page shows how')).toBeTruthy()
     expect(hub.queryByText(/join command/)).toBeNull()
     expect(hub.queryByText('Permission denied (publickey)')).toBeNull()
     expect(hub.queryByRole('button', { name: /Copy the join command/ })).toBeNull()
@@ -444,7 +444,7 @@ describe('the hub', () => {
   const otherMachines = () => screen.queryByRole('list', { name: 'Other machines' })
 
   it.each([
-    ['unjoined', 'the ssh config here names no account for yantra-box, so ssh tried `yantra` · Permission denied (publickey).', 'no account named for it · its machine page shows how'],
+    ['unjoined', 'the ssh config here names no account for yantra-box, so ssh tried `yantra` · Permission denied (publickey).', 'No account named for it · its machine page shows how'],
     ['browser', 'Tailscale SSH requires an additional check', 'Tailscale asks for a browser sign-in · its machine page shows how'],
   ])('lists a %s hub once, under step 1, with no join command', async (_kind, detail, words) => {
     const one = aMachine({ ...named, os: 'linux', online: true, address: '100.64.0.1' })
@@ -475,7 +475,7 @@ describe('the hub', () => {
       'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name)])],
     })
     expect(await screen.findByText("The appliance's key could not be read")).toBeTruthy()
-    expect(hubList().getByText('ready · 7 of 7')).toBeTruthy()
+    expect(hubList().getByText('Ready · 7 of 7')).toBeTruthy()
   })
 
   it('draws no hub and keeps the failure when the machines could not be read', async () => {
@@ -498,7 +498,7 @@ describe('the machine lines', () => {
   /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */
   it('draws an asleep machine as asleep, with no button', async () => {
     await draw(base([linux, mac]))
-    expect(screen.getAllByText('asleep · last seen 1h ago')).toHaveLength(2)
+    expect(screen.getAllByText('Asleep · last seen 1h ago')).toHaveLength(2)
     expect(screen.queryByRole('button', { name: /^Check/ })).toBeNull()
   })
 
@@ -531,7 +531,7 @@ describe('the machine lines', () => {
     const changed = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: CHANGED_KEY }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([changed as Readiness])] })
     expect(
-      screen.getByText('its host key changed · run sudo -u yantra -H yantra forget-host-key cachyos-g14 once you know why'),
+      screen.getByText('Its host key changed · run sudo -u yantra -H yantra forget-host-key cachyos-g14 once you know why'),
     ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeNull()
   })
@@ -552,7 +552,7 @@ describe('the machine lines', () => {
   it('gives a refused machine the join command to run on it', async () => {
     const refused = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
-    expect(screen.getByText('the key was refused · run the join command on it')).toBeTruthy()
+    expect(screen.getByText('The key was refused · run the join command on it')).toBeTruthy()
     expect(screen.queryByText('Permission denied (publickey)')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
     expect(await screen.findByText('Permission denied (publickey)')).toBeTruthy()
@@ -648,7 +648,7 @@ describe('the machine lines', () => {
       'GET /api/readiness': [200, looked.ok([checks(tools)])],
     })
     expect(screen.getByText(/1 of 2 machines ready · one is enough to start/)).toBeTruthy()
-    expect(screen.getByText('ready · 7 of 7')).toBeTruthy()
+    expect(screen.getByText('Ready · 7 of 7')).toBeTruthy()
     expect(filled()).toEqual(['New session'])
   })
 
@@ -664,7 +664,7 @@ describe('the machine lines', () => {
     const foreign = within(screen.getByRole('list', { name: 'Devices your account does not own' }))
     expect(foreign.getByText('shared from another account · not supported yet')).toBeTruthy()
     expect(foreign.getByText(/tagged, so the tailnet owns it/)).toBeTruthy()
-    expect(screen.queryByText('ready · 7 of 7')).toBeNull()
+    expect(screen.queryByText('Ready · 7 of 7')).toBeNull()
     expect(filled()).not.toEqual(['New session'])
   })
 
@@ -675,7 +675,7 @@ describe('the machine lines', () => {
       'GET /api/ssh-identity': [200, contract.sshIdentity],
       'GET /api/readiness': [200, looked.ok([checks({ ...tools, 'provider-auth': 'absent' })])],
     })
-    expect(screen.getByText('ready · 7 of 8')).toBeTruthy()
+    expect(screen.getByText('Ready · 7 of 8')).toBeTruthy()
     expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
   })
 })
@@ -787,7 +787,7 @@ describe('the bulk buttons', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Check all' }))
     expect(await screen.findByText('cachyos-g14 was not asked')).toBeTruthy()
-    await waitFor(() => expect(screen.getByText('ready · 7 of 7')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Ready · 7 of 7')).toBeTruthy())
   })
 
   it('shows neither button when every machine is asleep or ready', async () => {

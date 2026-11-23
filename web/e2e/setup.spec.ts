@@ -43,7 +43,7 @@ test.describe('the first run', () => {
 
   /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */
   test('draws asleep machines as asleep, with nothing to press', async ({ page }) => {
-    await expect(page.getByText(/^asleep · last seen/).first()).toBeVisible()
+    await expect(page.getByText(/^Asleep · last seen/).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /^Check/ })).toHaveCount(0)
   })
 
@@ -113,7 +113,7 @@ test.describe('a fresh install with a ready hub', () => {
   test('shows the hub ready under step 1, with no action', async ({ page }) => {
     const hub = page.getByRole('list', { name: 'The hub' })
     await expect(hub.getByText('yantra-box', { exact: true })).toBeVisible()
-    await expect(hub.getByText(/^ready · /)).toBeVisible()
+    await expect(hub.getByText(/^Ready · /)).toBeVisible()
     await expect(hub.getByRole('button')).toHaveCount(0)
     await expect(hub.getByRole('link')).toHaveCount(0)
     await expect(page.getByText(/yantra-box is the hub and needs no adding · more machines can be added later/)).toBeVisible()
