@@ -14,6 +14,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
+import { Num } from '@/m3/text/Text'
 import type { ApiError } from '@/api/errors'
 import { day } from '@/lib/time'
 import { Group } from './Group'
@@ -54,7 +55,11 @@ function Session(props: { session: DeviceSession }) {
             <Laptop />
           </Lead>
         }
-        supporting={`${session.this_device ? 'this device · ' : ''}with ${session.passkey} · ends ${when(session.ends)}`}
+        supporting={
+          <>
+            {session.this_device ? 'this device · ' : ''}with {session.passkey} · ends <Num>{when(session.ends)}</Num>
+          </>
+        }
         trailing={
           <Button variant="text" tone="error" onClick={() => out.mutate(session.id)} disabled={out.isPending}>
             Sign out
@@ -78,7 +83,11 @@ function Passkey(props: { name: string; made: number }) {
             <KeyRound />
           </Lead>
         }
-        supporting={`enrolled ${when(made)}`}
+        supporting={
+          <>
+            enrolled <Num>{when(made)}</Num>
+          </>
+        }
         trailing={
           <Button variant="text" tone="error" onClick={() => remove.mutate(name)} disabled={remove.isPending}>
             Remove

@@ -6,7 +6,7 @@ import { Button } from '@/m3/button/Button'
 import { Page } from '@/m3/page/Page'
 import { PageHeader } from '@/m3/page/PageHeader'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Num, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 import { KillSession } from '@/screens/fleet/Confirm'
 import { isAge } from '@/screens/fleet/clock'
 import { KeyRow } from '@/screens/session/Keys'
@@ -57,7 +57,7 @@ export function SessionTerminal() {
       <div className="session-terminal__row" data-factor={factor}>
         <div className="session-terminal__meta">
           <Text render={<p />} scale="body-small" tone="variant">
-            <Mono>{session}</Mono> is a tmux session on{' '}
+            <span>{session}</span> is a tmux session on{' '}
             <Link className="m3-hit" params={{ machine }} to="/m/$machine">
               {machine}
             </Link>{' '}
