@@ -194,6 +194,7 @@ function AccountButton() {
           <Suspense fallback={null}>
             <AccountMenu
               anchor={ref}
+              connected={github.data?.connected ?? false}
               login={github.data?.connected ? github.data.login : null}
               onOpenChange={setOpen}
               open={open}

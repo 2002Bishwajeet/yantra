@@ -5,7 +5,7 @@ import { REFUSED } from '@/lib/github'
 import { renderRouted } from '@/test/inRouter'
 import { AccountMenu } from './Account'
 
-function draw(props: { login: string | null; refused?: boolean }) {
+function draw(props: { login: string | null; connected?: boolean; refused?: boolean }) {
   const anchor = createRef<HTMLButtonElement>()
   return renderRouted(
     <>
@@ -14,6 +14,7 @@ function draw(props: { login: string | null; refused?: boolean }) {
       </button>
       <AccountMenu
         anchor={anchor}
+        connected={props.connected ?? props.login !== null}
         login={props.login}
         onOpenChange={vi.fn()}
         open
@@ -36,6 +37,13 @@ describe('the account line (Y-761)', () => {
     expect(screen.getByText('Signed in as octocat')).toBeTruthy()
     expect(items).toEqual(['Rooms', 'Settings', 'About'])
     expect(screen.getByRole('group', { name: 'Signed in as octocat' })).toBeTruthy()
+  })
+
+  it('says “Signed in” when connected with a login not yet learned', async () => {
+    await draw({ connected: true, login: null })
+    await opened()
+    expect(screen.getByText('Signed in')).toBeTruthy()
+    expect(screen.queryByText('This device')).toBeNull()
   })
 
   it('says “This device” when there is no grant', async () => {

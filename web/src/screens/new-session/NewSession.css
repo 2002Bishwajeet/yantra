@@ -377,7 +377,7 @@ span.ns__crumb {
   gap: 4px;
   padding: 12px 16px;
   border-radius: var(--m3-row-radius);
-  background: var(--md-sys-color-surface-container-lowest);
+  background: var(--m3-raised-surface);
 }
 
 .ns__stage[data-state="running"] {

@@ -6,14 +6,14 @@ import { Menu, MenuHeading, MenuLinkItem, MenuPopup, MenuSeparator } from '@/m3/
 import { guardOutsidePress, useReady, type PopupProps } from './useReady'
 
 /** The avatar's menu, without its trigger: the shell owns that element. */
-export function AccountMenu(props: PopupProps & { login: string | null; refused: boolean; update: boolean }) {
+export function AccountMenu(props: PopupProps & { connected: boolean; login: string | null; refused: boolean; update: boolean }) {
   // Never born open: a menu born open skips the enter transition and takes no focus.
   const ready = useReady()
   return (
     <Menu onOpenChange={guardOutsidePress(props)} open={props.open && ready}>
       {/* A LinkItem stays open by default, and the open menu's inert layer then covers the page. */}
       <MenuPopup anchor={props.anchor} finalFocus={props.anchor} keepMounted>
-        <MenuHeading>{props.login ? signedIn(props.login) : 'This device'}</MenuHeading>
+        <MenuHeading>{props.connected ? signedIn(props.login) : 'This device'}</MenuHeading>
         <MenuSeparator />
         {props.refused ? (
           <MenuLinkItem

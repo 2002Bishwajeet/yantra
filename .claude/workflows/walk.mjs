@@ -95,11 +95,25 @@ async function searchScene(page, name, url, out) {
   await snap(page, `${out}/search-typed-${name}`, false)
   await page.keyboard.press('Escape')
 }
+// Y-761: the Account menu's heading and vertical shape, shot open.
+async function accountScene(page, name, url, out) {
+  await page.goto(url, { waitUntil: 'load' })
+  await page.waitForTimeout(1500)
+  const avatar = page.getByRole('button', { name: 'Account', exact: true })
+  if (name === 'desktop-chromium') await avatar.click()
+  else await avatar.tap()
+  await page.getByRole('menu').waitFor()
+  await page.waitForTimeout(800)
+  writeFileSync(`${out}/account-open-${name}.txt`, await page.getByRole('menu').innerText())
+  await page.screenshot({ path: `${out}/account-open-${name}.png` })
+  await page.keyboard.press('Escape')
+}
 for (const [name, type, options] of looks) {
   const browser = await type.launch()
   const context = await browser.newContext({ ...options, reducedMotion: 'reduce', colorScheme: 'light' })
   let belled = false
   let searched = false
+  let accounted = false
   // The loop below adds to the queue, so each look starts from the routes the walk named.
   const queue = [...shots]
   for (const [url, shot, scheme] of queue) {
@@ -134,6 +148,15 @@ for (const [name, type, options] of looks) {
         await page.waitForTimeout(300)
         await page.screenshot({ path: `${file}-${n}.png` })
       }
+      // Y-761: no walked page scrolls on a phone, so a spacer forces it and the shot shows the bar toned over content.
+      await page.evaluate(() => {
+        const spacer = document.createElement('div')
+        spacer.style.height = '1600px'
+        document.body.append(spacer)
+        window.scrollTo(0, 400)
+      })
+      await page.waitForTimeout(400)
+      await page.screenshot({ path: `${file}-scrolled.png` })
     }
     if (shot === 'machines') {
       const also = (route) => queue.some(([, other]) => other === slug(route)) || queue.push([`${base}${route}`, slug(route), 'light'])
@@ -164,6 +187,14 @@ for (const [name, type, options] of looks) {
         await bellScene(page, name, url, out)
       } catch (e) {
         errors.push(`${name} bell scene: ${e.message}`)
+      }
+    }
+    if (shot !== 'sign-in' && !accounted) {
+      accounted = true
+      try {
+        await accountScene(page, name, url, out)
+      } catch (e) {
+        errors.push(`${name} account scene: ${e.message}`)
       }
     }
     if (shot !== 'sign-in' && !searched) {
