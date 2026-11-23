@@ -7,7 +7,7 @@ import { Button } from '@/m3/button/Button'
 import { State } from '@/m3/mark/Mark'
 import { Row } from '@/m3/row/Row'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Num, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 import { IconTile } from '@/m3/tile/Tile'
 import { useFormFactor } from '@/shell/formFactor'
 import { Ago } from './age'
@@ -125,9 +125,9 @@ function Group(props: { items: Item[]; title: string; verb: string; why: string 
                 </IconTile>
                 <div className="github__text">
                   <span className="github__meta">
-                    <Mono className="github__ref">
+                    <Num className="github__ref">
                       {ref}#{item.number}
-                    </Mono>
+                    </Num>
                     <span className="github__why">{why}</span>
                     {/* GitHub's age, which is the item's rather than the answer's. */}
                     <Num className="github__when">{clock?.text ?? item.updated_at}</Num>

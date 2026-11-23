@@ -10,7 +10,7 @@ import { stripControls } from '@/lib/controls'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Mark } from '@/m3/mark/Mark'
-import { Mono, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 import { type Keys, KeysContext } from './keysContext'
 import './Terminal.css'
 
@@ -303,7 +303,7 @@ export function Terminal(props: TerminalProps) {
                   : `Reconnecting · ${link.attempt} of ${ATTEMPTS}`}
         </Text>
       ) : (
-        <Mono clip>
+        <Num clip>
           {end.ended === 'exited'
             ? `exited ${end.exit ?? 'with no status'} · ${label}`
             : end.ended === 'yes'
@@ -313,7 +313,7 @@ export function Terminal(props: TerminalProps) {
                 : link.attempt === 0
                   ? `connecting · ${label}`
                   : `reconnecting · attempt ${link.attempt} of ${ATTEMPTS} · ${label}`}
-        </Mono>
+        </Num>
       )}
     </p>
   )

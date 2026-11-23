@@ -71,6 +71,14 @@ describe('Start session', () => {
     expect(screen.getAllByRole('button', { name: /^Start session on / })).toHaveLength(contract.attention.data.issues.length)
   })
 
+  it('sets the repository id in the brand face', async () => {
+    daemon()
+    await renderInApp(<Github attention={attention} grant={held} />)
+    const ref = (await screen.findAllByText(/^2002Bishwajeet\/yantra#\d+$/))[0]!
+    expect(ref.classList.contains('m3-num')).toBe(true)
+    expect(ref.classList.contains('m3-mono')).toBe(false)
+  })
+
   it('opens a picker of the workspaces that hold the repository, with the machine and its reason', async () => {
     const asked = daemon()
     const dialog = await open()

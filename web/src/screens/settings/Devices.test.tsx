@@ -25,7 +25,9 @@ describe('Devices', () => {
     expect(await screen.findByText('Passkeys work at hub.example.ts.net.')).toBeTruthy()
     expect(screen.getByText(/^this device · with iPhone/)).toBeTruthy()
     expect(screen.getByText('Mac')).toBeTruthy()
-    expect(screen.getByText(/^enrolled /)).toBeTruthy()
+    const date = screen.getByText(/^enrolled/).querySelector('.m3-num')!
+    expect(date.textContent).toMatch(/\d/)
+    expect(date.classList.contains('m3-mono')).toBe(false)
   })
 
   it('leads with Add a device and says the list is empty when there is no passkey', async () => {
@@ -96,12 +98,12 @@ describe('Devices', () => {
       'GET /api/passkey': [200, DEVICES],
       'DELETE /api/passkey/iPhone': [403, 'an agent token cannot act as the owner'],
     })
-    await screen.findByText(/^enrolled /)
+    await screen.findByText(/^enrolled/)
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
     const row = await screen.findByRole('alert')
     expect(within(row).getByRole('heading', { name: 'iPhone was not removed' })).toBeTruthy()
     expect(row.textContent).not.toContain('agent token')
-    expect(screen.getByText(/^enrolled /)).toBeTruthy()
+    expect(screen.getByText(/^enrolled/)).toBeTruthy()
     fireEvent.click(within(row).getByRole('button', { name: 'Details' }))
     expect(within(row).getByText('an agent token cannot act as the owner')).toBeTruthy()
   })

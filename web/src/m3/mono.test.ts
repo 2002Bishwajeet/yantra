@@ -1,7 +1,7 @@
 /**
- * Mono is for code: a command, a key, a path-as-code, a fingerprint, a hex, an
- * address, a host. A time, an age, a count, money or a path in prose uses `Num`
- * or the body face (Y-716). Reading the source is the only check that sees a
+ * Mono is for code: a command, a key, a parse error excerpt. An address, a host,
+ * a hex, an id, a date, a time, an age, a count or money uses `Num`; a sentence
+ * uses the body face (Y-716, Y-759). Reading the source is the only check that sees a
  * file jsdom never renders.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -18,7 +18,6 @@ const ALLOWED = new Set([
   'screens/session/WorkLog.tsx',
   'screens/session/Turns.tsx',
   'screens/session/GitActions.tsx',
-  'screens/session/Terminal.tsx',
   'screens/session/RunAsOwner.tsx',
   'screens/fleet/Github.tsx',
   'screens/repair/Repair.tsx',
@@ -26,15 +25,13 @@ const ALLOWED = new Set([
   'screens/fleet/Fleet.tsx',
   'screens/dashboard/Dashboard.tsx',
   'screens/settings/ConnectSheet.tsx',
-  'screens/session-terminal/SessionTerminal.tsx',
   'screens/setup/Setup.tsx',
   'screens/settings/About.tsx',
-  'screens/settings/Appearance.tsx',
   'screens/settings/RestartNow.tsx',
   'screens/settings/update.tsx',
 ])
 
-const NUMBER_CALLS = /\b(ago|elapsed|money|count|uptime|tilde)\(/
+const NUMBER_CALLS = /\b(ago|elapsed|money|count|uptime|tilde|day|at|on|when)\(/
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -73,6 +70,28 @@ describe('mono is for code', () => {
     expect(read('screens/fleet/Fleet.tsx')).toMatch(/<Mono className="fleet__detail m3-wrap">\{row\.error\}/)
     expect(mono('screens/dashboard/Dashboard.tsx')).toContain('row.error')
     expect(mono('screens/settings/ConnectSheet.tsx')).toContain('{scope}')
+  })
+
+  it('sets values, status lines and dates in the brand face', () => {
+    const read = (rel: string) => readFileSync(join(src, rel), 'utf8')
+    const about = read('screens/settings/About.tsx')
+    for (const label of ['Target', 'Listens on']) {
+      const fact = about.slice(about.indexOf(`label="${label}"`)).split('<Fact')[0]!
+      expect(fact, label).not.toMatch(/<Mono\b/)
+      expect(fact, label).toMatch(/<Num\b/)
+    }
+    expect(about.match(/label="Reached at"[^\n]*/)![0]).not.toMatch(/<Mono\b/)
+    expect(read('screens/fleet/Github.tsx')).not.toMatch(/<Mono\b/)
+    expect(read('screens/session/Terminal.tsx')).not.toMatch(/<Mono\b/)
+    expect(read('screens/session-terminal/SessionTerminal.tsx')).not.toMatch(/<Mono\b/)
+    expect(read('screens/settings/Appearance.tsx')).not.toMatch(/<Mono\b/)
+  })
+
+  it('sets a date in Num', () => {
+    const devices = readFileSync(join(src, 'screens/settings/Devices.tsx'), 'utf8')
+    expect(devices).toMatch(/ends <Num>\{when\(session\.ends\)\}<\/Num>/)
+    expect(devices).toMatch(/enrolled <Num>\{when\(made\)\}<\/Num>/)
+    expect(monoBodies('<Mono>{day(d)}</Mono>').some((b) => NUMBER_CALLS.test(b))).toBe(true)
   })
 
   it('catches a number in mono', () => {
