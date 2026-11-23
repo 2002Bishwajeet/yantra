@@ -75,12 +75,12 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     mount('desktop', '/m/cachyos-g14')
     await screen.findByText(/^looked /)
     const sessions = card('Sessions')
-    expect(sessions.getByText(/4 tmux sessions · 1 no workspace claims/)).toBeTruthy()
+    expect(sessions.getByText(/4 tmux sessions · 1 not in a workspace/)).toBeTruthy()
     expect(sessions.getAllByRole('link', { name: 'Terminal' })).toHaveLength(3)
     expect(sessions.getByRole('link', { name: 'Attach' }).getAttribute('href')).toBe(
       '/m/cachyos-g14/s/scratch',
     )
-    expect(sessions.getByText(/no workspace claims it/)).toBeTruthy()
+    expect(sessions.getByText(/Not in a workspace/)).toBeTruthy()
     expect(sessions.queryByRole('button', { name: 'Adopt' })).toBeNull()
   })
 

@@ -14,7 +14,7 @@ const relay = (status: number, said = ''): Answers => ({ 'POST /api/relay': [sta
 
 async function open() {
   fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
-  return within(await screen.findByRole('dialog', { name: 'Push relay' }))
+  return within(await screen.findByRole('dialog', { name: 'Alerts through ntfy' }))
 }
 
 function fill(sheet: ReturnType<typeof within>, url: string, token?: string) {
@@ -26,14 +26,14 @@ function fill(sheet: ReturnType<typeof within>, url: string, token?: string) {
 describe('the relay row', () => {
   it('reads whether the daemon holds a relay from about.relay', async () => {
     mountSettings('desktop', '/settings/notifications')
-    expect(await screen.findByText('On · pushes to your relay')).toBeTruthy()
+    expect(await screen.findByText('On · alerts go to your ntfy topic')).toBeTruthy()
   })
 
   it('says off when about.relay is false', async () => {
     mountSettings('desktop', '/settings/notifications', {
       'GET /api/about': [200, { ...contract.about, relay: false }],
     })
-    expect(await screen.findByText('Off · no relay is set')).toBeTruthy()
+    expect(await screen.findByText('Off · no ntfy topic is set')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Set up' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
   })
@@ -210,7 +210,7 @@ describe('the relay sheet', () => {
     // ADR-0021: the write took, and the row says it waits on a restart.
     fireEvent.click(sheet.getByRole('button', { name: 'Done' }))
     expect(
-      await screen.findByText('On · pushes to your relay · saved, used after a restart'),
+      await screen.findByText('On · alerts go to your ntfy topic · saved, used after a restart'),
     ).toBeTruthy()
   })
 
@@ -242,7 +242,7 @@ describe('the relay sheet', () => {
     expect(sheet.getByText(/answered 401/)).toBeTruthy()
     fireEvent.click(sheet.getByRole('button', { name: 'Cancel' }))
     expect(
-      await screen.findByText('On · pushes to your relay · saved, used after a restart'),
+      await screen.findByText('On · alerts go to your ntfy topic · saved, used after a restart'),
     ).toBeTruthy()
   })
 
@@ -260,7 +260,7 @@ describe('the relay sheet', () => {
     await sheet.findByText('The test message arrived at the relay.')
     fireEvent.click(sheet.getByRole('button', { name: 'Done' }))
     expect(
-      await screen.findByText('On · pushes to your relay · saved, used after a restart'),
+      await screen.findByText('On · alerts go to your ntfy topic · saved, used after a restart'),
     ).toBeTruthy()
 
     const before = asked.filter((one) => one === 'GET /api/about').length
@@ -279,7 +279,7 @@ describe('the relay sheet', () => {
     vi.useRealTimers()
 
     await waitFor(() => expect(asked.filter((one) => one === 'GET /api/about').length).toBeGreaterThan(before))
-    expect(await screen.findByText('On · pushes to your relay')).toBeTruthy()
+    expect(await screen.findByText('On · alerts go to your ntfy topic')).toBeTruthy()
   })
 
   it("draws a refusal with the daemon's own words, and the row says nothing was saved", async () => {
@@ -290,7 +290,7 @@ describe('the relay sheet', () => {
     expect(sheet.getByText('node biswas-iphone is on this tailnet but is not yours')).toBeTruthy()
     // Not written: the row still reads the daemon it started with.
     fireEvent.click(sheet.getByRole('button', { name: 'Cancel' }))
-    expect(screen.getByText('On · pushes to your relay')).toBeTruthy()
+    expect(screen.getByText('On · alerts go to your ntfy topic')).toBeTruthy()
   })
 
   it('draws no read-only push rules, only one note', async () => {

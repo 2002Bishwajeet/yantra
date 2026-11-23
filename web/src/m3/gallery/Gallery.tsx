@@ -311,7 +311,7 @@ function Catalogue() {
           </Card>
           <Card surface="tertiary">
             <Eyebrow>Worth a look</Eyebrow>
-            <Text scale="body-medium">2 sessions no workspace claims</Text>
+            <Text scale="body-medium">2 sessions not in a workspace</Text>
           </Card>
           <Card variant="outlined">
             <Eyebrow>Idle</Eyebrow>

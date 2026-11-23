@@ -53,7 +53,7 @@ export function Sessions(props: {
         {rows.length > 0 ? (
           <Text scale="body-small" tone="variant">
             {rows.length} tmux session{rows.length === 1 ? '' : 's'}
-            {free > 0 ? ` · ${free} no workspace claims` : ''}
+            {free > 0 ? ` · ${free} not in a workspace` : ''}
           </Text>
         ) : null}
       </div>
@@ -99,7 +99,7 @@ export function Sessions(props: {
                 <span className="machine__text">
                   <span className="machine__name m3-clip">{session.name}</span>
                   <span className="machine__where m3-clip">
-                    {workspace ? `workspace ${workspace}` : 'no workspace claims it'} ·{' '}
+                    {workspace ? `workspace ${workspace}` : 'Not in a workspace'} ·{' '}
                     {session.windows} window{session.windows === 1 ? '' : 's'} ·{' '}
                     {session.attached === 0
                       ? 'detached'
@@ -141,7 +141,7 @@ export function Sessions(props: {
       {/* D7 N2: said only beside a Kill. */}
       {rows.length > 0 ? (
         <Text render={<p />} className="machine__note" scale="body-small" tone="variant">
-          Kill asks first; it cannot be undone. A session no workspace claims is not adopted: its
+          Kill asks first; it cannot be undone. A session not in a workspace is not adopted: its
           repository is not on the wire, so a workspace for it starts at New session.
         </Text>
       ) : null}

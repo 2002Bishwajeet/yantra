@@ -51,7 +51,7 @@ describe('/usage on the busy fleet', () => {
     expect(within(window).getByRole('radio', { name: 'All', checked: true })).toBeTruthy()
     // Before the first read there is no stamp and no ssh note: the page has read nothing.
     expect(screen.queryByText(/^as read/)).toBeNull()
-    expect(screen.queryByText(/Read over ssh/)).toBeNull()
+    expect(screen.queryByText(/Read from each machine/)).toBeNull()
     expect(screen.getByText('Spend is read from each machine only when you ask.')).toBeTruthy()
   })
 
@@ -59,7 +59,7 @@ describe('/usage on the busy fleet', () => {
     mount('desktop', '/usage', scenario('busy'))
     fireEvent.click(await screen.findByRole('button', { name: 'Read spend' }, { timeout: 2000 }))
     expect(await screen.findByText('as read · every response in each transcript')).toBeTruthy()
-    expect(screen.getByText(/Read over ssh/)).toBeTruthy()
+    expect(screen.getByText(/Read from each machine/)).toBeTruthy()
   })
 
   it('puts Read spend in the empty state, and pressing it starts the fan-out', async () => {
@@ -143,7 +143,7 @@ describe('/usage on the busy fleet', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(11)
     expect(within(table).queryByRole('columnheader', { name: /total/i })).toBeNull()
     expect(screen.queryByText(/^Total/i)).toBeNull()
-    expect(screen.getByText(/no fleet total/)).toBeTruthy()
+    expect(screen.getByText(/not added up/)).toBeTruthy()
   })
 })
 
@@ -202,7 +202,7 @@ describe('/usage on an empty fleet', () => {
     expect(empty.getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
     expect(screen.queryByRole('button', { name: 'Read spend' })).toBeNull()
     expect(screen.queryByText(/^as read/)).toBeNull()
-    expect(screen.queryByText(/Read over ssh/)).toBeNull()
+    expect(screen.queryByText(/Read from each machine/)).toBeNull()
   })
 })
 

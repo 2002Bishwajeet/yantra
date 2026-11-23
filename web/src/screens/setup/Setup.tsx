@@ -94,7 +94,7 @@ function wordsOf(said: Line, name: string): string {
     case 'asleep':
       return `asleep${said.since ? ` · last seen ${seen(said.since)}` : ''}`
     case 'unchecked':
-      return 'not checked yet · a check costs one ssh round trip'
+      return 'Not checked yet · a check takes a few seconds'
     case 'unreachable':
       return reachWords(said.kind, name).cause
     case 'refused':
@@ -177,7 +177,7 @@ function HubLine(props: { machine: Machine; line: Line | null }) {
           </Text>
         ) : null}
         <Text scale="body-small" tone="variant">
-          {beat ? `${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy` : 'no beat has arrived'}
+          {beat ? `${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy` : 'No load reading from this machine yet'}
         </Text>
         {bad(said) ? <SshSaid detail={said.detail} quiet /> : null}
       </div>

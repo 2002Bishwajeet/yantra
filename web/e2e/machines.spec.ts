@@ -51,7 +51,7 @@ test.describe('the machines on a busy fleet', () => {
 
   test('offers an unclaimed session Attach and Kill, and never Adopt', async ({ page }) => {
     const worth = card(page, 'Worth a look')
-    await expect(worth.getByText('2 sessions no workspace claims')).toBeVisible()
+    await expect(worth.getByText('2 sessions not in a workspace')).toBeVisible()
     await expect(worth.getByRole('link', { name: 'Attach' })).toHaveCount(2)
     await expect(worth.getByRole('button', { name: 'Adopt' })).toHaveCount(0)
     await expect(worth.getByRole('link', { name: 'Attach' }).first()).toHaveAttribute(

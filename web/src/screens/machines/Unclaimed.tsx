@@ -30,7 +30,7 @@ export function Unclaimed(props: { held: Held[]; pending: boolean }) {
           Worth a look
         </Eyebrow>
         <Text scale="body-small">
-          {held.length} session{held.length === 1 ? '' : 's'} no workspace claims
+          {held.length} session{held.length === 1 ? '' : 's'} not in a workspace
         </Text>
       </div>
       <ul className="machines__rows">

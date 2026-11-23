@@ -89,7 +89,7 @@ export function Providers() {
               <GitFork />
             </Lead>
           }
-          supporting="not connected · Later"
+          supporting="Not connected · Later"
         />
       </Group>
       <Group label="LLM">

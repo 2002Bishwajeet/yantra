@@ -332,7 +332,7 @@ export function Usage() {
 
       {fanned.fanned === 'done' ? (
         <Text render={<p />} className="usage__note" scale="body-small" tone="variant">
-          Read over ssh from each machine's transcript, only when you ask. There is no fleet total.
+          Read from each machine when you ask. Each machine's spend is shown on its own and is not added up.
         </Text>
       ) : null}
     </Page>

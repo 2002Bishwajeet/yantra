@@ -19,7 +19,7 @@ describe('Agents', () => {
 
   it('says no machine is checked on a fresh install, and draws no placeholder agent', async () => {
     mountSettings('desktop', '/settings/agents', { 'GET /api/readiness': [200, { ...contract.readiness, data: [] }] })
-    expect(await screen.findByText(/^Default · no machine is checked yet · trust prompts/)).toBeTruthy()
+    expect(await screen.findByText(/^Default · no machine is checked yet · You answer its questions here/)).toBeTruthy()
     expect(screen.queryByText(/of 0 machines/)).toBeNull()
     expect(screen.queryByText('Another agent')).toBeNull()
     expect(screen.queryByText('Coming')).toBeNull()
@@ -29,7 +29,7 @@ describe('Agents', () => {
    *  agent behaves, so the page says where the setting really lives. */
   it('says an agent behaviour is set on the machine that runs it', async () => {
     mountSettings('desktop', '/settings/agents')
-    expect(await screen.findByText(/set on the machine that runs it/)).toBeTruthy()
+    expect(await screen.findByText(/Each machine keeps its own agent settings/)).toBeTruthy()
     expect(screen.queryByRole('switch')).toBeNull()
   })
 })

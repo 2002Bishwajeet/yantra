@@ -200,7 +200,7 @@ describe('the Dashboard on a busy fleet', () => {
     mount('desktop', '/')
     await drawn()
     const worth = region('Worth a look')
-    expect(reads('Worth a look')).toContain('2 sessions no workspace claims')
+    expect(reads('Worth a look')).toContain('2 sessions not in a workspace')
     expect(worth.getByText('scratch')).toBeTruthy()
     expect(worth.getByText('mux')).toBeTruthy()
     expect(worth.queryByRole('button', { name: 'Adopt' })).toBeNull()

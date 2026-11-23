@@ -265,13 +265,13 @@ describe('the steps', () => {
     const later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
     expect(later.queryByRole('link', { name: 'Set up' })).toBeNull()
     fireEvent.click(later.getByRole('button', { name: 'Set up' }))
-    expect(await screen.findByRole('dialog', { name: 'Push relay' })).toBeTruthy()
+    expect(await screen.findByRole('dialog', { name: 'Alerts through ntfy' })).toBeTruthy()
   })
 
   it('walks the push setup from Generate to a test that arrived', async () => {
     const asked = await draw({ ...base(), 'POST /api/relay': [204, undefined] })
     fireEvent.click(screen.getByRole('button', { name: 'Set up' }))
-    const sheet = within(await screen.findByRole('dialog', { name: 'Push relay' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Alerts through ntfy' }))
     fireEvent.click(sheet.getByRole('button', { name: 'Generate' }))
     const url = (sheet.getByLabelText('Topic URL') as HTMLInputElement).value
     expect(await sheet.findByRole('img', { name: /QR/ })).toBeTruthy()
@@ -504,7 +504,7 @@ describe('the machine lines', () => {
 
   it('offers Check on a machine that is online and not asked', async () => {
     await draw(base([up]))
-    expect(screen.getByText('not checked yet · a check costs one ssh round trip')).toBeTruthy()
+    expect(screen.getByText('Not checked yet · a check takes a few seconds')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Check' })).toBeTruthy()
   })
 

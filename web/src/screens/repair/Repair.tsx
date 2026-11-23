@@ -28,7 +28,7 @@ function Refused(props: { name: string; error: unknown; reset: () => void }) {
     kind: said.kind,
     said: said.said,
     retryable: said.retryable,
-    describe: loads ? () => 'That file loads, so there is nothing to repair.' : () => said.describe(),
+    describe: loads ? () => 'The file has no errors, so nothing needs a fix.' : () => said.describe(),
   }
   return (
     <ErrorSurface.Page

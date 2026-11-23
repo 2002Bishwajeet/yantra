@@ -57,7 +57,7 @@ export const CATEGORIES: readonly Category[] = [
     label: 'Appearance',
     group: 'Workspace',
     icon: <Palette />,
-    blurb: 'how the dashboard looks on this device',
+    blurb: 'How the dashboard looks on this device.',
     Screen: Appearance,
   },
   {
@@ -73,7 +73,7 @@ export const CATEGORIES: readonly Category[] = [
     label: 'About',
     group: 'Appliance',
     icon: <Info />,
-    blurb: 'The daemon on the appliance, and where its pieces live.',
+    blurb: 'The Yantra version on the appliance, and its updates.',
     Screen: About,
   },
 ]

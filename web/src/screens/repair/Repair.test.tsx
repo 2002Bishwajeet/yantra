@@ -117,7 +117,7 @@ describe('the repair page', () => {
     daemon({ status: 409, body: 'workspace `site` at … loads' })
     open()
 
-    expect(await screen.findByText('That file loads, so there is nothing to repair.')).toBeTruthy()
+    expect(await screen.findByText('The file has no errors, so nothing needs a fix.')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Details' }))
     expect(screen.getByText('workspace `site` at … loads')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Open site' }).getAttribute('href')).toBe('/w/site')
@@ -168,6 +168,6 @@ describe('the repair page', () => {
 
     expect(await screen.findByText('the workspace')).toBeTruthy()
     await waitFor(() => expect(router.state.location.pathname).toBe('/w/site'))
-    expect(screen.queryByText('That file loads, so there is nothing to repair.')).toBeNull()
+    expect(screen.queryByText('The file has no errors, so nothing needs a fix.')).toBeNull()
   })
 })

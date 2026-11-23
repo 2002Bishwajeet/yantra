@@ -478,7 +478,7 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
   )
 }
 
-/** D6 §4.3: Attach and Kill for a session no workspace claims, never Adopt. */
+/** D6 §4.3: Attach and Kill for a session not in a workspace, never Adopt. */
 function Worth(props: {
   sessions: Reading<MachineSessions[]>
   workspaces: Reading<Workspace[]>
@@ -507,7 +507,7 @@ function Worth(props: {
       <CardHead
         id="dash-worth"
         title="Worth a look"
-        words={unknown ? 'unclaimed sessions unknown' : `${plural(rows.length, 'session')} no workspace claims`}
+        words={unknown ? 'Unclaimed sessions unknown' : `${plural(rows.length, 'session')} not in a workspace`}
       />
       {sessions.looked === 'never' ? (
         <NotLooked what="Sessions have" />

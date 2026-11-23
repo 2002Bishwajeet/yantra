@@ -7,6 +7,7 @@ import { fromReading } from '@/api/client'
 import { useApplyUpdate, useSetChannel } from '@/api/mutations'
 import { aboutQuery } from '@/api/queries'
 import { Button } from '@/m3/button/Button'
+import { Disclosure } from '@/m3/disclosure/Disclosure'
 import { type Described, ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListChevron, ListItem, ListValue } from '@/m3/list/List'
@@ -54,31 +55,35 @@ export function About() {
 
   return (
     <>
-      <section aria-label="Daemon" className="settings__about">
+      <section aria-label="Yantra" className="settings__about">
         {facts ? (
           <Text render={<p />} className="settings__version" scale="title-large" emphasized>
-            yantrad <Num>{facts.version}</Num> · built {built(facts.built)} · running
+            Yantra <Num>{facts.version}</Num> · built {built(facts.built)} · running
           </Text>
         ) : (
           <Skeleton shape="text" />
         )}
+        <Disclosure summary="Technical details">
+          <dl className="settings__facts">
+              <Fact label="Target" value={facts ? <Num clip title={facts.target}>{facts.target}</Num> : null} wide />
+              <Fact label="Uptime" value={facts ? <Num>{uptime(facts.uptime_seconds)}</Num> : null} />
+              <Fact
+                label="Listens on"
+                value={
+                  facts
+                    ? facts.listening_on.map((address) => (
+                        <Num className="settings__line" clip key={address} title={address}>
+                          {address}
+                        </Num>
+                      ))
+                    : null
+                }
+                wide
+              />
+              <Fact label="Reached at" value={<Num>{location.host}</Num>} />
+          </dl>
+        </Disclosure>
         <dl className="settings__facts">
-          <Fact label="Target" value={facts ? <Num clip title={facts.target}>{facts.target}</Num> : null} wide />
-          <Fact label="Uptime" value={facts ? <Num>{uptime(facts.uptime_seconds)}</Num> : null} />
-          <Fact
-            label="Listens on"
-            value={
-              facts
-                ? facts.listening_on.map((address) => (
-                    <Num className="settings__line" clip key={address} title={address}>
-                      {address}
-                    </Num>
-                  ))
-                : null
-            }
-            wide
-          />
-          <Fact label="Reached at" value={<Num>{location.host}</Num>} />
           {published?.looked === 'failed' ? null : (
             <Fact
               label="Published"
@@ -109,7 +114,7 @@ export function About() {
         <ListItem
           stack
           headline="Only devices on your tailnet"
-          supporting="No separate login"
+          supporting="Each device signs in with your passkey"
           trailing={facts?.tailnet ? <ListValue>{facts.tailnet}</ListValue> : undefined}
           leading={
             <Lead>

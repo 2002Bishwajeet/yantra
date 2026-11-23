@@ -70,7 +70,7 @@ export function Appearance() {
             chosen={density === 'clean'}
             label="Clean"
             onChoose={() => writePrefs({ density: 'clean' })}
-            why="the default: whitespace, one hero, rows you can tap on a phone"
+            why="The default. More space, one main card, rows sized for a phone."
           >
             <svg aria-hidden="true" className="settings__schematic" viewBox="0 0 120 64">
               <rect fill="var(--md-sys-color-surface-container-high)" height="64" rx="6" width="28" />
@@ -82,7 +82,7 @@ export function Appearance() {
             chosen={density === 'compact'}
             label="Compact"
             onChoose={() => writePrefs({ density: 'compact' })}
-            why="denser rows, smaller cards, more on screen; for a wide monitor"
+            why="Denser rows and smaller cards, for a wide monitor."
           >
             <svg aria-hidden="true" className="settings__schematic" viewBox="0 0 120 64">
               <rect fill="var(--md-sys-color-surface-container-high)" height="64" rx="6" width="22" />
@@ -94,7 +94,7 @@ export function Appearance() {
           </Choice>
         </div>
         <Text render={<p />} className="settings__note" scale="body-small" tone="variant">
-          rows never drop below 44px in either
+          Both layouts keep every row large enough to tap.
         </Text>
       </section>
 
@@ -134,7 +134,7 @@ export function Appearance() {
             onChange={(event) => type(event.target.value)}
             placeholder={BRASS}
             spellCheck={false}
-            supporting="six hex digits"
+            supporting="Six hex digits"
             value={typed}
             variant="filled"
           />

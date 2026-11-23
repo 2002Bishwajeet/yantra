@@ -83,7 +83,7 @@ test.describe('usage on a busy fleet', () => {
     const table = card(page, 'Sessions').getByRole('table')
     await expect(table.getByRole('columnheader', { name: 'Cost' })).toBeVisible()
     await expect(table.getByRole('row')).toHaveCount(11)
-    await expect(page.getByText(/no fleet total/)).toBeVisible()
+    await expect(page.getByText(/not added up/)).toBeVisible()
   })
 
   /* The boards draw a proportion bar under each figure. Against the dearest

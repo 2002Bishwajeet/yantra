@@ -8,10 +8,21 @@ afterEach(() => {
   unmountSettings()
 })
 
+/** The facts sit in a closed Disclosure; its children mount on the first open. */
+function openDetails() {
+  fireEvent.click(screen.getByRole('button', { name: /Technical details/ }))
+}
+
 describe('About', () => {
-  it('says which daemon this is, and where it is reached', async () => {
+  it('says which Yantra this is, keeps the technical facts closed, and shows them on request', async () => {
     mountSettings('desktop', '/settings/about')
-    expect((await screen.findByText(/^yantrad/)).textContent).toBe('yantrad 0.1.0 · built 6 Sep · running')
+    expect((await screen.findByText(/· built 6 Sep · running/)).textContent).toBe('Yantra 0.1.0 · built 6 Sep · running')
+    expect(screen.getByRole('region', { name: 'Yantra' })).toBeTruthy()
+    const trigger = screen.getByRole('button', { name: /Technical details/ })
+    expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByText('Listens on')).toBeNull()
+    openDetails()
+    expect(trigger.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByText('aarch64-unknown-linux-musl')).toBeTruthy()
     expect(screen.getByText('1d 0h')).toBeTruthy()
     expect(screen.getByText('100.64.0.1:7717')).toBeTruthy()
@@ -33,12 +44,13 @@ describe('About', () => {
     mountSettings('desktop', '/settings/about', { 'GET /api/about': [200, { ...contract.about, tailnet: 'home.ts.net' }] })
     expect(await screen.findByText('Only devices on your tailnet')).toBeTruthy()
     expect(await screen.findByText('home.ts.net')).toBeTruthy()
-    expect(screen.getByText('No separate login')).toBeTruthy()
+    expect(screen.getByText('Each device signs in with your passkey')).toBeTruthy()
   })
 
   it('never breaks a value inside a word, and draws each address on its own line', async () => {
     mountSettings('desktop', '/settings/about')
-    await screen.findByText(/^yantrad/)
+    await screen.findByText(/· built 6 Sep · running/)
+    openDetails()
     for (const dd of document.querySelectorAll('.settings__fact > dd')) {
       expect(dd.className).not.toMatch(/break-all|m3-wrap/)
       expect((dd as HTMLElement).style.wordBreak).not.toBe('break-all')
@@ -227,6 +239,7 @@ describe('About', () => {
         'GET /api/about': (): Answer => (reads++ === 0 ? [200, contract.about] : [502, '']),
       })
       expect(await screen.findByText(/Updating from/)).toBeTruthy()
+      openDetails()
       await waitFor(() => expect(reads).toBeGreaterThanOrEqual(4), { timeout: 8_000 })
       await new Promise((done) => setTimeout(done, 100))
       expect(screen.queryByText('About could not be drawn')).toBeNull()

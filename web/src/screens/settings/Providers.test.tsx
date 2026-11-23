@@ -70,7 +70,7 @@ describe('Providers', () => {
     await screen.findByText('signed in as 2002Bishwajeet · repositories, reviews, issues')
     // §1 row 46: the footnote repeated the category blurb word for word.
     expect(screen.getAllByText(/Yantra signs in to GitHub itself/)).toHaveLength(1)
-    expect(screen.getByText('not connected · Later')).toBeTruthy()
+    expect(screen.getByText('Not connected · Later')).toBeTruthy()
   })
 
   it('walks the device flow: a code, where to type it, and then the login', async () => {
@@ -288,7 +288,7 @@ describe('Providers', () => {
   describe('GitLab and OpenAI', () => {
     it('draw "Later" as a value, never a disabled button (N6)', async () => {
       mountSettings('desktop', '/settings/providers')
-      await screen.findByText('not connected · Later')
+      await screen.findByText('Not connected · Later')
       const later = screen.getAllByText(/ · Later$/)
       expect(later).toHaveLength(2)
       for (const one of later) expect(one.tagName).not.toBe('BUTTON')

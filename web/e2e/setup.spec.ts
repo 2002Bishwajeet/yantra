@@ -66,7 +66,7 @@ test.describe('the first run', () => {
   test('walks push setup from the app links to a test that arrived', async ({ page }) => {
     const later = page.getByRole('list', { name: 'Later, when you want them' })
     await later.getByRole('button', { name: 'Set up' }).click()
-    const sheet = page.getByRole('dialog', { name: 'Push relay' })
+    const sheet = page.getByRole('dialog', { name: 'Alerts through ntfy' })
     await expect(sheet).toBeVisible()
     await expect(page).toHaveURL(/\/$/)
     await expect(sheet.getByRole('link', { name: /iPhone/ })).toHaveAttribute('href', /apps\.apple\.com/)

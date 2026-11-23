@@ -7,12 +7,12 @@ import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/tes
 
 const CATEGORIES = [
   { id: 'general', label: 'General', shows: 'Home directory for clones' },
-  { id: 'notifications', label: 'Notifications', shows: 'Push relay' },
+  { id: 'notifications', label: 'Notifications', shows: 'Alerts through ntfy' },
   { id: 'providers', label: 'Providers', shows: 'GitLab' },
   { id: 'agents', label: 'Agents', shows: 'Claude Code' },
   { id: 'appearance', label: 'Appearance', shows: 'Colour' },
   { id: 'devices', label: 'Devices', shows: 'A code for one new device' },
-  { id: 'about', label: 'About', shows: 'Listens on' },
+  { id: 'about', label: 'About', shows: 'Technical details' },
 ] as const
 
 /** Providers writes the boards' shorter string on a phone (row 114). */
@@ -401,10 +401,10 @@ test.describe('settings · Notifications', () => {
     await opened(page, 'Notifications', size)
 
     // `about.relay` says the running daemon holds one (D7 §4.7).
-    await expect(page.getByText('On · pushes to your relay')).toBeVisible()
+    await expect(page.getByText('On · alerts go to your ntfy topic')).toBeVisible()
 
     await page.getByRole('button', { name: 'Edit' }).click()
-    const sheet = page.getByRole('dialog', { name: 'Push relay' })
+    const sheet = page.getByRole('dialog', { name: 'Alerts through ntfy' })
     await expect(sheet).toBeVisible()
     const token = sheet.getByLabel('Token')
     await expect(token).toHaveAttribute('type', 'password')
@@ -422,7 +422,7 @@ test.describe('settings · Notifications', () => {
     await expect(sheet.getByText(/^Push works\./)).toBeVisible()
     await sheet.getByRole('button', { name: 'Done' }).click()
     await expect(
-      page.getByText('On · pushes to your relay · saved, used after a restart'),
+      page.getByText('On · alerts go to your ntfy topic · saved, used after a restart'),
     ).toBeVisible()
 
     expect(writes.filter((one) => one === 'POST /api/relay')).toHaveLength(1)
@@ -436,7 +436,7 @@ test.describe('settings · Notifications', () => {
     await scenario(page, 'firstrun')
     await page.goto('/settings/notifications')
     await opened(page, 'Notifications', size)
-    await expect(page.getByText('Off · no relay is set')).toBeVisible()
+    await expect(page.getByText('Off · no ntfy topic is set')).toBeVisible()
   })
 })
 
@@ -446,7 +446,7 @@ test.describe('settings · About reads the appliance', () => {
     await page.goto('/settings/about')
     await opened(page, 'About', size)
     await expect(page.getByText('Only devices on your tailnet')).toBeVisible()
-    await expect(page.getByText('No separate login')).toBeVisible()
+    await expect(page.getByText('Each device signs in with your passkey')).toBeVisible()
   })
 
   // The key moved to Add a device, so the old link opens its new home.
@@ -461,7 +461,8 @@ test.describe('settings · About reads the appliance', () => {
     await scenario(page, 'busy')
     await page.goto('/settings/about')
     await opened(page, 'About', size)
-    await expect(page.getByText(/^yantrad 0\.1\.0 · built 6 Sep · running/)).toBeVisible()
+    await expect(page.getByText(/^Yantra 0\.1\.0 · built 6 Sep · running/)).toBeVisible()
+    await page.getByRole('button', { name: /Technical details/ }).click()
     await expect(page.getByText('aarch64-unknown-linux-musl')).toBeVisible()
   })
 
