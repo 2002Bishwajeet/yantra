@@ -1,6 +1,6 @@
 // Y-660: walk.sh runs this in the Playwright image, from web/, so the dashboard's own @playwright/test is used.
 import { createRequire } from 'node:module'
-import { writeFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 
 const [base, out, ...routes] = process.argv.slice(2)
 const { chromium, webkit, devices } = createRequire(`${process.cwd()}/package.json`)('@playwright/test')
@@ -139,6 +139,31 @@ async function needsScene(page, name, url, out) {
   await page.waitForTimeout(2000)
   await snap(page, `${out}/needs-you-open-${name}${desktop ? '' : '-1'}`, desktop)
 }
+// Y-757: the phone keeps the status and Stop in the More menu, so the walk opens it. The row's 40 % is a
+// number, so the phone's text file gets the measured tops; a reader cannot take them from a picture.
+async function workspaceScene(page, name, file, menu) {
+  const phone = name !== 'desktop-chromium'
+  await page.evaluate(() => window.scrollTo(0, 0))
+  if (phone) {
+    const top = async (part) => Math.round((await part.boundingBox()).y)
+    const thread = await top(page.getByRole('region', { name: 'Conversation' }))
+    const picker = await top(page.getByRole('button', { name: /^Threads,/ }))
+    const git = await top(page.locator('.git__split'))
+    const { height } = page.viewportSize()
+    appendFileSync(
+      `${file}.txt`,
+      `\n\nThe walk measured, on a ${height} px screen: the conversation starts at ${thread} px, ${Math.round((thread / height) * 100)} % down. The thread picker starts at ${picker} px and the git action at ${git} px.\n`,
+    )
+  }
+  const more = page.getByRole('button', { name: 'More actions' })
+  if (phone) await more.tap()
+  else await more.click()
+  await page.getByRole('menu').waitFor()
+  await page.waitForTimeout(500)
+  // The phone's picture ends in -1, as its other screens do, so walk.sh publish puts it in the PR's table.
+  await snap(page, phone ? `${menu}-1` : menu, false)
+  await page.keyboard.press('Escape')
+}
 for (const [name, type, options] of looks) {
   const browser = await type.launch()
   const context = await browser.newContext({ ...options, reducedMotion: 'reduce', colorScheme: 'light' })
@@ -217,6 +242,13 @@ for (const [name, type, options] of looks) {
         }
       } catch (e) {
         errors.push(`${name} machines: the daemon's list could not be read: ${e.message}`)
+      }
+    }
+    if (/^\/w\/[^/]+$/.test(new URL(url).pathname)) {
+      try {
+        await workspaceScene(page, name, file, `${out}/${shot}-menu-${name}`)
+      } catch (e) {
+        errors.push(`${name} workspace scene: ${e.message}`)
       }
     }
     if (shot === 'settings-about') {
