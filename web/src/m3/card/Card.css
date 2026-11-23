@@ -27,8 +27,8 @@
 }
 
 .m3-card[data-surface="lowest"] {
-  background: var(--md-sys-color-surface-container-lowest);
-  --m3-field-surface: var(--md-sys-color-surface-container-lowest);
+  background: var(--m3-raised-surface);
+  --m3-field-surface: var(--m3-raised-surface);
 }
 
 .m3-card[data-surface="primary"] {

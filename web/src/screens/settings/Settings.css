@@ -386,7 +386,7 @@
   margin: 0;
   padding: 12px 16px;
   border-radius: var(--m3-list-radius);
-  background: var(--md-sys-color-surface-container-lowest);
+  background: var(--m3-raised-surface);
   list-style: none;
 }
 

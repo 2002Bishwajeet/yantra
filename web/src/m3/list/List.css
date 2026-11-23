@@ -5,7 +5,7 @@
   padding: 0;
   list-style: none;
   border-radius: var(--m3-list-radius);
-  background: var(--md-sys-color-surface-container-lowest);
+  background: var(--m3-raised-surface);
   overflow: hidden;
 }
 

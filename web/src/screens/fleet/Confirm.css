@@ -7,7 +7,7 @@
 
 /* The row is the Fleet's, word for word; here it always sits on white. */
 .confirm .m3-row {
-  background: var(--md-sys-color-surface-container-lowest);
+  background: var(--m3-raised-surface);
 }
 
 .confirm .m3-error {

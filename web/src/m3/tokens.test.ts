@@ -5,7 +5,7 @@
 import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { roles } from './theme/scheme'
+import { roles, schemeFor } from './theme/scheme'
 
 const css = readFileSync(resolve(process.cwd(), 'src/m3/tokens.css'), 'utf8')
 
@@ -103,6 +103,34 @@ describe('every colour role, both themes', () => {
     expect(css).toContain('[data-theme="light"] {\n  color-scheme: light;')
     expect(css).toContain('[data-theme="dark"] {\n  color-scheme: dark;')
     expect(css).toContain(':root[data-theme="dark"],')
+  })
+})
+
+describe('the raised surface (Y-761)', () => {
+  it('is lowest in light and highest in dark', () => {
+    expect(css).toContain(
+      '--m3-raised-surface: light-dark(var(--md-sys-color-surface-container-lowest), var(--md-sys-color-surface-container-highest));',
+    )
+  })
+
+  it('keeps a plain light value where light-dark() is unknown', () => {
+    const block = /@supports not \(color: light-dark\(#000, #fff\)\) \{[\s\S]*?\n\}/.exec(css)![0]
+    expect(block).toContain('--m3-raised-surface: var(--md-sys-color-surface-container-lowest);')
+  })
+
+  it('is lighter than surface-container in dark, in brass and in a seeded scheme', () => {
+    const brass = { raised: pair('surface-container-highest')![2], card: pair('surface-container')![2] }
+    const seeded = schemeFor('#3366CC', true)
+    for (const { raised, card } of [
+      brass,
+      { raised: seeded['surface-container-highest'], card: seeded['surface-container'] },
+    ]) {
+      expect(luminance(raised)).toBeGreaterThan(luminance(card))
+    }
+  })
+
+  it('is no darker than the card in light', () => {
+    expect(luminance(pair('surface-container-lowest')![1])).toBeGreaterThan(luminance(pair('surface-container')![1]))
   })
 })
 

@@ -192,7 +192,15 @@ function AccountButton() {
       {armed || idle ? (
         <Guarded title="Account could not be drawn">
           <Suspense fallback={null}>
-            <AccountMenu anchor={ref} onOpenChange={setOpen} open={open} refused={refused} update={update} />
+            <AccountMenu
+              anchor={ref}
+              connected={github.data?.connected ?? false}
+              login={github.data?.connected ? github.data.login : null}
+              onOpenChange={setOpen}
+              open={open}
+              refused={refused}
+              update={update}
+            />
           </Suspense>
         </Guarded>
       ) : null}
@@ -457,7 +465,7 @@ export function Shell() {
   const fab = down === null && (factor === 'tablet' || (factor === 'phone' && top)) ? primary : null
   usePublishDrawn(fab !== null)
   useFabCollapse(factor === 'phone' && fab !== null, pathname)
-  useBarScrolled(factor === 'desktop', pathname)
+  useBarScrolled(factor, pathname)
   const key = keyOf(fab)
   const focus = useFabFocus(key)
   const [beat, setBeat] = useState({ key, odd: false })
