@@ -257,7 +257,7 @@ Q6 in [`tracker.md`](tracker.md).
 **Rust** for the daemon, CLI and per-machine agent · **TypeScript** for the web UI ·
 `tokio` + `axum` · the system `ssh` binary as transport (with `ControlMaster` multiplexing) ·
 tmux for persistence · Tailscale as the network · sherpa-onnx with NVIDIA's Parakeet-TDT-0.6B-v2
-(CC-BY-4.0) for dictation · one SQLite file of Chat threads and Web Push devices,
+(CC-BY-4.0) for dictation · one SQLite file of Chat threads, clones and Web Push devices,
 `~/.local/state/yantra/threads.sqlite` ([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md),
 [ADR-0047](docs/adr/0047-the-dashboard-gets-web-push.md)); the
 rest of the state is declared, derived, or held in memory · appliance target `aarch64-unknown-linux-musl`.

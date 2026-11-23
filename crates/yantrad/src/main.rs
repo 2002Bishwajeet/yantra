@@ -28,6 +28,7 @@ use yantra_core::inventory::{Inventory, Tailscale};
 use yantra_core::notify::RELAY_URL;
 
 mod api;
+mod bind;
 mod carry;
 mod chat;
 // Y-124: it only compares the routes against the dashboard's committed fixture.

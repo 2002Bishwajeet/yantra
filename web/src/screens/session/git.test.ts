@@ -47,6 +47,17 @@ describe('gitFailure', () => {
     expect(gitFailure(action, refused(409, said)).kind).toBe(kind)
   })
 
+  // The sentence is commit::Failed::OtherRepository's, word for word (Y-782).
+  it.each<GitAction>(['pr', 'pending', 'merge'])('a %s 409 for a remote that names another repository is otherRepository', (action) => {
+    const said = 'this thread belongs to o/r, but its remote now names evil/x, so nothing went to GitHub'
+    const failure = gitFailure(action, refused(409, said))
+    expect(failure).toMatchObject({ kind: 'otherRepository', retryable: true, said })
+    expect(failure.title).toBe('The remote names another repository')
+    expect(failure.describe()).toMatch(/Set the remote back on the machine/)
+    // The CLI reads the workspace file and the grant, and only the hub holds both.
+    expect(failure.describe()).toMatch(/run `yantra pr open` or `yantra pr merge` in a shell on the hub\.$/)
+  })
+
   it.each<GitAction>(['draft', 'commit', 'push', 'pr', 'merge', 'remove'])(
     'a %s refusal that names the missing grant is noGrant, with no CLI in its words',
     (action) => {
@@ -136,14 +147,15 @@ describe('gitFailure', () => {
       ['merge', refused(502)],
       ['merge', refused(409, 'no GitHub grant — run `yantra github login`')],
       ['remove', refused(409)],
+      ['pr', refused(409, 'this thread belongs to o/r, but its remote now names evil/x, so nothing went to GitHub')],
     ]
     for (const [action, error] of probes) {
       const failure = gitFailure(action, error)
       kinds.add(failure.kind)
       seen.add(failure.title)
     }
-    expect(kinds.size).toBe(21)
-    expect(seen.size).toBe(21)
+    expect(kinds.size).toBe(22)
+    expect(seen.size).toBe(22)
   })
 })
 

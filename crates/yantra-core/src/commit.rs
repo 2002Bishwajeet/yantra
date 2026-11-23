@@ -22,6 +22,7 @@
 
 use crate::agent;
 use crate::checkpoint::{self, DIFF_FLAGS, SNAPSHOT, capped};
+use crate::clone;
 use crate::delegate::said;
 use crate::github::{self, Conditional, Github, IssueRef, PullState, Token};
 use crate::ssh::{self, Exec, Os, Ssh};
@@ -534,9 +535,57 @@ fn is_race(error: &github::Error) -> bool {
     matches!(error, github::Error::Unprocessable { said } if said.contains("A pull request already exists"))
 }
 
+/// The repository and branch of the thread's upstream. `bound` is the
+/// repository the daemon's store keeps for the thread: an agent in the
+/// worktree can rewrite a remote, so one that names another repository is
+/// refused before anything is asked (ADR-0045, Y-782).
+fn upstream<'a>(
+    found: &'a thread::Listed,
+    bound: Option<&str>,
+) -> Result<(String, String, &'a String), Failed> {
+    let (url, branch) = found.upstream.as_ref().ok_or(Failed::NotPushed)?;
+    let (owner, repo) = github::repo_of(url).ok_or(Failed::NotGithub)?;
+    let remote = format!("{owner}/{repo}");
+    match bound {
+        Some(bound) if !bound.eq_ignore_ascii_case(&remote) => Err(Failed::OtherRepository {
+            bound: bound.to_owned(),
+            remote,
+        }),
+        _ => Ok((owner, repo, branch)),
+    }
+}
+
+/// `owner/repo` of the thread's upstream, which the daemon binds an old
+/// thread to on its first PR verb.
+pub fn repository(found: &thread::Listed) -> Result<String, Failed> {
+    let (owner, repo, _) = upstream(found, None)?;
+    Ok(format!("{owner}/{repo}"))
+}
+
+/// `owner/repo` of the `origin` of the repository at `path`, which a new
+/// thread takes when Yantra did not clone the folder. `None` is no `origin`,
+/// or one that is not on github.com.
+pub async fn origin<E: Exec>(exec: &E, path: &str) -> Result<Option<String>, Error> {
+    let out = exec
+        .exec(&format!(
+            "git -C {} config --get remote.origin.url",
+            clone::destination(path)
+        ))
+        .await?;
+    match out.status {
+        0 => Ok(github::repo_of(String::from_utf8_lossy(&out.stdout).trim())
+            .map(|(owner, repo)| format!("{owner}/{repo}"))),
+        // `--get` exits 1 when the key is not set.
+        1 => Ok(None),
+        _ => Err(failed(&out)),
+    }
+}
+
 /// Opens a PR from the thread's pushed branch to the repository's default
 /// branch, or answers the one already open (§B4). Yantra keeps no link: the
-/// threads list reads the PR from the upstream (ADR-0034 decision 3).
+/// threads list reads the PR from the upstream (ADR-0034 decision 3). `bound`
+/// is the repository the daemon keeps for the thread, and an upstream that
+/// names another one is refused (Y-782); `None` checks nothing.
 pub async fn open_pr<E: Exec>(
     exec: &E,
     found: &thread::Listed,
@@ -544,9 +593,9 @@ pub async fn open_pr<E: Exec>(
     token: &Token,
     title: Option<&str>,
     body: Option<&str>,
+    bound: Option<&str>,
 ) -> Result<Opened, Failed> {
-    let (url, branch) = found.upstream.as_ref().ok_or(Failed::NotPushed)?;
-    let (owner, repo) = github::repo_of(url).ok_or(Failed::NotGithub)?;
+    let (owner, repo, branch) = upstream(found, bound)?;
     let unseen = |error| unseen(&owner, &repo, error);
     let open = async || -> Result<Option<Opened>, Failed> {
         let pull = github
@@ -624,9 +673,9 @@ pub async fn pending_pr(
     found: &thread::Listed,
     github: &Github,
     token: &Token,
+    bound: Option<&str>,
 ) -> Result<Pending, Failed> {
-    let (url, branch) = found.upstream.as_ref().ok_or(Failed::NotPushed)?;
-    let (owner, repo) = github::repo_of(url).ok_or(Failed::NotGithub)?;
+    let (owner, repo, branch) = upstream(found, bound)?;
     let unseen = |error| unseen(&owner, &repo, error);
     let pull = github
         .pull_for_head(token, &owner, &repo, branch)
@@ -668,8 +717,9 @@ pub async fn merge_pr(
     token: &Token,
     number: u64,
     seen: &str,
+    bound: Option<&str>,
 ) -> Result<MergedPr, Failed> {
-    let pending = pending_pr(found, github, token).await?;
+    let pending = pending_pr(found, github, token, bound).await?;
     if pending.number != number {
         return Err(Failed::NotThatPr {
             confirmed: number,
@@ -732,6 +782,11 @@ pub enum Failed {
     )]
     Diverged,
 
+    #[error(
+        "this thread belongs to {bound}, but its remote now names {remote}, so nothing went to GitHub"
+    )]
+    OtherRepository { bound: String, remote: String },
+
     #[error("the PR has no title, and the tip commit has no subject")]
     NoTitle,
 
@@ -783,14 +838,15 @@ async fn login_server<E: Exec>(exec: &E) -> Result<Option<String>, Failed> {
     Ok(Some(tmux.command()))
 }
 
-async fn find_listed(name: &str, id: &str) -> Result<(Ssh, thread::Listed), Failed> {
+/// Thread `id` of workspace `name`, with the workspace and its machine.
+pub async fn find_listed(name: &str, id: &str) -> Result<(Workspace, Ssh, thread::Listed), Failed> {
     let (workspace, ssh) = reach(name).await?;
     let found = thread::listed(&ssh, &workspace)
         .await?
         .into_iter()
         .find(|found| thread::name(&found.place) == id)
         .ok_or_else(|| Failed::NoThread { id: id.to_owned() })?;
-    Ok((ssh, found))
+    Ok((workspace, ssh, found))
 }
 
 async fn find(name: &str, id: &str) -> Result<(Ssh, Place), Failed> {
@@ -830,13 +886,14 @@ pub async fn commit_for(name: &str, id: &str, message: Option<&str>) -> Result<C
 /// [`push`] for thread `id` of workspace `name`. An issue thread's remote
 /// branch carries the issue's number.
 pub async fn push_for(name: &str, id: &str) -> Result<Pushed, Failed> {
-    let (ssh, found) = find_listed(name, id).await?;
+    let (_, ssh, found) = find_listed(name, id).await?;
     let issue = found.issue.and_then(|issue| issue.parse::<IssueRef>().ok());
     let tmux = login_server(&ssh).await?;
     Ok(push(&ssh, &found.place, issue.as_ref(), tmux.as_deref()).await?)
 }
 
-/// [`open_pr`] for thread `id` of workspace `name`.
+/// [`open_pr`] for thread `id` of workspace `name`, unbound: a person types
+/// `yantra pr` in the folder they see (ADR-0045, 2026-11-12 note, point 4).
 pub async fn open_pr_for(
     name: &str,
     id: &str,
@@ -845,8 +902,8 @@ pub async fn open_pr_for(
     title: Option<&str>,
     body: Option<&str>,
 ) -> Result<Opened, Failed> {
-    let (ssh, found) = find_listed(name, id).await?;
-    open_pr(&ssh, &found, github, token, title, body).await
+    let (_, ssh, found) = find_listed(name, id).await?;
+    open_pr(&ssh, &found, github, token, title, body, None).await
 }
 
 /// [`pending_pr`] for thread `id` of workspace `name`.
@@ -856,8 +913,8 @@ pub async fn pending_pr_for(
     github: &Github,
     token: &Token,
 ) -> Result<Pending, Failed> {
-    let (_, found) = find_listed(name, id).await?;
-    pending_pr(&found, github, token).await
+    let (_, _, found) = find_listed(name, id).await?;
+    pending_pr(&found, github, token, None).await
 }
 
 /// [`merge_pr`] for thread `id` of workspace `name`.
@@ -869,8 +926,8 @@ pub async fn merge_pr_for(
     number: u64,
     seen: &str,
 ) -> Result<MergedPr, Failed> {
-    let (_, found) = find_listed(name, id).await?;
-    merge_pr(&found, github, token, number, seen).await
+    let (_, _, found) = find_listed(name, id).await?;
+    merge_pr(&found, github, token, number, seen, None).await
 }
 
 /// [`thread::remove`] for thread `id` of workspace `name`: its keeper, worktree, branch,
@@ -1489,6 +1546,7 @@ mod tests {
             &token(),
             None,
             None,
+            None,
         )
         .await
         .expect("opened");
@@ -1548,6 +1606,7 @@ mod tests {
             &token(),
             Some("My title"),
             Some(""),
+            None,
         )
         .await
         .expect("opened");
@@ -1579,6 +1638,7 @@ mod tests {
             &token(),
             None,
             None,
+            None,
         )
         .await
         .expect("the open one");
@@ -1605,7 +1665,7 @@ mod tests {
         let machine = Machine::answering(vec![out(AHEAD, "", ""), out(NOT_PUSHED, "", "")]);
         let open = |found: thread::Listed| {
             let (machine, github) = (&machine, &github);
-            async move { open_pr(machine, &found, github, &token(), None, None).await }
+            async move { open_pr(machine, &found, github, &token(), None, None, None).await }
         };
 
         assert!(matches!(
@@ -1653,6 +1713,7 @@ mod tests {
             &token(),
             None,
             None,
+            None,
         )
         .await
         .expect_err("422");
@@ -1694,6 +1755,7 @@ mod tests {
             &token(),
             None,
             None,
+            None,
         )
         .await
         .expect("the winner");
@@ -1726,6 +1788,7 @@ mod tests {
             &token(),
             None,
             None,
+            None,
         )
         .await
         .expect("the open one");
@@ -1754,6 +1817,7 @@ mod tests {
             &token(),
             None,
             Some("Done.\n\nFixes: #42."),
+            None,
         )
         .await
         .expect("opened");
@@ -1779,6 +1843,7 @@ mod tests {
             &token(),
             None,
             None,
+            None,
         )
         .await
         .expect_err("404");
@@ -1801,6 +1866,7 @@ mod tests {
             &at(address),
             &token(),
             Some("  "),
+            None,
             None,
         )
         .await
@@ -1853,7 +1919,7 @@ mod tests {
             ],
         );
 
-        let merged = merge_pr(&pushed(), &at(address), &token(), 21, "aaa111")
+        let merged = merge_pr(&pushed(), &at(address), &token(), 21, "aaa111", None)
             .await
             .expect("merged");
 
@@ -1900,7 +1966,7 @@ mod tests {
             vec![reply("200 OK", OPEN), reply("200 OK", HEAD_OPEN)],
         );
 
-        let refused = merge_pr(&pushed(), &at(address), &token(), 21, "zzz999")
+        let refused = merge_pr(&pushed(), &at(address), &token(), 21, "zzz999", None)
             .await
             .expect_err("a moved head");
 
@@ -1927,10 +1993,10 @@ mod tests {
         );
         let github = at(address);
 
-        let pending = pending_pr(&pushed(), &github, &token())
+        let pending = pending_pr(&pushed(), &github, &token(), None)
             .await
             .expect("pending");
-        let refused = merge_pr(&pushed(), &github, &token(), 21, &pending.head_sha)
+        let refused = merge_pr(&pushed(), &github, &token(), 21, &pending.head_sha, None)
             .await
             .expect_err("a moved head");
 
@@ -1956,7 +2022,7 @@ mod tests {
             vec![reply("200 OK", OPEN), reply("200 OK", HEAD_OPEN)],
         );
 
-        let refused = merge_pr(&pushed(), &at(address), &token(), 20, "aaa111")
+        let refused = merge_pr(&pushed(), &at(address), &token(), 20, "aaa111", None)
             .await
             .expect_err("another PR");
 
@@ -1990,8 +2056,8 @@ mod tests {
         );
         let github = at(address);
 
-        let again = merge_pr(&pushed(), &github, &token(), 21, "aaa111").await;
-        let none = merge_pr(&pushed(), &github, &token(), 21, "aaa111").await;
+        let again = merge_pr(&pushed(), &github, &token(), 21, "aaa111", None).await;
+        let none = merge_pr(&pushed(), &github, &token(), 21, "aaa111", None).await;
 
         assert!(
             matches!(again, Err(Failed::AlreadyMerged { number: 21 })),
@@ -1999,7 +2065,7 @@ mod tests {
         );
         assert!(matches!(none, Err(Failed::NoPr)), "{none:?}");
         assert!(matches!(
-            merge_pr(&listed(None, None), &github, &token(), 21, "aaa111").await,
+            merge_pr(&listed(None, None), &github, &token(), 21, "aaa111", None).await,
             Err(Failed::NotPushed)
         ));
     }
@@ -2018,7 +2084,7 @@ mod tests {
             ],
         );
 
-        let merged = merge_pr(&pushed(), &at(address), &token(), 21, "aaa111")
+        let merged = merge_pr(&pushed(), &at(address), &token(), 21, "aaa111", None)
             .await
             .expect("merged");
 
@@ -2036,7 +2102,7 @@ mod tests {
             vec![reply("200 OK", OPEN), reply("200 OK", HEAD_OPEN)],
         );
 
-        let pending = pending_pr(&pushed(), &at(address), &token())
+        let pending = pending_pr(&pushed(), &at(address), &token(), None)
             .await
             .expect("pending");
 
@@ -2045,6 +2111,134 @@ mod tests {
         assert_eq!(pending.commits, 3);
         assert_eq!(pending.branch, UPSTREAM);
         assert_eq!((pending.owner.as_str(), pending.repo.as_str()), ("o", "r"));
+    }
+
+    /// Y-782: an agent rewrote the remote to `evil/x`. The stub answers no
+    /// request, so a call that reached GitHub would fail another way.
+    #[tokio::test]
+    async fn a_remote_that_names_another_repository_is_refused_before_anything_is_asked() {
+        let (listener, address) = listen();
+        let served = serve(listener, Vec::new());
+        let github = at(address);
+        let machine = Machine::answering(Vec::new());
+        let moved = listed(None, Some("git@github.com:evil/x.git"));
+        let other = |failed: Failed| {
+            assert!(
+                matches!(
+                    &failed,
+                    Failed::OtherRepository { bound, remote } if bound == "o/r" && remote == "evil/x"
+                ),
+                "{failed:?}"
+            );
+            assert_eq!(
+                failed.to_string(),
+                "this thread belongs to o/r, but its remote now names evil/x, so nothing went to GitHub"
+            );
+        };
+
+        other(
+            open_pr(&machine, &moved, &github, &token(), None, None, Some("o/r"))
+                .await
+                .expect_err("no PR"),
+        );
+        other(
+            pending_pr(&moved, &github, &token(), Some("o/r"))
+                .await
+                .expect_err("no read"),
+        );
+        other(
+            merge_pr(&moved, &github, &token(), 21, "aaa111", Some("o/r"))
+                .await
+                .expect_err("no merge"),
+        );
+
+        assert!(served.join().expect("the listener thread").is_empty());
+        assert!(machine.asked().is_empty());
+    }
+
+    /// GitHub reads a repository's name without its case, and the CLI binds nothing.
+    #[tokio::test]
+    async fn the_bound_repository_matches_in_any_case_and_none_refuses_nothing() {
+        let (listener, address) = listen();
+        let _served = serve(
+            listener,
+            vec![
+                reply("200 OK", OPEN),
+                reply("200 OK", HEAD_OPEN),
+                reply("200 OK", OPEN),
+                reply("200 OK", HEAD_OPEN),
+            ],
+        );
+        let github = at(address);
+
+        let cased = pending_pr(&pushed(), &github, &token(), Some("O/R")).await;
+        let unbound = pending_pr(&pushed(), &github, &token(), None).await;
+
+        assert_eq!(cased.expect("pending").number, 21);
+        assert_eq!(unbound.expect("pending").number, 21);
+        assert_eq!(repository(&pushed()).expect("a repository"), "o/r");
+        assert!(matches!(
+            repository(&listed(None, None)),
+            Err(Failed::NotPushed)
+        ));
+    }
+
+    #[tokio::test]
+    async fn origin_is_the_github_repository_of_the_remote_or_none() {
+        let machine = Machine::answering(vec![
+            out(0, "git@github.com:o/r.git\n", ""),
+            out(0, "https://me:secret@gitlab.com/o/r.git\n", ""),
+            out(1, "", ""),
+            out(128, "", "fatal: cannot change to '/gone'"),
+        ]);
+
+        assert_eq!(
+            origin(&machine, "~/src/r").await.expect("an origin"),
+            Some("o/r".to_owned())
+        );
+        assert_eq!(
+            origin(&machine, "/srv/r").await.expect("a foreign one"),
+            None
+        );
+        assert_eq!(origin(&machine, "/srv/r").await.expect("no origin"), None);
+        assert!(matches!(
+            origin(&machine, "/gone").await,
+            Err(Error::Git { ref stderr }) if stderr.contains("/gone")
+        ));
+        assert_eq!(
+            machine.asked()[0],
+            "git -C \"$HOME\"/'src/r' config --get remote.origin.url"
+        );
+    }
+
+    /// Real git: `origin` reads the URL, and a repository with no remote has none.
+    #[tokio::test]
+    async fn origin_reads_a_real_repository() {
+        struct Local;
+        impl Exec for Local {
+            async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+                Ok(sh(&format!(
+                    "export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1\n{command}"
+                )))
+            }
+        }
+        let dir = std::env::temp_dir().join(format!("yt-origin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.display().to_string();
+        assert!(sh(&format!("git init -q {path}")).success());
+
+        assert_eq!(origin(&Local, &path).await.expect("no origin"), None);
+        assert!(
+            sh(&format!(
+                "git -C {path} remote add origin https://github.com/Owner/Repo.git"
+            ))
+            .success()
+        );
+        assert_eq!(
+            origin(&Local, &path).await.expect("an origin"),
+            Some("Owner/Repo".to_owned())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The tip command on a real git: pushed, ahead, behind, diverged, then

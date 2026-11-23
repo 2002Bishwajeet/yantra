@@ -321,6 +321,7 @@ async fn every_script() -> Vec<(String, String)> {
         commit::draft(&r, &place, Some("/usr/bin/tmux")),
         commit::commit(&r, &place, "Fix it's quoting"),
         commit::push(&r, &place, Some(&issue), Some("/usr/bin/tmux")),
+        commit::origin(&r, "~/src/r"),
     );
     drive!(
         r,

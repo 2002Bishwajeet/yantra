@@ -409,7 +409,6 @@ where
         )
         .route("/machines/{machine}/probe", post(ask::<I>))
         .route("/machines/{machine}/dirs", post(walk::<I>))
-        .route("/machines/{machine}/clone", post(fetch::<I>))
         .route(
             "/workspaces/{name}/threads/{thread}/terminal",
             post(thread_terminal::<I>),
@@ -439,6 +438,8 @@ where
         .route("/join/forget-host-key", post(forget_host_key::<I>))
         .route("/update", post(renew::<I>))
         .route("/update/channel", put(rechannel::<I>))
+        // Here for the store, which keeps where each clone came from (Y-782).
+        .route("/machines/{machine}/clone", post(fetch::<I>))
         .route("/threads", get(threads_found::<I>))
         // Here for the grant: a thread's PR and its issue are read with it.
         .route(
@@ -1212,19 +1213,23 @@ fn from_dirs(error: &dirs::Error) -> StatusCode {
 /// ([ADR-0022]) and completion is [`ask`]. Nothing here awaits the clone, and
 /// a handler that did would hold a request for as long as a repository takes.
 ///
+/// **A task the daemon owns follows a github.com clone after the answer**
+/// (Y-782), and [`record_clone`] says why. It holds ssh for one pane read
+/// every three seconds until git ends, and for [`CLONE_BUDGET`] at most.
+///
 /// **No token goes with it** ([ADR-0023] §4): the machine's own git credential
 /// fetches, and a URL carrying one is a `400` before any machine is asked.
 ///
 /// [ADR-0022]: ../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md
 /// [ADR-0023]: ../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md
 async fn fetch<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(machine): Path<String>,
     Json(asked): Json<Fetch>,
 ) -> Result<(StatusCode, Json<Cloning>), Refused> {
-    let caller = allowed(&authoriser, &from, &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let plan = clone::plan(&asked.url, &asked.path).map_err(|error| Refused::Verb {
         status: from_clone(&error),
         said: chain(&error),
@@ -1237,14 +1242,66 @@ async fn fetch<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_clone(&error),
             said: chain(&error),
         })?;
+    let answer = Cloning {
+        machine: cloning.machine.clone(),
+        session: cloning.session.clone(),
+    };
+    if let (Some(store), Some(repo)) = (state.fleet.store.clone(), to_record(&plan, &cloning)) {
+        tokio::spawn(async move {
+            let landed = clone::landed(&cloning);
+            record_clone(&store, &cloning.machine, &plan.path, &repo, landed).await;
+        });
+    }
 
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(Cloning {
-            machine: cloning.machine,
-            session: cloning.session,
-        }),
-    ))
+    Ok((StatusCode::ACCEPTED, Json(answer)))
+}
+
+/// How long the daemon follows one clone.
+const CLONE_BUDGET: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// The github.com repository a clone record would name, for a clone this call
+/// started. A session that was already there can be another URL with the same
+/// last segment, so it gets no record.
+fn to_record(plan: &clone::Plan, cloning: &clone::Cloning) -> Option<String> {
+    let (owner, repo) = github::repo_of(&plan.url)?;
+    cloning
+        .opened
+        .was_created()
+        .then(|| format!("{owner}/{repo}"))
+}
+
+/// Keeps which github.com repository Yantra cloned into the path (ADR-0045,
+/// 2026-11-23 note), for the threads made there later. It writes only after
+/// `landed` says `git clone` exited 0. A clone that git refused leaves the
+/// folder as it was, and a record of it would bind every later thread to a
+/// repository the folder does not hold (Y-782).
+///
+/// No record is the safe answer: those threads take the folder's `origin`
+/// ([`crate::bind`]). A daemon restart, a clone longer than [`CLONE_BUDGET`]
+/// and a failed write all end there. An older record of the path stays.
+async fn record_clone(
+    store: &Store,
+    machine: &str,
+    path: &str,
+    repo: &str,
+    landed: impl Future<Output = Result<bool, clone::Error>>,
+) {
+    let said = match tokio::time::timeout(CLONE_BUDGET, landed).await {
+        Ok(Ok(true)) => {
+            let kept = store.put_clone(machine, path, repo).await;
+            kept.err().map(|error| chain(&error))
+        }
+        // git refused it and said why in the pane, or the session is gone.
+        Ok(Ok(false)) => return,
+        Ok(Err(error)) => Some(chain(&error)),
+        Err(_) => Some(format!(
+            "it still ran after {} minutes",
+            CLONE_BUDGET.as_secs() / 60
+        )),
+    };
+    if let Some(said) = said {
+        tracing::warn!("clone into {machine}:{path}: the store has no record of it: {said}");
+    }
 }
 
 /// The two refusals are the caller's; a macOS machine with no tmux server is
@@ -2419,6 +2476,7 @@ fn row_of(
         created: now,
         active: now,
         seen: Some(now),
+        repo: None,
     }
 }
 
@@ -2572,7 +2630,23 @@ async fn thread_new<I: Inventory + Clone + Send + Sync + 'static>(
     let opened = thread::start(&name, &issue, &github::Github::default(), &token)
         .await
         .map_err(refuse)?;
+    if let Some(store) = &state.fleet.store {
+        bind_new(store, &name, &opened).await;
+    }
     Ok(Json(ThreadOpened::of(opened)))
+}
+
+/// [`crate::bind::created`] for the thread `opened` names. The thread is made
+/// by now, so a workspace or a machine that cannot be read leaves it unbound.
+async fn bind_new(store: &Store, name: &str, opened: &thread::Opened) {
+    let reached = workspace::load(name).ok().and_then(|workspace| {
+        let ssh = ssh::Ssh::new(ssh::machine_at(&workspace.machine)?).ok()?;
+        Some((workspace, ssh))
+    });
+    match reached {
+        Some((workspace, ssh)) => crate::bind::created(store, &workspace, &ssh, opened).await,
+        None => tracing::warn!("thread new {name}: the thread is not bound to a repository"),
+    }
 }
 
 /// The machine name reaches `ssh`'s argv, so it is checked first (I-63).
@@ -2832,13 +2906,15 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
         .await
         .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
     tracing::info!("pr open {name} {id} for {}", caller.node);
-    let opened = commit::open_pr_for(
-        &name,
-        &id,
+    let (ssh, found, bound) = bound_thread(&state.fleet, &name, &id).await?;
+    let opened = commit::open_pr(
+        &ssh,
+        &found,
         &github::Github::default(),
         &token,
         title.as_deref(),
         body.as_deref(),
+        Some(&bound),
     )
     .await
     .map_err(refuse_commit)?;
@@ -2858,6 +2934,7 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
         number: opened.number,
         url: opened.url,
         created: opened.created,
+        repo: bound,
     }))
 }
 
@@ -2877,7 +2954,8 @@ async fn pending_pr<I: Inventory + Clone + Send + Sync + 'static>(
         .await
         .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
     tracing::info!("pr pending {name} {id} for {}", caller.node);
-    let pending = commit::pending_pr_for(&name, &id, &github::Github::default(), &token)
+    let (_, found, bound) = bound_thread(&state.fleet, &name, &id).await?;
+    let pending = commit::pending_pr(&found, &github::Github::default(), &token, Some(&bound))
         .await
         .map_err(refuse_commit)?;
     Ok(Json(ThreadPrPending {
@@ -2885,6 +2963,7 @@ async fn pending_pr<I: Inventory + Clone + Send + Sync + 'static>(
         url: pending.url,
         head_sha: pending.head_sha,
         commits: pending.commits,
+        repo: bound,
     }))
 }
 
@@ -2922,13 +3001,14 @@ async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
         .await
         .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
     tracing::info!("pr merge {name} {id} #{number} for {}", caller.node);
-    let merged = commit::merge_pr_for(
-        &name,
-        &id,
+    let (_, found, bound) = bound_thread(&state.fleet, &name, &id).await?;
+    let merged = commit::merge_pr(
+        &found,
         &github::Github::default(),
         &token,
         number,
         &seen,
+        Some(&bound),
     )
     .await
     .map_err(refuse_commit)?;
@@ -2937,6 +3017,27 @@ async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
         url: merged.url,
         branch_deleted: merged.kept.is_none(),
     }))
+}
+
+/// Thread `id` of workspace `name`, and the repository its PR verbs may write
+/// (ADR-0045, Y-782). The CLI's verbs stay unbound; these three do not.
+async fn bound_thread(
+    fleet: &Fleet,
+    name: &str,
+    id: &str,
+) -> Result<(ssh::Ssh, thread::Listed, String), Refused> {
+    let store = fleet.store.as_ref().ok_or_else(no_store)?;
+    let (workspace, ssh, found) = commit::find_listed(name, id).await.map_err(refuse_commit)?;
+    let bound = crate::bind::bound(store, &workspace, &found)
+        .await
+        .map_err(|error| match error {
+            crate::bind::Error::Commit(failed) => refuse_commit(failed),
+            crate::bind::Error::Store(failed) => Refused::Verb {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                said: chain(&failed),
+            },
+        })?;
+    Ok((ssh, found, bound))
 }
 
 /// `yantra chat rm <workspace> <thread>` on the wire (Y-496): the thread's keeper, worktree and
@@ -3009,6 +3110,7 @@ fn from_commit(error: &commit::Failed) -> StatusCode {
         | commit::Failed::NoPr
         | commit::Failed::AlreadyMerged { .. }
         | commit::Failed::NotThatPr { .. }
+        | commit::Failed::OtherRepository { .. }
         | commit::Failed::Unseen { .. } => StatusCode::CONFLICT,
         commit::Failed::Github(github) => from_github(github),
         commit::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
@@ -3606,6 +3708,8 @@ struct ThreadPrOpened {
     url: String,
     /// `false` when the PR was already open.
     created: bool,
+    /// `owner/repo`, the repository the thread is bound to (Y-782).
+    repo: String,
 }
 
 /// `head_sha` is spelled as `/api/pulls` spells it, and the merge body sends it back.
@@ -3615,6 +3719,8 @@ struct ThreadPrPending {
     url: String,
     head_sha: String,
     commits: u64,
+    /// `owner/repo`, which the merge dialog names (Y-782).
+    repo: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -4141,6 +4247,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                             created: SEEN,
                             active: SEEN,
                             seen: Some(SEEN),
+                            repo: None,
                         },
                         None,
                     )
@@ -4185,6 +4292,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         created: SEEN,
                         active: SEEN,
                         seen: Some(SEEN),
+                        repo: None,
                     },
                     &crate::chat::Registry::default(),
                 )
@@ -4215,6 +4323,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 created: SEEN,
                 active: SEEN,
                 seen: Some(SEEN),
+                repo: None,
             })]),
         ),
         (
@@ -4311,6 +4420,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 number: 497,
                 url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
                 created: true,
+                repo: "2002Bishwajeet/yantra".to_owned(),
             }),
         ),
         (
@@ -4321,6 +4431,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
                 head_sha: "89abcdef0123456789abcdef0123456789abcdef".to_owned(),
                 commits: 3,
+                repo: "2002Bishwajeet/yantra".to_owned(),
             }),
         ),
         (
@@ -6770,6 +6881,10 @@ mod tests {
             commit::Failed::Diverged,
             commit::Failed::NotGithub,
             commit::Failed::NoTitle,
+            commit::Failed::OtherRepository {
+                bound: "o/r".to_owned(),
+                remote: "evil/x".to_owned(),
+            },
         ] {
             assert_eq!(from_commit(&refused), StatusCode::CONFLICT, "{refused}");
         }
@@ -7327,6 +7442,64 @@ mod tests {
         let (status, said) = answered(from_dirs(&not_made), &not_made).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(said.contains("File exists"), "{said}");
+    }
+
+    /// Y-782: only a clone that this call started from github.com gets a
+    /// record. A session that was already there, and another host, get none.
+    #[test]
+    fn only_a_clone_yantra_started_from_github_is_recorded() {
+        use yantra_core::tmux::{Opened, Session};
+        let session = || Session {
+            name: "clone-r".to_owned(),
+            session_id: "$1".to_owned(),
+            window_id: "@1".to_owned(),
+            pane_id: "%1".to_owned(),
+        };
+        let repo = |url: &str, opened: Opened| {
+            let plan = clone::plan(url, "~/src/r").expect("a plan");
+            let cloning = clone::Cloning {
+                machine: "pi".to_owned(),
+                session: plan.session.clone(),
+                opened,
+            };
+            to_record(&plan, &cloning)
+        };
+
+        let attached = repo("https://github.com/evil/r", Opened::Attached(session()));
+        assert_eq!(attached, None);
+        let foreign = repo("https://gitlab.com/o/r.git", Opened::Created(session()));
+        assert_eq!(foreign, None);
+        let started = repo("git@github.com:o/r.git", Opened::Created(session()));
+        assert_eq!(started.as_deref(), Some("o/r"));
+    }
+
+    /// Y-782: the record is written when git exits 0 and at no other ending.
+    /// A clone that git refused leaves the folder as it was, so it leaves the
+    /// record of an older clone as it was too.
+    #[tokio::test(start_paused = true)]
+    async fn a_clone_is_recorded_only_after_it_lands() {
+        let (store, _) = crate::store::tests::scratch();
+        let record = async |repo: &str, landed: Option<Result<bool, clone::Error>>| {
+            let ending = async {
+                match landed {
+                    Some(landed) => landed,
+                    None => std::future::pending().await,
+                }
+            };
+            record_clone(&store, "pi", "~/src/r", repo, ending).await;
+            store.cloned("pi", "~/src/r").await.expect("a read")
+        };
+
+        assert_eq!(record("fork/r", Some(Ok(false))).await, None);
+        let unknown = record("fork/r", Some(Err(clone::Error::NoStateDir)));
+        assert_eq!(unknown.await, None);
+        assert_eq!(record("fork/r", None).await, None, "past the budget");
+
+        assert_eq!(record("o/r", Some(Ok(true))).await.as_deref(), Some("o/r"));
+        let refused = record("fork/r", Some(Ok(false))).await;
+        assert_eq!(refused.as_deref(), Some("o/r"), "the record stays");
+        let again = record("fork/r", Some(Ok(true))).await;
+        assert_eq!(again.as_deref(), Some("fork/r"), "a later clone");
     }
 
     /// The clone route is gated like every other write, and the mapper sends

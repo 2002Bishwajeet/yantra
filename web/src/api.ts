@@ -674,6 +674,8 @@ export type ThreadPrOpened = {
   number: number
   url: string
   created: boolean
+  /** `owner/repo`, the repository the thread is bound to (Y-782). */
+  repo: string
 }
 
 /** `POST /api/workspaces/{name}/threads/{thread}/pending` (Y-781): the thread's open PR as the
@@ -683,6 +685,8 @@ export type ThreadPrPending = {
   url: string
   head_sha: string
   commits: number
+  /** `owner/repo`, which the merge dialog names (Y-782). */
+  repo: string
 }
 
 /** `POST /api/workspaces/{name}/threads/{thread}/merge` with `{ number, head_sha }` (Y-496): a
