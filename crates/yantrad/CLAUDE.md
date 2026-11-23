@@ -345,8 +345,9 @@ the dashboard. It sends a `Content-Security-Policy`, `X-Content-Type-Options: no
 It sends `Cache-Control: no-store` on `/api` and under it. The policy is
 [`src/web/policy.txt`](src/web/policy.txt). `web::policy` adds the https origin About serves to
 `connect-src`, the file's last directive, because the plain page asks that origin for `/healthz`
-before it moves there. `web/vite.config.ts` reads the same file, so the e2e suite runs every screen
-under the policy.
+before it moves there. The layer fails closed: `web::policy` leaves out an origin that would add a
+source or a directive, or that no header value holds, and still sends the policy.
+`web/vite.config.ts` reads the same file, so the e2e suite runs every screen under the policy.
 
 - **`Referrer-Policy` is `same-origin`, and not the audit's `no-referrer`.** `same-origin` sends no
   `Referer` to another origin. `no-referrer` makes a browser send `Origin: null` on some same-origin

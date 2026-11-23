@@ -197,9 +197,10 @@ async fn secured(
     let mut response = next.run(request).await;
     let origin = api::https(&*fleet.model.read().await, &fleet.facts.listening_on);
     let headers = response.headers_mut();
-    if let Ok(policy) = HeaderValue::from_str(&web::policy(origin.as_deref())) {
-        headers.insert(header::CONTENT_SECURITY_POLICY, policy);
-    }
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        web::policy(origin.as_deref()),
+    );
     for (name, value) in [
         (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         (header::X_FRAME_OPTIONS, "DENY"),
@@ -905,6 +906,7 @@ mod tests {
                 "object-src 'none'",
                 "base-uri 'none'",
                 "frame-ancestors 'none'",
+                "form-action 'self'",
                 "script-src 'self'",
                 // About's `https`, which the plain page asks before it moves,
                 // and not the configured origin.

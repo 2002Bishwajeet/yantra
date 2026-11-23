@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 
 /** ADR-0024 §5: preferences are browser-local, one versioned key. The shell
  *  reads `seenAt`, `theme`, `density` and `seed`; Y-350's Appearance and
- *  General pages write the rest. `index.html` reads the same key before the
+ *  General pages write the rest. `public/theme.js` reads the same key before the
  *  first paint, so keep the shape and the key in step with that script. */
 export type Prefs = {
   v: 1
