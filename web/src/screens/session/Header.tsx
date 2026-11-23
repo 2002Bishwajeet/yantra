@@ -128,7 +128,7 @@ export function Header(props: HeaderProps) {
   )
   const reasonId = primary.enabled ? undefined : `${said}-verb`
   // Y-757: on a phone Stop only lives in the menu, so no glyph in the bar can pass for the composer's interrupt.
-  const menuVerb = phone ? verb.stop : other
+  const menuVerbs = phone ? (live.stop ? [verb.stop, verb.resume] : [verb.stop]) : [other]
   const menu = (
     <Menu>
       <MenuTrigger render={<IconButton label="More actions" ref={more} />}>
@@ -154,15 +154,17 @@ export function Header(props: HeaderProps) {
             <MenuSeparator />
           </>
         ) : null}
-        <MenuItem disabled={!menuVerb.enabled || menuVerb.pending} onClick={menuVerb.run}>
-          {menuVerb.pending ? menuVerb.busy : menuVerb.word}
-          {menuVerb.enabled ? null : (
-            <Text scale="body-small" tone="variant">
-              {' '}
-              · {menuVerb.why}
-            </Text>
-          )}
-        </MenuItem>
+        {menuVerbs.map((v) => (
+          <MenuItem disabled={!v.enabled || v.pending} key={v.word} onClick={v.run}>
+            {v.pending ? v.busy : v.word}
+            {v.enabled ? null : (
+              <Text scale="body-small" tone="variant">
+                {' '}
+                · {v.why}
+              </Text>
+            )}
+          </MenuItem>
+        ))}
         <MenuItem onClick={() => setDeleting(true)} tone="error">
           Delete
         </MenuItem>
