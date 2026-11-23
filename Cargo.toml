@@ -48,7 +48,7 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 # yantrad's thread store (ADR-0045). `bundled` compiles SQLite's C source, so the
 # musl appliance build needs no system library; the default `cache` is unused.
-rusqlite = { version = "0.42", default-features = false, features = ["bundled"] }
+rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
 # `yantra-stt` (ADR-0043). The default `static` feature links the prebuilt
 # libraries its build script downloads, so the binary needs no onnxruntime.
 sherpa-onnx = "2.0.1"
