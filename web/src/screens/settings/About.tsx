@@ -248,7 +248,7 @@ function Update(props: {
   if (asked !== null && !progress) {
     return (
       <Text render={<p role="status" />} scale="body-medium" tone="variant">
-        Updating from <Mono>{asked}</Mono>. The daemon installs the release and restarts. If nothing changes in a few
+        Updating from <Num>{asked}</Num>. The daemon installs the release and restarts. If nothing changes in a few
         minutes, the install failed: <Mono>journalctl -u yantra-update</Mono> on the box says why.
       </Text>
     )

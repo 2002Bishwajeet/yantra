@@ -1,6 +1,6 @@
 import type { ApiError } from '@/api/errors'
 import { Button } from '@/m3/button/Button'
-import { Mono, Text } from '@/m3/text/Text'
+import { Num, Text } from '@/m3/text/Text'
 
 /** Each way the Y-368 trigger can fail is a different thing to fix. */
 export function refused(error: ApiError, unanswered = 'The daemon did not answer, so no update was asked for'): string {
@@ -23,7 +23,7 @@ export function Reload(props: { running: string; asked: string }) {
   return (
     <div className="settings__update" role="status">
       <Text render={<p />} scale="body-medium">
-        yantrad <Mono>{running}</Mono> is running. This page is still the <Mono>{asked}</Mono> dashboard.
+        yantrad <Num>{running}</Num> is running. This page is still the <Num>{asked}</Num> dashboard.
       </Text>
       <Button onClick={() => location.reload()} type="button" variant="tonal">
         Reload

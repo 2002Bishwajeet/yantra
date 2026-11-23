@@ -28,7 +28,6 @@ const ALLOWED = new Set([
   'screens/setup/Setup.tsx',
   'screens/settings/About.tsx',
   'screens/settings/RestartNow.tsx',
-  'screens/settings/update.tsx',
 ])
 
 const NUMBER_CALLS = /\b(ago|elapsed|money|count|uptime|tilde|day|at|on|when)\(/
