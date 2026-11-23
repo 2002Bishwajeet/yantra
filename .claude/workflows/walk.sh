@@ -6,6 +6,8 @@
 #                                       of the owner's with no cookie, which draws the sign-in screen (Y-687); the daemon
 #                                       sees its own /etc/yantra, seeded with the Stable channel, so a switch never writes the host
 #                                       it returns when the daemon has checked the machines, so a card shows its checks (Y-740).
+#                                       a branch that changes the dashboard gets one workspace file that does not load,
+#                                       in the daemon's own copy of the workspaces, so `/` draws a Needs-you row (Y-754)
 #                                       This daemon runs as you with your ssh config, and no agent reports to it. It cannot show
 #                                       a check that only the hub's own account or an agent's report can fail (Y-740)
 #   walk.sh shoot <worktree> <route>... screenshots and the visible text of each route, WebKit at 390 px, Chromium at
@@ -13,6 +15,7 @@
 #                                       a route that ends in @dark is shot in the dark scheme (Y-770)
 #                                       a branch that changes the session screen also gets the first live session,
 #                                       light and dark (Y-770); the picture shows what that pane holds
+#                                       `/` also opens the first Needs-you row and shoots the page it leads to (Y-754)
 #                                       /machines also shoots the page of each machine whose card lists a failing check (Y-740)
 #                                       or what ssh said, and the page of each phone, tablet and Windows PC of the owner's,
 #                                       which the list hides (Y-775)
@@ -76,6 +79,18 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
   rm -rf "$dir/etc-yantra" && mkdir -p "$dir/etc-yantra"
   echo stable >"$dir/etc-yantra/channel"
   rm -rf "$dir/run" && mkdir -p "$dir/run"
+  # Y-754: the laptop holds no workspace, so `/` drew the checklist and no walk showed a Needs-you row.
+  # A file that does not load is such a row and reaches no machine. The host's directory shows through unchanged.
+  ws=${XDG_CONFIG_HOME:-$HOME/.config}/yantra/workspaces
+  rm -rf "$dir/workspaces"
+  if git -C "$wt" diff --name-only origin/main...HEAD | grep -q '^web/src/screens/dashboard/'; then
+    if [ -d "$ws" ]; then
+      cp -rL "$ws" "$dir/workspaces"
+      printf 'machine = ""\nrepo = "/walk"\n' >"$dir/workspaces/walk-shows-a-long-needs-you-title.toml"
+    else
+      echo "walk: $ws does not exist, so the walk adds no Needs-you row" >&2
+    fi
+  fi
   # shellcheck disable=SC2016
   setsid pasta --config-net -T none -U none -t "127.0.0.1/$port:7718" -t "127.0.0.1/$signin:7719" -- unshare --mount bash -c '
     set -eu
@@ -89,10 +104,11 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
       mount --bind "$f" "$1/etc-yantra/${f##*/}"
     done
     mount --rbind "$1/etc-yantra" /etc/yantra
+    [ ! -d "$1/workspaces" ] || mount --bind "$1/workspaces" "$8"
     exec unshare --user --map-user="$2" --map-group="$3" bash -c "
       python3 $7/walk-proxy.py 7718 $1/run/yantrad.sock &
       [ -z \"$6\" ] || python3 $7/walk-proxy.py 7719 $4:7717 $6 &
-      RUNTIME_DIRECTORY=$1/run YANTRA_WEB=$5/web/dist exec $5/target/debug/yantrad"' _ "$dir" "$(id -u)" "$(id -g)" "$v4" "$wt" "$as" "$here" \
+      RUNTIME_DIRECTORY=$1/run YANTRA_WEB=$5/web/dist exec $5/target/debug/yantrad"' _ "$dir" "$(id -u)" "$(id -g)" "$v4" "$wt" "$as" "$here" "$ws" \
     >"$dir/daemon.log" 2>&1 </dev/null &
   echo $! >"$dir/daemon.pid"
   for _ in $(seq 60); do
