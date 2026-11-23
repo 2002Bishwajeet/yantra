@@ -54,7 +54,8 @@ describe('gitFailure', () => {
     expect(failure).toMatchObject({ kind: 'otherRepository', retryable: true, said })
     expect(failure.title).toBe('The remote names another repository')
     expect(failure.describe()).toMatch(/Set the remote back on the machine/)
-    expect(failure.describe()).toMatch(/`yantra pr`/)
+    // The CLI reads the workspace file and the grant, and only the hub holds both.
+    expect(failure.describe()).toMatch(/run `yantra pr open` or `yantra pr merge` in a shell on the hub\.$/)
   })
 
   it.each<GitAction>(['draft', 'commit', 'push', 'pr', 'merge', 'remove'])(

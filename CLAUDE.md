@@ -151,7 +151,7 @@ state and no secret value ([ADR-0044](docs/adr/0044-a-write-needs-the-owners-pas
 [ADR-0032](docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md).
 **Since 2026-11-09 the daemon also keeps one store**, `~/.local/state/yantra/threads.sqlite`: one row per Chat
 thread with its session id, title, machine, status and GitHub repository, one row per clone that
-Yantra started, and no message text and no secret
+Yantra completed, and no message text and no secret
 ([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md)).
 **Since 2026-11-20 it also writes the Web Push signing key** to `/etc/yantra/daemon.env`, beside the
 relay and the grant, and keeps each device's push subscription in the thread store, with no fleet

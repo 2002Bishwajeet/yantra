@@ -92,7 +92,7 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
   noGrant: { title: 'GitHub is not connected', next: 'Connect GitHub, then try again.' },
   otherRepository: {
     title: 'The remote names another repository',
-    next: 'The git remote on the machine no longer names the repository of this thread, so nothing went to GitHub. Set the remote back on the machine, then try again. If you moved the repository on purpose, use `yantra pr` in a shell there.',
+    next: 'The git remote on the machine no longer names the repository of this thread, so nothing went to GitHub. Set the remote back on the machine, then try again. If you moved the repository on purpose, run `yantra pr open` or `yantra pr merge` in a shell on the hub.',
   },
   removeRefused: {
     title: 'The worktree was not removed',

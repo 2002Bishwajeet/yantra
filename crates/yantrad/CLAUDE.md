@@ -511,7 +511,10 @@ startup command of a tmux session on the machine and the route answers `202` wit
 nothing awaits the clone, progress is that session's terminal socket (ADR-0022) and completion is the
 probe. Both values are checked in [`clone.rs`](../yantra-core/src/clone.rs) before ssh, and a URL
 carrying a credential is refused: it would sit in the pane's start command for as long as the session
-lives (ADR-0023 §4).
+lives (ADR-0023 §4). **The clone record is written when `git clone` exits 0, and never when it starts**
+(Y-782): a clone that git refused leaves the folder as it was, and a record of it binds every later
+thread to a repository the folder does not hold. A task the daemon owns follows the pane after the
+`202`. A restart or a clone longer than an hour leaves no record, and those threads take `origin`.
 
 **`GET /api/notifications` and the ring behind it are
 [ADR-0025](../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md)** (Y-343), proposed rather than
@@ -1150,7 +1153,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Thirteen things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Fourteen things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -1212,11 +1215,15 @@ polls it.
 bounded `claude -p` that answers `initialize` and exits. The composer asks once when a person types
 `/` at the start of a prompt, and holds the answer for five minutes.
 
+**Y-782 is the fourteenth, and no request awaits it.** After the clone route answers `202`, a task
+reads the clone session's pane every 3 s until `git clone` ends, for at most an hour. A person
+started that clone, and the task ends with it.
+
 **`room_read` waits beside the tasks licence, and holds no ssh at all** (Y-534). Its wait is in
 memory, it ends at 50 s or when the daemon shuts down, and a `room_send` spawns its wakes as tasks
 rather than awaiting them.
 
-None of the thirteen licenses a **read handler** that awaits ssh, which is still the bug this module
+None of the fourteen licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.
@@ -1297,7 +1304,7 @@ unreachable GitHub that stays shows after 5 s. A status error that stays shows o
 - **The CLI is the honesty check.** Anything the web UI can do must be expressible in `yantra`
   first. That is what stops the daemon growing a second, richer API that the CLI cannot reach.
 - Stack: `axum` and `tokio`, both in use since Y-069. **One store, and only one**: `src/store.rs` keeps
-  a row per Chat thread and a row per clone that Yantra started in `~/.local/state/yantra/threads.sqlite` ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md),
+  a row per Chat thread and a row per clone that Yantra completed in `~/.local/state/yantra/threads.sqlite` ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md),
   Y-688). It answers the first question about the past, which threads a machine had and what they
   were called, and the store wins over git config for a session id and for the GitHub repository (Y-782). Only `DELETE …/threads/{thread}`
   forgets a row: the web's *Forget thread* and `yantra chat rm --daemon` send it for a `gone` thread. A third table,

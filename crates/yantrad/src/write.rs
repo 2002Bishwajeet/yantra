@@ -1213,6 +1213,10 @@ fn from_dirs(error: &dirs::Error) -> StatusCode {
 /// ([ADR-0022]) and completion is [`ask`]. Nothing here awaits the clone, and
 /// a handler that did would hold a request for as long as a repository takes.
 ///
+/// **A task the daemon owns follows a github.com clone after the answer**
+/// (Y-782), and [`record_clone`] says why. It holds ssh for one pane read
+/// every three seconds until git ends, and for [`CLONE_BUDGET`] at most.
+///
 /// **No token goes with it** ([ADR-0023] §4): the machine's own git credential
 /// fetches, and a URL carrying one is a `400` before any machine is asked.
 ///
@@ -1238,38 +1242,65 @@ async fn fetch<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_clone(&error),
             said: chain(&error),
         })?;
-    if let Some(store) = &state.fleet.store {
-        record_clone(store, &plan, &cloning).await;
+    let answer = Cloning {
+        machine: cloning.machine.clone(),
+        session: cloning.session.clone(),
+    };
+    if let (Some(store), Some(repo)) = (state.fleet.store.clone(), to_record(&plan, &cloning)) {
+        tokio::spawn(async move {
+            let landed = clone::landed(&cloning);
+            record_clone(&store, &cloning.machine, &plan.path, &repo, landed).await;
+        });
     }
 
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(Cloning {
-            machine: cloning.machine,
-            session: cloning.session,
-        }),
-    ))
+    Ok((StatusCode::ACCEPTED, Json(answer)))
+}
+
+/// How long the daemon follows one clone.
+const CLONE_BUDGET: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// The github.com repository a clone record would name, for a clone this call
+/// started. A session that was already there can be another URL with the same
+/// last segment, so it gets no record.
+fn to_record(plan: &clone::Plan, cloning: &clone::Cloning) -> Option<String> {
+    let (owner, repo) = github::repo_of(&plan.url)?;
+    cloning
+        .opened
+        .was_created()
+        .then(|| format!("{owner}/{repo}"))
 }
 
 /// Keeps which github.com repository Yantra cloned into the path (ADR-0045,
-/// 2026-11-23 note), for the threads made there later. Only a clone this call
-/// started is kept: a session that was already there can be another URL with
-/// the same last segment. A failed write leaves the clone as it is.
-async fn record_clone(store: &Store, plan: &clone::Plan, cloning: &clone::Cloning) {
-    let Some((owner, repo)) = github::repo_of(&plan.url) else {
-        return;
+/// 2026-11-23 note), for the threads made there later. It writes only after
+/// `landed` says `git clone` exited 0. A clone that git refused leaves the
+/// folder as it was, and a record of it would bind every later thread to a
+/// repository the folder does not hold (Y-782).
+///
+/// No record is the safe answer: those threads take the folder's `origin`
+/// ([`crate::bind`]). A daemon restart, a clone longer than [`CLONE_BUDGET`]
+/// and a failed write all end there. An older record of the path stays.
+async fn record_clone(
+    store: &Store,
+    machine: &str,
+    path: &str,
+    repo: &str,
+    landed: impl Future<Output = Result<bool, clone::Error>>,
+) {
+    let said = match tokio::time::timeout(CLONE_BUDGET, landed).await {
+        Ok(Ok(true)) => {
+            let kept = store.put_clone(machine, path, repo).await;
+            kept.err().map(|error| chain(&error))
+        }
+        // git refused it and said why in the pane, or the session is gone.
+        Ok(Ok(false)) => return,
+        Ok(Err(error)) => Some(chain(&error)),
+        Err(_) => Some(format!(
+            "it still ran after {} minutes",
+            CLONE_BUDGET.as_secs() / 60
+        )),
     };
-    if !cloning.opened.was_created() {
-        return;
-    }
-    let repo = format!("{owner}/{repo}");
-    if let Err(error) = store.put_clone(&cloning.machine, &plan.path, &repo).await {
-        tracing::warn!(
-            "clone into {}:{}: the store has no record of it: {}",
-            cloning.machine,
-            plan.path,
-            chain(&error)
-        );
+    if let Some(said) = said {
+        tracing::warn!("clone into {machine}:{path}: the store has no record of it: {said}");
     }
 }
 
@@ -7413,53 +7444,62 @@ mod tests {
         assert!(said.contains("File exists"), "{said}");
     }
 
-    /// Y-782: the store keeps a clone that this call started from github.com,
-    /// and nothing for a session that was already there or for another host.
-    #[tokio::test]
-    async fn a_clone_yantra_started_from_github_is_recorded() {
+    /// Y-782: only a clone that this call started from github.com gets a
+    /// record. A session that was already there, and another host, get none.
+    #[test]
+    fn only_a_clone_yantra_started_from_github_is_recorded() {
         use yantra_core::tmux::{Opened, Session};
-        let (store, _) = crate::store::tests::scratch();
         let session = || Session {
             name: "clone-r".to_owned(),
             session_id: "$1".to_owned(),
             window_id: "@1".to_owned(),
             pane_id: "%1".to_owned(),
         };
-        let record = async |url: &str, path: &str, opened: Opened| {
-            let plan = clone::plan(url, path).expect("a plan");
+        let repo = |url: &str, opened: Opened| {
+            let plan = clone::plan(url, "~/src/r").expect("a plan");
             let cloning = clone::Cloning {
                 machine: "pi".to_owned(),
                 session: plan.session.clone(),
                 opened,
             };
-            record_clone(&store, &plan, &cloning).await;
-            store.cloned("pi", path).await.expect("a read")
+            to_record(&plan, &cloning)
         };
 
-        let attached = record(
-            "https://github.com/evil/r",
-            "~/src/r",
-            Opened::Attached(session()),
-        );
-        assert_eq!(attached.await, None);
-        let foreign = record(
-            "https://gitlab.com/o/r.git",
-            "~/src/r",
-            Opened::Created(session()),
-        );
-        assert_eq!(foreign.await, None);
-        let started = record(
-            "git@github.com:o/r.git",
-            "~/src/r",
-            Opened::Created(session()),
-        );
-        assert_eq!(started.await.as_deref(), Some("o/r"));
-        let again = record(
-            "https://github.com/evil/r",
-            "~/src/r",
-            Opened::Attached(session()),
-        );
-        assert_eq!(again.await.as_deref(), Some("o/r"), "the record stays");
+        let attached = repo("https://github.com/evil/r", Opened::Attached(session()));
+        assert_eq!(attached, None);
+        let foreign = repo("https://gitlab.com/o/r.git", Opened::Created(session()));
+        assert_eq!(foreign, None);
+        let started = repo("git@github.com:o/r.git", Opened::Created(session()));
+        assert_eq!(started.as_deref(), Some("o/r"));
+    }
+
+    /// Y-782: the record is written when git exits 0 and at no other ending.
+    /// A clone that git refused leaves the folder as it was, so it leaves the
+    /// record of an older clone as it was too.
+    #[tokio::test(start_paused = true)]
+    async fn a_clone_is_recorded_only_after_it_lands() {
+        let (store, _) = crate::store::tests::scratch();
+        let record = async |repo: &str, landed: Option<Result<bool, clone::Error>>| {
+            let ending = async {
+                match landed {
+                    Some(landed) => landed,
+                    None => std::future::pending().await,
+                }
+            };
+            record_clone(&store, "pi", "~/src/r", repo, ending).await;
+            store.cloned("pi", "~/src/r").await.expect("a read")
+        };
+
+        assert_eq!(record("fork/r", Some(Ok(false))).await, None);
+        let unknown = record("fork/r", Some(Err(clone::Error::NoStateDir)));
+        assert_eq!(unknown.await, None);
+        assert_eq!(record("fork/r", None).await, None, "past the budget");
+
+        assert_eq!(record("o/r", Some(Ok(true))).await.as_deref(), Some("o/r"));
+        let refused = record("fork/r", Some(Ok(false))).await;
+        assert_eq!(refused.as_deref(), Some("o/r"), "the record stays");
+        let again = record("fork/r", Some(Ok(true))).await;
+        assert_eq!(again.as_deref(), Some("fork/r"), "a later clone");
     }
 
     /// The clone route is gated like every other write, and the mapper sends
