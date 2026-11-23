@@ -57,7 +57,7 @@ test.describe('one machine on a busy fleet', () => {
       'href',
       '/m/cachyos-g14/s/scratch',
     )
-    await expect(sessions.getByText('Not in a workspace')).toBeVisible()
+    await expect(sessions.getByText(/^Not in a workspace ·/)).toBeVisible()
     await expect(sessions.getByRole('button', { name: 'Adopt' })).toHaveCount(0)
   })
 
