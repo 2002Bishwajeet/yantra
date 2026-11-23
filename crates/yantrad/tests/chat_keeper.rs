@@ -412,14 +412,9 @@ impl Machine {
             },
             Agent::StandIn | Agent::Acp => None,
         };
-        let Some(fixture) = SshFixture::start()? else {
+        let Some(machine) = Self::bare()? else {
             return Ok(None);
         };
-        fixture.run(&format!(
-            "mkdir -p {REPO} ~/.local/bin && cd {REPO} && git init -q && echo one > README \
-             && git add README && git -c user.name=t -c user.email=t@example.com commit -qm one"
-        ))?;
-        let machine = Self { fixture };
         match agent {
             Agent::StandIn => {
                 machine.write("/home/yantra/recording.jsonl", RECORDING)?;
@@ -427,25 +422,45 @@ impl Machine {
             }
             Agent::Acp => machine.write("/home/yantra/.local/bin/gemini", ACP_STAND_IN)?,
             Agent::RealClaude => {
-                let login = login.context("a login")?;
-                machine.fixture.arrange_as_root(&format!(
-                    "install -d -o {USER} -g {USER} -m 700 /home/{USER}/.claude"
-                ))?;
-                machine
-                    .fixture
-                    .copy_in(&login, &format!("/home/{USER}/.claude/.credentials.json"))?;
-                machine.fixture.arrange_as_root(&format!(
-                    "cd /home/{USER}/.claude && chown {USER}:{USER} .credentials.json \
-                     && chmod 400 .credentials.json \
-                     && printf '{{\"model\":\"haiku\"}}' > settings.json \
-                     && chown {USER}:{USER} settings.json"
-                ))?;
-                machine
-                    .fixture
-                    .run("ln -s /opt/claude/claude ~/.local/bin/claude")?;
+                machine.real_claude()?;
+                machine.log_in(&login.context("a login")?)?;
             }
         }
         Ok(Some(machine))
+    }
+
+    /// The fixture with a repository and no agent.
+    fn bare() -> Result<Option<Self>> {
+        let Some(fixture) = SshFixture::start()? else {
+            return Ok(None);
+        };
+        fixture.run(&format!(
+            "mkdir -p {REPO} ~/.local/bin && cd {REPO} && git init -q && echo one > README \
+             && git add README && git -c user.name=t -c user.email=t@example.com commit -qm one"
+        ))?;
+        Ok(Some(Self { fixture }))
+    }
+
+    /// Puts the real `claude` on the fixture's `PATH`, with no login.
+    fn real_claude(&self) -> Result<()> {
+        self.fixture
+            .run("ln -s /opt/claude/claude ~/.local/bin/claude")?;
+        Ok(())
+    }
+
+    /// Gives the fixture's account the owner's login and a cheap model.
+    fn log_in(&self, login: &Path) -> Result<()> {
+        self.fixture.arrange_as_root(&format!(
+            "install -d -o {USER} -g {USER} -m 700 /home/{USER}/.claude"
+        ))?;
+        self.fixture
+            .copy_in(login, &format!("/home/{USER}/.claude/.credentials.json"))?;
+        self.fixture.arrange_as_root(&format!(
+            "cd /home/{USER}/.claude && chown {USER}:{USER} .credentials.json \
+             && chmod 400 .credentials.json \
+             && printf '{{\"model\":\"haiku\"}}' > settings.json \
+             && chown {USER}:{USER} settings.json"
+        ))
     }
 
     fn write(&self, path: &str, body: &str) -> Result<()> {
@@ -1121,6 +1136,73 @@ async fn a_real_claude_background_task_wakes_the_thread() -> Result<()> {
         .collect();
     assert!(said.contains("WAKE_DONE"), "{said}");
     assert!(machine.session_exists(&thread), "the keeper stays");
+    Ok(())
+}
+
+/// Y-815, with the real `claude` and no fake: the workspace's account is not
+/// the daemon's own, and it holds no login. The refusal names that account and
+/// a command that runs as it, and the keeper goes. Then the account gets the
+/// owner's login, as `/login` gives it one, and Retry's turn completes.
+#[tokio::test]
+async fn a_real_claude_with_no_login_names_its_account_and_runs_after_the_login() -> Result<()> {
+    let Some(machine) = Machine::bare()? else {
+        return Ok(());
+    };
+    machine.real_claude()?;
+    let host = Host::new(&machine.fixture)?;
+    let _daemon = host.daemon("a").await?;
+    let turn = json!({"type": "turn", "text": "Say the one word done.", "harness": "claude"});
+
+    let mut socket = Socket::open(&chat(None, None)).await?;
+    socket.send(turn.clone()).await?;
+    let mut drawn = Vec::new();
+    let refusal = loop {
+        let frame = socket.next(REAL_PATIENCE).await?;
+        let frame = frame.with_context(|| format!("the socket closed: {drawn:#?}"))?;
+        if frame["type"] == "error" {
+            break frame;
+        }
+        drawn.push(frame);
+    };
+    let thread = thread_of(&drawn)?;
+    assert_eq!(
+        drawn[drawn.len() - 1]["payload"]["state"],
+        "failed",
+        "{drawn:#?}"
+    );
+    let said = refusal["said"].as_str().unwrap_or_default();
+    assert!(said.starts_with("Not logged in"), "{refusal}");
+    assert_eq!(
+        refusal,
+        json!({"type": "error", "kind": "notLoggedIn", "said": said,
+               "harness": "claude", "machine": "fixture", "account": USER,
+               "command": format!("run sudo -iu {USER} claude and type /login")})
+    );
+    machine
+        .until(
+            Duration::from_secs(60),
+            "the keeper of the claude with no login going",
+            |machine| Ok(!machine.session_exists(&thread)),
+        )
+        .await?;
+    assert_eq!(machine.agent_pid(Agent::RealClaude, &thread)?, "");
+
+    let Some(login) = credentials()? else {
+        return Ok(());
+    };
+    machine.log_in(&login)?;
+    // Retry opens the socket again, and the attach replays the failed turn.
+    let mut socket = Socket::open(&chat(Some(&thread), None)).await?;
+    while let Ok(Some(_)) = socket.next(Duration::from_secs(3)).await {}
+    socket.send(turn).await?;
+    let again = socket
+        .through(REAL_PATIENCE, |frame| frame["type"] == "turn.completed")
+        .await?;
+    assert_eq!(
+        again[again.len() - 1]["payload"]["state"],
+        "completed",
+        "{again:#?}"
+    );
     Ok(())
 }
 

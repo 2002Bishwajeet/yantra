@@ -962,7 +962,9 @@ The rules from before the keeper still hold:
   [`tests/chat_keeper.rs`](tests/chat_keeper.rs) is ADR-0035's done test: a real `yantrad` against
   the podman fixture, through a cut pipe, a closed socket and a killed daemon. Its ADR-0041 cases
   prove that a background task outlives its turn and wakes the thread, and that an idle keeper
-  closes.
+  closes. Its Y-815 case runs the real `claude` with no login on an account that is not the
+  daemon's own: the refusal names that account, the keeper goes, and after the login the next turn
+  completes.
 
 ## The route that holds rooms
 
