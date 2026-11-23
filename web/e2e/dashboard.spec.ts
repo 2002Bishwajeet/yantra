@@ -25,7 +25,7 @@ test.describe('the dashboard on a busy fleet', () => {
     await firstReading(page)
   })
 
-  test('draws the strip, the hero, Running and Worth a look', async ({ page }) => {
+  test('draws the strip, the hero, Running and Worth a look', async ({ page, size }) => {
     await expect(page.getByText('5 of 6 machines online')).toBeVisible()
     // D7 §3.3 and §4.9: a machine the tailnet sees off is asleep, and Open
     // replaces Fix.
@@ -35,7 +35,12 @@ test.describe('the dashboard on a busy fleet', () => {
     const hero = region(page, 'Needs you')
     await expect(hero.getByText('things are waiting on you')).toBeVisible()
     await expect(hero.getByText('yantra-web is waiting for trust')).toBeVisible()
-    await expect(hero.getByRole('link', { name: 'Answer' })).toBeVisible()
+    // Y-754: on a phone the row is the link and carries no Answer button.
+    await expect(
+      size === 'phone'
+        ? hero.getByRole('link', { name: /yantra-web is waiting for trust/ })
+        : hero.getByRole('link', { name: 'Answer' }),
+    ).toBeVisible()
 
     const running = region(page, 'Running')
     await expect(running.getByRole('progressbar')).toHaveCount(0)
@@ -44,6 +49,32 @@ test.describe('the dashboard on a busy fleet', () => {
     await expect(worth.getByRole('link', { name: 'Attach' })).toHaveCount(2)
     await expect(worth.getByRole('button', { name: 'Kill' })).toHaveCount(2)
     await expect(worth.getByRole('button', { name: 'Adopt' })).toHaveCount(0)
+  })
+
+  test('shows each Needs-you headline whole on a phone, and a tap opens the row', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'Y-754 is the phone layout')
+    await page.setViewportSize({ width: 390, height: 844 })
+    const rows = region(page, 'Needs you').locator('.m3-row')
+    expect(await rows.count()).toBeGreaterThan(0)
+    const seen = await rows.evaluateAll((all) =>
+      all.map((row) => {
+        const head = row.querySelector<HTMLElement>('.m3-row__headline')!
+        const style = getComputedStyle(head)
+        const line = parseFloat(style.lineHeight)
+        return {
+          cut: head.scrollWidth > head.clientWidth,
+          lines: Math.round(head.getBoundingClientRect().height / line),
+          buttons: row.querySelectorAll('.m3-button').length,
+        }
+      }),
+    )
+    for (const one of seen) {
+      expect(one.cut).toBe(false)
+      expect(one.lines).toBeLessThanOrEqual(2)
+      expect(one.buttons).toBe(0)
+    }
+    await region(page, 'Needs you').getByRole('link', { name: /yantra-web is waiting for trust/ }).click()
+    await expect(page).toHaveURL(/\/w\/yantra-web/)
   })
 
   test('has one h1, which on the phone is the app bar', async ({ page, size }) => {
