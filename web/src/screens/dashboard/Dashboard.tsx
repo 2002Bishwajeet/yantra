@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { CircleDot, GitPullRequest, Plus, RotateCw } from 'lucide-react'
+import { ChevronRight, CircleDot, ExternalLink, GitPullRequest, Plus, RotateCw } from 'lucide-react'
 import type {
   AgentRow,
   Attention,
@@ -191,12 +191,21 @@ function Strip(props: {
   )
 }
 
-function GithubRow(props: { item: Item; kind: 'review' | 'issue'; now: number }) {
-  const { item, kind, now } = props
+/** On a phone the row is the link and its trailing slot is a mark, not a control (Y-754). */
+function Go(props: { out?: boolean }) {
+  const Icon = props.out ? ExternalLink : ChevronRight
+  return <Icon aria-hidden className="dash__go" />
+}
+
+function GithubRow(props: { item: Item; kind: 'review' | 'issue'; now: number; phone: boolean }) {
+  const { item, kind, now, phone } = props
   const short = item.repo.split('/')[1] ?? item.repo
   const age = at(item.updated_at, now)
   return (
-    <Row tone="translucent">
+    <Row
+      render={phone ? <a href={item.url} rel="noreferrer" target="_blank" /> : undefined}
+      tone="translucent"
+    >
       <IconTile>{kind === 'review' ? <GitPullRequest /> : <CircleDot />}</IconTile>
       <RowText
         headline={`${kind === 'review' ? 'Review requested' : 'Issue assigned'}: ${short}#${item.number}`}
@@ -207,23 +216,30 @@ function GithubRow(props: { item: Item; kind: 'review' | 'issue'; now: number })
           </>
         }
       />
-      <Button
-        render={<a href={item.url} rel="noreferrer" target="_blank" />}
-        role="link"
-        variant={kind === 'review' ? 'tonal' : 'text'}
-      >
-        {kind === 'review' ? 'Review' : 'Open'}
-      </Button>
+      {phone ? (
+        <Go out />
+      ) : (
+        <Button
+          render={<a href={item.url} rel="noreferrer" target="_blank" />}
+          role="link"
+          variant={kind === 'review' ? 'tonal' : 'text'}
+        >
+          {kind === 'review' ? 'Review' : 'Open'}
+        </Button>
+      )}
     </Row>
   )
 }
 
-function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
-  const { row, events, now } = props
+function NeedsRow(props: { row: WorkRow; events: Event[]; now: number; phone: boolean }) {
+  const { row, events, now, phone } = props
   if (row.kind === 'machine') return null
   if (row.kind === 'unusable') {
     return (
-      <Row tone="translucent">
+      <Row
+        render={phone ? <Link params={{ name: row.name }} to="/w/$name/repair" /> : undefined}
+        tone="translucent"
+      >
         <Tile name={row.name} />
         <RowText
           headline={`${row.name} will not load`}
@@ -233,19 +249,24 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
             </State>
           }
         />
-        <Button render={<Link params={{ name: row.name }} to="/w/$name/repair" />} role="link" variant="text">
-          Repair
-        </Button>
+        {phone ? (
+          <Go />
+        ) : (
+          <Button render={<Link params={{ name: row.name }} to="/w/$name/repair" />} role="link" variant="text">
+            Repair
+          </Button>
+        )}
       </Row>
     )
   }
   const { workspace, status } = row
   const { mark, words } = phrase(status)
   const state = status?.reached === 'yes' ? status.status : null
+  const chat = <Link params={{ name: workspace.name }} search={{ view: 'chat' }} to="/w/$name" />
   if (state?.state === 'awaiting_trust') {
     const asked = askedAt(events, workspace.name)
     return (
-      <Row tone="translucent">
+      <Row render={phone ? chat : undefined} tone="translucent">
         <Tile name={workspace.name} />
         <RowText
           headline={`${workspace.name} is waiting for trust`}
@@ -266,18 +287,18 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
             </State>
           }
         />
-        <Button
-          render={<Link params={{ name: workspace.name }} search={{ view: 'chat' }} to="/w/$name" />}
-          role="link"
-          variant="tonal"
-        >
-          Answer
-        </Button>
+        {phone ? (
+          <Go />
+        ) : (
+          <Button render={chat} role="link" variant="tonal">
+            Answer
+          </Button>
+        )}
       </Row>
     )
   }
   return (
-    <Row tone="translucent">
+    <Row render={phone ? chat : undefined} tone="translucent">
       <Tile name={workspace.name} />
       <RowText
         headline={
@@ -291,12 +312,10 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number }) {
           </State>
         }
       />
-      {state?.state === 'unclear' ? null : (
-        <Button
-          render={<Link params={{ name: workspace.name }} search={{ view: 'chat' }} to="/w/$name" />}
-          role="link"
-          variant="text"
-        >
+      {phone ? (
+        <Go />
+      ) : state?.state === 'unclear' ? null : (
+        <Button render={chat} role="link" variant="text">
           Open
         </Button>
       )}
@@ -319,8 +338,9 @@ function Hero(props: {
   /** Another band has rows, so a quiet Needs you has nothing to add. */
   others: boolean
   fleetEmpty: boolean
+  phone: boolean
 }) {
-  const { rows, count, attention, github, events, now, retry, others, fleetEmpty } = props
+  const { rows, count, attention, github, events, now, retry, others, fleetEmpty, phone } = props
   // D7 §3.1: where the FAB carries New session, this copy is not also filled.
   const carried = useFab() !== null
   const connecting = useConnecting()
@@ -359,15 +379,15 @@ function Hero(props: {
       ) : (
         <div className="dash__rows">
           {rows.map((row) => (
-            <NeedsRow events={events} key={row.id} now={now} row={row} />
+            <NeedsRow events={events} key={row.id} now={now} phone={phone} row={row} />
           ))}
           {attention.looked === 'ok' ? (
             <>
               {attention.data.reviews.map((item) => (
-                <GithubRow item={item} key={item.url} kind="review" now={now} />
+                <GithubRow item={item} key={item.url} kind="review" now={now} phone={phone} />
               ))}
               {attention.data.issues.map((item) => (
-                <GithubRow item={item} key={item.url} kind="issue" now={now} />
+                <GithubRow item={item} key={item.url} kind="issue" now={now} phone={phone} />
               ))}
               {attention.data.notifications > 0 ? (
                 <a className="dash__unread m3-hit" href="https://github.com/notifications" rel="noreferrer" target="_blank">
@@ -675,7 +695,8 @@ export function Dashboard() {
   const sessions = useSessions()
   const fleetEmpty = listed.looked === 'ok' && listed.data.length === 0
   const read = useAgents(workspaces)
-  const agents = fleetEmpty ? NO_AGENTS : read
+  // Y-754: a fleet whose only files do not load has no status read either, and those files still need the owner.
+  const agents = workspaces.looked === 'ok' && workspaces.data.length === 0 ? NO_AGENTS : read
   // The fifth is on the daemon's 300 s clock and stamps itself (D6 §2).
   const attention = useAttention()
   const github = grant(useGithub().data, useGithubReadiness())
@@ -813,6 +834,7 @@ export function Dashboard() {
               rows={band('needs').filter((row) => row.kind !== 'machine')}
               others={others}
               fleetEmpty={fleetEmpty}
+              phone={phone}
             />
           </ErrorBoundary>
           <ErrorBoundary eyebrow="Running" title="Running could not be drawn">

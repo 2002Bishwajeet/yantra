@@ -126,6 +126,19 @@ async function accountScene(page, name, url, out) {
   if (!wrong && (await fault())) errors.push(`${name} account scene: the menu closed while the picture was taken`)
   await page.keyboard.press('Escape')
 }
+// Y-754: a phone's Needs-you row is the link and a desktop's row ends in one. A GitHub row leaves the dashboard, so it is not opened.
+async function needsScene(page, name, url, out) {
+  await page.goto(url, { waitUntil: 'load' })
+  await page.waitForTimeout(5000)
+  const desktop = name === 'desktop-chromium'
+  const band = page.getByRole('region', { name: 'Needs you' })
+  const link = band.locator(desktop ? '.m3-row a.m3-button:not([target])' : 'a.m3-row:not([target])').first()
+  if ((await link.count()) === 0) return
+  if (desktop) await link.click()
+  else await link.tap()
+  await page.waitForTimeout(2000)
+  await snap(page, `${out}/needs-you-open-${name}${desktop ? '' : '-1'}`, desktop)
+}
 for (const [name, type, options] of looks) {
   const browser = await type.launch()
   const context = await browser.newContext({ ...options, reducedMotion: 'reduce', colorScheme: 'light' })
@@ -235,6 +248,13 @@ for (const [name, type, options] of looks) {
         await searchScene(page, name, url, out)
       } catch (e) {
         errors.push(`${name} search scene: ${e.message}`)
+      }
+    }
+    if (shot === 'home') {
+      try {
+        await needsScene(page, name, url, out)
+      } catch (e) {
+        errors.push(`${name} needs-you scene: ${e.message}`)
       }
     }
     await page.close()

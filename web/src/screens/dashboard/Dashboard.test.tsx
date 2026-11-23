@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { Machine, Readiness } from '@/api'
@@ -289,6 +291,44 @@ describe('the Dashboard on a phone', () => {
     expect(running.queryByRole('link', { name: 'Open' })).toBeNull()
     expect(running.getByRole('link', { name: /landing/ }).getAttribute('href')).toBe(
       '/w/landing?view=chat',
+    )
+  })
+
+  /** Y-754: the row is the link, so a headline has the whole row to wrap in. */
+  it('makes each Needs-you row the link and drops its trailing button', async () => {
+    mount('phone', '/')
+    await drawn()
+    const hero = region('Needs you')
+    for (const name of ['Answer', 'Review', 'Open', 'Repair']) expect(hero.queryByRole('link', { name })).toBeNull()
+    const trust = hero.getByRole('link', { name: /yantra-web is waiting for trust/ })
+    expect(trust.getAttribute('href')).toBe('/w/yantra-web?view=chat')
+    expect(hero.getByRole('link', { name: /price-table crashed/ }).getAttribute('href')).toBe('/w/price-table?view=chat')
+    const github = hero.getByRole('link', { name: /Review requested: yantra#245/ })
+    expect(github.getAttribute('target')).toBe('_blank')
+    expect(github.getAttribute('href')).toMatch(/^https:\/\/github\.com\//)
+    const rows = hero.getAllByRole('link').filter((one) => one.classList.contains('m3-row'))
+    expect(rows.length).toBeGreaterThanOrEqual(4)
+    for (const row of rows) {
+      expect(row.querySelector('button, a, .m3-button')).toBeNull()
+      expect(row.querySelector('svg.dash__go[aria-hidden="true"]')).toBeTruthy()
+    }
+  })
+
+  /** Y-754: the walk's fleet. No workspace loads, so no status is read, and the file still needs the owner. */
+  it('draws a file that will not load when it is the only one', async () => {
+    const state = scenario('busy')
+    state.workspaces = looked.ok([{ loaded: 'no', name: 'broken', error: 'has an empty `machine`' }]) as never
+    mount('phone', '/', state)
+    await drawn()
+    const row = region('Needs you').getByRole('link', { name: /broken will not load/ })
+    expect(row.getAttribute('href')).toBe('/w/broken/repair')
+    expect(screen.queryByText(/have not been looked at yet/)).toBeNull()
+  })
+
+  it('lets a Needs-you headline wrap to two lines instead of clipping', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/screens/dashboard/Dashboard.css'), 'utf8')
+    expect(css).toMatch(
+      /\[data-shell="phone"\] \.dash__hero \.m3-row__headline \{[^}]*-webkit-line-clamp: 2;[^}]*white-space: normal;[^}]*overflow-wrap: anywhere;/s,
     )
   })
 
