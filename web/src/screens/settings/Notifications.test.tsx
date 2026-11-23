@@ -33,7 +33,7 @@ describe('the relay row', () => {
     mountSettings('desktop', '/settings/notifications', {
       'GET /api/about': [200, { ...contract.about, relay: false }],
     })
-    expect(await screen.findByText('Off · nothing is pushed')).toBeTruthy()
+    expect(await screen.findByText('Off · no relay is set')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Set up' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
   })

@@ -1,4 +1,4 @@
-/** The one error anything under `api/` rejects with. Eighteen kinds, each from a
+/** The one error anything under `api/` rejects with. Nineteen kinds, each from a
  *  different place: what a surface draws is `describe()`, and `said` — the
  *  daemon's own words, verbatim — goes beneath it in mono, as every form
  *  already does (D3 §8.1). */
@@ -37,6 +37,8 @@ export type Kind =
   | 'too-long'
   | 'silent'
   | 'stt-failed'
+  // The browser could not subscribe to, or leave, Web Push (ADR-0047).
+  | 'push'
 
 /** What the status alone says, before the daemon's sentence. Each code means a
  *  different thing, and collapsing them into "failed" sends the operator
@@ -81,6 +83,7 @@ const sentences: Record<Kind, string> = {
   'too-long': 'That was over 60 seconds, so nothing was sent. Hold for less.',
   silent: 'No words were heard. Hold the button and speak.',
   'stt-failed': 'The speech service failed, so nothing was written.',
+  push: 'This browser could not change its notifications.',
 }
 
 /** The kinds a press of the microphone ends with. */

@@ -118,7 +118,7 @@ use yantra_core::image::{self, Images};
 use yantra_core::inventory::Inventory;
 use yantra_core::keep::{self, Cursor, File, Keeper, Limits};
 use yantra_core::logs::{self, Who};
-use yantra_core::notify::{self, Phase, Relay};
+use yantra_core::notify::{self, Phase, Relay, encoded};
 use yantra_core::room;
 use yantra_core::ssh::{self, Exec as _, Ssh};
 use yantra_core::thread::{self, Place};
@@ -1505,18 +1505,19 @@ impl Wait {
                 .collect(),
             title: Some(self.phase.headline().to_owned()),
             priority: None,
-            click: base.and_then(|base| self.link(base)),
+            click: base.and_then(|base| Some(format!("{base}{}", self.page()?))),
+            path: self.page(),
         }
     }
 
     /// The thread's page, which for a home thread needs the store's machine.
-    fn link(&self, base: &str) -> Option<String> {
+    fn page(&self) -> Option<String> {
         let page = if self.workspace == keep::HOME {
             format!("m/{}/home", encoded(self.machine.as_deref()?))
         } else {
             format!("w/{}", encoded(&self.workspace))
         };
-        Some(format!("{base}/{page}?thread={}", encoded(&self.thread)))
+        Some(format!("/{page}?thread={}", encoded(&self.thread)))
     }
 
     /// A home thread's row has no workspace (ADR-0046 decision 1.4).
@@ -1540,29 +1541,19 @@ impl Wait {
     }
 }
 
-/// RFC 3986's unreserved characters stay; every other byte is `%XX`.
-fn encoded(segment: &str) -> String {
-    segment
-        .bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                char::from(byte).to_string()
-            }
-            _ => format!("%{byte:02X}"),
-        })
-        .collect()
-}
-
-/// Sends each wait to the relay, one at a time, for the life of the daemon.
+/// Sends each wait to the installed dashboards and the relay, one at a time,
+/// for the life of the daemon.
 pub async fn tell(
-    relay: Relay,
+    push: Option<crate::push::Push>,
+    relay: Option<Relay>,
     store: Store,
     base: Option<String>,
     mut waits: mpsc::UnboundedReceiver<Wait>,
 ) {
     while let Some(mut wait) = waits.recv().await {
         wait.named(&store).await;
-        if let Err(error) = notify::post(&relay, wait.message(base.as_deref())).await {
+        let message = wait.message(base.as_deref());
+        if let Err(error) = crate::notify::told(push.as_ref(), relay.as_ref(), message).await {
             tracing::warn!(
                 "chat {}: the wait was not notified: {error}",
                 wait.workspace
@@ -9012,6 +9003,11 @@ mod tests {
             Some("https://box.tail.ts.net:8443/w/web?thread=1a2b3c4d")
         );
         assert_eq!(wait.message(None).click, None, "no base, no link");
+        assert_eq!(
+            wait.message(None).path.as_deref(),
+            Some("/w/web?thread=1a2b3c4d"),
+            "Web Push needs no base (ADR-0047)"
+        );
     }
 
     /// A home thread's page is its machine's, which only the store knows.

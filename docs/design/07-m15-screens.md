@@ -395,7 +395,7 @@ with three changes:
 ### 4.7 Settings → Notifications
 
 - **Relay row:** the supporting line reads `about.relay`. *On · the daemon holds a relay and pushes
-  to it*, or *Off · nothing is pushed*. After a save in this session, it adds *· saved, used after
+  to it*, or *Off · no relay is set* (Y-825: Web Push can be on with no relay). After a save in this session, it adds *· saved, used after
   yantrad restarts*. *Edit* stays.
 - **Push when:** three rows with a value on the right, *Sent* or *Not sent*, not a disabled
   `Switch`. The group note stays.

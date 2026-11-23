@@ -20,7 +20,11 @@
 //! [`crate::events`] first, so a send that is dropped, or never configured, is
 //! still a remembered event.
 //!
+//! **A message goes two ways** ([ADR-0047]): to each installed dashboard by
+//! Web Push, and to the ntfy relay when one is set. Every rule above binds both.
+//!
 //! [ADR-0025]: ../../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md
+//! [ADR-0047]: ../../../docs/adr/0047-the-dashboard-gets-web-push.md
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,6 +34,7 @@ use yantra_core::notify::{BODY_MAX, Message, Notification, Relay, Watch, post};
 use yantra_core::status::Fleet;
 
 use crate::events::{self, Event, Events};
+use crate::push::Push;
 
 /// The whole of what one look may spend telling someone, well under
 /// `refresh::EVERY`. Without it a fleet where several things changed at once,
@@ -67,6 +72,14 @@ impl Notifier {
         }
     }
 
+    #[must_use]
+    pub fn pushing(self, push: Option<Push>) -> Self {
+        Self {
+            teller: self.teller.pushing(push),
+            ..self
+        }
+    }
+
     /// Called once the reading is already in the model, so nothing a browser
     /// reads is waiting on a relay.
     ///
@@ -84,11 +97,12 @@ impl Notifier {
     }
 }
 
-/// The relay and its quiet log: the rules every send from a refresh task
-/// keeps. `None` is a daemon with no relay, which still remembers.
+/// The relay, the installed dashboards and their quiet log: the rules every
+/// send from a refresh task keeps. With neither, the daemon still remembers.
 #[derive(Debug)]
 pub struct Teller {
     relay: Option<Relay>,
+    push: Option<Push>,
     log: Log,
 }
 
@@ -96,8 +110,14 @@ impl Teller {
     pub fn new(relay: Option<Relay>) -> Self {
         Self {
             relay,
+            push: None,
             log: Log::default(),
         }
+    }
+
+    #[must_use]
+    pub fn pushing(self, push: Option<Push>) -> Self {
+        Self { push, ..self }
     }
 
     /// What the PR watch saw (Y-494): remembered, then sent as the agents'
@@ -115,10 +135,7 @@ impl Teller {
     }
 
     async fn deliver(&mut self, messages: Vec<Message>, watched: bool) {
-        let Some(relay) = &self.relay else {
-            return;
-        };
-        if messages.is_empty() {
+        if (self.relay.is_none() && self.push.is_none()) || messages.is_empty() {
             return;
         }
         if watched {
@@ -128,7 +145,8 @@ impl Teller {
             );
             return;
         }
-        let outcome = tokio::time::timeout(BUDGET, send(relay, messages))
+        let sending = send(self.push.as_ref(), self.relay.as_ref(), messages);
+        let outcome = tokio::time::timeout(BUDGET, sending)
             .await
             .unwrap_or(Err("the budget for this look ran out".to_owned()));
         if let Some(line) = self.log.line(outcome) {
@@ -191,19 +209,52 @@ impl PrNote {
             title: Some(self.phase.headline().to_owned()),
             priority: None,
             click: None,
+            path: Some(format!(
+                "/w/{}",
+                yantra_core::notify::encoded(&self.workspace)
+            )),
         }
     }
 }
 
-/// The first failure ends the pass: the rest of this look's notifications are
-/// dropped rather than retried against a relay that has just said no.
-async fn send(relay: &Relay, messages: Vec<Message>) -> Result<(), String> {
+/// Every message is tried once, so one device that refuses does not cost the
+/// relay the rest of the pass. The first failure is the answer.
+async fn send(
+    push: Option<&Push>,
+    relay: Option<&Relay>,
+    messages: Vec<Message>,
+) -> Result<(), String> {
+    let mut outcome = Ok(());
     for message in messages {
-        post(relay, message)
-            .await
-            .map_err(|error| error.to_string())?;
+        outcome = outcome.and(told(push, relay, message).await);
     }
-    Ok(())
+    outcome
+}
+
+/// One message to every installed dashboard and to the relay, where each
+/// exists (ADR-0047 decision 5). Both are tried at once, so a slow push
+/// service does not spend the relay's time. The first failure is the answer.
+pub async fn told(
+    push: Option<&Push>,
+    relay: Option<&Relay>,
+    message: Message,
+) -> Result<(), String> {
+    let pushing = async {
+        match push {
+            Some(push) => push.send(&message).await,
+            None => Ok(()),
+        }
+    };
+    let relaying = async {
+        match relay {
+            Some(relay) => post(relay, message.clone())
+                .await
+                .map_err(|error| error.to_string()),
+            None => Ok(()),
+        }
+    };
+    let (pushed, relayed) = tokio::join!(pushing, relaying);
+    pushed.and(relayed)
 }
 
 /// `yantra-agent`'s `Log` is the precedent: the first failure is said out loud
@@ -434,6 +485,48 @@ mod tests {
         );
     }
 
+    /// ADR-0047 decision 5: an installed dashboard gets the same words with
+    /// the page a tap opens, and nothing for a look that a dashboard watched.
+    #[tokio::test]
+    async fn a_change_is_pushed_to_an_installed_dashboard_unless_one_is_watched() {
+        let (push, _, secret, auth, served) =
+            crate::push::tests::pushing_to(&["201 Created"]).await;
+        let mut notifier = Notifier::new(None).pushing(Some(push));
+        let events = Events::default();
+
+        notifier
+            .tell(&fleet("api", Verdict::Running), false, &events)
+            .await;
+        notifier
+            .tell(&fleet("api", Verdict::AwaitingTrust), true, &events)
+            .await;
+        notifier
+            .tell(&fleet("api", Verdict::Running), false, &events)
+            .await;
+        notifier
+            .tell(
+                &fleet("api", Verdict::Crashed { status: 1 }),
+                false,
+                &events,
+            )
+            .await;
+
+        let seen = served.join().expect("the listener thread");
+        let text: serde_json::Value =
+            serde_json::from_slice(&crate::push::tests::decrypt(&seen[0].1, &secret, &auth))
+                .expect("JSON");
+        assert_eq!(
+            text,
+            serde_json::json!({
+                "title": "Agent failed",
+                "body": "api: The agent run failed.",
+                "url": "/w/api",
+            }),
+            "the watched trust prompt was dropped, and the crash was pushed"
+        );
+        assert_eq!(events.read().await.len(), 2);
+    }
+
     /// The window is what makes the beacon a *last seen* rather than a switch
     /// somebody has to turn off: a page that stopped saying anything is a page
     /// nobody is watching, within a minute.
@@ -540,12 +633,13 @@ mod tests {
     }
 
     /// A refused send drops the note and is said once, as the agents' are.
+    /// The note behind it in the same pass is still tried.
     #[tokio::test]
     async fn a_refused_pr_note_is_dropped_and_not_retried() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let address = listener.local_addr().expect("the port it got");
         let served = thread::spawn(move || {
-            ["503 Service Unavailable", "200 OK"]
+            ["503 Service Unavailable", "200 OK", "200 OK"]
                 .map(|status| request(&listener, status))
                 .to_vec()
         });
@@ -569,11 +663,83 @@ mod tests {
             seen.iter().map(|request| body(request)).collect::<Vec<_>>(),
             [
                 Some("web: PR #21 has a failed check".to_owned()),
+                Some("web: PR #21 has a new review".to_owned()),
                 Some("web: PR #21 passed its checks".to_owned()),
             ],
-            "the review behind the refused send is gone"
+            "the refused check is gone, and the review behind it was sent"
         );
         assert_eq!(events.read().await.len(), 3);
+    }
+
+    /// One device that refuses every push does not stop the pass: the relay
+    /// gets both notes, and the failure is still said.
+    #[tokio::test]
+    async fn a_device_that_refuses_does_not_cost_the_relay_a_message() {
+        let (push, _, _, _, pushed) =
+            crate::push::tests::pushing_to(&["503 Service Unavailable", "503 Service Unavailable"])
+                .await;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let relayed =
+            thread::spawn(move || ["200 OK", "200 OK"].map(|status| answer(&listener, status)));
+        let mut teller = Teller::new(Some(relay(address))).pushing(Some(push));
+
+        teller
+            .tell_pulls(
+                &[note(PrPhase::CheckFailed), note(PrPhase::Reviewed)],
+                false,
+                &Events::default(),
+            )
+            .await;
+
+        assert_eq!(
+            relayed.join().expect("the relay"),
+            [
+                "web: PR #21 has a failed check",
+                "web: PR #21 has a new review"
+            ]
+        );
+        assert_eq!(pushed.join().expect("the push service").len(), 2);
+        assert!(teller.log.quiet, "the device's refusal was said");
+    }
+
+    /// The push service here answers only after the relay has its message.
+    /// A push sent before the relay's would wait out its whole timeout.
+    #[tokio::test]
+    async fn a_slow_push_service_does_not_hold_the_relay() {
+        let slow = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let (push, ..) =
+            crate::push::tests::pushing_at(slow.local_addr().expect("the port it got")).await;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let (relayed, wait) = std::sync::mpsc::channel();
+        let pushed = thread::spawn(move || {
+            let arrived = wait.recv_timeout(Duration::from_secs(10)).is_ok();
+            crate::push::tests::request(&slow, "201 Created");
+            arrived
+        });
+        let relaying = thread::spawn(move || {
+            let said = answer(&listener, "200 OK");
+            relayed.send(()).expect("the push service waits");
+            said
+        });
+
+        let outcome = told(
+            Some(&push),
+            Some(&relay(address)),
+            note(PrPhase::Reviewed).message(),
+        )
+        .await;
+
+        assert_eq!(
+            relaying.join().expect("the relay"),
+            "web: PR #21 has a new review"
+        );
+        assert!(
+            pushed.join().expect("the push service"),
+            "the relay came first"
+        );
+        assert_eq!(outcome, Ok(()));
     }
 
     #[test]

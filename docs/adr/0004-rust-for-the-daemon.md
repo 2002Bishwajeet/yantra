@@ -136,3 +136,9 @@ serves one user. Throughput was never the constraint, and no benchmark motivated
 > The `rusqlite` row of the stack table is now built, and I-12, I-13 and I-14 bind it. The audit's
 > answer for everything else stands: workspaces stay declared, sessions stay derived from tmux, and
 > the beats stay in memory.
+
+> **Bent a fifth time on 2026-11-20 (Y-825), by the same bound.**
+> [ADR-0047](0047-the-dashboard-gets-web-push.md) has the daemon write a Web Push signing key to
+> `/etc/yantra/daemon.env` and keep one row per subscribed device in the thread store. Both are
+> inputs the owner gives when they turn notifications on. Neither holds a session of the fleet, a
+> verdict, a beat or a history, and the first look after a start still knows nothing about the fleet.

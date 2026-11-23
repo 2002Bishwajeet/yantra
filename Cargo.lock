@@ -4202,13 +4202,16 @@ dependencies = [
 name = "yantrad"
 version = "0.14.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "axum",
  "base64 0.23.1",
  "etcetera",
  "getrandom 0.4.3",
+ "hkdf",
  "include_dir",
  "nix 0.31.3",
+ "p256",
  "rusqlite",
  "serde",
  "serde_json",

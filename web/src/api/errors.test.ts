@@ -47,6 +47,7 @@ describe('what an error says', () => {
       'too-long': dictateError('too-long', 'the clip is longer than 60 seconds').describe(),
       silent: dictateError('silent', 'the service heard no words').describe(),
       'stt-failed': dictateError('failed', 'the service answered 500').describe(),
+      push: new ApiError('push', 'Registration failed - push service error').describe(),
     }
     for (const said of Object.values(sentences)) {
       expect(said).toMatch(/^[A-Z].*\.$/)

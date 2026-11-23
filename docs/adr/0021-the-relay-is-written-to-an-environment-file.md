@@ -141,3 +141,11 @@ for.
 > **A second file, recorded 2026-10-19 (Y-515).** The daemon now also writes `dashboard.json`, the
 > owner's dashboard layout, in its account's config directory. It is a preference, not fleet state,
 > and holds no secret: [ADR-0036](0036-the-dashboard-layout-syncs-through-the-daemon.md).
+
+> **A third value, recorded 2026-11-20 (Y-825).**
+> [ADR-0047](0047-the-dashboard-gets-web-push.md) puts the Web Push signing key in this file as
+> `YANTRA_VAPID_KEY`, through decision 2's writer and under both locks. What changed upstream is that
+> the owner wants notifications in the installed dashboard, and a push service accepts a push only
+> from the key a device subscribed with, so the key must survive a restart. Decision 3 does not carry
+> over: the daemon makes the key itself and holds it in memory at once. The relay stays, as the
+> fallback.

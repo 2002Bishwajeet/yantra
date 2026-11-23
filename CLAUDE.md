@@ -152,6 +152,9 @@ state and no secret value ([ADR-0044](docs/adr/0044-a-write-needs-the-owners-pas
 **Since 2026-11-09 the daemon also keeps one store**, `~/.local/state/yantra/threads.sqlite`: one row per Chat
 thread with its session id, title, machine and status, and no message text and no secret
 ([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md)).
+**Since 2026-11-20 it also writes the Web Push signing key** to `/etc/yantra/daemon.env`, beside the
+relay and the grant, and keeps each device's push subscription in the thread store, with no fleet
+state ([ADR-0047](docs/adr/0047-the-dashboard-gets-web-push.md)).
 
 **Rust is the whole control plane, not a component of it.** Do not introduce a second runtime into
 the daemon, the CLI or the agent. TypeScript's only home is the browser.
@@ -205,15 +208,17 @@ traits' own implementations must be tested against the real thing.
 
 - **Idempotency.** `yantra up X` twice must attach, not duplicate. Design it in; don't bolt it on.
 - **Never store secrets.** Workspaces hold *references* (1Password/pass/sops), never values.
-  **Two exceptions, both written down rather than implied:** the ntfy token, which
+  **Three exceptions, each written down rather than implied:** the ntfy token, which
   [ADR-0021](docs/adr/0021-the-relay-is-written-to-an-environment-file.md) puts in
-  `/etc/yantra/daemon.env` in plain text, `0600` and owned by the account the daemon runs as, and
+  `/etc/yantra/daemon.env` in plain text, `0600` and owned by the account the daemon runs as,
   the daemon's own GitHub token, which
-  [ADR-0023](docs/adr/0023-the-github-grant-lives-beside-the-relay.md) puts beside it. The owner
-  took both decisions with the cost stated — whoever can read that file has both. It covers one
-  file holding two credentials the daemon itself uses; a third is a reason to reread ADR-0023 and
-  not a licence it grants, and a machine never receives either. The passkey file of
-  [ADR-0044](docs/adr/0044-a-write-needs-the-owners-passkey.md) is not a third: it keeps public keys
+  [ADR-0023](docs/adr/0023-the-github-grant-lives-beside-the-relay.md) puts beside it, and the Web
+  Push signing key, which [ADR-0047](docs/adr/0047-the-dashboard-gets-web-push.md) puts beside both
+  after the reread that ADR-0023 asks for. The owner took each decision with the cost stated —
+  whoever can read that file has all three. It covers one file holding three credentials the daemon
+  itself uses; a fourth is a reason to reread ADR-0023 and not a licence it grants, and a machine
+  never receives any of them. The passkey file of
+  [ADR-0044](docs/adr/0044-a-write-needs-the-owners-passkey.md) is not a fourth: it keeps public keys
   and token hashes, so no value in it grants access. **Workspaces are untouched**: the schema still has no field for a
   value, and a reference is still resolved at launch on the machine that runs the agent.
 - **Start small.** Prefer the smallest thing that runs end to end. This project's failure mode is a

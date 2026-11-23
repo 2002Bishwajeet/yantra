@@ -179,11 +179,20 @@ Accessed 2026-11-09.
 > **What changed upstream of the reasoning:** the build loop runs agents in the owner's worktrees,
 > and the 2026-11-12 audit showed one could redirect a merge.
 
+> **ADR-0045, decision 2, 2026-11-20 ([Y-825](../../tracker.md), owner):** the store gets a second
+> table, `push_devices`, with one row per device that gets Web Push: the endpoint, the device's
+> public key and its 16-byte `auth` secret
+> ([ADR-0047](0047-the-dashboard-gets-web-push.md) decision 3). The `threads` table is unchanged and
+> still holds no message text. **What changed upstream of the reasoning:** the owner asked for
+> notifications in the installed dashboard, and the daemon must remember each device across a
+> restart. The row is not fleet state. It is the first value in the store that is a secret of a
+> kind: it sends nothing without the signing key, which is not in the store.
+
 > **ADR-0045, decision 2, 2026-11-23 ([Y-782](../../tracker.md), owner):** the store also keeps a
 > clone record, one row per clone with the machine, the path and `owner/repo`. Point 1 of the
 > 2026-11-12 note needs a record that an agent cannot change, and nothing kept one. The clone route
 > writes the row when Yantra clones a repository. A row holds no message text and no secret.
-> Decision 2's "nothing else" now means these two tables.
+> Decision 2's "nothing else" now also allows this table.
 >
 > **What changed upstream of the reasoning:** the 2026-11-12 note assumed that Yantra already
 > recorded each clone. It did not.

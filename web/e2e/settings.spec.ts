@@ -436,7 +436,7 @@ test.describe('settings · Notifications', () => {
     await scenario(page, 'firstrun')
     await page.goto('/settings/notifications')
     await opened(page, 'Notifications', size)
-    await expect(page.getByText('Off · nothing is pushed')).toBeVisible()
+    await expect(page.getByText('Off · no relay is set')).toBeVisible()
   })
 })
 

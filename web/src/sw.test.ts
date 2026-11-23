@@ -20,10 +20,28 @@ let served: Record<string, string>
 let offline: boolean
 let cached: Map<string, Response>
 
+type Shown = { title: string; body?: string; icon?: string; data?: { url?: string } }
+type Client = {
+  url: string
+  controlled: boolean
+  focused: boolean
+  visibilityState?: 'visible' | 'hidden'
+  /** `focus()` throws, as it does for a window the browser will not raise. */
+  stuck?: boolean
+  told?: unknown[]
+}
+
+let shown: Shown[]
+let clients: Client[]
+let opened: string[]
+
 beforeEach(() => {
   served = {}
   offline = false
   cached = new Map()
+  shown = []
+  clients = []
+  opened = []
 })
 
 const href = (key: FakeRequest | string) =>
@@ -57,7 +75,35 @@ function load() {
     },
     location: { origin: ORIGIN },
     skipWaiting: () => {},
-    clients: { claim: async () => {} },
+    registration: {
+      showNotification: async (title: string, options: Omit<Shown, 'title'>) => {
+        shown.push({ title, ...options })
+      },
+    },
+    clients: {
+      claim: async () => {},
+      matchAll: async () =>
+        clients.map((client) => ({
+          focused: client.focused,
+          visibilityState: client.visibilityState ?? 'hidden',
+          navigate: async (url: string) => {
+            if (!client.controlled) throw new TypeError('not controlled')
+            client.url = url
+            // The page that loads is a new client, and that one takes the focus.
+            return { focus: async () => void (client.focused = true) }
+          },
+          focus: async () => {
+            if (client.stuck) throw new TypeError('not focused')
+            client.focused = true
+          },
+          postMessage: (message: unknown) => {
+            client.told = [...(client.told ?? []), message]
+          },
+        })),
+      openWindow: async (url: string) => {
+        opened.push(url)
+      },
+    },
   }
   new Function('self', 'caches', 'fetch', source)(
     worker,
@@ -163,5 +209,115 @@ describe('the service worker', () => {
     served['/'] = 'the new shell'
     expect(await ask(handlers, '/', { mode: 'navigate' })).toBe('the new shell')
     expect(await cached.get(href('/'))?.text()).toBe('the new shell')
+  })
+})
+
+/** Runs a handler that hands its work to `waitUntil`, and waits for the work. */
+async function settle(handler: ((event: never) => void) | undefined, event: object) {
+  let waited: Promise<unknown> = Promise.resolve()
+  handler?.({ ...event, waitUntil: (pending: Promise<unknown>) => (waited = pending) } as never)
+  await waited
+}
+
+const push = (handlers: Record<string, (event: never) => void>, data: unknown) =>
+  settle(handlers.push, { data })
+
+async function tap(handlers: Record<string, (event: never) => void>, url: string | undefined) {
+  let closed = false
+  await settle(handlers.notificationclick, { notification: { data: { url }, close: () => (closed = true) } })
+  return closed
+}
+
+describe('a push (ADR-0047)', () => {
+  it('shows what the daemon sent, with the page a tap opens', async () => {
+    const said = { title: 'Approval needed', body: "api: waiting at claude's trust prompt", url: '/w/api' }
+    await push(load(), { json: () => said })
+
+    expect(shown).toEqual([
+      { title: said.title, body: said.body, icon: '/icon-192.png', data: { url: '/w/api' } },
+    ])
+  })
+
+  it('still shows a notification for a push it cannot read, or one with no data', async () => {
+    const handlers = load()
+    await push(handlers, {
+      json: () => {
+        throw new SyntaxError('not JSON')
+      },
+    })
+    await push(handlers, null)
+
+    expect(shown).toEqual([
+      { title: 'Yantra', body: '', icon: '/icon-192.png', data: { url: '/' } },
+      { title: 'Yantra', body: '', icon: '/icon-192.png', data: { url: '/' } },
+    ])
+  })
+})
+
+describe('a tap on a notification (ADR-0047)', () => {
+  it('focuses the open dashboard and tells its router the page, with no reload', async () => {
+    clients = [{ url: `${ORIGIN}/fleet`, controlled: true, focused: false }]
+
+    expect(await tap(load(), '/w/api?thread=1a2b')).toBe(true)
+
+    expect(clients).toEqual([
+      { url: `${ORIGIN}/fleet`, controlled: true, focused: true, told: [{ open: '/w/api?thread=1a2b' }] },
+    ])
+    expect(opened).toEqual([])
+  })
+
+  it('picks the focused window, then a visible one, over the first', async () => {
+    clients = [
+      { url: `${ORIGIN}/fleet`, controlled: true, focused: false },
+      { url: `${ORIGIN}/rooms`, controlled: true, focused: false, visibilityState: 'visible' },
+      { url: `${ORIGIN}/settings`, controlled: true, focused: true, visibilityState: 'visible' },
+    ]
+    const handlers = load()
+
+    await tap(handlers, '/w/api')
+    expect(clients.map((client) => client.told)).toEqual([undefined, undefined, [{ open: '/w/api' }]])
+
+    clients[2]!.focused = false
+    await tap(handlers, '/w/web')
+    expect(clients[1]?.told).toEqual([{ open: '/w/web' }])
+    expect(clients[0]?.told).toBeUndefined()
+  })
+
+  it('navigates a window that does not take the focus', async () => {
+    clients = [{ url: `${ORIGIN}/fleet`, controlled: true, focused: false, stuck: true }]
+
+    await tap(load(), '/w/api')
+
+    expect(clients).toEqual([{ url: `${ORIGIN}/w/api`, controlled: true, focused: true, stuck: true }])
+    expect(opened).toEqual([])
+  })
+
+  it('opens a window when no dashboard is open', async () => {
+    await tap(load(), '/rooms/design')
+
+    expect(opened).toEqual([`${ORIGIN}/rooms/design`])
+  })
+
+  it('opens a window when the open one cannot be moved', async () => {
+    clients = [{ url: `${ORIGIN}/fleet`, controlled: false, focused: false, stuck: true }]
+
+    await tap(load(), '/w/api')
+
+    expect(opened).toEqual([`${ORIGIN}/w/api`])
+    expect(clients[0]?.focused).toBe(false)
+  })
+
+  it('never leaves the dashboard for another site', async () => {
+    const handlers = load()
+
+    await tap(handlers, 'https://evil.example/login')
+    await tap(handlers, '//evil.example/login')
+    await tap(handlers, undefined)
+
+    expect(opened).toEqual([`${ORIGIN}/`, `${ORIGIN}/`, `${ORIGIN}/`])
+
+    clients = [{ url: `${ORIGIN}/fleet`, controlled: true, focused: true }]
+    await tap(handlers, 'https://evil.example/login')
+    expect(clients[0]?.told).toEqual([{ open: '/' }])
   })
 })

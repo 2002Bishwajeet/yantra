@@ -492,6 +492,7 @@ where
 
     let tasks = crate::tasks::router(authoriser.clone(), fleet.closing.clone());
     let placement = crate::placement::router(authoriser.clone(), fleet.clone());
+    let push = crate::push::router(authoriser.clone(), fleet.push.clone());
 
     let installs: Router<S> = Router::new()
         .route("/machines/{machine}/install", post(put_basics::<I>))
@@ -505,6 +506,7 @@ where
         .merge(installs)
         .merge(tasks)
         .merge(placement)
+        .merge(push)
 }
 
 /// `GET /join`, the script a person pipes into `sh` on a new machine (Y-387).
