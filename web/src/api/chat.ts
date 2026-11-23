@@ -221,7 +221,9 @@ function loginOf(failure: Partial<Record<keyof Login, unknown>>): Login | null {
 
 function errorOfLogin(frame: Extract<ChatFailure, { kind: 'notLoggedIn' }>): ChatError {
   const { type: _, kind, said, ...login } = frame
-  return new ChatError(kind, said, `Run this ${loginPlace(login)}, then retry.`, login)
+  // The command is `sudo -iu <account> …`, and an agent account has no sudo (ADR-0046).
+  const from = login.account ? ' from your own account' : ''
+  return new ChatError(kind, said, `Run this on ${login.machine}${from}, then retry.`, login)
 }
 
 const isCount = (n: unknown) => n === undefined || (typeof n === 'number' && Number.isInteger(n) && n >= 0)

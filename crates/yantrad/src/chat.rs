@@ -3961,29 +3961,38 @@ async fn keep_claude<M: Machine>(
                 if let Event::TurnCompleted(done) = &event.event {
                     tracing::info!("chat {name}: the turn ended {:?}", done.state);
                     let failed = done.state == TurnState::Failed;
-                    if let Some(said) = done
+                    let logged_out = done
                         .message
                         .as_ref()
-                        .filter(|said| failed && said.starts_with(CLAUDE_NOT_LOGGED_IN))
-                    {
+                        .filter(|said| failed && said.starts_with(CLAUDE_NOT_LOGGED_IN));
+                    if let Some(said) = logged_out {
                         let account = machine.account().await;
                         let refusal = not_logged_in(None, machine.machine(), account, said.clone());
                         live.publish(&refusal, None);
                     }
+                    let logged_out = logged_out.is_some();
                     // A closing keeper keeps the deadline its close armed.
                     if !live.lock().closing {
                         kill_at = None;
                     }
                     claude_turn_ended(machine.as_ref(), &name, &place, &live, failed).await;
                     // A keeper with background work waits for it (ADR-0041 decision 9).
+                    // A running claude may not see a later /login, so the
+                    // turn after one starts a new claude (Y-815).
                     if claude.session.background().is_empty()
-                        && let Ok(size) = machine.out_size(&place).await
-                        && size > Limits::default().cap / 2
+                        && (logged_out
+                            || machine
+                                .out_size(&place)
+                                .await
+                                .is_ok_and(|size| size > Limits::default().cap / 2))
                         && live.close_unless_busy()
                     {
-                        tracing::info!(
-                            "chat {name}: the keeper's out is past half its cap, so it is replaced"
-                        );
+                        let why = if logged_out {
+                            "claude is not logged in"
+                        } else {
+                            "the keeper's out is past half its cap"
+                        };
+                        tracing::info!("chat {name}: {why}, so the keeper is replaced");
                         close_claude(&claude, &mut kill_at);
                     }
                     claude_next(machine.as_ref(), &name, &place, &live, &mut claude).await;
@@ -7037,6 +7046,36 @@ mod tests {
         let said = tab.next().await;
         assert_eq!(said["account"], "work", "{said}");
         assert_eq!(said["command"], "run sudo -iu work claude and type /login");
+    }
+
+    /// Y-815: a running claude may not see a later /login, so a turn that
+    /// failed "Not logged in" closes the keeper and the next turn starts a new one.
+    #[tokio::test]
+    async fn a_claude_that_is_not_logged_in_is_replaced_for_the_next_turn() {
+        let script = Arc::new(Script {
+            account: Some("work".to_owned()),
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        claude
+            .say(
+                json!({"type": "result", "subtype": "success", "is_error": true,
+                        "result": "Not logged in · Please run /login"}),
+            )
+            .await;
+        assert_eq!(tab.next().await["payload"]["state"], "failed");
+        assert_eq!(tab.next().await["kind"], "notLoggedIn");
+        assert_eq!(claude.heard().await, None, "its stdin closed");
+        until_closed(&script, claude).await;
+
+        tab.send(json!({"type": "turn", "text": "again"}));
+        let mut fresh = script.claude().await;
+        assert_eq!(prompt_of(&fresh.heard().await.expect("a line")), "again");
     }
 
     /// Y-815: once the person logs in, Retry sends the turn again on the same socket.

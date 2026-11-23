@@ -205,7 +205,7 @@ describe('the harness picker', () => {
     const alert = await settled(() => screen.getByRole('alert'))
     expect(within(alert).getByRole('heading').textContent).toBe('opencode is not logged in as work on cachyos-g14')
     expect(alert.textContent).toContain('as work on cachyos-g14')
-    expect(alert.textContent).toContain('Run this as work on cachyos-g14, then retry.')
+    expect(alert.textContent).toContain('Run this on cachyos-g14 from your own account, then retry.')
     expect(within(alert).getByText('sudo -iu work opencode auth login')).toBeTruthy()
     expect(within(alert).getByRole('button', { name: 'Copy how to log opencode in' })).toBeTruthy()
     expect(within(alert).queryByRole('button', { name: 'Try again' })).toBeNull()

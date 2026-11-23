@@ -260,7 +260,7 @@ describe('the chat socket', () => {
       command: 'sudo -iu work opencode auth login',
     })
     expect(errors[0]?.said).toBe('the agent refused: Authentication required (-32000)')
-    expect(errors[0]?.describe()).toBe('Run this as work on cachyos-g14, then retry.')
+    expect(errors[0]?.describe()).toBe('Run this on cachyos-g14 from your own account, then retry.')
     expect(errors[0]?.retryable).toBe(false)
   })
 
