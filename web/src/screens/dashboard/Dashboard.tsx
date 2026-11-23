@@ -695,7 +695,8 @@ export function Dashboard() {
   const sessions = useSessions()
   const fleetEmpty = listed.looked === 'ok' && listed.data.length === 0
   const read = useAgents(workspaces)
-  const agents = fleetEmpty ? NO_AGENTS : read
+  // Y-754: a fleet whose only files do not load has no status read either, and those files still need the owner.
+  const agents = workspaces.looked === 'ok' && workspaces.data.length === 0 ? NO_AGENTS : read
   // The fifth is on the daemon's 300 s clock and stamps itself (D6 §2).
   const attention = useAttention()
   const github = grant(useGithub().data, useGithubReadiness())

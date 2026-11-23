@@ -314,6 +314,17 @@ describe('the Dashboard on a phone', () => {
     }
   })
 
+  /** Y-754: the walk's fleet. No workspace loads, so no status is read, and the file still needs the owner. */
+  it('draws a file that will not load when it is the only one', async () => {
+    const state = scenario('busy')
+    state.workspaces = looked.ok([{ loaded: 'no', name: 'broken', error: 'has an empty `machine`' }]) as never
+    mount('phone', '/', state)
+    await drawn()
+    const row = region('Needs you').getByRole('link', { name: /broken will not load/ })
+    expect(row.getAttribute('href')).toBe('/w/broken/repair')
+    expect(screen.queryByText(/have not been looked at yet/)).toBeNull()
+  })
+
   it('lets a Needs-you headline wrap to two lines instead of clipping', () => {
     const css = readFileSync(resolve(process.cwd(), 'src/screens/dashboard/Dashboard.css'), 'utf8')
     expect(css).toMatch(
