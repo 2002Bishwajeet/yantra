@@ -340,7 +340,7 @@ test.describe('the composer', () => {
     await page.getByRole('menuitemradio', { name: 'Gemini' }).click()
     await page.getByLabel(`Message Gemini in ${NAME}`, { exact: true }).fill('hello')
     await page.getByRole('button', { name: 'Send' }).click()
-    await expect(page.getByRole('alert').getByRole('heading')).toHaveText('Gemini is not logged in on cachyos-g14')
+    await expect(page.getByRole('alert').getByRole('heading')).toHaveText('Gemini is not logged in as work on cachyos-g14')
     await expect(page.getByLabel(`Message Gemini in ${NAME}`, { exact: true })).toHaveValue('hello')
     // The banner and the card are one column: the same left edge and the same width.
     const column = async (locator: ReturnType<Page['locator']>) => {
