@@ -485,6 +485,9 @@ Settings → General. Ten things about the code:
 - **Replies are Markdown**, through `react-markdown`, `remark-gfm` and
   `rehype-sanitize`, with no raw HTML. It is in the session chunk only, where it
   costs about 48 KB gzip (15 KB to 63 KB). The first load did not move.
+  **An image draws as a link, never as an `<img>`** (Y-785): the browser asks
+  for no address that an agent or GitHub wrote. The daemon's
+  `Content-Security-Policy` is the second layer.
 
 The Transcript tab below is unchanged and still draws text as text.
 
@@ -762,8 +765,10 @@ Route changes use the router's view transitions (Y-678): the content slides by d
   `data-theme` pins it in either direction.
 - **`index.html` reads `localStorage` before the first paint**, under
   [`shell/prefs.ts`](src/shell/prefs.ts)'s key and version, so the theme and the
-  density land with the first frame rather than one after it. Keep the inline
-  script and `prefs.ts` in step: preferences are browser-local and the daemon
+  density land with the first frame rather than one after it. The script is
+  [`public/theme.js`](public/theme.js), loaded from `<head>` with no `defer`,
+  because the daemon's policy runs no inline script (Y-785). Keep it and
+  `prefs.ts` in step: preferences are browser-local and the daemon
   persists none of them (ADR-0024 §5).
 - **The colour engine is not on this path.** `m3/theme/scheme.ts` loads only for
   a seed other than brass, and on Appearance; the first load carries no scheme
@@ -845,7 +850,9 @@ render, the shell, the tokens, the colour scheme, `sw.test.ts` and
 **Playwright covers the screens, in a browser** ([ADR-0024](../docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md) §6).
 [`e2e/`](e2e/) runs three projects over every spec — **phone 390×844, tablet
 834×1194, desktop 1440×1024** ([`lib/sizes.ts`](e2e/lib/sizes.ts)) — against
-`vite preview` over a real build rather than the dev server. A fourth, `phone-webkit`, runs
+`vite preview` over a real build rather than the dev server. The preview server sends the
+daemon's `Content-Security-Policy` (Y-785), so `console.spec.ts` fails on a screen the policy
+breaks. A fourth, `phone-webkit`, runs
 the phone in WebKit with an iPhone profile (Y-660). It skips the image comparison, because every
 baseline is a Chromium render. CI runs the Add a device and turn-diff tests there (Y-684). `lib/axe.ts` runs
 axe with `wcag2a wcag2aa wcag21a wcag21aa wcag22aa` and fails on any violation

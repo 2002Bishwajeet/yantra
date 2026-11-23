@@ -80,3 +80,10 @@ for (const name of SCENARIOS) {
     expect(seen, `console messages:\n${seen.join('\n')}`).toEqual([])
   })
 }
+
+/* Y-785: the tests above prove the policy breaks no screen only while the pages are served under it. */
+test('the page is served under the policy the daemon sends', async ({ page }) => {
+  test.skip(!!process.env.E2E_DEV, 'the dev server sends no policy: its HMR preamble is inline')
+  const answer = await page.goto('/')
+  expect(answer?.headers()['content-security-policy']).toMatch(/^default-src 'self'; .*; script-src 'self'; connect-src 'self'$/)
+})
