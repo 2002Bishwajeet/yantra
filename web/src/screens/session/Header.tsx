@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { Ellipsis, Play, Square } from 'lucide-react'
+import { Ellipsis, Play } from 'lucide-react'
 import type { MachineSessions, Workspace, WorkspaceStatus } from '@/api'
 import { useDown, useResume } from '@/api/mutations'
 import type { Reading } from '@/api/hooks'
@@ -127,6 +127,8 @@ export function Header(props: HeaderProps) {
     </span>
   )
   const reasonId = primary.enabled ? undefined : `${said}-verb`
+  // Y-757: on a phone Stop only lives in the menu, so no glyph in the bar can pass for the composer's interrupt.
+  const menuVerb = phone ? verb.stop : other
   const menu = (
     <Menu>
       <MenuTrigger render={<IconButton label="More actions" ref={more} />}>
@@ -152,12 +154,12 @@ export function Header(props: HeaderProps) {
             <MenuSeparator />
           </>
         ) : null}
-        <MenuItem disabled={!other.enabled || other.pending} onClick={other.run}>
-          {other.pending ? other.busy : other.word}
-          {other.enabled ? null : (
+        <MenuItem disabled={!menuVerb.enabled || menuVerb.pending} onClick={menuVerb.run}>
+          {menuVerb.pending ? menuVerb.busy : menuVerb.word}
+          {menuVerb.enabled ? null : (
             <Text scale="body-small" tone="variant">
               {' '}
-              · {other.why}
+              · {menuVerb.why}
             </Text>
           )}
         </MenuItem>
@@ -170,19 +172,21 @@ export function Header(props: HeaderProps) {
 
   return (
     <>
-      {/* Y-757: the phone's app bar holds the verb and the menu, and the menu holds the status. */}
+      {/* Y-757: the phone's app bar holds Resume and the menu, Stop waits in the menu, and the menu holds the status. */}
       {phone && slot
         ? createPortal(
             <>
-              <IconButton
-                aria-describedby={reasonId}
-                disabled={!primary.enabled || primary.pending}
-                label={primary.pending ? primary.busy : primary.word}
-                onClick={primary.run}
-              >
-                {live.stop ? <Square /> : <Play />}
-              </IconButton>
-              {reason}
+              {live.stop ? null : (
+                <IconButton
+                  aria-describedby={reasonId}
+                  disabled={!verb.resume.enabled || verb.resume.pending}
+                  label={verb.resume.pending ? verb.resume.busy : verb.resume.word}
+                  onClick={verb.resume.run}
+                >
+                  <Play />
+                </IconButton>
+              )}
+              {live.stop ? null : reason}
               {menu}
             </>,
             slot,

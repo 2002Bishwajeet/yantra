@@ -149,15 +149,19 @@ describe('the session header on a phone', () => {
   }
   const bar = () => document.querySelector<HTMLElement>('.m3-top-app-bar')!
 
-  it.each([
-    ['running', 'Stop'],
-    ['stopped', 'Resume'],
-  ] as const)('puts %s’s verb %s in the app bar and draws no page header', async (state, verb) => {
-    await onPhone(state)
-    expect(await within(bar()).findByRole('button', { name: verb })).toBeTruthy()
-    expect(within(bar()).getByRole('button', { name: 'More actions' })).toBeTruthy()
+  it('keeps Stop out of the app bar while the agent runs, so no glyph there reads as the composer interrupt', async () => {
+    await onPhone('running')
+    expect(await within(bar()).findByRole('button', { name: 'More actions' })).toBeTruthy()
+    expect(within(bar()).queryByRole('button', { name: /Stop|Resume/ })).toBeNull()
     expect(document.querySelector('.m3-page-header__actions')).toBeNull()
     expect(document.querySelector('.m3-page-header')?.hasAttribute('data-bare')).toBe(true)
+  })
+
+  it('puts Resume in the app bar once the agent has stopped, and Stop waits in the menu', async () => {
+    await onPhone('stopped')
+    expect(await within(bar()).findByRole('button', { name: 'Resume' })).toBeTruthy()
+    fireEvent.click(within(bar()).getByRole('button', { name: 'More actions' }))
+    expect(await screen.findByRole('menuitem', { name: /^Stop/ })).toBeTruthy()
   })
 
   it('shows the state, the age, the machine and the path in the menu, not on the page', async () => {
@@ -167,7 +171,7 @@ describe('the session header on a phone', () => {
     const menu = await screen.findByRole('menu')
     expect(menu.textContent).toContain('running')
     expect(within(menu).getByText(/pi · ~\/api/)).toBeTruthy()
-    expect(within(menu).getByRole('menuitem', { name: /^Resume/ })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: /^Stop/ })).toBeTruthy()
     expect(within(menu).getByRole('menuitem', { name: 'Delete' })).toBeTruthy()
   })
 
@@ -181,7 +185,8 @@ describe('the session header on a phone', () => {
   it('draws the refusal of a failed stop inline on the page', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(answer(500, 'boom'))))
     await onPhone('running')
-    fireEvent.click(await within(bar()).findByRole('button', { name: 'Stop' }))
+    fireEvent.click(await within(bar()).findByRole('button', { name: 'More actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Stop/ }))
     expect(await screen.findByText(/api was not stopped/)).toBeTruthy()
   })
 })

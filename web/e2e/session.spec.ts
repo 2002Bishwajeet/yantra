@@ -210,7 +210,8 @@ test.describe('the session screen, chat first', () => {
   test('cuts the phone header to the app bar and one chat row', async ({ page, size }) => {
     test.skip(size !== 'phone', 'the app bar slot is the phone board')
     const bar = page.locator('.m3-top-app-bar')
-    await expect(bar.getByRole('button', { name: /^(Stop|Resume)$/ })).toBeVisible()
+    await expect(bar.getByRole('button', { name: 'Resume' })).toBeVisible()
+    await expect(bar.getByRole('button', { name: 'Stop' })).toHaveCount(0)
     await bar.getByRole('button', { name: 'More actions' }).click()
     await expect(page.getByRole('menu')).toContainText('waiting for trust')
     await page.keyboard.press('Escape')
