@@ -293,8 +293,8 @@ costs GitHub no quota, and a 304 reuses what the watch already holds.
 
 **Every message also goes to the installed dashboards by Web Push** (Y-825,
 [ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md), [`push.rs`](src/push.rs)).
-`notify::told` is the one send: `Push::send` to every device in the store, then the relay when one
-is set. The agents notifier, the PR watch, the chat's waits and the rooms' pauses all call it, and
+`notify::told` is the one send: `Push::send` to every device in the store and, at the same time,
+the relay when one is set. The agents notifier, the PR watch, the chat's waits and the rooms' pauses all call it, and
 each keeps its own rules. The payload is `{title, body, url}`, where `url` is `Message::path`, a path
 in the dashboard. Four rules bind `push.rs`:
 

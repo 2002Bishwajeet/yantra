@@ -59,12 +59,24 @@ function page(url) {
   return new URL('/', self.location.origin).href
 }
 
-/** An open dashboard goes to the page and takes the focus. With none open,
- *  or one that cannot be moved, the page opens in a new window. */
+/** An open dashboard takes the focus and its router goes to the page, so
+ *  nothing reloads. The focused window is first, then a visible one. A window
+ *  that cannot take the focus is navigated. With none open, or one that cannot
+ *  be moved, the page opens in a new window. */
 async function open(url) {
   const href = page(url)
-  const [client] = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  const client =
+    windows.find((one) => one.focused) || windows.find((one) => one.visibilityState === 'visible') || windows[0]
   if (client) {
+    try {
+      const at = new URL(href)
+      const shown = await client.focus()
+      ;(shown || client).postMessage({ open: at.pathname + at.search + at.hash })
+      return
+    } catch {
+      // This window did not take the focus.
+    }
     try {
       const there = await client.navigate(href)
       await (there || client).focus()

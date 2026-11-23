@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { type Answers, mountSettings, sent, unmountSettings } from './harness'
 
@@ -55,14 +55,21 @@ function browser(given: Browser) {
     return notification.permission
   })
   const notification = { permission: given.permission, requestPermission }
+  const addEventListener = vi.fn()
   vi.stubGlobal('isSecureContext', true)
   vi.stubGlobal('PushManager', class {})
   vi.stubGlobal('Notification', notification)
   Object.defineProperty(navigator, 'serviceWorker', {
     configurable: true,
-    value: { getRegistration: async () => registration, ready: Promise.resolve(registration), register: vi.fn() },
+    value: {
+      getRegistration: async () => registration,
+      ready: Promise.resolve(registration),
+      register: vi.fn(),
+      addEventListener,
+      removeEventListener: vi.fn(),
+    },
   })
-  return { subscribe, requestPermission }
+  return { subscribe, requestPermission, addEventListener }
 }
 
 afterEach(() => {
@@ -250,16 +257,19 @@ describe('a device that has notifications on', () => {
     expect(named).toEqual({ endpoint: ENDPOINT })
   })
 
-  it('says to turn it on again when the daemon no longer lists the device', async () => {
+  it('turns off and says to turn it on again when the daemon no longer lists the device', async () => {
     on()
+    const held = current
     mount({ 'POST /api/push/test': [404, 'this device is not on the list'] })
     const group = await device()
 
     fireEvent.click(await group.findByRole('button', { name: 'Send a test' }))
 
-    expect(
-      await screen.findByText('Yantra no longer lists this device. Turn notifications off and on again.'),
-    ).toBeTruthy()
+    expect(await screen.findByText('Yantra no longer lists this device. Turn notifications on again.')).toBeTruthy()
+    expect(await group.findByRole('button', { name: 'Turn on' })).toBeTruthy()
+    expect(group.getByText('Off')).toBeTruthy()
+    expect(held?.unsubscribe).toHaveBeenCalled()
+    expect(group.queryByRole('button', { name: 'Send a test' })).toBeNull()
   })
 
   it('says the test did not arrive on a 502, with what the push service answered', async () => {
@@ -305,5 +315,20 @@ describe('a device that has notifications on', () => {
     expect(await screen.findByRole('alert')).toBeTruthy()
     expect(group.getByRole('button', { name: 'Turn off' })).toBeTruthy()
     expect(held?.unsubscribe).not.toHaveBeenCalled()
+  })
+})
+
+describe('a tap on a notification while the dashboard is open', () => {
+  it('takes the router to the page the worker names, and to no other site', async () => {
+    const { addEventListener } = browser({ permission: 'granted', held: serverKey() })
+    mount()
+    await device()
+    const heard = addEventListener.mock.calls.find(([kind]) => kind === 'message')?.[1] as (event: unknown) => void
+
+    heard({ data: { open: '//evil.example/login' } })
+    heard({ data: { open: '/settings/appearance' } })
+
+    await waitFor(() => expect(location.pathname).toBe('/settings/appearance'))
+    expect(screen.queryByRole('region', { name: 'This device' })).toBeNull()
   })
 })

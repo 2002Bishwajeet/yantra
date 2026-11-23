@@ -129,6 +129,32 @@ export function useTurnOffPush() {
   })
 }
 
+/** The browser alone says "on" (`pushState`), so a 404 here is the one place
+ *  the page learns the daemon dropped the device. The browser then leaves its
+ *  subscription, and Turn on makes a new one. */
 export function useTestPush() {
-  return useMutation<void, ApiError, string>({ mutationFn: sendTest })
+  const client = useQueryClient()
+  return useMutation<void, ApiError, string>({
+    mutationFn: sendTest,
+    onError: async (error) => {
+      if (error.kind !== 'missing') return
+      const registration = await navigator.serviceWorker.getRegistration().catch(() => undefined)
+      const subscription = await registration?.pushManager.getSubscription().catch(() => null)
+      await subscription?.unsubscribe().catch(() => {})
+      client.setQueryData<PushState>(keys.push(), { kind: 'off' })
+    },
+  })
+}
+
+/** A tap on a notification while a dashboard is open: the worker names the
+ *  page, and `go` takes the router there with no reload. */
+export function followPush(go: (path: string) => void): () => void {
+  if (!('serviceWorker' in navigator)) return () => {}
+  const worker = navigator.serviceWorker
+  const heard = (event: MessageEvent) => {
+    const path: unknown = event.data?.open
+    if (typeof path === 'string' && path.startsWith('/') && !path.startsWith('//')) go(path)
+  }
+  worker.addEventListener('message', heard)
+  return () => worker.removeEventListener('message', heard)
 }

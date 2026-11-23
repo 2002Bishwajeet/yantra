@@ -244,6 +244,9 @@ fn deliver(key: &Key, device: &Device, text: &[u8]) -> Outcome {
     let sent = ureq::post(&device.endpoint)
         .config()
         .timeout_global(Some(TIMEOUT))
+        // A redirect would leave the https endpoint that `checked` accepted.
+        .max_redirects(0)
+        .https_only(!cfg!(test))
         .build()
         .header("TTL", &KEPT.as_secs().to_string())
         .header("Content-Encoding", "aes128gcm")
@@ -251,6 +254,10 @@ fn deliver(key: &Key, device: &Device, text: &[u8]) -> Outcome {
         .header("Authorization", &authorization)
         .send(&body[..]);
     match sent {
+        Ok(answer) if answer.status().is_redirection() => Outcome::Failed(format!(
+            "the push service answered {}",
+            answer.status().as_u16()
+        )),
         Ok(_) => Outcome::Sent,
         Err(ureq::Error::StatusCode(404 | 410)) => Outcome::Gone,
         Err(ureq::Error::StatusCode(status)) => {
@@ -345,9 +352,10 @@ impl Push {
             return Ok(key.public.clone());
         }
         let (key, secret) = Key::generate()?;
-        notify::write_vapid(&self.file, &secret)?;
         // A device kept from an older key cannot be pushed to with this one.
+        // They go first, so a failed delete leaves no key that outlives them.
         self.store.remove_devices().await?;
+        notify::write_vapid(&self.file, &secret)?;
         let public = key.public.clone();
         *self.key.write().await = Some(Arc::new(key));
         tracing::info!(
@@ -795,13 +803,19 @@ pub(crate) mod tests {
         let (store, path) = crate::store::tests::scratch();
         let file = path.with_file_name("no-such-directory").join("daemon.env");
         let push = Push::new(store, Arc::default(), &file, None);
+        let (old, ..) = device("https://push.example/old");
+        push.store.put_device(old, DEVICES).await.expect("sql");
 
         assert!(matches!(push.public_key().await, Err(Error::NotKept(_))));
         assert!(push.key().await.is_none());
+        assert!(
+            push.store.devices().await.expect("sql").is_empty(),
+            "the devices go before the key is written"
+        );
     }
 
     /// One request as a push service sees it: the head and the bytes.
-    fn request(listener: &TcpListener, status: &str) -> (String, Vec<u8>) {
+    pub(crate) fn request(listener: &TcpListener, status: &str) -> (String, Vec<u8>) {
         let (mut stream, _) = listener.accept().expect("the daemon connects");
         let mut seen = Vec::new();
         let mut byte = [0u8; 1];
@@ -850,6 +864,12 @@ pub(crate) mod tests {
                 .map(|status| request(&listener, status))
                 .collect()
         });
+        let (push, device, secret, auth) = pushing_at(address).await;
+        (push, device, secret, auth, served)
+    }
+
+    /// A `Push` with a key and one device whose push service is at `address`.
+    pub(crate) async fn pushing_at(address: SocketAddr) -> (Push, Device, SecretKey, [u8; 16]) {
         let (push, _) = scratch();
         push.public_key().await.expect("a key");
         let (device, secret, auth) = device(&format!("http://{address}/push/abc"));
@@ -857,7 +877,7 @@ pub(crate) mod tests {
             .put_device(device.clone(), DEVICES)
             .await
             .expect("sql");
-        (push, device, secret, auth, served)
+        (push, device, secret, auth)
     }
 
     fn said(title: &str, body: &str, path: Option<&str>) -> Message {
@@ -947,6 +967,28 @@ pub(crate) mod tests {
         served.join().expect("the listener");
         assert_eq!(failed, "the push service answered 503");
         assert!(!failed.contains(&device.endpoint));
+        assert_eq!(push.store.devices().await.expect("sql"), [device]);
+    }
+
+    /// The endpoint was checked as https, and a redirect names another
+    /// address. So a 3xx is a failure, and nothing goes to where it points.
+    #[tokio::test]
+    async fn a_redirect_is_a_failure_and_is_not_followed() {
+        let elsewhere = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let there = elsewhere.local_addr().expect("the port it got");
+        let status: &'static str =
+            Box::leak(format!("302 Found\r\nLocation: http://{there}/taken").into_boxed_str());
+        let statuses: &'static [&'static str] = Box::leak(Box::new([status]));
+        let (push, device, _, _, served) = pushing_to(statuses).await;
+
+        let failed = push.send(&said("t", "b", None)).await.expect_err("a 302");
+
+        served.join().expect("the listener");
+        assert_eq!(failed, "the push service answered 302");
+        elsewhere
+            .set_nonblocking(true)
+            .expect("a nonblocking check");
+        assert!(elsewhere.accept().is_err(), "the redirect was followed");
         assert_eq!(push.store.devices().await.expect("sql"), [device]);
     }
 

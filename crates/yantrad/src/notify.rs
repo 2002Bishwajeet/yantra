@@ -217,37 +217,43 @@ impl PrNote {
     }
 }
 
-/// The first failure ends the pass: the rest of this look's notifications are
-/// dropped rather than retried against a relay that has just said no.
+/// Every message is tried once, so one device that refuses does not cost the
+/// relay the rest of the pass. The first failure is the answer.
 async fn send(
     push: Option<&Push>,
     relay: Option<&Relay>,
     messages: Vec<Message>,
 ) -> Result<(), String> {
+    let mut outcome = Ok(());
     for message in messages {
-        told(push, relay, message).await?;
+        outcome = outcome.and(told(push, relay, message).await);
     }
-    Ok(())
+    outcome
 }
 
 /// One message to every installed dashboard and to the relay, where each
-/// exists (ADR-0047 decision 5). Both are tried, and the first failure is the
-/// answer.
+/// exists (ADR-0047 decision 5). Both are tried at once, so a slow push
+/// service does not spend the relay's time. The first failure is the answer.
 pub async fn told(
     push: Option<&Push>,
     relay: Option<&Relay>,
     message: Message,
 ) -> Result<(), String> {
-    let pushed = match push {
-        Some(push) => push.send(&message).await,
-        None => Ok(()),
+    let pushing = async {
+        match push {
+            Some(push) => push.send(&message).await,
+            None => Ok(()),
+        }
     };
-    let relayed = match relay {
-        Some(relay) => post(relay, message)
-            .await
-            .map_err(|error| error.to_string()),
-        None => Ok(()),
+    let relaying = async {
+        match relay {
+            Some(relay) => post(relay, message.clone())
+                .await
+                .map_err(|error| error.to_string()),
+            None => Ok(()),
+        }
     };
+    let (pushed, relayed) = tokio::join!(pushing, relaying);
     pushed.and(relayed)
 }
 
@@ -627,12 +633,13 @@ mod tests {
     }
 
     /// A refused send drops the note and is said once, as the agents' are.
+    /// The note behind it in the same pass is still tried.
     #[tokio::test]
     async fn a_refused_pr_note_is_dropped_and_not_retried() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let address = listener.local_addr().expect("the port it got");
         let served = thread::spawn(move || {
-            ["503 Service Unavailable", "200 OK"]
+            ["503 Service Unavailable", "200 OK", "200 OK"]
                 .map(|status| request(&listener, status))
                 .to_vec()
         });
@@ -656,11 +663,83 @@ mod tests {
             seen.iter().map(|request| body(request)).collect::<Vec<_>>(),
             [
                 Some("web: PR #21 has a failed check".to_owned()),
+                Some("web: PR #21 has a new review".to_owned()),
                 Some("web: PR #21 passed its checks".to_owned()),
             ],
-            "the review behind the refused send is gone"
+            "the refused check is gone, and the review behind it was sent"
         );
         assert_eq!(events.read().await.len(), 3);
+    }
+
+    /// One device that refuses every push does not stop the pass: the relay
+    /// gets both notes, and the failure is still said.
+    #[tokio::test]
+    async fn a_device_that_refuses_does_not_cost_the_relay_a_message() {
+        let (push, _, _, _, pushed) =
+            crate::push::tests::pushing_to(&["503 Service Unavailable", "503 Service Unavailable"])
+                .await;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let relayed =
+            thread::spawn(move || ["200 OK", "200 OK"].map(|status| answer(&listener, status)));
+        let mut teller = Teller::new(Some(relay(address))).pushing(Some(push));
+
+        teller
+            .tell_pulls(
+                &[note(PrPhase::CheckFailed), note(PrPhase::Reviewed)],
+                false,
+                &Events::default(),
+            )
+            .await;
+
+        assert_eq!(
+            relayed.join().expect("the relay"),
+            [
+                "web: PR #21 has a failed check",
+                "web: PR #21 has a new review"
+            ]
+        );
+        assert_eq!(pushed.join().expect("the push service").len(), 2);
+        assert!(teller.log.quiet, "the device's refusal was said");
+    }
+
+    /// The push service here answers only after the relay has its message.
+    /// A push sent before the relay's would wait out its whole timeout.
+    #[tokio::test]
+    async fn a_slow_push_service_does_not_hold_the_relay() {
+        let slow = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let (push, ..) =
+            crate::push::tests::pushing_at(slow.local_addr().expect("the port it got")).await;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let (relayed, wait) = std::sync::mpsc::channel();
+        let pushed = thread::spawn(move || {
+            let arrived = wait.recv_timeout(Duration::from_secs(10)).is_ok();
+            crate::push::tests::request(&slow, "201 Created");
+            arrived
+        });
+        let relaying = thread::spawn(move || {
+            let said = answer(&listener, "200 OK");
+            relayed.send(()).expect("the push service waits");
+            said
+        });
+
+        let outcome = told(
+            Some(&push),
+            Some(&relay(address)),
+            note(PrPhase::Reviewed).message(),
+        )
+        .await;
+
+        assert_eq!(
+            relaying.join().expect("the relay"),
+            "web: PR #21 has a new review"
+        );
+        assert!(
+            pushed.join().expect("the push service"),
+            "the relay came first"
+        );
+        assert_eq!(outcome, Ok(()));
     }
 
     #[test]

@@ -1,7 +1,8 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserHistory, RouterProvider } from '@tanstack/react-router'
 import { makeQueryClient } from '@/api/client'
+import { followPush } from '@/api/push'
 import { useSignedOut } from '@/api/signedIn'
 import { type AppRouter, getRouter } from '@/router'
 
@@ -17,6 +18,7 @@ export default function App({ router }: { router?: AppRouter }) {
   const [client] = useState(makeQueryClient)
   const [made] = useState(() => router ?? getRouter(createBrowserHistory(), client))
   const out = useSignedOut()
+  useEffect(() => followPush((path) => made.history.push(path)), [made])
   return (
     <QueryClientProvider client={client}>
       {/* ADR-0044: while the daemon says 401, the sign-in screen takes the page.

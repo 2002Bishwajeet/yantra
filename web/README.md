@@ -32,8 +32,8 @@ background tab still polls, and a poll is not a person watching.
 [ADR-0047](../docs/adr/0047-the-dashboard-gets-web-push.md)). Settings → Notifications → *This
 device* asks the permission from the tap, subscribes with the daemon's key and posts the
 subscription ([`api/push.ts`](src/api/push.ts)). [`public/sw.js`](public/sw.js) shows each push and,
-on a tap, moves an open dashboard to the push's page or opens a window there. It opens only its own
-origin. On an iPhone this works only from the Home Screen app. The ntfy relay below it is the
+on a tap, focuses an open dashboard and tells its router the push's page, or opens a window there.
+It opens only its own origin. On an iPhone this works only from the Home Screen app. The ntfy relay below it is the
 fallback.
 
 **`/` opens on work, not on an inventory.** Four groups ordered by who must act

@@ -31,7 +31,10 @@ beneath it in mono. `error.status` is there where a code arrived.
 
 `push.ts` is ADR-0047's Web Push for the browser that shows the page: `pushState` reads the browser's
 push manager, `turnOn` takes the daemon's key, subscribes and posts the subscription, `turnOff` and
-`sendTest` are the other two writes, and `usePush` holds the state under `keys.push()`.
+`sendTest` are the other two writes, and `usePush` holds the state under `keys.push()`. A test the
+daemon answers 404 means the daemon dropped the device, so `useTestPush` unsubscribes the browser and
+sets the state to `off`. `followPush` hears the page a tapped notification names from `sw.js`, and
+`App` sends the router there.
 
 The microphone also uses `refused` for a socket that never opened, and `socket` for the daemon's text
 frame, each with a microphone sentence from `mic.ts`.

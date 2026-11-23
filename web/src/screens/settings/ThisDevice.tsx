@@ -22,7 +22,7 @@ function supporting(state: PushState | undefined): string {
 function sentence(error: ApiError, doing: 'on' | 'off' | 'test'): string {
   if (error.kind === 'network') return 'Yantra did not answer. Try again.'
   if (doing === 'test') {
-    if (error.kind === 'missing') return 'Yantra no longer lists this device. Turn notifications off and on again.'
+    if (error.kind === 'missing') return 'Yantra no longer lists this device. Turn notifications on again.'
     if (error.status === 502) return 'The test alert did not reach this device.'
   }
   if (doing === 'on') {
