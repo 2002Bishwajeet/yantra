@@ -1,18 +1,20 @@
 import { Link } from '@tanstack/react-router'
 import { Info, KeyRound, MessagesSquare, Settings as SettingsIcon } from 'lucide-react'
-import { REFUSED } from '@/lib/github'
+import { REFUSED, signedIn } from '@/lib/github'
 import { Badge } from '@/m3/badge/Badge'
-import { Menu, MenuLinkItem, MenuPopup } from '@/m3/menu/Menu'
+import { Menu, MenuHeading, MenuLinkItem, MenuPopup, MenuSeparator } from '@/m3/menu/Menu'
 import { guardOutsidePress, useReady, type PopupProps } from './useReady'
 
 /** The avatar's menu, without its trigger: the shell owns that element. */
-export function AccountMenu(props: PopupProps & { refused: boolean; update: boolean }) {
+export function AccountMenu(props: PopupProps & { login: string | null; refused: boolean; update: boolean }) {
   // Never born open: a menu born open skips the enter transition and takes no focus.
   const ready = useReady()
   return (
     <Menu onOpenChange={guardOutsidePress(props)} open={props.open && ready}>
       {/* A LinkItem stays open by default, and the open menu's inert layer then covers the page. */}
       <MenuPopup anchor={props.anchor} finalFocus={props.anchor} keepMounted>
+        <MenuHeading>{props.login ? signedIn(props.login) : 'This device'}</MenuHeading>
+        <MenuSeparator />
         {props.refused ? (
           <MenuLinkItem
             closeOnClick

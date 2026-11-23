@@ -97,7 +97,7 @@
   border-radius: var(--md-sys-shape-corner-large-increased);
   text-align: left;
   color: var(--md-sys-color-on-surface);
-  background: var(--md-sys-color-surface-container-lowest);
+  background: var(--m3-raised-surface);
   cursor: pointer;
   font: inherit;
 }

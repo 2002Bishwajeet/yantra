@@ -18,6 +18,24 @@
   z-index: 5;
   height: var(--m3-safe-top);
   background: var(--md-sys-color-surface);
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+/* Y-761: M3 on-scroll on the phone, a change of tone for the bar and the strip above it (useBarScrolled). */
+[data-shell="phone"] .m3-top-app-bar {
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+[data-shell="phone"][data-scrolled] .m3-top-app-bar,
+[data-shell="phone"][data-scrolled].shell::before {
+  background-color: var(--md-sys-color-surface-container);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-shell="phone"] .m3-top-app-bar,
+  .shell::before {
+    transition: none;
+  }
 }
 
 [data-shell="tablet"],

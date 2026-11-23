@@ -325,6 +325,8 @@
   --m3-card-padding: 20px;
   --m3-card-padding-x: 24px;
   --m3-card-gap: 16px;
+  /* Rows and lowest cards sit lighter than their card: brightest tone in light, `highest` in dark, where `lowest` is darker than the card. */
+  --m3-raised-surface: light-dark(var(--md-sys-color-surface-container-lowest), var(--md-sys-color-surface-container-highest));
   --m3-row-radius: var(--md-sys-shape-corner-large);
   --m3-row-padding: 10px 12px;
   --m3-row-min-height: 44px;
@@ -403,6 +405,7 @@
    plain values, so a colour role is never invalid. */
 @supports not (color: light-dark(#000, #fff)) {
   :root {
+    --m3-raised-surface: var(--md-sys-color-surface-container-lowest);
     --md-sys-color-primary: #9A4523;
     --md-sys-color-on-primary: #FFFFFF;
     --md-sys-color-primary-container: #F1E0CA;
