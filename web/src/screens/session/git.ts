@@ -26,6 +26,7 @@ export type GitFailureKind =
   | 'mergeHeadMoved'
   | 'mergeGithub'
   | 'noGrant'
+  | 'otherRepository'
   | 'removeRefused'
   | 'noThread'
   | 'unreachable'
@@ -89,6 +90,10 @@ const words: Record<GitFailureKind, { title: string; next: string }> = {
   },
   mergeGithub: { title: 'GitHub did not merge', next: 'GitHub did not take the merge. Try again in a moment.' },
   noGrant: { title: 'GitHub is not connected', next: 'Connect GitHub, then try again.' },
+  otherRepository: {
+    title: 'The remote names another repository',
+    next: 'The git remote on the machine no longer names the repository of this thread, so nothing went to GitHub. Set the remote back on the machine, then try again. If you moved the repository on purpose, use `yantra pr` in a shell there.',
+  },
   removeRefused: {
     title: 'The worktree was not removed',
     next: 'git on the machine kept the worktree or its branch. Try again, or remove it there.',
@@ -147,6 +152,9 @@ function conflict(action: GitAction, said: string): GitFailureKind {
 // The daemon's words for a missing grant name the CLI, so only they tell it from any other refusal (Y-753).
 const NO_GRANT = /no github grant|github\s+login/i
 
+// The daemon's words when a PR verb finds a remote that names another repository than the thread's (Y-782).
+const OTHER_REPOSITORY = /its remote now names/i
+
 export function gitFailure(action: GitAction, cause: unknown): GitFailure {
   const error = asApiError(cause)
   const kind: GitFailureKind =
@@ -154,6 +162,8 @@ export function gitFailure(action: GitAction, cause: unknown): GitFailure {
       ? 'network'
       : NO_GRANT.test(error.said)
         ? 'noGrant'
+        : OTHER_REPOSITORY.test(error.said)
+        ? 'otherRepository'
         : error.status === 404
         ? 'noThread'
         : error.status === 503

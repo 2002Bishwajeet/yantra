@@ -1137,6 +1137,7 @@ export const threadPushed = {
 export const threadPrOpened = {
   "created": true,
   "number": 497,
+  "repo": "2002Bishwajeet/yantra",
   "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
 } satisfies ThreadPrOpened
 
@@ -1144,6 +1145,7 @@ export const threadPrPending = {
   "commits": 3,
   "head_sha": "89abcdef0123456789abcdef0123456789abcdef",
   "number": 497,
+  "repo": "2002Bishwajeet/yantra",
   "url": "https://github.com/2002Bishwajeet/yantra/pull/497"
 } satisfies ThreadPrPending
 

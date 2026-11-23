@@ -450,7 +450,7 @@ async fn a_pr_opens_from_the_pushed_tip_read_over_ssh() -> Result<()> {
             r#"{"number":3,"html_url":"https://github.com/o/r/pull/3","state":"open","merged_at":null}"#.into(),
         ),
     ]);
-    let opened = commit::open_pr(&ssh, &thread, &github, &token, None, None).await?;
+    let opened = commit::open_pr(&ssh, &thread, &github, &token, None, None, None).await?;
     assert!(opened.created);
     assert_eq!(opened.number, 3);
     let seen = served.join().expect("the stub thread");
@@ -470,9 +470,79 @@ async fn a_pr_opens_from_the_pushed_tip_read_over_ssh() -> Result<()> {
     commit::commit(&ssh, &place, "Add b").await?;
     let (github, _served) = github_answering(vec![("200 OK", NONE_OPEN.into())]);
     assert!(matches!(
-        commit::open_pr(&ssh, &thread, &github, &token, None, None).await,
+        commit::open_pr(&ssh, &thread, &github, &token, None, None, None).await,
         Err(commit::Failed::Ahead)
     ));
+    Ok(())
+}
+
+/// Y-782 per §B3: real git rewrites the remote from the thread's worktree, as
+/// an agent there can. The thread is bound to `o/r`, so every PR verb refuses
+/// and the loopback GitHub, which answers nothing, is never asked.
+#[tokio::test]
+async fn a_rewritten_remote_is_refused_by_every_pr_verb() -> Result<()> {
+    const REPO: &str = "/home/yantra/bound";
+    const ORIGIN: &str = "/home/yantra/bound-origin.git";
+    let Some((fixture, ssh, workspace)) = lab("yt-bnd", REPO).await? else {
+        return Ok(());
+    };
+    assert_eq!(commit::origin(&ssh, REPO).await?, None, "no remote yet");
+    fixture.run(&format!(
+        "git -C {REPO} config user.name Owner && git -C {REPO} config user.email owner@example.com \
+         && git init -q --bare {ORIGIN} && git -C {REPO} remote add origin {ORIGIN}"
+    ))?;
+    let place = thread::open(&ssh, &workspace).await?;
+    fixture.run(&format!("cd {} && printf 'a\\n' > a.txt", place.worktree))?;
+    commit::commit(&ssh, &place, "Fix the thing").await?;
+    commit::push(&ssh, &place, None, None).await?;
+    fixture.run(&format!(
+        "git -C {REPO} remote set-url origin https://github.com/o/r.git"
+    ))?;
+    assert_eq!(commit::origin(&ssh, REPO).await?.as_deref(), Some("o/r"));
+    let thread = async || -> Result<thread::Listed> {
+        Ok(thread::listed(&ssh, &workspace)
+            .await?
+            .into_iter()
+            .find(|found| found.place.branch == place.branch)
+            .expect("the thread"))
+    };
+    let bound = commit::repository(&thread().await?)?;
+    assert_eq!(bound, "o/r");
+
+    fixture.run(&format!(
+        "git -C {} remote set-url origin https://github.com/evil/other.git",
+        place.worktree
+    ))?;
+    let moved = thread().await?;
+    let token = Token::new("gho_notarealtoken".to_owned());
+    let (github, served) = github_answering(Vec::new());
+    let refused = |failed: commit::Failed| {
+        assert!(
+            matches!(
+                &failed,
+                commit::Failed::OtherRepository { bound, remote }
+                    if bound == "o/r" && remote == "evil/other"
+            ),
+            "{failed:?}"
+        );
+    };
+
+    refused(
+        commit::open_pr(&ssh, &moved, &github, &token, None, None, Some(&bound))
+            .await
+            .expect_err("no PR"),
+    );
+    refused(
+        commit::pending_pr(&moved, &github, &token, Some(&bound))
+            .await
+            .expect_err("no read"),
+    );
+    refused(
+        commit::merge_pr(&moved, &github, &token, 3, "0123abcd", Some(&bound))
+            .await
+            .expect_err("no merge"),
+    );
+    assert!(served.join().expect("the stub thread").is_empty());
     Ok(())
 }
 
@@ -526,7 +596,7 @@ async fn a_thread_walks_from_a_commit_to_a_merge_and_is_removed() -> Result<()> 
         ("200 OK", r#"{"default_branch":"main"}"#.into()),
         ("201 Created", OPEN_PR.into()),
     ]);
-    let opened = commit::open_pr(&ssh, &thread, &github, &token, None, None).await?;
+    let opened = commit::open_pr(&ssh, &thread, &github, &token, None, None, None).await?;
     assert!(opened.created);
     assert_eq!(opened.number, 3);
     let seen = served.join().expect("the stub thread");
@@ -555,7 +625,7 @@ async fn a_thread_walks_from_a_commit_to_a_merge_and_is_removed() -> Result<()> 
         ("200 OK", r#"{"sha":"5ca1ab1e"}"#.into()),
         ("204 No Content", String::new()),
     ]);
-    let merged = commit::merge_pr(&thread, &github, &token, 3, &tip).await?;
+    let merged = commit::merge_pr(&thread, &github, &token, 3, &tip, None).await?;
     assert_eq!(merged.number, 3);
     assert_eq!(merged.branch, pushed.branch);
     assert_eq!(merged.kept, None);

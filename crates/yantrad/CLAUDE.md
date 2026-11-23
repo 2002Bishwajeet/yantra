@@ -1297,10 +1297,10 @@ unreachable GitHub that stays shows after 5 s. A status error that stays shows o
 - **The CLI is the honesty check.** Anything the web UI can do must be expressible in `yantra`
   first. That is what stops the daemon growing a second, richer API that the CLI cannot reach.
 - Stack: `axum` and `tokio`, both in use since Y-069. **One store, and only one**: `src/store.rs` keeps
-  a row per Chat thread in `~/.local/state/yantra/threads.sqlite` ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md),
+  a row per Chat thread and a row per clone that Yantra started in `~/.local/state/yantra/threads.sqlite` ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md),
   Y-688). It answers the first question about the past, which threads a machine had and what they
-  were called, and the store wins over git config for a session id. Only `DELETE …/threads/{thread}`
-  forgets a row: the web's *Forget thread* and `yantra chat rm --daemon` send it for a `gone` thread. A second table,
+  were called, and the store wins over git config for a session id and for the GitHub repository (Y-782). Only `DELETE …/threads/{thread}`
+  forgets a row: the web's *Forget thread* and `yantra chat rm --daemon` send it for a `gone` thread. A third table,
   `push_devices`, holds each device that gets Web Push ([ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md)). `rusqlite` with hand-written SQL,
   every call on a blocking thread, and the pragmas on every connection (I-12, I-13, I-14). The daemon
   refuses to start when the store does not open. Everything else is still declared in the workspace

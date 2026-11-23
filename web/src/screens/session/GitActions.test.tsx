@@ -62,6 +62,8 @@ async function pick(name: string) {
   fireEvent.click(await screen.findByRole('menuitem', { name }))
 }
 const openPr = { number: 7, url: 'https://github.com/o/r/pull/7' }
+/** `commit::Failed::OtherRepository`, as the daemon says it (Y-782). */
+const otherRepository = 'this thread belongs to o/r, but its remote now names evil/x, so nothing went to GitHub'
 
 describe('the quick action', () => {
   it.each([
@@ -330,7 +332,7 @@ describe('open PR', () => {
     daemon({ pr: [200, threadPrOpened] })
     const { refresh } = open()
     await pick('Open PR')
-    await waitFor(() => expect(screen.getByText(`Opened PR #${threadPrOpened.number}`)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(`Opened PR #${threadPrOpened.number} in ${threadPrOpened.repo}`)).toBeTruthy())
     expect(refresh).toHaveBeenCalledOnce()
     fireEvent.click(menuTrigger())
     const item = await screen.findByRole('menuitem', { name: `PR #${threadPrOpened.number}` })
@@ -368,11 +370,36 @@ describe('open PR', () => {
     const alert = await screen.findByRole('alert')
     expect(within(alert).getByRole('heading', { name: 'The daemon did not answer' })).toBeTruthy()
   })
+
+  // Y-782: the list reads the PR from the rewritten remote, so the PR it finds there must not hide the refusal.
+  it('names both repositories when the remote moved, and keeps the refusal when the list finds a PR', async () => {
+    const log = daemon({ pr: [409, otherRepository] })
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const actions = (listed?: ThreadPr) => (
+      <QueryClientProvider client={client}>
+        <GitActions busy={false} diffs={1} listed={listed} onRemoved={vi.fn()} refresh={vi.fn()} thread={mine} workspace="site" />
+      </QueryClientProvider>
+    )
+    const view = render(actions())
+    await pick('Open PR')
+    const refusal = async () => {
+      const alert = await screen.findByRole('alert')
+      expect(within(alert).getByRole('heading', { name: 'The remote names another repository' })).toBeTruthy()
+      expect(within(alert).getByText(/Set the remote back on the machine/)).toBeTruthy()
+      expect(within(alert).getByText(otherRepository).textContent).toMatch(/belongs to o\/r.*names evil\/x/)
+      return alert
+    }
+    await refusal()
+
+    view.rerender(actions({ state: 'open', number: 9, url: 'https://github.com/evil/x/pull/9' }))
+    fireEvent.click(within(await refusal()).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(log.filter((one) => one.path === `${base}/pr`)).toHaveLength(2))
+  })
 })
 
 describe('merge', () => {
   const listed = { state: 'open', ...openPr } as const
-  const read = { ...threadPrPending, ...openPr, head_sha: 'aaa111bbb222ccc333', commits: 3 }
+  const read = { ...threadPrPending, ...openPr, head_sha: 'aaa111bbb222ccc333', commits: 3, repo: 'o/r' }
   const pending: Reply = [200, read]
   const confirm = async () => {
     await pick('Merge PR #7')
@@ -407,6 +434,40 @@ describe('merge', () => {
     expect(head.getAttribute('rel')).toBe('noopener noreferrer')
     expect(within(asked).getByRole('status').textContent).toBe('')
     expect(mergeButton(asked).disabled).toBe(false)
+  })
+
+  // Y-782: the owner sees which repository the merge writes before the Merge button turns on.
+  it('names the repository the merge goes to', async () => {
+    daemon({ pending })
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    const repo = await within(asked).findByText('o/r')
+    expect(repo.closest('.m3-row')?.textContent).toBe('o/rRepository on GitHub')
+    expect(asked.querySelector('.git__merge')?.firstElementChild).toBe(repo.closest('.m3-row'))
+  })
+
+  it('refuses the read when the remote names another repository, and shows no head to merge', async () => {
+    const log = daemon({ pending: [409, otherRepository] })
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    const alert = await within(asked).findByRole('alert')
+    expect(within(alert).getByRole('heading', { name: 'The remote names another repository' })).toBeTruthy()
+    expect(within(alert).getByText(otherRepository)).toBeTruthy()
+    expect(within(asked).queryByRole('link', { name: /commit/ })).toBeNull()
+    expect(mergeButton(asked).disabled).toBe(true)
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(log.filter((one) => one.path === `${base}/pending`)).toHaveLength(2))
+    expect(log.some((one) => one.path === `${base}/merge`)).toBe(false)
+  })
+
+  it('refuses a merge when the remote moved after the read, with both names', async () => {
+    daemon({ pending, merge: [409, otherRepository] })
+    open({ diffs: 0, listed })
+    const asked = await confirm()
+    fireEvent.click(await ready(asked))
+    const alert = await within(asked).findByRole('alert')
+    expect(within(alert).getByRole('heading', { name: 'The remote names another repository' })).toBeTruthy()
+    expect(within(alert).getByText(otherRepository)).toBeTruthy()
   })
 
   it('counts one commit as one', async () => {
