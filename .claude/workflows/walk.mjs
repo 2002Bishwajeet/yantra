@@ -102,10 +102,28 @@ async function accountScene(page, name, url, out) {
   const avatar = page.getByRole('button', { name: 'Account', exact: true })
   if (name === 'desktop-chromium') await avatar.click()
   else await avatar.tap()
-  await page.getByRole('menu').waitFor()
-  await page.waitForTimeout(800)
-  writeFileSync(`${out}/account-open-${name}.txt`, await page.getByRole('menu').innerText())
+  // A visibility wait passes a popup that Base UI holds at opacity 0 until it has a position, and one under
+  // another layer. Neither is in the picture, so the scene asks what is painted and reports what is not.
+  const fault = () =>
+    page.evaluate(() => {
+      const menu = document.querySelector('.m3-menu[data-open]')
+      if (!menu) return 'no menu is open'
+      const box = menu.getBoundingClientRect()
+      const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      const opacity = [menu, menu.closest('.m3-menu__positioner')].map((one) => getComputedStyle(one).opacity).join(' in ')
+      if (opacity === '1 in 1' && menu.contains(top)) return ''
+      return `opacity ${opacity}, box ${[box.x, box.y, box.width, box.height].map(Math.round)}, on top <${top?.tagName ?? 'nothing'} class="${top?.getAttribute('class') ?? ''}">`
+    })
+  let wrong = await fault()
+  for (let n = 0; wrong && n < 20; n++) {
+    await page.waitForTimeout(150)
+    wrong = await fault()
+  }
+  if (wrong) errors.push(`${name} account scene: the open menu is not painted: ${wrong}`)
+  const text = await page.locator('.m3-menu[data-open]').innerText({ timeout: 1000 }).catch(() => '')
+  writeFileSync(`${out}/account-open-${name}.txt`, text)
   await page.screenshot({ path: `${out}/account-open-${name}.png` })
+  if (!wrong && (await fault())) errors.push(`${name} account scene: the menu closed while the picture was taken`)
   await page.keyboard.press('Escape')
 }
 for (const [name, type, options] of looks) {
@@ -148,15 +166,29 @@ for (const [name, type, options] of looks) {
         await page.waitForTimeout(300)
         await page.screenshot({ path: `${file}-${n}.png` })
       }
-      // Y-761: no walked page scrolls on a phone, so a spacer forces it and the shot shows the bar toned over content.
-      await page.evaluate(() => {
+      // Y-761: the phone scrolls `main`, not the window (Y-670), and no walked page is taller than the screen.
+      // A spacer inside `main` makes it scroll, so the shot shows the bar toned over content. Sign-in has no shell.
+      const scrolled = await page.evaluate(() => {
+        const main = document.querySelector('[data-shell="phone"] .shell__main')
+        if (!main) return false
         const spacer = document.createElement('div')
-        spacer.style.height = '1600px'
-        document.body.append(spacer)
-        window.scrollTo(0, 400)
+        spacer.id = 'walk-spacer'
+        spacer.style.cssText = 'flex: none; height: 1600px'
+        main.append(spacer)
+        main.scrollTop = 400
+        return main.scrollTop > 0
       })
-      await page.waitForTimeout(400)
-      await page.screenshot({ path: `${file}-scrolled.png` })
+      if (scrolled) {
+        await page.waitForTimeout(400)
+        if (!(await page.locator('[data-shell="phone"][data-scrolled]').count())) errors.push(`${name} ${shot}: the bar kept its resting tone over scrolled content`)
+        await page.screenshot({ path: `${file}-scrolled.png` })
+      }
+      // The scenes below shoot this page again.
+      await page.evaluate(() => {
+        const main = document.querySelector('[data-shell="phone"] .shell__main')
+        document.getElementById('walk-spacer')?.remove()
+        if (main) main.scrollTop = 0
+      })
     }
     if (shot === 'machines') {
       const also = (route) => queue.some(([, other]) => other === slug(route)) || queue.push([`${base}${route}`, slug(route), 'light'])
