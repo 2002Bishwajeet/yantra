@@ -434,9 +434,7 @@ async fn resume<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<StatusCode, Refused> {
-    let who = identify(&state.authoriser, &from, &headers).await?;
-    may_reach(&who, &state.rooms, &name)?;
-    let caller = who.caller();
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     state.rooms.resume(&name).map_err(|error| Refused::Verb {
         status: StatusCode::NOT_FOUND,
         said: error.to_string(),
@@ -792,7 +790,8 @@ async fn events<I: Inventory + Clone + Send + Sync + 'static>(
     }))
 }
 
-/// A person's message. The label is the caller's machine, never the body.
+/// The owner's message is a person's. A token's is an agent's (Y-783): it
+/// counts, and a paused room refuses it. The label is never from the body.
 async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Served<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
@@ -809,20 +808,32 @@ async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
             status: StatusCode::SERVICE_UNAVAILABLE,
             said,
         })?;
-    let label = match &who {
-        Who::Owner(..) => format!("owner on {}", machine.name),
-        Who::Agent { workspace, .. } => format!("{} · {workspace}", machine.name),
-    };
-    let sent = state
-        .rooms
-        .post(&name, &label, &post.text)
-        .map_err(|error| match error {
-            room::Error::Empty | room::Error::TooLong(_) => Refused::Verb {
-                status: StatusCode::BAD_REQUEST,
-                said: error.to_string(),
-            },
-            other => missing(other),
-        })?;
+    let sent = match &who {
+        Who::Owner(..) => {
+            let label = format!("owner on {}", machine.name);
+            state.rooms.post(&name, &label, &post.text)
+        }
+        Who::Agent { caller, workspace } => {
+            let label = format!("{} · {workspace}", machine.name);
+            let reader = Reader {
+                node: caller.node.clone(),
+                thread: None,
+                session: None,
+            };
+            state
+                .rooms
+                .scoped(workspace)
+                .send(&reader, &label, &name, &post.text)
+        }
+    }
+    .map_err(|error| Refused::Verb {
+        status: match error {
+            room::Error::Empty | room::Error::TooLong(_) => StatusCode::BAD_REQUEST,
+            room::Error::Paused(_) => StatusCode::CONFLICT,
+            _ => StatusCode::NOT_FOUND,
+        },
+        said: error.to_string(),
+    })?;
     Ok(Json(RoomPosted {
         seq: sent.seq,
         delivered: sent.delivered,
@@ -1281,6 +1292,87 @@ mod tests {
         );
         let names: Vec<String> = rooms.list().into_iter().map(|room| room.name).collect();
         assert_eq!(names, ["away", "home", "loose", "shared"]);
+    }
+
+    /// Y-783: a token's post is an agent's message. It counts, a paused room
+    /// refuses it, and only the owner resumes.
+    #[tokio::test]
+    async fn an_agent_token_spends_the_budget_and_never_lifts_a_pause() {
+        let passkeys = crate::passkey::Passkeys::memory();
+        let minted = passkeys.mint_agent("wa");
+        let (_, session, _) = crate::passkey::tests::enrolled(&passkeys, "iPhone");
+        let (rooms, woke, pauses) = rooms();
+        rooms
+            .create(&Definition {
+                name: "home".to_owned(),
+                workspace: "wa".to_owned(),
+                brief: None,
+                base: None,
+                workspaces: Vec::new(),
+                made_at: 0,
+            })
+            .expect("defined");
+        let mut app = serve_keyed(fake(), rooms.clone(), woke, pauses, passkeys);
+        let owner = (
+            header::COOKIE,
+            format!("{}={session}", crate::passkey::COOKIE),
+        );
+        let agent = (header::AUTHORIZATION, format!("Bearer {}", minted.token));
+        let ask = async |who: &(header::HeaderName, String), verb: &str| {
+            let mut request = Request::builder()
+                .method(Method::POST)
+                .uri(format!("/rooms/home/{verb}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(&who.0, &who.1)
+                .body(Body::from(json!({"text": "hi"}).to_string()))
+                .expect("a request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(Peer::from(SocketAddr::from((ALPHA, 61620)))));
+            let response = app
+                .router
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("the router is infallible");
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .expect("the body is in memory");
+            (status, String::from_utf8_lossy(&body).into_owned())
+        };
+        let budget = || {
+            let room = rooms.view("home").expect("the room is defined").0;
+            (room.spent, room.paused)
+        };
+
+        for n in 1..=room::BUDGET {
+            let (status, said) = ask(&agent, "messages").await;
+            assert_eq!(status, StatusCode::OK, "message {n}: {said}");
+        }
+        assert_eq!(budget(), (room::BUDGET, true));
+        assert!(app.pauses.try_recv().is_ok(), "the pause notifies once");
+        assert!(app.pauses.try_recv().is_err());
+
+        let (status, said) = ask(&agent, "messages").await;
+        assert_eq!(status, StatusCode::CONFLICT, "{said}");
+        assert!(said.contains("room home is paused"), "{said}");
+        assert_eq!(budget(), (room::BUDGET, true));
+
+        let (status, said) = ask(&agent, "resume").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{said}");
+        assert_eq!(budget(), (room::BUDGET, true));
+
+        let (status, said) = ask(&owner, "resume").await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{said}");
+        assert_eq!(budget(), (0, false));
+
+        let (status, said) = ask(&agent, "messages").await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert_eq!(budget(), (1, false));
+        let (status, said) = ask(&owner, "messages").await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        assert_eq!(budget(), (0, false));
     }
 
     /// The owner ends a room, or gives its name to another workspace, while a
