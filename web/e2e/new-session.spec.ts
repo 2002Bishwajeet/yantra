@@ -307,7 +307,7 @@ test.describe('all four steps, to a workspace that is running', () => {
     const stages = page.getByRole('list', { name: 'Stages' })
     await expect(page.getByText('Starting quiet-otter')).toBeVisible()
     // Nothing to clone: the directory is already there.
-    await expect(stages.getByText('not needed')).toBeVisible()
+    await expect(stages.getByText('Not needed')).toBeVisible()
     await expect(page).toHaveURL('/w/quiet-otter?view=chat')
   })
 

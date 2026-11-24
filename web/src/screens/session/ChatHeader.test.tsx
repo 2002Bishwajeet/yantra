@@ -89,7 +89,7 @@ const rows = () =>
 describe('prMark', () => {
   it('names each of the five states', () => {
     expect(contract.threads.map((one) => prMark(one.pr).word)).toEqual([
-      'no PR',
+      'No PR',
       'PR #512 open',
       'PR #511 closed',
       'PR #510 merged',
@@ -138,7 +138,7 @@ describe('the thread menu', () => {
     expect(within(open).getByText('PR #512 open')).toBeTruthy()
     expect(screen.getByText('PR #510 merged')).toBeTruthy()
     expect(screen.getByText('PR #511 closed')).toBeTruthy()
-    expect(screen.getByText('no PR')).toBeTruthy()
+    expect(screen.getByText('No PR')).toBeTruthy()
     expect(screen.getByRole('group', { name: 'Active' })).toBeTruthy()
     expect(screen.getByRole('group', { name: 'Finished' })).toBeTruthy()
   })
@@ -214,9 +214,9 @@ describe('the thread menu', () => {
     await show()
     await openMenu()
     const [offline, gone] = await rows()
-    expect(within(offline!).getByText(/^offline · seen .+ ago$/)).toBeTruthy()
-    expect(offline!.getAttribute('aria-label')).toMatch(/, offline · seen .+ ago, /)
-    expect(within(gone!).getByText('gone')).toBeTruthy()
+    expect(within(offline!).getByText(/^Offline · seen .+ ago$/)).toBeTruthy()
+    expect(offline!.getAttribute('aria-label')).toMatch(/, Offline · seen .+ ago, /)
+    expect(within(gone!).getByText('Gone')).toBeTruthy()
     expect(screen.queryByText('the machine is offline')).toBeNull()
   })
 

@@ -13,8 +13,8 @@ import { ThisDevice } from './ThisDevice'
  *  so a save cannot move `relay` until yantrad restarts and this page is read
  *  again, ADR-0021). */
 function relaySupporting(relay: boolean | undefined, saved: boolean): string {
-  if (relay === undefined) return 'asking the daemon'
-  const base = relay ? 'On · pushes to your relay' : 'Off · no relay is set'
+  if (relay === undefined) return 'Asking the daemon'
+  const base = relay ? 'On · alerts go to your ntfy topic' : 'Off · no ntfy topic is set'
   return saved ? `${base} · saved, used after a restart` : base
 }
 
@@ -37,7 +37,7 @@ export function Notifications() {
       <ThisDevice />
       <Group label="Fallback">
         <ListItem
-          headline="Push relay"
+          headline="Alerts through ntfy"
           leading={
             <Lead>
               <Bell />
@@ -51,7 +51,7 @@ export function Notifications() {
           }
         />
       </Group>
-      <Note>The relay sends the same alerts through the ntfy app, for a device that cannot install Yantra.</Note>
+      <Note>Alerts also reach the ntfy app, for a device that cannot install Yantra.</Note>
       <PushSetup onOpenChange={setOpen} onSaved={() => setSavedAtUptime(about.data?.uptime_seconds ?? 0)} open={open} />
     </>
   )

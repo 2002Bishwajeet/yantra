@@ -6,7 +6,7 @@ import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
 import { forgetHostKey, joinFixes, reachWords } from '@/lib/checks'
-import { apart, notYours, platformOf } from '@/lib/platform'
+import { apart, platformOf } from '@/lib/platform'
 import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -92,21 +92,21 @@ const mark: Record<View, MarkState> = {
 function wordsOf(said: Line, name: string): string {
   switch (said.kind) {
     case 'asleep':
-      return `asleep${said.since ? ` · last seen ${seen(said.since)}` : ''}`
+      return `Asleep${said.since ? ` · last seen ${seen(said.since)}` : ''}`
     case 'unchecked':
-      return 'not checked yet · a check costs one ssh round trip'
+      return 'Not checked yet · a check takes a few seconds'
     case 'unreachable':
       return reachWords(said.kind, name).cause
     case 'refused':
-      return 'the key was refused · run the join command on it'
+      return 'The key was refused · run the join command on it'
     case 'unjoined':
-      return 'no account named for it · run the join command on it'
+      return 'No account named for it · run the join command on it'
     case 'browser':
       return 'Tailscale asks for a browser sign-in · run the join command on it'
     case 'changed':
-      return `its host key changed · run ${forgetHostKey(name)} once you know why`
+      return `Its host key changed · run ${forgetHostKey(name)} once you know why`
     case 'ready':
-      return `ready · ${said.present} of ${said.total}`
+      return `Ready · ${said.present} of ${said.total}`
     case 'missing':
       return said.installable ? said.words : `${said.words} · the machine page shows how`
   }
@@ -116,9 +116,9 @@ function wordsOf(said: Line, name: string): string {
 function hubWords(said: Line, name: string): string {
   switch (said.kind) {
     case 'refused':
-      return 'the key was refused · its machine page shows how'
+      return 'The key was refused · its machine page shows how'
     case 'unjoined':
-      return 'no account named for it · its machine page shows how'
+      return 'No account named for it · its machine page shows how'
     case 'browser':
       return 'Tailscale asks for a browser sign-in · its machine page shows how'
     default:
@@ -177,7 +177,7 @@ function HubLine(props: { machine: Machine; line: Line | null }) {
           </Text>
         ) : null}
         <Text scale="body-small" tone="variant">
-          {beat ? `${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy` : 'no beat has arrived'}
+          {beat ? `${beat.free_ram_mb.toLocaleString()} MB free · ${beat.cpu_busy_pct}% busy` : 'No load reading from this machine yet'}
         </Text>
         {bad(said) ? <SshSaid detail={said.detail} quiet /> : null}
       </div>
@@ -226,7 +226,7 @@ function MachineLine(props: {
     return () => running(name, false)
   }, [name, install.running, running])
 
-  const words = view === 'installing' ? `installing on ${name}…` : view === 'blocked' ? password(report) : wordsOf(said, name)
+  const words = view === 'installing' ? `Installing on ${name}…` : view === 'blocked' ? password(report) : wordsOf(said, name)
 
   const check = (label: string) => (
     <Button disabled={recheck.isPending} onClick={() => recheck.mutate(name)} variant="text">
@@ -278,7 +278,7 @@ function MachineLine(props: {
         ) : null}
         {bad(said) && joinFixes(said.kind) ? join : null}
         {bad(said) ? <SshSaid detail={said.detail} quiet /> : null}
-        {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
+        {view === 'installing' ? <Track label={`Installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)
           : null}
@@ -431,7 +431,7 @@ export function Setup() {
                 </>
               ) : (
                 <Text scale="body-small" tone="variant">
-                  the key is made when the first machine joins
+                  The key is made when the first machine joins
                 </Text>
               )}
               {machines.looked === 'failed' ? (
@@ -447,7 +447,7 @@ export function Setup() {
                       <li className="setup__line" data-kind="apart" key={one.name}>
                         <span className="setup__machine">{one.name}</span>
                         <Text className="setup__said" scale="body-small" tone="variant">
-                          {notYours(one)}
+                          {apart(one)}
                         </Text>
                       </li>
                     ))}

@@ -11,7 +11,7 @@ describe('Row', () => {
   it('is a plain div with its two lines when it goes nowhere', () => {
     render(
       <Row tone="selected" data-testid="row">
-        <RowText headline="yantra-web" supporting={<State state="needs" size="small">waiting · cachyos-g14</State>} />
+        <RowText headline="yantra-web" supporting={<State state="needs" size="small">Waiting · cachyos-g14</State>} />
       </Row>,
     )
     const row = screen.getByTestId('row')
@@ -19,7 +19,7 @@ describe('Row', () => {
     expect(row.dataset.tone).toBe('selected')
     expect(row.className).not.toContain('m3-interactive')
     expect(screen.getByText('yantra-web')).toBeTruthy()
-    expect(screen.getByText('waiting · cachyos-g14')).toBeTruthy()
+    expect(screen.getByText('Waiting · cachyos-g14')).toBeTruthy()
   })
 
   it('is the link itself, with the hit area, when rendered as one', async () => {
@@ -53,7 +53,7 @@ describe('Row', () => {
           headline="landing"
           supporting={
             <>
-              <State state="running" size="small">running</State>
+              <State state="running" size="small">Running</State>
               <span data-testid="age">3h</span>
             </>
           }

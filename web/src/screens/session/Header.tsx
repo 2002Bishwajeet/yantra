@@ -7,6 +7,7 @@ import { useDown, useResume } from '@/api/mutations'
 import type { Reading } from '@/api/hooks'
 import { answerFailure, joinFixes, reachWords } from '@/lib/checks'
 import { ago } from '@/lib/time'
+import { capital } from '@/lib/words'
 import { useIdle } from '@/lib/useIdle'
 import { Badge } from '@/m3/badge/Badge'
 import { Button } from '@/m3/button/Button'
@@ -52,7 +53,7 @@ export function Delete(props: {
             headline={workspace.name}
             supporting={
               <State size="small" state={mark}>
-                {words} · {workspace.machine}
+                {capital(words)} · {workspace.machine}
               </State>
             }
           />
@@ -148,7 +149,7 @@ export function Header(props: HeaderProps) {
           <>
             <div className="session__status">
               <State state={mark}>
-                {words}
+                {capital(words)}
                 {age}
               </State>
               <Text scale="body-small" tone="variant" clip>
@@ -223,7 +224,7 @@ export function Header(props: HeaderProps) {
         subtitle={
           phone ? undefined : (
             <State state={mark}>
-              {words}
+              {capital(words)}
               {age}
             </State>
           )

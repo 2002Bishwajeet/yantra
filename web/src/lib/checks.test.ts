@@ -313,30 +313,30 @@ describe('the short cause of a check (Y-733)', () => {
 
   it('gives the cause the plan names', () => {
     const absent = (check: string, detail = '') => causeOf({ check, state: 'absent', detail })
-    expect(absent('tmux')).toBe('not found')
-    expect(absent('terminfo')).toBe('lacks xterm-256color')
+    expect(absent('tmux')).toBe('Not found')
+    expect(absent('terminfo')).toBe('Lacks xterm-256color')
     expect(absent('provider-cli')).toBe('gh not found')
     expect(absent('provider-auth')).toBe('gh not signed in')
     expect(absent('login-session')).toBe('claude not signed in')
-    expect(absent('login-session', NO_SERVER)).toBe('no tmux server from a login')
-    expect(absent('heartbeat')).toBe('no reports arrive')
-    expect(absent('agent-cli')).toBe('not found')
+    expect(absent('login-session', NO_SERVER)).toBe('No tmux server from a login')
+    expect(absent('heartbeat')).toBe('No reports arrive')
+    expect(absent('agent-cli')).toBe('Not found')
     expect(absent('folder-access')).toBe('macOS blocks your folders')
-    expect(absent('reachable', 'Permission denied (publickey).')).toBe('key refused')
-    expect(absent('reachable', 'ssh: names no account')).toBe('no account named')
+    expect(absent('reachable', 'Permission denied (publickey).')).toBe('Key refused')
+    expect(absent('reachable', 'ssh: names no account')).toBe('No account named')
     expect(absent('reachable', 'connection timed out')).toBe('ssh cannot reach it')
-    expect(absent('made-up')).toBe('could not be asked')
-    expect(causeOf({ check: 'tmux', state: 'unknown' })).toBe('could not be asked')
+    expect(absent('made-up')).toBe('Could not be asked')
+    expect(causeOf({ check: 'tmux', state: 'unknown' })).toBe('Could not be asked')
   })
 
   /** Y-740: the phone hides the row's word, so the cause says installed and names the fix. */
   it('says what is installed is installed, and names its fix', () => {
     const absent = (check: string, detail: string) => causeOf({ check, state: 'absent', detail })
-    expect(absent('agent-cli', UNRUNNABLE)).toBe('installed, no access; Install')
-    expect(absent('heartbeat', details[6]!)).toBe('installed; update it')
-    expect(absent('heartbeat', details[7]!)).toBe('installed; update it')
+    expect(absent('agent-cli', UNRUNNABLE)).toBe('Installed, no access; Install')
+    expect(absent('heartbeat', details[6]!)).toBe('Installed; update it')
+    expect(absent('heartbeat', details[7]!)).toBe('Installed; update it')
     for (const said of [absent('agent-cli', UNRUNNABLE), absent('heartbeat', details[6]!), absent('heartbeat', details[7]!)]) {
-      expect(said).not.toMatch(/missing|not found/)
+      expect(said).not.toMatch(/missing|not found/i)
     }
   })
 

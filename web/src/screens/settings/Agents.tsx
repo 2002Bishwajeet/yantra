@@ -17,10 +17,10 @@ export function Agents() {
               <Bot />
             </Lead>
           }
-          supporting={`Default · ${onMachines(presentOn(readiness, 'agent-cli'), 'present')} · trust prompts are answered from the dashboard`}
+          supporting={`Default · ${onMachines(presentOn(readiness, 'agent-cli'), 'present')} · You answer its questions here`}
         />
       </Group>
-      <Note>How an agent behaves is set on the machine that runs it; the daemon holds no switch for it.</Note>
+      <Note>Each machine keeps its own agent settings. Change them on that machine.</Note>
     </>
   )
 }

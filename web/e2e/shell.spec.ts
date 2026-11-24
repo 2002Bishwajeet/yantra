@@ -260,7 +260,7 @@ test.describe('the shell on busy', () => {
     const dialog = page.getByRole('dialog', { name: 'Search' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('combobox').fill('lan')
-    await expect(dialog.getByRole('option', { name: /^landing running/ })).toBeVisible()
+    await expect(dialog.getByRole('option', { name: /^landing Running/ })).toBeVisible()
     // Y-746: the docked view opens where the bar is, in the right half, with no key footer.
     await expect.poll(async () => (await dialog.boundingBox())!.y).toBeLessThanOrEqual(pill.y + pill.height)
     const view = (await dialog.boundingBox())!
@@ -340,7 +340,7 @@ test.describe('the shell on busy', () => {
     await page.goto('/w/landing?view=chat')
     const rail = page.getByRole('complementary', { name: 'Sessions' })
     await expect(rail).toBeVisible()
-    await expect(rail.getByRole('link', { name: /^landing running/ })).toHaveAttribute('data-tone', 'selected')
+    await expect(rail.getByRole('link', { name: /^landing Running/ })).toHaveAttribute('data-tone', 'selected')
   })
 
   /** Y-375: the menu, the popover and the sheet's list are chunks that arrive

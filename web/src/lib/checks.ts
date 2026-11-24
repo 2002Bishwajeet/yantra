@@ -122,26 +122,26 @@ export function fixOf(check: Pick<Check, 'check'> & Partial<Pick<Check, 'detail'
 export const isNightly = (version: string | undefined): boolean => /-nightly\./.test(version ?? '')
 
 const SHORT_REACH: Record<ReachableFailure, string> = {
-  refused: 'key refused',
-  unjoined: 'no account named',
-  browser: 'waits for a browser sign-in',
-  changed: 'host key changed',
+  refused: 'Key refused',
+  unjoined: 'No account named',
+  browser: 'Waits for a browser sign-in',
+  changed: 'Host key changed',
   unreachable: 'ssh cannot reach it',
 }
 
 const SHORT_ABSENT: Record<string, string> = {
-  sshd: 'not answering',
-  tmux: 'not found',
-  git: 'not found',
-  'agent-cli': 'not found',
-  mic: 'not found',
-  terminfo: 'lacks xterm-256color',
+  sshd: 'Not answering',
+  tmux: 'Not found',
+  git: 'Not found',
+  'agent-cli': 'Not found',
+  mic: 'Not found',
+  terminfo: 'Lacks xterm-256color',
   'provider-cli': 'gh not found',
   'provider-auth': 'gh not signed in',
   'login-session': 'claude not signed in',
   'folder-access': 'macOS blocks your folders',
-  hooks: 'hook command not on PATH',
-  'no-sudo': 'it can use sudo',
+  hooks: 'Hook command not on PATH',
+  'no-sudo': 'It can use sudo',
 }
 
 /** What is wrong, in at most eight words. The daemon's own detail waits behind the row's Fix.
@@ -149,12 +149,12 @@ const SHORT_ABSENT: Record<string, string> = {
 export function causeOf(check: Pick<Check, 'check' | 'state'> & Partial<Pick<Check, 'detail'>>): string {
   if (check.state === 'present') return ''
   const detail = check.detail ?? ''
-  if (check.state !== 'absent') return 'could not be asked'
-  if (noLoginServer(detail)) return 'no tmux server from a login'
+  if (check.state !== 'absent') return 'Could not be asked'
+  if (noLoginServer(detail)) return 'No tmux server from a login'
   if (check.check === 'reachable') return SHORT_REACH[reachableFailure(detail)]
-  if (unrunnable(check)) return 'installed, no access; Install'
-  if (check.check === 'heartbeat') return olderAgent(check) ? 'installed; update it' : 'no reports arrive'
-  return SHORT_ABSENT[check.check] ?? 'could not be asked'
+  if (unrunnable(check)) return 'Installed, no access; Install'
+  if (check.check === 'heartbeat') return olderAgent(check) ? 'Installed; update it' : 'No reports arrive'
+  return SHORT_ABSENT[check.check] ?? 'Could not be asked'
 }
 
 /** An id this table does not know is not one a session needs. */

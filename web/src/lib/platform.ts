@@ -1,7 +1,8 @@
 import type { Machine } from '@/api'
+import { capital } from './words'
 
 /** Why a node another owner holds is not yours to use (owner, 2026-09-13,
- *  Y-404); `null` is a node your account owns. */
+ *  Y-404); `null` is a node your account owns. A clause: `apart` starts a line with it. */
 export function notYours(machine: Pick<Machine, 'ownership'>): string | null {
   if (machine.ownership === 'shared') return 'shared from another account · not supported yet'
   if (machine.ownership === 'tagged') return 'tagged, so the tailnet owns it and not your account · not supported yet'
@@ -13,13 +14,16 @@ export function notYours(machine: Pick<Machine, 'ownership'>): string | null {
 export const runsSessions = (machine: Pick<Machine, 'os' | 'ownership'>) =>
   machine.ownership === 'yours' && (machine.os === 'linux' || machine.os === 'macOS')
 
-/** What a node that runs no session is, in the dashboard's words (owner, 2026-09-12). */
+/** Tailscale's `os` as a line shows it: `linux` reads Linux, and macOS and iOS keep their own spelling. */
+export const osName = (os: string) => (os.endsWith('OS') ? os : capital(os))
+
+/** What a node that runs no session is, as a line of its own (owner, 2026-09-12). */
 export function apart(machine: Pick<Machine, 'os' | 'ownership'>): string {
   const reason = notYours(machine)
-  if (reason) return reason
+  if (reason) return capital(reason)
   if (machine.os === 'windows') return 'Windows · coming soon as a machine for sessions · opens the dashboard meanwhile'
-  if (machine.os === 'iOS' || machine.os === 'android') return 'opens the dashboard · runs no session'
-  return `${machine.os || 'an unnamed system'} · runs no session`
+  if (machine.os === 'iOS' || machine.os === 'android') return 'Opens the dashboard · runs no session'
+  return `${osName(machine.os) || 'An unnamed system'} · runs no session`
 }
 
 /** The four flows of Add a device, spelled as its address spells them

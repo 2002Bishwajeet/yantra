@@ -53,6 +53,17 @@ async function channelScene(page, name, file) {
     }
   }
 }
+// Y-763: About keeps its facts behind a closed disclosure, so a shot of the page never shows them.
+async function technicalScene(page, name, file) {
+  const phone = name !== 'desktop-chromium'
+  const trigger = page.getByRole('button', { name: /Technical details/ })
+  if (phone) await trigger.tap()
+  else await trigger.click()
+  await page.getByText('Uptime').first().waitFor({ state: 'visible' })
+  await page.waitForTimeout(800)
+  await snap(page, phone ? `${file}-1` : file, !phone)
+  if (phone) await page.evaluate(() => window.scrollTo(0, 0))
+}
 async function bellScene(page, name, url, out) {
   await page.goto(url, { waitUntil: 'load' })
   await page.waitForTimeout(1500)
@@ -265,6 +276,11 @@ for (const [name, type, options] of looks) {
       }
     }
     if (shot === 'settings-about') {
+      try {
+        await technicalScene(page, name, `${out}/about-technical-${name}`)
+      } catch (e) {
+        errors.push(`${name} technical scene: ${e.message}`)
+      }
       try {
         await channelScene(page, name, (scene) => `${out}/${scene}-${name}`)
       } catch (e) {

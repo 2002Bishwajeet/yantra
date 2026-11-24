@@ -80,7 +80,7 @@ test('repair on a file that loads is refused, and links to the workspace', async
   await scenario(page, 'busy')
   await page.goto(PATH)
   const alert = page.getByRole('alert')
-  await expect(alert).toContainText('That file loads, so there is nothing to repair.')
+  await expect(alert).toContainText('The file has no errors, so nothing needs a fix.')
   await alert.getByRole('button', { name: 'Details' }).click()
   await expect(alert).toContainText('loads, so its file may not be written whole')
   await expect(page.getByRole('link', { name: 'Open price-table' })).toHaveAttribute('href', '/w/price-table')

@@ -55,6 +55,7 @@ import { KeptReading } from '@/screens/fleet/KeptReading'
 import { askedAt, online, recent, stamp, startedAt } from './bands'
 import { useHeldBands } from '@/screens/fleet/held'
 import { runsSessions } from '@/lib/platform'
+import { capital } from '@/lib/words'
 import { useSetupHome } from '@/screens/setup/progress'
 import { PrimaryAction } from '@/shell/PrimaryAction'
 import { useFab } from '@/shell/primary'
@@ -170,7 +171,7 @@ function Strip(props: {
               ·
             </span>
             <State className={one.asleep ? undefined : 'dash__down'} state="unknown">
-              {one.name} {one.asleep ? 'asleep' : 'not answering'}
+              <span data-name>{one.name}</span> {one.asleep ? 'asleep' : 'not answering'}
               {one.since ? (
                 <span className="dash__long">
                   {' '}
@@ -211,7 +212,7 @@ function GithubRow(props: { item: Item; kind: 'review' | 'issue'; now: number; p
         headline={`${kind === 'review' ? 'Review requested' : 'Issue assigned'}: ${short}#${item.number}`}
         supporting={
           <>
-            {item.title}
+            <span data-name>{item.title}</span>
             {age ? <> · <Num className="dash__when">{age.text}</Num></> : null}
           </>
         }
@@ -241,7 +242,9 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number; phone: bo
           headline={`${row.name} will not load`}
           supporting={
             <State size="small" state="failed">
-              <Mono className="m3-wrap">{row.error}</Mono>
+              <Mono className="m3-wrap" data-name>
+                {row.error}
+              </Mono>
             </State>
           }
         />
@@ -268,7 +271,7 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number; phone: bo
           headline={`${workspace.name} is waiting for trust`}
           supporting={
             <State size="small" state="needs">
-              waiting · {workspace.machine}
+              Waiting · {workspace.machine}
               {asked ? (
                 <>
                   {' '}
@@ -304,7 +307,7 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number; phone: bo
         }
         supporting={
           <State size="small" state={mark}>
-            {state?.state === 'unclear' ? state.because : `${words} · ${workspace.machine}`}
+            {state?.state === 'unclear' ? capital(state.because) : `${capital(words)} · ${workspace.machine}`}
           </State>
         }
       />
@@ -427,7 +430,7 @@ function RunningRow(props: {
           headline={row.workspace.name}
           supporting={
             <State size="small" state={mark}>
-              {words} · {row.workspace.machine}
+              {capital(words)} · {row.workspace.machine}
             </State>
           }
         />
@@ -474,7 +477,7 @@ function Running(props: { rows: WorkRow[]; sessions: Reading<MachineSessions[]>;
   )
 }
 
-/** D6 §4.3: Attach and Kill for a session no workspace claims, never Adopt. */
+/** D6 §4.3: Attach and Kill for a session not in a workspace, never Adopt. */
 function Worth(props: {
   sessions: Reading<MachineSessions[]>
   workspaces: Reading<Workspace[]>
@@ -503,19 +506,19 @@ function Worth(props: {
       <CardHead
         id="dash-worth"
         title="Worth a look"
-        words={unknown ? 'unclaimed sessions unknown' : `${plural(rows.length, 'session')} no workspace claims`}
+        words={unknown ? 'Unclaimed sessions unknown' : `${plural(rows.length, 'session')} not in a workspace`}
       />
       {sessions.looked === 'never' ? (
         <NotLooked what="Sessions have" />
       ) : unknown ? (
-        <State state="unknown">no workspace list to check these against, so none can be called unclaimed</State>
+        <State state="unknown">Without the workspace list, Yantra cannot tell which sessions are unclaimed</State>
       ) : (
         <ul className="dash__rows">
           {rows.map(({ machine, session }) => {
             const age = ago(now / 1000 - session.created_at, now).text
             const supporting = (
               <>
-                {machine} · {plural(session.windows, 'window')} · <Num className="dash__when">{age}</Num>
+                <span data-name>{machine}</span> · {plural(session.windows, 'window')} · <Num className="dash__when">{age}</Num>
               </>
             )
             return (
@@ -531,7 +534,7 @@ function Worth(props: {
                           <Row>
                             <RowText
                               headline={session.name}
-                              supporting={`${machine} · ${plural(session.windows, 'window')} · ${age}`}
+                              supporting={<><span data-name>{machine}</span> · {plural(session.windows, 'window')} · {age}</>}
                             />
                           </Row>
                         }
@@ -571,7 +574,7 @@ function IdleRow(props: { row: Extract<WorkRow, { kind: 'workspace' }>; sessions
         <Tile name={row.workspace.name} size="small" />
         <span className="dash__name m3-wrap">{row.workspace.name}</span>
         <State size="small" state={mark}>
-          {words}
+          {capital(words)}
         </State>
         {started === null ? null : <Num className="dash__age dash__when">{ago(now / 1000 - started, now).text}</Num>}
       </Row>
@@ -657,7 +660,7 @@ function Recent(props: { events: Event[]; error: ApiError | null; now: number; r
               <Tile name={one.workspace} size="small" />
               <span className="dash__name m3-wrap">{one.workspace}</span>
               <State className="dash__recent-words" size="small" state={one.mark}>
-                {one.words} · {one.machine}
+                {capital(one.words)} · {one.machine}
               </State>
               <Num className="dash__age dash__when">{ago(now / 1000 - one.at, now).text}</Num>
             </Row>
@@ -862,7 +865,9 @@ export function Dashboard() {
       {unread.length > 0 ? (
         <div className="dash__line">
           <Eyebrow render={<h2 />}>Not read yet</Eyebrow>
-          <State state="unknown">{names(unread)}</State>
+          <State data-name state="unknown">
+            {names(unread)}
+          </State>
         </div>
       ) : null}
     </Page>

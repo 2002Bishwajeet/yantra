@@ -37,7 +37,7 @@ describe('the Dashboard on a busy fleet', () => {
     await drawn()
     expect(screen.getByText(/5 of 6/).textContent).toBe('5 of 6 machines online')
     // D7 §3.3: a machine the tailnet sees off is asleep, and Open replaces Fix.
-    expect(screen.getByText(/thinkpad asleep/)).toBeTruthy()
+    expect(screen.getByText(/^asleep/)).toBeTruthy()
     const open = screen.getAllByRole('link').find((one) => one.getAttribute('href') === '/m/thinkpad')
     expect(open?.textContent).toMatch(/^Open/)
   })
@@ -200,7 +200,7 @@ describe('the Dashboard on a busy fleet', () => {
     mount('desktop', '/')
     await drawn()
     const worth = region('Worth a look')
-    expect(reads('Worth a look')).toContain('2 sessions no workspace claims')
+    expect(reads('Worth a look')).toContain('2 sessions not in a workspace')
     expect(worth.getByText('scratch')).toBeTruthy()
     expect(worth.getByText('mux')).toBeTruthy()
     expect(worth.queryByRole('button', { name: 'Adopt' })).toBeNull()
@@ -232,7 +232,7 @@ describe('the Dashboard on a busy fleet', () => {
     mount('desktop', '/', state)
     await drawn()
     expect(screen.getByText(/of 6/).textContent).toBe('4 of 6 machines online')
-    expect(screen.getByText(/macbook not answering/)).toBeTruthy()
+    expect(screen.getByText(/^not answering/)).toBeTruthy()
   })
 
   it('asks before Kill, because a killed session cannot be brought back', async () => {
@@ -277,7 +277,7 @@ describe('the Dashboard in Compact', () => {
     expect(screen.queryByRole('button', { name: /^Show/ })).toBeNull()
     // Two of the five events in the buffer name no workspace, so three remain.
     expect(reads('Recent')).toContain('last 3 session events')
-    expect(reads('Recent')).toContain('asked for trust · cachyos-g14')
+    expect(reads('Recent')).toContain('Asked for trust · cachyos-g14')
     expect(region('Recent').queryByText(/relay test/)).toBeNull()
     expect(idle.queryByRole('link', { name: 'New session' })).toBeNull()
   })

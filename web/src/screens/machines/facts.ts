@@ -8,6 +8,7 @@ import type {
   Workspace,
 } from '@/api'
 import { olderAgent, sessionNeeds, unrunnable } from '@/lib/checks'
+import { osName } from '@/lib/platform'
 import type { MarkState } from '@/m3/mark/Mark'
 
 /** The four a machine card draws; the machine page draws all ten. */
@@ -77,7 +78,7 @@ export const counted = (one: Tally) => `${one.present} of ${one.total}`
 
 /** The card's summary line, which is the phone board's condensed check block. */
 export function summary(one: Tally): string {
-  if (one.total === 0) return 'not checked'
+  if (one.total === 0) return 'Not checked'
   const said = [counted(one)]
   if (one.absent > 0) said.push(`${one.absent} failing`)
   if (one.unknown > 0) said.push(`${one.unknown} unknown`)
@@ -105,7 +106,7 @@ export const gb = (mb: number) => {
  *  when the machine did not answer. */
 export function factsOf(machine: Machine, sessions: number | null): string {
   const beat = machine.heartbeat
-  const parts: string[] = [machine.os]
+  const parts: string[] = [osName(machine.os)]
   if (beat) {
     parts.push(
       beat.arch,

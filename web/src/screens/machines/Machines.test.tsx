@@ -33,7 +33,7 @@ describe('/machines on the busy fleet', () => {
 
     const good = card('cachyos-g14')
     // Every basic is present, so the chip reads the verdict, not `online` (D7 §3.3).
-    expect(good.getByText('ready')).toBeTruthy()
+    expect(good.getByText('Ready')).toBeTruthy()
     // Y-714: what passes is counted, never listed, on the desktop as on the phone.
     for (const check of ['ssh', 'tmux', 'claude', 'terminfo']) {
       expect(good.queryByText(check)).toBeNull()
@@ -47,7 +47,7 @@ describe('/machines on the busy fleet', () => {
     expect(short.getByText('missing')).toBeTruthy()
     // The check name table (`lib/checks.ts`), never a raw id (D7 §3.5).
     expect(short.getByText('claude')).toBeTruthy()
-    expect(short.getByText('not found')).toBeTruthy()
+    expect(short.getByText('Not found')).toBeTruthy()
     expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeTruthy()
     // `git` is not in pi-5's report at all, so it counts as missing too (D7 §3.3).
     expect(short.getByText('2 missing')).toBeTruthy()
@@ -55,7 +55,7 @@ describe('/machines on the busy fleet', () => {
 
     const gone = card('thinkpad')
     // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
-    expect(gone.getByText('asleep · 7 Jul')).toBeTruthy()
+    expect(gone.getByText('Asleep · 7 Jul')).toBeTruthy()
     // ssh failed too, so the card gives one sentence in place of a tally nobody could ask (Y-714).
     expect(gone.getByText(/can’t reach thinkpad over ssh/)).toBeTruthy()
     expect(gone.queryByText(/unknown/)).toBeNull()
@@ -78,10 +78,10 @@ describe('/machines on the busy fleet', () => {
     expect(screen.queryByRole('region', { name: 'friends-box' })).toBeNull()
     const foreign = within(screen.getByRole('region', { name: 'Devices your account does not own' }))
     expect(foreign.getByText('friends-box')).toBeTruthy()
-    expect(foreign.getByText('shared from another account · not supported yet')).toBeTruthy()
-    expect(foreign.getByText('shared')).toBeTruthy()
+    expect(foreign.getByText('Shared from another account · not supported yet')).toBeTruthy()
+    expect(foreign.getByText('Shared')).toBeTruthy()
     expect(foreign.getByText('ci-runner')).toBeTruthy()
-    expect(foreign.getByText(/tagged, so the tailnet owns it/)).toBeTruthy()
+    expect(foreign.getByText(/^Tagged, so the tailnet owns it/)).toBeTruthy()
   })
 
   it('starts an install when Install is pressed', async () => {
@@ -107,7 +107,7 @@ describe('/machines on the busy fleet', () => {
     )
     const asked = mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
-    expect(card('pi-5').getByText('not checked')).toBeTruthy()
+    expect(card('pi-5').getByText('Not checked')).toBeTruthy()
     // The chip carries the status, and the first ask is not "again".
     expect(card('pi-5').queryByText('not asked yet')).toBeNull()
     expect(card('pi-5').queryByRole('button', { name: 'Check again' })).toBeNull()
@@ -160,15 +160,15 @@ describe('/machines on the busy fleet', () => {
     state.asked = { 'pi-5': report }
     const asked = mount('desktop', '/machines', state)
     await screen.findByText(/^looked /)
-    expect(card('pi-5').getByText('not checked')).toBeTruthy()
+    expect(card('pi-5').getByText('Not checked')).toBeTruthy()
 
     fireEvent.click(card('pi-5').getByRole('button', { name: 'Check' }))
-    await waitFor(() => expect(card('pi-5').queryByText('not checked')).toBeNull())
+    await waitFor(() => expect(card('pi-5').queryByText('Not checked')).toBeNull())
 
     const polls = () => asked.filter((one) => one === 'GET /api/readiness').length
     const before = polls()
     await waitFor(() => expect(polls()).toBeGreaterThan(before), { timeout: 7_000 })
-    expect(card('pi-5').queryByText('not checked')).toBeNull()
+    expect(card('pi-5').queryByText('Not checked')).toBeNull()
   }, 15_000)
 
   it('offers an unclaimed session Attach and Kill, and never Adopt', async () => {
@@ -208,7 +208,7 @@ describe('/machines on the busy fleet', () => {
     const about = (name: string) =>
       screen.getByRole('region', { name }).querySelector('.machines__about')?.textContent ?? ''
     expect(about('cachyos-g14')).toMatch(
-      /^linux · \S+ · CPU \d+% busy · [\d.]+ GB memory free · [\d.]+ GB disk free( · (no sessions|\d+ sessions?))?$/,
+      /^Linux · \S+ · CPU \d+% busy · [\d.]+ GB memory free · [\d.]+ GB disk free( · (no sessions|\d+ sessions?))?$/,
     )
     // I-47: no heartbeat is no numbers, never zeros.
     expect(about('pi-5')).not.toMatch(/CPU|GB|\b0\b/)
@@ -286,7 +286,7 @@ describe('/machines with devices that open the dashboard', () => {
     expect(missing.getByRole('button', { name: 'Install' })).toBeTruthy()
 
     const refused = card('refused-box')
-    expect(refused.getByText('key refused')).toBeTruthy()
+    expect(refused.getByText('Key refused')).toBeTruthy()
     expect(refused.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
     expect(refused.queryByRole('button', { name: 'Install' })).toBeNull()
   })
@@ -296,7 +296,7 @@ describe('/machines with devices that open the dashboard', () => {
     await screen.findByText(/^looked /)
 
     const asleep = card('asleep-laptop')
-    expect(asleep.getByText(/^asleep · /)).toBeTruthy()
+    expect(asleep.getByText(/^Asleep · /)).toBeTruthy()
     expect(asleep.queryAllByRole('button', { name: /install|copy|again/i })).toHaveLength(0)
   })
 
@@ -337,7 +337,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
     one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: said } : check))
     mount('desktop', '/machines', state)
     const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
-    expect(await box.findByText('browser sign-in')).toBeTruthy()
+    expect(await box.findByText('Browser sign-in')).toBeTruthy()
     expect(box.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
     expect(box.getByText(/waits for a browser sign-in, and the appliance has no browser/)).toBeTruthy()
     expect(box.queryByText(said)).toBeNull()
@@ -354,7 +354,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
     one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: CHECK_RULE } : check))
     mount('desktop', '/machines', state)
     const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
-    expect(await box.findByText('browser sign-in')).toBeTruthy()
+    expect(await box.findByText('Browser sign-in')).toBeTruthy()
     expect(box.getByText('Tailscale SSH on cachyos-g14 waits for a browser sign-in, and the appliance has no browser.')).toBeTruthy()
     expect(box.getByRole('button', { name: 'Copy join command' })).toBeTruthy()
     fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
@@ -371,7 +371,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
     one.checks = one.checks.map((check) => (check.check === 'reachable' ? { ...check, state: 'absent', detail: CHANGED_KEY } : check))
     mount('desktop', '/machines', state)
     const box = within(await screen.findByRole('region', { name: 'cachyos-g14' }))
-    expect(await box.findByText('host key changed')).toBeTruthy()
+    expect(await box.findByText('Host key changed')).toBeTruthy()
     expect(box.getByText(/cachyos-g14 answered with a different host key than the one the appliance recorded/)).toBeTruthy()
     expect(box.queryByRole('button', { name: 'Copy join command' })).toBeNull()
     fireEvent.click(box.getByRole('button', { name: /What ssh said/ }))
@@ -381,7 +381,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
   /** A changed host key reads as `unreachable`, never `refused` — the join
    *  command places a key and cannot fix that (`reachableFailure`, Y-402
    *  review). Only a refused key offers Copy join command. */
-  it('reads ssh failing on a neutral-tone chip, and offers only the raw text', async () => {
+  it("reads Can't reach on a neutral-tone chip, and offers only the raw text", async () => {
     const state = scenario('busy')
     const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
     const cachy = data.find((one) => one.machine === 'cachyos-g14')!
@@ -392,7 +392,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
     await screen.findByText(/^looked /)
 
     const failing = card('cachyos-g14')
-    expect(failing.getByText('ssh failing')).toBeTruthy()
+    expect(failing.getByText("Can't reach")).toBeTruthy()
     expect(failing.queryByRole('button', { name: 'Copy join command' })).toBeNull()
     expect(failing.getAllByRole('button').map((one) => one.textContent)).toEqual(['Show'])
   })

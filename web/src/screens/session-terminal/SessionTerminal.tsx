@@ -57,11 +57,11 @@ export function SessionTerminal() {
       <div className="session-terminal__row" data-factor={factor}>
         <div className="session-terminal__meta">
           <Text render={<p />} scale="body-small" tone="variant">
-            <span>{session}</span> is a tmux session on{' '}
+            <span>{session}</span> runs on{' '}
             <Link className="m3-hit" params={{ machine }} to="/m/$machine">
               {machine}
-            </Link>{' '}
-            that no workspace claims
+            </Link>
+            . It is not part of a workspace.
           </Text>
           {/* The swept list says how old it is; a bar until it answers, so
               the line never flashes empty (EmptyStates board). */}

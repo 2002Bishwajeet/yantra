@@ -71,13 +71,13 @@ describe('one fleet, every count', () => {
     expect(counted(tally(fleet[0]!.report!.checks))).toBe('10 of 13')
     // A Mac whose login has no tmux server is not ready, and the chip says so.
     expect(chipFor(mac, fleet[0]!.report).word).toBe('3 to fix')
-    expect(chipFor(laptop, fleet[1]!.report).word).toBe('ready · 1 to fix')
-    expect(chipFor(box, null).word).toBe('asleep')
+    expect(chipFor(laptop, fleet[1]!.report).word).toBe('Ready · 1 to fix')
+    expect(chipFor(box, null).word).toBe('Asleep')
   })
 
   it('counts a ready machine the same in setup and in the chips', () => {
     const lines = fleet.map(({ machine, report: one }) => ({ machine: machine.name, line: line(machine, one, null) }))
-    const chips = fleet.filter(({ machine, report: one }) => chipFor(machine, one).word.startsWith('ready')).length
+    const chips = fleet.filter(({ machine, report: one }) => chipFor(machine, one).word.startsWith('Ready')).length
     expect(chips).toBe(1)
     expect(readied(lines).words).toContain(`${chips} of ${lines.length} machines ready`)
   })

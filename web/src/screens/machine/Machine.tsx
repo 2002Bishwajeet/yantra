@@ -13,7 +13,8 @@ import {
   useSessions,
   useWorkspaces,
 } from '@/api/hooks'
-import { apart, runsSessions } from '@/lib/platform'
+import { apart, osName, runsSessions } from '@/lib/platform'
+import { capital } from '@/lib/words'
 import { at } from '@/lib/time'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
@@ -91,8 +92,8 @@ function About(props: { machine: OneMachine; lastSeen: string | null }) {
   return (
     <>
       <dl className="machine__facts">
-        <Fact icon={Monitor} label="OS">{machine.os}</Fact>
-        <Fact icon={Activity} label="Status">{word}</Fact>
+        <Fact icon={Monitor} label="OS">{osName(machine.os)}</Fact>
+        <Fact icon={Activity} label="Status">{capital(word)}</Fact>
         {lastSeen && !machine.online ? (
           <Fact icon={Clock} label="Last seen">
             {/^\d+[smhd]$/.test(lastSeen) ? `${lastSeen} ago` : lastSeen}
@@ -117,7 +118,7 @@ function About(props: { machine: OneMachine; lastSeen: string | null }) {
                 {machine.address}
               </Text>
             ) : (
-              'none reported'
+              'None reported'
             )
           }
         />
@@ -135,14 +136,14 @@ function Apart(props: { machine: OneMachine; lastSeen: string | null; name: stri
   // An offline phone in a pocket is normal, so only an expired key is an error.
   const asleep = !machine.online && !machine.expired
   const { state, word } = asleep ? { state: 'unknown' as const, word: 'asleep' } : machineState(machine)
-  const seen = machine.online ? 'now' : lastSeen ? ago(lastSeen) : 'not seen'
+  const seen = machine.online ? 'Now' : lastSeen ? ago(lastSeen) : 'Not seen'
   return (
     <Page>
       <PageHeader
         subtitle={
           <Chip tone={machine.expired ? 'error' : 'lowest'}>
             <Mark size="small" state={state} />
-            {machine.online || !lastSeen ? word : `${word} · ${ago(lastSeen)}`}
+            {capital(machine.online || !lastSeen ? word : `${word} · ${ago(lastSeen)}`)}
           </Chip>
         }
         title={name}
@@ -154,7 +155,7 @@ function Apart(props: { machine: OneMachine; lastSeen: string | null; name: stri
           </Text>
         </div>
         <dl className="machine__facts">
-          <Fact icon={Activity} label="Status">{word}</Fact>
+          <Fact icon={Activity} label="Status">{capital(word)}</Fact>
           <Fact icon={Clock} label="Last seen">{seen}</Fact>
         </dl>
         <Text render={<p />} scale="body-small" tone="variant">
@@ -354,7 +355,7 @@ function Sessionful(props: {
               </Text>
             </div>
             {factor === 'phone' ? (
-              <Disclosure summary={`${one.os} · ${machineState(one).word}`}>
+              <Disclosure summary={`${osName(one.os)} · ${machineState(one).word}`}>
                 <About lastSeen={lastSeen} machine={one} />
               </Disclosure>
             ) : (

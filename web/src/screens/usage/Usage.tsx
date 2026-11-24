@@ -152,7 +152,7 @@ function Refusals(props: { rows: Row[] }) {
       {said.map((row) => (
         <li key={row.workspace.name}>
           <State size="small" state={row.read === 'nothing' ? 'idle' : 'failed'}>
-            <span className="usage__who" title={row.workspace.name}>{row.workspace.name}</span>
+            <span className="usage__who" data-name title={row.workspace.name}>{row.workspace.name}</span>
           </State>
           <Text scale="body-small" className="usage__reason m3-wrap">{row.said}</Text>
         </li>
@@ -332,7 +332,7 @@ export function Usage() {
 
       {fanned.fanned === 'done' ? (
         <Text render={<p />} className="usage__note" scale="body-small" tone="variant">
-          Read over ssh from each machine's transcript, only when you ask. There is no fleet total.
+          Read from each machine when you ask. The page shows no total for the whole fleet.
         </Text>
       ) : null}
     </Page>

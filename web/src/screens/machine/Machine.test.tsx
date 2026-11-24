@@ -29,7 +29,7 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     expect(ready.getByText(/^10 of 10 · asked/)).toBeTruthy()
     expect(ready.getByRole('link', { name: 'New session' })).toBeTruthy()
     expect(ready.getByRole('button', { name: 'Check again' })).toBeTruthy()
-    expect(screen.getAllByText('ready').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Ready').length).toBeGreaterThan(0)
 
     // Y-714: ten checks passed, so the card lists none and has no probe text to show.
     expect(ready.queryByText('ok')).toBeNull()
@@ -37,8 +37,8 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     expect(ready.queryByRole('button', { name: /What ssh said/ })).toBeNull()
 
     const about = card('About')
-    expect(about.getByText('linux')).toBeTruthy()
-    expect(about.getByText('online')).toBeTruthy()
+    expect(about.getByText('Linux')).toBeTruthy()
+    expect(about.getByText('Online')).toBeTruthy()
     expect(about.getByText('CPU')).toBeTruthy()
     expect(about.getByText(/% busy$/)).toBeTruthy()
     expect(about.queryByText(/beat/)).toBeNull()
@@ -46,7 +46,7 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     const here = card('Workspaces on this machine')
     expect(here.getByRole('link', { name: 'yantra-web' })).toBeTruthy()
     expect(here.getByRole('link', { name: 'agent-sdk' })).toBeTruthy()
-    expect(here.getByText('waiting for trust')).toBeTruthy()
+    expect(here.getByText('Waiting for trust')).toBeTruthy()
     // `landing` lives on macbook, so it is not drawn here.
     expect(here.queryByText('landing')).toBeNull()
   })
@@ -75,12 +75,15 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     mount('desktop', '/m/cachyos-g14')
     await screen.findByText(/^looked /)
     const sessions = card('Sessions')
-    expect(sessions.getByText(/4 tmux sessions · 1 no workspace claims/)).toBeTruthy()
+    expect(sessions.getByText(/4 tmux sessions · 1 not in a workspace/)).toBeTruthy()
     expect(sessions.getAllByRole('link', { name: 'Terminal' })).toHaveLength(3)
     expect(sessions.getByRole('link', { name: 'Attach' }).getAttribute('href')).toBe(
       '/m/cachyos-g14/s/scratch',
     )
-    expect(sessions.getByText(/no workspace claims it/)).toBeTruthy()
+    expect(sessions.getByText(/Not in a workspace/)).toBeTruthy()
+    expect(sessions.getAllByText(/^Workspace \S/).length).toBeGreaterThan(0)
+    expect(sessions.getAllByText('Claimed').length).toBeGreaterThan(0)
+    expect(sessions.getByText('Unclaimed')).toBeTruthy()
     expect(sessions.queryByRole('button', { name: 'Adopt' })).toBeNull()
   })
 
@@ -315,7 +318,7 @@ describe('/m/thinkpad, which is off', () => {
     expect(await ready.findByRole('heading', { name: 'thinkpad is asleep' })).toBeTruthy()
     expect(ready.getByText(/Yantra asks again when it comes back/)).toBeTruthy()
     expect(ready.queryByRole('button', { name: 'Check again' })).toBeNull()
-    expect(screen.getByText(/^asleep/)).toBeTruthy()
+    expect(screen.getByText(/^Asleep/)).toBeTruthy()
     const sessions = card('Sessions')
     expect(await sessions.findByText('The sessions cannot be listed')).toBeTruthy()
     expect(sessions.queryByText('thinkpad is asleep')).toBeNull()
@@ -362,9 +365,9 @@ describe('/m/cachyos-g14 when nothing can be reached', () => {
 /** Y-775: a phone, tablet or Windows PC runs no session, so the page offers no ssh and no sudo. */
 describe('a device that runs no session', () => {
   const cases = [
-    ['setup', '/m/iphone', 'online', 'now'],
-    ['firstrun', '/m/pixel-tablet', 'asleep', /^\d+ Sep$/],
-    ['setup', '/m/gaming-pc', 'asleep', /^\d+ Sep$/],
+    ['setup', '/m/iphone', 'Online', 'Now'],
+    ['firstrun', '/m/pixel-tablet', 'Asleep', /^\d+ Sep$/],
+    ['setup', '/m/gaming-pc', 'Asleep', /^\d+ Sep$/],
   ] as const
 
   for (const [name, path, word, seen] of cases) {
@@ -386,6 +389,6 @@ describe('a device that runs no session', () => {
 
   it('says why the device is apart', async () => {
     mount('phone', '/m/iphone', scenario('setup'))
-    expect(await screen.findByText('opens the dashboard · runs no session')).toBeTruthy()
+    expect(await screen.findByText('Opens the dashboard · runs no session')).toBeTruthy()
   })
 })

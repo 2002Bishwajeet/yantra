@@ -28,7 +28,7 @@ function Refused(props: { name: string; error: unknown; reset: () => void }) {
     kind: said.kind,
     said: said.said,
     retryable: said.retryable,
-    describe: loads ? () => 'That file loads, so there is nothing to repair.' : () => said.describe(),
+    describe: loads ? () => 'The file has no errors, so nothing needs a fix.' : () => said.describe(),
   }
   return (
     <ErrorSurface.Page
@@ -74,7 +74,7 @@ function Editor(props: {
   return (
     <>
       <Card className="repair__alert" role="alert" surface="error">
-        <State state="failed">will not load</State>
+        <State state="failed">Will not load</State>
         <div className="repair__reason">
           <h2 className="repair__reason-title">
             {refused ? refusal(refused) : `${name} will not load.`}

@@ -52,6 +52,8 @@ type Rule = {
   kind: 'url' | 'dialog' | 'expanded' | 'pressed' | 'disabled' | 'text' | 'value'
   value: string
   gone?: string
+  /** A class on the pressed button's own card: `value` and `gone` are read inside it. */
+  within?: string
 }
 type Expect = Rule | Partial<Record<Size, Rule>>
 
@@ -60,7 +62,7 @@ const dialog: Rule = { kind: 'dialog', value: '' }
 const expanded: Rule = { kind: 'expanded', value: 'true' }
 const pressed: Rule = { kind: 'pressed', value: 'true' }
 const disabled: Rule = { kind: 'disabled', value: '' }
-const text = (value: string, gone?: string): Rule => ({ kind: 'text', value, gone })
+const text = (value: string, gone?: string, within?: string): Rule => ({ kind: 'text', value, gone, within })
 
 /** A key names every button whose name starts with it; the longest key wins. */
 const SHELL: Record<string, Expect> = {
@@ -108,7 +110,8 @@ const PRESSES: Record<string, Record<string, Expect>> = {
   fleet: { 'New session': url('/new'), 'Sign in': url('/settings/providers') },
   machines: {
     Open: url('/m/yantra-box'),
-    Check: text('ready'),
+    // Scoped to the card, so another card's 'Ready' chip cannot answer for a refused re-check (#514).
+    Check: text('Ready', 'Not checked', 'machines__card'),
     'Add a device': url('/machines/add'),
   },
   ...Object.fromEntries(MACHINES.map((name) => [`machine-${name}`, MACHINE_PAGE])),
@@ -147,6 +150,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
   },
   'settings-about': {
     ...SETTINGS_NAV,
+    Show: expanded,
     Source: url('https://github.com/2002Bishwajeet/yantra'),
     'Dictation model': url('https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2'),
   },
@@ -202,6 +206,10 @@ function lookup(table: Record<string, Expect>, name: string) {
 async function press(page: Page, el: Locator, rule: Rule) {
   if (rule.kind === 'disabled') return expect(el).toBeDisabled()
   if (rule.kind === 'url' && rule.value.startsWith('http')) return expect(el).toHaveAttribute('href', rule.value)
+  // Read the card before the press: the pressed button may leave the page, and `el` counts by position.
+  const card = rule.within
+    ? await el.evaluate((one, cls) => one.closest(`.${cls}`)?.getAttribute('aria-labelledby') ?? null, rule.within)
+    : null
   await el.click()
   switch (rule.kind) {
     case 'url':
@@ -215,8 +223,9 @@ async function press(page: Page, el: Locator, rule: Rule) {
     case 'value':
       return expect(page.getByRole('textbox', { name: rule.value, exact: true })).not.toHaveValue('')
     case 'text':
-      await expect(page.getByText(rule.value, { exact: true }).first()).toBeVisible()
-      if (rule.gone) await expect(page.getByText(rule.gone, { exact: true })).toHaveCount(0)
+      const scope = card ? page.locator(`.${rule.within}[aria-labelledby="${card}"]`) : page
+      await expect(scope.getByText(rule.value, { exact: true }).first()).toBeVisible()
+      if (rule.gone) await expect(scope.getByText(rule.gone, { exact: true })).toHaveCount(0)
   }
 }
 

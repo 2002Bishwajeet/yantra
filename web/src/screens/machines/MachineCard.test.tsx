@@ -64,8 +64,8 @@ describe("a ready machine whose microphone is not installed", () => {
       detail: "not installed — the microphone is optional",
     });
     renderCard(aMachine(), checks);
-    await screen.findByText("ready");
-    expect(screen.getByText("ready")).toBeTruthy();
+    await screen.findByText("Ready");
+    expect(screen.getByText("Ready")).toBeTruthy();
     expect(screen.getByText("13 of 14")).toBeTruthy();
     expect(screen.queryByText(/failing/)).toBeNull();
   });
@@ -86,7 +86,7 @@ describe("a machine whose Tailscale lost its control server (Y-626)", () => {
     await screen.findByText(
       "Tailscale lost its control server. The machine still answers over the tailnet.",
     );
-    expect(screen.queryByText(/asleep/)).toBeNull();
+    expect(screen.queryByText(/asleep/i)).toBeNull();
   });
 
   it("says nothing about the control link while Tailscale can see the node", async () => {
@@ -136,7 +136,7 @@ describe("a machine ssh cannot reach (Y-714)", () => {
     await screen.findByText(/can’t reach cachyos-g14 over ssh/);
     expect(screen.getAllByText(/can’t reach cachyos-g14 over ssh/)).toHaveLength(1);
     expect(screen.queryByText("tmux")).toBeNull();
-    expect(screen.queryByText(/could not be asked/)).toBeNull();
+    expect(screen.queryByText(/could not be asked/i)).toBeNull();
     expect(screen.queryByText(/of 4/)).toBeNull();
   });
 
@@ -153,7 +153,7 @@ describe("a machine ssh cannot reach (Y-714)", () => {
     renderCard(aMachine({ online: false }), checks);
     await screen.findByText(/can’t reach cachyos-g14 over ssh/);
     expect(screen.queryByText("tmux")).toBeNull();
-    expect(screen.queryByText(/could not be asked/)).toBeNull();
+    expect(screen.queryByText(/could not be asked/i)).toBeNull();
     expect(screen.queryByText(/of 4/)).toBeNull();
   });
 });
@@ -171,23 +171,23 @@ describe("a ready machine with gaps (Y-714)", () => {
 
   it("lists the failing checks and none that pass", async () => {
     renderCard(aMachine(), checks);
-    await screen.findByText("ready · 2 to fix");
+    await screen.findByText("Ready · 2 to fix");
     expect(screen.queryByText("ssh")).toBeNull();
     expect(screen.queryByText("tmux")).toBeNull();
     expect(screen.queryByText("terminfo")).toBeNull();
     expect(screen.queryByText("ok")).toBeNull();
-    expect(screen.getByText("hook command not on PATH")).toBeTruthy();
+    expect(screen.getByText("Hook command not on PATH")).toBeTruthy();
   });
 
   it("shows the sudo gap once, in its note, and keeps the other gaps as lines", async () => {
     renderCard(aMachine(), checks);
-    await screen.findByText("ready · 2 to fix");
+    await screen.findByText("Ready · 2 to fix");
     expect(screen.queryByText(/wheel group/)).toBeNull();
     const said = screen.getAllByText("Agents here can use sudo");
     expect(said).toHaveLength(1);
     expect(said[0].getAttribute("role")).toBe("note");
     expect(screen.queryByText("The joined account can use sudo")).toBeNull();
-    expect(screen.getByText("hook command not on PATH")).toBeTruthy();
+    expect(screen.getByText("Hook command not on PATH")).toBeTruthy();
     const filled = Array.from(document.body.querySelectorAll("button, a")).filter((one) =>
       /filled/.test(one.className),
     );
@@ -196,7 +196,7 @@ describe("a ready machine with gaps (Y-714)", () => {
 
   it("prints no backticks", async () => {
     renderCard(aMachine(), [...all.filter((one) => one.check !== "terminfo"), { check: "terminfo", state: "absent", detail: "that machine lacks `xterm-256color`" }]);
-    await screen.findByText("lacks xterm-256color");
+    await screen.findByText("Lacks xterm-256color");
     expect(document.body.textContent).not.toContain("`");
     // Y-733: a failing row is its short cause, with no daemon paragraph and no Fix on the card.
     expect(document.body.textContent).not.toContain("that machine lacks");
@@ -218,11 +218,11 @@ describe("a card for something that is installed", () => {
       aMachine({ name: "yantra-box" }),
       with_({ "agent-cli": "claude is installed at /usr/local/bin/claude, but this account cannot run it. Install puts claude where this account can run it" }),
     );
-    expect(await screen.findByText("installed, no access; Install")).toBeTruthy();
+    expect(await screen.findByText("Installed, no access; Install")).toBeTruthy();
     expect(screen.getByText("closed")).toBeTruthy();
     expect(screen.getByText("1 to install")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Install" })).toBeTruthy();
-    expect(screen.queryByText(/missing|not found/)).toBeNull();
+    expect(screen.queryByText(/missing|not found/i)).toBeNull();
   });
 
   it("names yantra-agent, says it is installed, and says to update it", async () => {
@@ -230,7 +230,7 @@ describe("a card for something that is installed", () => {
       aMachine({ name: "cachyos-g14" }),
       with_({ heartbeat: "yantra-agent here sends no version, so it predates yantrad v0.12.0. Update it on cachyos-g14: `curl x | bash`" }),
     );
-    expect(await screen.findByText("installed; update it")).toBeTruthy();
+    expect(await screen.findByText("Installed; update it")).toBeTruthy();
     expect(screen.getByText("yantra-agent")).toBeTruthy();
     expect(screen.getByText("behind")).toBeTruthy();
     expect(screen.queryByText(/missing|no version|usage reports/)).toBeNull();

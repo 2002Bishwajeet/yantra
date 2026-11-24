@@ -31,7 +31,7 @@ describe('ErrorSurface', () => {
         title="The daemon could not read the fleet"
         error={network}
         reset={reset}
-        unknowns={['off the tailnet', 'yantrad down']}
+        unknowns={['Off the tailnet', 'Daemon down']}
         meta="last good read 2m ago"
       />,
     )
@@ -92,7 +92,7 @@ describe('ErrorSurface', () => {
         title="Usage"
         error={network}
         reset={() => {}}
-        unknowns={['off the tailnet']}
+        unknowns={['Off the tailnet']}
         action={<Button variant="text">Open Tailscale</Button>}
       />,
     )

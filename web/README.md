@@ -849,6 +849,14 @@ render, the shell, the tokens, the colour scheme, `sw.test.ts` and
 [`src/test/`](src/test/): `daemon.ts` stubs `fetch` the way `yantrad` answers,
 `inQuery`, `inRouter` and `inApp` supply the context a hook or a `<Link>` needs.
 
+**Every test also checks the supporting lines it draws** (Y-763).
+[`src/test/capitals.ts`](src/test/capitals.ts) reads the page after each change and fails the test
+on a line that starts in lower case. It reads the second line of a `ListItem`, the lines of Setup
+and the lines and the chip of a Machines card. A line may start with a name that is spelled in
+lower case: macOS, a tool such as `gh`, a host, or a machine the page names. It reads the supporting
+line of an M3 `Row` and the state word of a Fleet, Machine or Machines row, so *Running* and
+*Unclaimed* start with a capital on every screen.
+
 **Playwright covers the screens, in a browser** ([ADR-0024](../docs/adr/0024-the-dashboard-is-material-3-built-by-hand.md) §6).
 [`e2e/`](e2e/) runs three projects over every spec — **phone 390×844, tablet
 834×1194, desktop 1440×1024** ([`lib/sizes.ts`](e2e/lib/sizes.ts)) — against

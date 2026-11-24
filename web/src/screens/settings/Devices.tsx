@@ -47,7 +47,7 @@ function Empty(props: { title: string; children: string }) {
 function Session(props: { session: DeviceSession }) {
   const { session } = props
   const out = useSignOut()
-  const how = session.read_only ? 'reads only' : `${session.this_device ? 'this device · ' : ''}with ${session.passkey}`
+  const how = session.read_only ? 'Reads only' : `${session.this_device ? 'This device · with' : 'With'} ${session.passkey}`
   return (
     <>
       <ListItem
@@ -93,7 +93,7 @@ function Passkey(props: { name: string; made: number }) {
         }
         supporting={
           <>
-            enrolled <Num>{when(made)}</Num>
+            Enrolled <Num>{when(made)}</Num>
           </>
         }
         trailing={
@@ -121,7 +121,7 @@ function NewDevice(props: { first: boolean }) {
             <Plus />
           </Lead>
         }
-        supporting="or run yantra passkey code on the hub"
+        supporting="Or run yantra passkey code on the hub"
         trailing={
           <Button variant="tonal" onClick={() => code.mutate()} disabled={code.isPending}>
             {code.data ? 'New code' : 'Make a code'}
@@ -154,7 +154,7 @@ function ReadOnly() {
             <Eye />
           </Lead>
         }
-        supporting="or run yantra session read walk on the hub"
+        supporting="Or run yantra session read walk on the hub"
         trailing={
           <Button variant="tonal" onClick={() => made.mutate()} disabled={made.isPending}>
             {made.data ? 'Make another' : 'Make a token'}

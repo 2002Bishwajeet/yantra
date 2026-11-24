@@ -287,7 +287,7 @@ describe('a failed reading as an error', () => {
     const error = fromReading(looked.failed('invalid workspace file'))
     expect(error).toBeInstanceOf(ApiError)
     expect(error?.said).toBe('invalid workspace file')
-    expect(error?.describe()).toBe('The look failed.')
+    expect(error?.describe()).toBe('This could not be read.')
   })
 
   it('is null for the three states that are not failures', () => {

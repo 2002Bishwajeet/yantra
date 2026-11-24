@@ -230,18 +230,18 @@ function Catalogue() {
         <div className="m3-gallery__stack m3-gallery__wide">
           <Row tone="selected">
             <Tile name="yantra-web" />
-            <RowText headline="yantra-web" supporting={<State state="needs" size="small">waiting for trust · cachyos-g14</State>} />
+            <RowText headline="yantra-web" supporting={<State state="needs" size="small">Waiting for trust · cachyos-g14</State>} />
             <Num>4m</Num>
           </Row>
           <Row render={<a href="#row" />}>
             <Tile name="landing" />
-            <RowText headline="landing" supporting={<State state="running" size="small">running · macbook</State>} />
+            <RowText headline="landing" supporting={<State state="running" size="small">Running · macbook</State>} />
             <Track value={1} label="elapsed, the longest" />
             <Num>3h 41m</Num>
           </Row>
           <Row tone="plain">
             <Tile name="price-table" size="small" />
-            <RowText headline="price-table" supporting={<State state="idle" size="small">stopped · cachyos-g14</State>} />
+            <RowText headline="price-table" supporting={<State state="idle" size="small">Stopped · cachyos-g14</State>} />
             <Track value={0.33} label="elapsed" />
             <Num>7 Jul</Num>
             <Button variant="text">Open</Button>
@@ -268,7 +268,7 @@ function Catalogue() {
                 </Lead>
               }
               headline="GitHub"
-              supporting="signed in as 2002Bishwajeet · repositories, reviews, issues"
+              supporting="Signed in as 2002Bishwajeet · repositories, reviews, issues"
               trailing={<Button variant="text">Manage</Button>}
             />
             <ListItem
@@ -311,7 +311,7 @@ function Catalogue() {
           </Card>
           <Card surface="tertiary">
             <Eyebrow>Worth a look</Eyebrow>
-            <Text scale="body-medium">2 sessions no workspace claims</Text>
+            <Text scale="body-medium">2 sessions not in a workspace</Text>
           </Card>
           <Card variant="outlined">
             <Eyebrow>Idle</Eyebrow>
@@ -563,7 +563,7 @@ function Catalogue() {
             title="Nothing here can be reached"
             error={network}
             reset={() => {}}
-            unknowns={['off the tailnet', 'yantrad down']}
+            unknowns={['Off the tailnet', 'Daemon down']}
             meta="last good read 2m ago"
             action={<Button variant="text">Open Tailscale</Button>}
           />

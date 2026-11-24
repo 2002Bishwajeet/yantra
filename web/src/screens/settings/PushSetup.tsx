@@ -90,7 +90,7 @@ export function PushSetup(props: { open: boolean; onOpenChange: (open: boolean) 
       description="Push sends an alert to your phone when an agent needs you and no dashboard is open. It goes through ntfy, a free app that needs no account, so Yantra keeps no push server of its own."
       onOpenChange={close}
       open={open}
-      title="Push relay"
+      title="Alerts through ntfy"
     >
       <form className="settings__form" id="relay" onSubmit={submit}>
         <ol className="push-setup">

@@ -41,7 +41,7 @@ function List({ rooms }: { rooms: RoomSummary[] }) {
             <RowText headline={room.name} supporting={facts(room)} />
             {room.paused ? (
               <State className="rooms__state" state="needs">
-                paused
+                Paused
               </State>
             ) : null}
           </Row>

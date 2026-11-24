@@ -23,7 +23,7 @@ test.describe('the fleet on a busy fleet', () => {
     await expect(needs.getByRole('link', { name: 'Answer' })).toBeVisible()
 
     const running = band(page, 'Running')
-    await expect(running.getByText('running', { exact: true })).toHaveCount(3)
+    await expect(running.locator('.fleet__state').getByText('Running', { exact: true })).toHaveCount(3)
     await expect(running.getByRole('link', { name: 'Open' })).toHaveCount(3)
     await expect(running.getByRole('button', { name: 'Stop' })).toHaveCount(3)
 

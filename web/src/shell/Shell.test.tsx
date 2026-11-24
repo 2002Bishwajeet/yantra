@@ -295,12 +295,12 @@ describe('the FAB', () => {
       fireEvent.click(fab()!)
       await waitFor(() => expect(asked).toContain('POST /api/machines/cachyos-g14/install'))
       // The line's track says it is running; there is nothing left to press.
-      expect(await screen.findByText('installing on cachyos-g14…')).toBeTruthy()
+      expect(await screen.findByText('Installing on cachyos-g14…')).toBeTruthy()
       await waitFor(() => expect(fab()).toBeNull())
       // Focus goes to the line that says what happened, not to the body.
       const said = document.activeElement as HTMLElement
       expect(said.hasAttribute('data-fab-return')).toBe(true)
-      expect(within(said).getByText('installing on cachyos-g14…')).toBeTruthy()
+      expect(within(said).getByText('Installing on cachyos-g14…')).toBeTruthy()
     })
 
     it('carries Add a device before any machine has joined', async () => {

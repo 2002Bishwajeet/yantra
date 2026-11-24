@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { Cpu, FileText, MessageSquare, Play, TriangleAlert } from 'lucide-react'
 import type { Item } from '@/api'
@@ -11,6 +11,8 @@ import { Row, RowText } from '@/m3/row/Row'
 import { SearchView } from '@/m3/search-view/SearchView'
 import { IconTile, Tile } from '@/m3/tile/Tile'
 import { StartSession } from '@/screens/fleet/StartSession'
+import { capital } from '@/lib/words'
+import { osName } from '@/lib/platform'
 import { useTick } from '@/useTick'
 import { keyOf, type LoopId } from '@/screens/session/keys'
 import { elapsed } from '@/screens/session/threads'
@@ -24,7 +26,7 @@ import './Palette.css'
 type Entry = {
   key: string
   label: string
-  supporting?: string
+  supporting?: ReactNode
   mark?: MarkState
   /** The chord that runs the same entry. */
   chord?: string
@@ -191,7 +193,7 @@ export function PalettePopup(props: {
           ? agents.data.map((row) => ({
               key: `w:${row.workspace.name}`,
               label: row.workspace.name,
-              supporting: `${phrase(row.status).words} · ${row.workspace.machine}`,
+              supporting: `${capital(phrase(row.status).words)} · ${row.workspace.machine}`,
               mark: phrase(row.status).mark,
               go: () =>
                 void navigate({
@@ -218,7 +220,12 @@ export function PalettePopup(props: {
         return {
           key: `t:${one.workspace}:${one.id}`,
           label: one.title ?? 'Untitled thread',
-          supporting: away ? `${where} · ${away}` : where,
+          supporting: (
+            <>
+              <span data-name>{where}</span>
+              {away ? ` · ${away}` : null}
+            </>
+          ),
           terms: where,
           go: () =>
             void navigate({
@@ -236,7 +243,7 @@ export function PalettePopup(props: {
           ? machines.data.map((one) => ({
               key: `m:${one.name}`,
               label: one.name,
-              supporting: one.online ? `online · ${one.os}` : `offline · ${one.os}`,
+              supporting: `${one.online ? 'Online' : 'Offline'} · ${osName(one.os)}`,
               go: () => void navigate({ to: '/m/$machine', params: { machine: one.name } }),
             }))
           : [],

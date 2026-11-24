@@ -7,6 +7,7 @@ import { threadTitle } from '@/screens/session/threads'
 import { fromReading } from '@/api/client'
 import { loaded, useAgents, useMachines, useSessions, useWorkspaces, type Reading } from '@/api/hooks'
 import { ago } from '@/lib/time'
+import { capital } from '@/lib/words'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { State } from '@/m3/mark/Mark'
@@ -48,7 +49,7 @@ function Group(props: { label: string; rows: AgentRow[]; sessions: Reading<Machi
                   headline={row.workspace.name}
                   supporting={
                     <State size="small" state={mark}>
-                      {words} · {row.workspace.machine}
+                      {capital(words)} · {row.workspace.machine}
                     </State>
                   }
                 />
@@ -101,7 +102,7 @@ function Home(props: { threads: HomeThreads; open: { machine: string; thread: st
                   headline={threadTitle(thread)}
                   supporting={
                     <State size="small" state={thread.state === 'working' ? 'running' : 'idle'}>
-                      {thread.state === 'working' ? 'working' : 'idle'} · {machine}
+                      {thread.state === 'working' ? 'Working' : 'Idle'} · {machine}
                     </State>
                   }
                 />

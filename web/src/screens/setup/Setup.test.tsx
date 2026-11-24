@@ -136,7 +136,7 @@ describe('the steps', () => {
     await draw(base([node]))
     let later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
     expect(later.getByText("The appliance's Tailscale key")).toBeTruthy()
-    expect(later.getByText(/soon · expires on 2026-09-12, in 6 days/)).toBeTruthy()
+    expect(later.getByText(/Soon · expires on 2026-09-12, in 6 days/)).toBeTruthy()
     const link = later.getByRole('link', { name: 'Admin console' })
     expect(link.getAttribute('href')).toBe('https://login.tailscale.com/admin/machines')
     expect(link.getAttribute('target')).toBe('_blank')
@@ -144,7 +144,7 @@ describe('the steps', () => {
 
     await draw(base([{ ...node, key_expires: null }]))
     later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
-    expect(later.getByText(/done · key expiry is off/)).toBeTruthy()
+    expect(later.getByText(/Done · key expiry is off/)).toBeTruthy()
     expect(later.queryByRole('link', { name: 'Admin console' })).toBeNull()
   })
 
@@ -170,7 +170,7 @@ describe('the steps', () => {
   it('counts no join while the key does not exist, and keeps Add a device the next thing', async () => {
     const old = { machine: linux.name, checks: [{ check: 'reachable', state: 'present', detail: '' }] }
     await draw({ ...base([linux]), 'GET /api/readiness': [200, looked.ok([old as Readiness])] })
-    expect(screen.getByText(/not yet · no machine has joined yet/)).toBeTruthy()
+    expect(screen.getByText(/Not yet · no machine has joined yet/)).toBeTruthy()
     expect(filled()).toEqual(['Add a device'])
   })
 
@@ -178,16 +178,16 @@ describe('the steps', () => {
    *  not joined: step 2 says so rather than *no machine has joined*. */
   it("says a machine ready without Yantra's key was reached without it, and to run the join command", async () => {
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([checks(tools)])] })
-    expect(screen.getByText("not yet · cachyos-g14 reached without Yantra's key · run the join command on it once")).toBeTruthy()
-    expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+    expect(screen.getByText("Not yet · cachyos-g14 reached without Yantra's key · run the join command on it once")).toBeTruthy()
+    expect(screen.getByText(/Done · 1 of 1 machines ready/)).toBeTruthy()
     expect(filled()).toEqual(['Add a device'])
   })
 
   /** Y-615: a fresh install lists guests nobody has checked, so step 2 does not deny them. */
   it('says how many machines wait for a check, and puts Check all on step 3', async () => {
     await draw(base([up, upToo]))
-    expect(screen.getByText('not yet · 2 machines on the tailnet, none checked yet · a check shows which joined')).toBeTruthy()
-    expect(screen.getByText('not yet · needs one ready machine · none is checked yet')).toBeTruthy()
+    expect(screen.getByText('Not yet · 2 machines on the tailnet, none checked yet · a check shows which joined')).toBeTruthy()
+    expect(screen.getByText('Not yet · needs one ready machine · none is checked yet')).toBeTruthy()
     const row = (title: string) => screen.getByText(title).closest('.m3-list__row') as HTMLElement
     expect(within(row('Get it ready')).getByRole('button', { name: 'Check all' })).toBeTruthy()
     expect(within(row('Add a machine')).queryByRole('button', { name: 'Check all' })).toBeNull()
@@ -233,7 +233,7 @@ describe('the steps', () => {
 
   it('names no terminal command for the key, and shows its fingerprint once it exists', async () => {
     await draw(base())
-    expect(screen.getByText('the key is made when the first machine joins')).toBeTruthy()
+    expect(screen.getByText('The key is made when the first machine joins')).toBeTruthy()
     expect(screen.queryByText(/yantra ssh-identity/)).toBeNull()
     cleanup()
     await draw({ ...base(), 'GET /api/ssh-identity': [200, contract.sshIdentity] })
@@ -246,8 +246,8 @@ describe('the steps', () => {
     await draw({ ...base(), 'GET /api/ssh-identity': [500, 'the key file could not be read'] })
     const surface = (await screen.findByText("The appliance's key could not be read")).closest('[role="alert"]')!
     expect(within(surface as HTMLElement).getByText(/the key file could not be read/)).toBeTruthy()
-    expect(screen.getByText(/could not be read · .*the key file could not be read/)).toBeTruthy()
-    expect(screen.queryByText('the key is made when the first machine joins')).toBeNull()
+    expect(screen.getByText(/Could not be read · .*the key file could not be read/)).toBeTruthy()
+    expect(screen.queryByText('The key is made when the first machine joins')).toBeNull()
     expect([...document.querySelectorAll('.m3-lead')][1]!.querySelector('svg')).toBeTruthy()
   })
 
@@ -265,13 +265,13 @@ describe('the steps', () => {
     const later = within(screen.getByRole('list', { name: 'Later, when you want them' }))
     expect(later.queryByRole('link', { name: 'Set up' })).toBeNull()
     fireEvent.click(later.getByRole('button', { name: 'Set up' }))
-    expect(await screen.findByRole('dialog', { name: 'Push relay' })).toBeTruthy()
+    expect(await screen.findByRole('dialog', { name: 'Alerts through ntfy' })).toBeTruthy()
   })
 
   it('walks the push setup from Generate to a test that arrived', async () => {
     const asked = await draw({ ...base(), 'POST /api/relay': [204, undefined] })
     fireEvent.click(screen.getByRole('button', { name: 'Set up' }))
-    const sheet = within(await screen.findByRole('dialog', { name: 'Push relay' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Alerts through ntfy' }))
     fireEvent.click(sheet.getByRole('button', { name: 'Generate' }))
     const url = (sheet.getByLabelText('Topic URL') as HTMLInputElement).value
     expect(await sheet.findByRole('img', { name: /QR/ })).toBeTruthy()
@@ -287,7 +287,7 @@ describe('the steps', () => {
 
   it('is done at the first session once a workspace exists', async () => {
     await draw({ ...base(), 'GET /api/workspaces': [200, looked.ok([aListed()])] })
-    expect(screen.getByText(/done · 1 workspace made/)).toBeTruthy()
+    expect(screen.getByText(/Done · 1 workspace made/)).toBeTruthy()
   })
 
   it('says the one step that runs in a terminal is the join command', async () => {
@@ -364,16 +364,16 @@ describe('the hub', () => {
     })
     const hub = hubList()
     expect(hub.getByText('yantra-box')).toBeTruthy()
-    expect(hub.getByText('ready · 7 of 7')).toBeTruthy()
+    expect(hub.getByText('Ready · 7 of 7')).toBeTruthy()
     expect(hub.getByText('19,942 MB free · 15% busy')).toBeTruthy()
     expect(hub.queryByRole('button')).toBeNull()
     expect(hub.queryByRole('link')).toBeNull()
     expect([...document.querySelectorAll('.m3-lead')][0]!.querySelector('svg')).toBeTruthy()
     expect(
-      screen.getByText('done · yantra-box is the hub and needs no adding · more machines can be added later'),
+      screen.getByText('Done · yantra-box is the hub and needs no adding · more machines can be added later'),
     ).toBeTruthy()
     expect(screen.queryByRole('list', { name: 'Other machines' })).toBeNull()
-    expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+    expect(screen.getByText(/Done · 1 of 1 machines ready/)).toBeTruthy()
     expect(screen.queryByText('Devices that open the dashboard')).toBeNull()
     expect(screen.queryByText('iphone')).toBeNull()
     expect(filled()).toEqual(['New session'])
@@ -389,8 +389,8 @@ describe('the hub', () => {
     expect(added.getByText('cachyos-g14')).toBeTruthy()
     expect(added.queryByText('yantra-box')).toBeNull()
     expect(hubList().queryByText('cachyos-g14')).toBeNull()
-    expect(screen.getByText('done · cachyos-g14 joined · more machines can be added later')).toBeTruthy()
-    expect(screen.getByText(/done · 2 of 2 machines ready/)).toBeTruthy()
+    expect(screen.getByText('Done · cachyos-g14 joined · more machines can be added later')).toBeTruthy()
+    expect(screen.getByText(/Done · 2 of 2 machines ready/)).toBeTruthy()
     const rows = [...document.querySelectorAll('.setup__list > li')]
     const lines = screen.getByRole('list', { name: 'Other machines' })
     const step = (title: string) => rows.findIndex((one) => one.textContent?.includes(title))
@@ -404,7 +404,7 @@ describe('the hub', () => {
       'GET /api/readiness': [200, looked.ok([checks({ ...tools, tmux: 'absent' }, '', box.name)])],
     })
     const hub = hubList()
-    expect(hub.getByText('missing tmux')).toBeTruthy()
+    expect(hub.getByText('Missing tmux')).toBeTruthy()
     expect(hub.getByRole('link', { name: 'Open yantra-box' }).getAttribute('href')).toBe('/m/yantra-box')
     expect(hub.queryByRole('button')).toBeNull()
     expect(screen.queryByRole('button', { name: /Install/ })).toBeNull()
@@ -431,7 +431,7 @@ describe('the hub', () => {
     const refused = { machine: box.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([box]), ...keyed, 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
     const hub = hubList()
-    expect(hub.getByText('the key was refused · its machine page shows how')).toBeTruthy()
+    expect(hub.getByText('The key was refused · its machine page shows how')).toBeTruthy()
     expect(hub.queryByText(/join command/)).toBeNull()
     expect(hub.queryByText('Permission denied (publickey)')).toBeNull()
     expect(hub.queryByRole('button', { name: /Copy the join command/ })).toBeNull()
@@ -444,7 +444,7 @@ describe('the hub', () => {
   const otherMachines = () => screen.queryByRole('list', { name: 'Other machines' })
 
   it.each([
-    ['unjoined', 'the ssh config here names no account for yantra-box, so ssh tried `yantra` · Permission denied (publickey).', 'no account named for it · its machine page shows how'],
+    ['unjoined', 'the ssh config here names no account for yantra-box, so ssh tried `yantra` · Permission denied (publickey).', 'No account named for it · its machine page shows how'],
     ['browser', 'Tailscale SSH requires an additional check', 'Tailscale asks for a browser sign-in · its machine page shows how'],
   ])('lists a %s hub once, under step 1, with no join command', async (_kind, detail, words) => {
     const one = aMachine({ ...named, os: 'linux', online: true, address: '100.64.0.1' })
@@ -463,7 +463,7 @@ describe('the hub', () => {
     const one = aMachine({ ...named, os: 'linux', online: true, ownership: 'tagged', address: '100.64.0.1' })
     await draw({ ...base([one]), ...keyed })
     expect(screen.getAllByText('yantra-box')).toHaveLength(1)
-    expect(hubList().getByText(/^tagged, so the tailnet owns it/)).toBeTruthy()
+    expect(hubList().getByText(/^Tagged, so the tailnet owns it/)).toBeTruthy()
     expect(screen.queryByRole('list', { name: 'Devices your account does not own' })).toBeNull()
     expect(hubList().queryByRole('button')).toBeNull()
   })
@@ -475,7 +475,7 @@ describe('the hub', () => {
       'GET /api/readiness': [200, looked.ok([checks(tools, '', box.name)])],
     })
     expect(await screen.findByText("The appliance's key could not be read")).toBeTruthy()
-    expect(hubList().getByText('ready · 7 of 7')).toBeTruthy()
+    expect(hubList().getByText('Ready · 7 of 7')).toBeTruthy()
   })
 
   it('draws no hub and keeps the failure when the machines could not be read', async () => {
@@ -498,13 +498,13 @@ describe('the machine lines', () => {
   /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */
   it('draws an asleep machine as asleep, with no button', async () => {
     await draw(base([linux, mac]))
-    expect(screen.getAllByText('asleep · last seen 1h ago')).toHaveLength(2)
+    expect(screen.getAllByText('Asleep · last seen 1h ago')).toHaveLength(2)
     expect(screen.queryByRole('button', { name: /^Check/ })).toBeNull()
   })
 
   it('offers Check on a machine that is online and not asked', async () => {
     await draw(base([up]))
-    expect(screen.getByText('not checked yet · a check costs one ssh round trip')).toBeTruthy()
+    expect(screen.getByText('Not checked yet · a check takes a few seconds')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Check' })).toBeTruthy()
   })
 
@@ -531,7 +531,7 @@ describe('the machine lines', () => {
     const changed = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: CHANGED_KEY }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([changed as Readiness])] })
     expect(
-      screen.getByText('its host key changed · run sudo -u yantra -H yantra forget-host-key cachyos-g14 once you know why'),
+      screen.getByText('Its host key changed · run sudo -u yantra -H yantra forget-host-key cachyos-g14 once you know why'),
     ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Copy the join command for cachyos-g14' })).toBeNull()
   })
@@ -552,7 +552,7 @@ describe('the machine lines', () => {
   it('gives a refused machine the join command to run on it', async () => {
     const refused = { machine: up.name, checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] }
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([refused as Readiness])] })
-    expect(screen.getByText('the key was refused · run the join command on it')).toBeTruthy()
+    expect(screen.getByText('The key was refused · run the join command on it')).toBeTruthy()
     expect(screen.queryByText('Permission denied (publickey)')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /What ssh said/ }))
     expect(await screen.findByText('Permission denied (publickey)')).toBeTruthy()
@@ -600,11 +600,11 @@ describe('the machine lines', () => {
       'GET /api/readiness': [200, looked.ok([missing])],
       'POST /api/machines/cachyos-g14/install': [202, undefined],
     })
-    expect(screen.getByText('missing tmux')).toBeTruthy()
+    expect(screen.getByText('Missing tmux')).toBeTruthy()
     expect(filled()).toEqual(['Install on cachyos-g14'])
     fireEvent.click(screen.getByRole('button', { name: 'Install on cachyos-g14' }))
-    expect(await screen.findByText('installing on cachyos-g14…')).toBeTruthy()
-    expect(screen.getByRole('progressbar', { name: 'installing on cachyos-g14' })).toBeTruthy()
+    expect(await screen.findByText('Installing on cachyos-g14…')).toBeTruthy()
+    expect(screen.getByRole('progressbar', { name: 'Installing on cachyos-g14' })).toBeTruthy()
     expect(asked).toContain('POST /api/machines/cachyos-g14/install')
   })
 
@@ -634,7 +634,7 @@ describe('the machine lines', () => {
   it('sends a check Install does not fix to the machine page', async () => {
     const term = checks({ ...tools, terminfo: 'absent' })
     await draw({ ...base([up]), 'GET /api/readiness': [200, looked.ok([term])] })
-    expect(screen.getByText('missing terminfo · the machine page shows how')).toBeTruthy()
+    expect(screen.getByText('Missing terminfo · the machine page shows how')).toBeTruthy()
     const open = screen.getAllByRole('link', { name: 'Open' }).map((one) => one.getAttribute('href'))
     expect(open).toContain('/m/cachyos-g14')
   })
@@ -648,7 +648,7 @@ describe('the machine lines', () => {
       'GET /api/readiness': [200, looked.ok([checks(tools)])],
     })
     expect(screen.getByText(/1 of 2 machines ready · one is enough to start/)).toBeTruthy()
-    expect(screen.getByText('ready · 7 of 7')).toBeTruthy()
+    expect(screen.getByText('Ready · 7 of 7')).toBeTruthy()
     expect(filled()).toEqual(['New session'])
   })
 
@@ -662,9 +662,9 @@ describe('the machine lines', () => {
       'GET /api/readiness': [200, looked.ok([checks(tools)])],
     })
     const foreign = within(screen.getByRole('list', { name: 'Devices your account does not own' }))
-    expect(foreign.getByText('shared from another account · not supported yet')).toBeTruthy()
-    expect(foreign.getByText(/tagged, so the tailnet owns it/)).toBeTruthy()
-    expect(screen.queryByText('ready · 7 of 7')).toBeNull()
+    expect(foreign.getByText('Shared from another account · not supported yet')).toBeTruthy()
+    expect(foreign.getByText(/^Tagged, so the tailnet owns it/)).toBeTruthy()
+    expect(screen.queryByText('Ready · 7 of 7')).toBeNull()
     expect(filled()).not.toEqual(['New session'])
   })
 
@@ -675,8 +675,8 @@ describe('the machine lines', () => {
       'GET /api/ssh-identity': [200, contract.sshIdentity],
       'GET /api/readiness': [200, looked.ok([checks({ ...tools, 'provider-auth': 'absent' })])],
     })
-    expect(screen.getByText('ready · 7 of 8')).toBeTruthy()
-    expect(screen.getByText(/done · 1 of 1 machines ready/)).toBeTruthy()
+    expect(screen.getByText('Ready · 7 of 8')).toBeTruthy()
+    expect(screen.getByText(/Done · 1 of 1 machines ready/)).toBeTruthy()
   })
 })
 
@@ -724,7 +724,7 @@ describe('the bulk buttons', () => {
       'POST /api/machines/macbook/install': [202, undefined],
     })
     fireEvent.click(screen.getByRole('button', { name: 'Install on all' }))
-    expect(await screen.findByText('installing on cachyos-g14…')).toBeTruthy()
+    expect(await screen.findByText('Installing on cachyos-g14…')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Install on all' })).toBeNull()
   })
 
@@ -738,8 +738,8 @@ describe('the bulk buttons', () => {
     }
     const asked = await draw(routes)
     fireEvent.click(screen.getByRole('button', { name: 'Install on all' }))
-    expect(await screen.findByText('installing on cachyos-g14…')).toBeTruthy()
-    expect(await screen.findByText('installing on macbook…')).toBeTruthy()
+    expect(await screen.findByText('Installing on cachyos-g14…')).toBeTruthy()
+    expect(await screen.findByText('Installing on macbook…')).toBeTruthy()
     expect(asked.filter((one) => one.endsWith('/install'))).toHaveLength(2)
     expect(asked).not.toContain('POST /api/machines/ubuntu/install')
   })
@@ -761,7 +761,7 @@ describe('the bulk buttons', () => {
       'POST /api/machines/macbook/install': [202, undefined],
     })
     fireEvent.click(screen.getByRole('button', { name: 'Install on all' }))
-    expect(await screen.findByText('installing on macbook…')).toBeTruthy()
+    expect(await screen.findByText('Installing on macbook…')).toBeTruthy()
     expect(asked).not.toContain('POST /api/machines/cachyos-g14/install')
   })
 
@@ -775,7 +775,7 @@ describe('the bulk buttons', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Install on all' }))
     expect(await screen.findByText('The install on cachyos-g14 did not start')).toBeTruthy()
-    expect(await screen.findByText('installing on macbook…')).toBeTruthy()
+    expect(await screen.findByText('Installing on macbook…')).toBeTruthy()
   })
 
   it('lets one check fail without stopping the others', async () => {
@@ -787,7 +787,7 @@ describe('the bulk buttons', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Check all' }))
     expect(await screen.findByText('cachyos-g14 was not asked')).toBeTruthy()
-    await waitFor(() => expect(screen.getByText('ready · 7 of 7')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Ready · 7 of 7')).toBeTruthy())
   })
 
   it('shows neither button when every machine is asleep or ready', async () => {

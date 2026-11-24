@@ -43,7 +43,7 @@ test.describe('the first run', () => {
 
   /** D7 S3 and S5: an asleep machine is normal, and ssh cannot answer it. */
   test('draws asleep machines as asleep, with nothing to press', async ({ page }) => {
-    await expect(page.getByText(/^asleep · last seen/).first()).toBeVisible()
+    await expect(page.getByText(/^Asleep · last seen/).first()).toBeVisible()
     await expect(page.getByRole('button', { name: /^Check/ })).toHaveCount(0)
   })
 
@@ -56,7 +56,7 @@ test.describe('the first run', () => {
   })
 
   test('says the key is made by the first join, and reads the relay', async ({ page }) => {
-    await expect(page.getByText('the key is made when the first machine joins')).toBeVisible()
+    await expect(page.getByText('The key is made when the first machine joins')).toBeVisible()
     await expect(page.getByText(/yantra ssh-identity/)).toHaveCount(0)
     await expect(page.getByText(/no relay yet/)).toBeVisible()
     await expect(page.getByText(/One step runs in a terminal: the join command/)).toBeVisible()
@@ -66,7 +66,7 @@ test.describe('the first run', () => {
   test('walks push setup from the app links to a test that arrived', async ({ page }) => {
     const later = page.getByRole('list', { name: 'Later, when you want them' })
     await later.getByRole('button', { name: 'Set up' }).click()
-    const sheet = page.getByRole('dialog', { name: 'Push relay' })
+    const sheet = page.getByRole('dialog', { name: 'Alerts through ntfy' })
     await expect(sheet).toBeVisible()
     await expect(page).toHaveURL(/\/$/)
     await expect(sheet.getByRole('link', { name: /iPhone/ })).toHaveAttribute('href', /apps\.apple\.com/)
@@ -113,7 +113,7 @@ test.describe('a fresh install with a ready hub', () => {
   test('shows the hub ready under step 1, with no action', async ({ page }) => {
     const hub = page.getByRole('list', { name: 'The hub' })
     await expect(hub.getByText('yantra-box', { exact: true })).toBeVisible()
-    await expect(hub.getByText(/^ready · /)).toBeVisible()
+    await expect(hub.getByText(/^Ready · /)).toBeVisible()
     await expect(hub.getByRole('button')).toHaveCount(0)
     await expect(hub.getByRole('link')).toHaveCount(0)
     await expect(page.getByText(/yantra-box is the hub and needs no adding · more machines can be added later/)).toBeVisible()

@@ -477,7 +477,7 @@ function Body(props: {
     case 'unasked':
       return (
         <Text render={<p />} className="readiness__said" scale="body-medium" tone="variant">
-          Check asks {name} what it has now, one ssh round trip.
+          Check asks {name} what it has now. It takes a few seconds.
         </Text>
       )
     case 'unread':

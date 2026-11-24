@@ -200,7 +200,7 @@ export async function look<T>(
  *  states, which are not failures. */
 export function fromReading(reading: Reading<unknown>): ApiError | null {
   if (reading.looked !== 'failed') return null
-  return new ApiError('network', reading.error, { sentence: 'The look failed.' })
+  return new ApiError('network', reading.error, { sentence: 'This could not be read.' })
 }
 
 /** The same options, thrown to the nearest boundary instead of held in

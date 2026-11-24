@@ -41,7 +41,7 @@ describe('the card summary', () => {
   })
 
   it('says so when nothing has been asked', () => {
-    expect(summary(tally([]))).toBe('not checked')
+    expect(summary(tally([]))).toBe('Not checked')
   })
 
   /** Y-580: the count is built from the rows drawn, so the microphone is a row too. */
@@ -110,15 +110,15 @@ describe('the facts line', () => {
   })
 
   it('names os, arch, cpu, memory, disk and the session count', () => {
-    expect(factsOf(sized, 2)).toBe('linux · x86_64 · CPU 15% busy · 19 GB memory free · 209 GB disk free · 2 sessions')
+    expect(factsOf(sized, 2)).toBe('Linux · x86_64 · CPU 15% busy · 19 GB memory free · 209 GB disk free · 2 sessions')
     expect(factsOf(sized, 1)).toContain('1 session')
     expect(factsOf(sized, 0)).toContain('no sessions')
     expect(factsOf(sized, null)).not.toContain('session')
   })
 
   it('shows the os alone, and no zeros, with no heartbeat (I-47)', () => {
-    expect(factsOf(aMachine({ heartbeat: null }), null)).toBe('linux')
-    expect(factsOf(aMachine({ heartbeat: null }), 2)).toBe('linux · 2 sessions')
+    expect(factsOf(aMachine({ heartbeat: null }), null)).toBe('Linux')
+    expect(factsOf(aMachine({ heartbeat: null }), 2)).toBe('Linux · 2 sessions')
   })
 })
 

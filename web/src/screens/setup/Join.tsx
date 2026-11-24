@@ -23,7 +23,7 @@ export function Join(props: { machine: string; what: string; hero?: boolean }) {
   }
   return (
     <Text scale="body-small" tone="variant">
-      making a join command…
+      Making a join command…
     </Text>
   )
 }

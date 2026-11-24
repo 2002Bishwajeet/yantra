@@ -32,7 +32,7 @@ test('an inbox issue starts a session with its draft and lists the threads in th
   // Five threads and the New thread link.
   await expect(threads.getByRole('menuitem').and(page.locator('a'))).toHaveCount(6)
   await expect(threads.locator('a[aria-current]')).toHaveCount(1)
-  for (const mark of ['no PR', 'PR #512 open', 'PR #511 closed', 'PR #510 merged', 'PR unknown']) {
+  for (const mark of ['No PR', 'PR #512 open', 'PR #511 closed', 'PR #510 merged', 'PR unknown']) {
     await expect(threads.getByText(mark)).toBeVisible()
   }
   await expect(threads.getByText('#488 A workspace lists its threads')).toBeVisible()

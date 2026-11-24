@@ -26,9 +26,9 @@ describe('Devices', () => {
   it('lists the passkeys and the signed-in devices, and marks this one', async () => {
     mountSettings('desktop', '/settings/devices', { 'GET /api/passkey': [200, DEVICES] })
     expect(await screen.findByText('Passkeys work at hub.example.ts.net.')).toBeTruthy()
-    expect(screen.getByText(/^this device · with iPhone/)).toBeTruthy()
+    expect(screen.getByText(/^This device · with iPhone/)).toBeTruthy()
     expect(screen.getByText('Mac')).toBeTruthy()
-    const date = screen.getByText(/^enrolled/).querySelector('.m3-num')!
+    const date = screen.getByText(/^Enrolled/).querySelector('.m3-num')!
     expect(date.textContent).toMatch(/\d/)
     expect(date.classList.contains('m3-mono')).toBe(false)
   })
@@ -83,7 +83,7 @@ describe('Devices', () => {
     mountSettings('desktop', '/settings/devices', {
       'GET /api/passkey': [200, { ...DEVICES, sessions: [DEVICES.sessions[0]] }],
     })
-    await screen.findByText(/^this device · with iPhone/)
+    await screen.findByText(/^This device · with iPhone/)
     expect(screen.queryByRole('button', { name: 'Sign out every other device' })).toBeNull()
   })
 
@@ -102,12 +102,12 @@ describe('Devices', () => {
       'GET /api/passkey': [200, DEVICES],
       'DELETE /api/passkey/iPhone': [403, 'an agent token cannot act as the owner'],
     })
-    await screen.findByText(/^enrolled/)
+    await screen.findByText(/^Enrolled/)
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
     const row = await screen.findByRole('alert')
     expect(within(row).getByRole('heading', { name: 'iPhone was not removed' })).toBeTruthy()
     expect(row.textContent).not.toContain('agent token')
-    expect(screen.getByText(/^enrolled/)).toBeTruthy()
+    expect(screen.getByText(/^Enrolled/)).toBeTruthy()
     fireEvent.click(within(row).getByRole('button', { name: 'Details' }))
     expect(within(row).getByText('an agent token cannot act as the owner')).toBeTruthy()
   })
@@ -120,7 +120,7 @@ describe('Devices', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Make a code' }))
     const row = await screen.findByRole('alert')
     expect(within(row).getByRole('heading', { name: 'The proxy hides who is calling' })).toBeTruthy()
-    expect(screen.getByText('or run yantra passkey code on the hub')).toBeTruthy()
+    expect(screen.getByText('Or run yantra passkey code on the hub')).toBeTruthy()
   })
 
   it('marks a read-only session and signs it out like any other', async () => {
@@ -129,8 +129,8 @@ describe('Devices', () => {
       'DELETE /api/sessions/c3': [204],
     })
     await screen.findByText('walk')
-    expect(within(row('walk')).getByText(/^reads only · ends/)).toBeTruthy()
-    expect(row('walk').textContent).not.toContain('with iPhone')
+    expect(within(row('walk')).getByText(/^Reads only · ends/)).toBeTruthy()
+    expect(row('walk').textContent).not.toMatch(/with iPhone/i)
     fireEvent.click(within(row('walk')).getByRole('button', { name: 'Sign out' }))
     await waitFor(() => expect(asked).toContain('DELETE /api/sessions/c3'))
   })

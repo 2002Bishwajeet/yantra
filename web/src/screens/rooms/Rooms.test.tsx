@@ -114,10 +114,10 @@ describe('the rooms list', () => {
     const link = await screen.findByRole('link', { name: /review/ })
     expect(link.getAttribute('href')).toBe('/rooms/review')
     expect(link.textContent).toContain('20/20 · 2 members · 2 messages')
-    expect(link.textContent).toContain('paused')
+    expect(link.textContent).toContain('Paused')
     const other = screen.getByRole('link', { name: /design/ })
     expect(other.textContent).toContain('3/20 · 2 members · 1 message')
-    expect(other.textContent).not.toContain('paused')
+    expect(other.textContent).not.toContain('Paused')
   })
 
   it('says there is no room, and why, when the daemon holds none', async () => {

@@ -129,7 +129,7 @@ describe('the counts on a machine with optional checks absent', () => {
     expect(rows).toHaveLength(4)
 
     const verdict = verdictOf({ name: 'pi', machine: machine(), readiness: report(list), events: [], watch: null })
-    expect(chipOf(verdict, null).word).toBe(`ready · ${needs.length} to fix`)
+    expect(chipOf(verdict, null).word).toBe(`Ready · ${needs.length} to fix`)
     expect(card().getByRole('heading', { name: `${needs.length} checks need you` })).toBeTruthy()
 
     expect(card().getByText(new RegExp(`^10 of ${list.length} · asked`))).toBeTruthy()
@@ -612,7 +612,7 @@ describe('the Readiness card', () => {
     await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'yantra-agent on pi is v0.3.2; yantrad is v0.11.0' })).toBeTruthy()
     expect(card().getByText('behind')).toBeTruthy()
-    expect(card().getByText('installed; update it')).toBeTruthy()
+    expect(card().getByText('Installed; update it')).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing/)
     expect(card().queryByRole('button', { name: /What ssh said/ })).toBeNull()
     expect(card().queryByText(command)).toBeNull()
@@ -630,7 +630,7 @@ describe('the Readiness card', () => {
     await draw(report(checks(['heartbeat'], said)), [earlier], { machine: machine({ os: 'macOS' }) })
     expect(card().getByRole('heading', { name: 'yantra-agent on pi is older than yantrad v0.11.0' })).toBeTruthy()
     expect(card().getByText('behind')).toBeTruthy()
-    expect(card().getByText('installed; update it')).toBeTruthy()
+    expect(card().getByText('Installed; update it')).toBeTruthy()
   })
 
   /** Y-740: the hub's claude links into a home the daemon's account cannot enter. */
@@ -643,14 +643,14 @@ describe('the Readiness card', () => {
     )
     await draw(report(closed))
     expect(card().getByRole('heading', { name: 'claude is installed, but this account cannot run it' })).toBeTruthy()
-    expect(card().getByText('installed, no access; Install')).toBeTruthy()
+    expect(card().getByText('Installed, no access; Install')).toBeTruthy()
     expect(card().getByText('Install puts claude in this account’s home on pi, with the vendor’s installer.')).toBeTruthy()
     expect(card().getByRole('button', { name: 'Install' })).toBeTruthy()
-    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing|not found/)
+    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing|not found/i)
     pressFix()
     expect(card().getAllByText(said).length).toBeGreaterThan(0)
     openSaid()
-    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing|not found/)
+    expect(screen.getByRole('region', { name: 'Readiness' }).textContent).not.toMatch(/missing|not found/i)
   })
 
   /** Y-591: a warning with the fix and its cost, and never a block on a session. */
@@ -890,7 +890,7 @@ describe('one short line per problem (Y-733)', () => {
     const said = { tmux: 'tmux is not on PATH or in any of: $HOME/.local/bin. Install `tmux` there' }
     await draw(report(checks(['tmux'], said)))
     const row = rows()[0]!
-    expect(row.querySelector('.machine__cause')!.textContent).toBe('not found')
+    expect(row.querySelector('.machine__cause')!.textContent).toBe('Not found')
     expect(row.textContent).not.toMatch(/`|PATH or in any/)
     const fix = within(row).getByRole('button', { name: /^Fix/ })
     expect(fix.getAttribute('aria-expanded')).toBe('false')

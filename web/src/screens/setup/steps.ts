@@ -3,6 +3,7 @@ import type { Reading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { INSTALLABLE, nameOf, reachableFailure, type ReachableFailure, unrunnable } from '@/lib/checks'
 import { grant, REFUSED } from '@/lib/github'
+import { capital } from '@/lib/words'
 import { blocking } from '@/lib/ready'
 import { tally } from '@/screens/machines/facts'
 import type { MarkState } from '@/m3/mark/Mark'
@@ -32,11 +33,11 @@ export const marks: Record<Status, MarkState> = {
 }
 
 export const statusWord: Record<Status, string> = {
-  done: 'done',
-  progress: 'in progress',
-  todo: 'not yet',
-  due: 'soon',
-  failed: 'could not be read',
+  done: 'Done',
+  progress: 'In progress',
+  todo: 'Not yet',
+  due: 'Soon',
+  failed: 'Could not be read',
 }
 
 const reading = (): Step => ({ status: 'todo', words: 'reading…' })
@@ -166,7 +167,7 @@ export function line(machine: Machine, report: Readiness | null, since: string |
   const needs = blocking(report)
   if (needs.length === 0) return { kind: 'ready', present, total }
   const installable = needs.some((one) => INSTALLABLE.includes(one.check) && one.state === 'absent')
-  return { kind: 'missing', present, total, words: lacking(needs), installable }
+  return { kind: 'missing', present, total, words: capital(lacking(needs)), installable }
 }
 
 export const ready = (one: Line) => one.kind === 'ready'

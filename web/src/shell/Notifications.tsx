@@ -44,12 +44,13 @@ function EntryText(props: { entry: Entry; supporting: ReactNode }) {
 function EntryRow(props: { entry: Entry; now: number; onOpen: () => void }) {
   const { entry, now, onOpen } = props
   const commands = entry.commands ?? []
+  const said = entry.verbatim ? <span data-name>{entry.supporting}</span> : entry.supporting
   const supporting = entry.mark ? (
     <State size="small" state={entry.mark}>
-      {entry.supporting}
+      {said}
     </State>
   ) : (
-    entry.supporting
+    said
   )
   const render = entry.href ? (
     <a href={entry.href} rel="noreferrer" target="_blank" />

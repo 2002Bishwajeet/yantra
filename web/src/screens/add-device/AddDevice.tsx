@@ -44,7 +44,7 @@ const HOMEBREW = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/H
 /** D7 §3.8: the encoder loads with this route, and only when a code is drawn. */
 const Qr = lazy(() => import('qrcode.react').then((it) => ({ default: it.QRCodeSVG })))
 
-const said: Record<BeatState, string> = { ahead: 'not yet', waiting: 'waiting', done: 'done', stuck: 'stuck' }
+const said: Record<BeatState, string> = { ahead: 'Not yet', waiting: 'Waiting', done: 'Done', stuck: 'Stuck' }
 const marks: Record<BeatState, MarkState> = { ahead: 'idle', waiting: 'running', done: 'done', stuck: 'needs' }
 const steps: Record<BeatState, StepState> = { ahead: 'ahead', waiting: 'current', done: 'done', stuck: 'stuck' }
 

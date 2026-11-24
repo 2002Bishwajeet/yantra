@@ -1,5 +1,6 @@
 import type { Attention, Event } from '@/api'
 import type { MarkState } from '@/m3/mark/Mark'
+import { capital } from '@/lib/words'
 
 /** One row of the notifications list: a daemon event (ADR-0025) or a GitHub
  *  item from `/api/attention`, which the browser merges (api.ts, `Event`). */
@@ -10,6 +11,8 @@ export type Entry = {
   tile: { kind: 'workspace'; name: string } | { kind: 'github' } | { kind: 'relay' } | { kind: 'machine'; name: string }
   headline: string
   supporting: string
+  /** `supporting` is a person's own words, so it keeps its spelling. */
+  verbatim?: boolean
   mark?: MarkState
   /** `supporting` must wrap rather than clip: it carries a warning a person
    *  cannot act on if it is cut off (S7). */
@@ -60,11 +63,12 @@ function ofEvent(event: Event, index: number): Entry {
     // `joined` event; `logs_in_as` is absent when ssh could not be read.
     const normal = event.kept === false && event.logs_in_as === event.user
     return normal
-      ? { ...base, headline: `${event.machine} joined`, supporting: `as ${event.user}`, mark: 'done', open: event.machine }
+      ? { ...base, headline: `${event.machine} joined`, supporting: `Logs in as ${event.user}`, mark: 'done', open: event.machine }
       : {
           ...base,
           headline: `${event.machine} joined, as another account`,
           supporting: event.said,
+          verbatim: true,
           mark: 'needs',
           open: event.machine,
           wrap: true,
@@ -97,6 +101,7 @@ function ofEvent(event: Event, index: number): Entry {
           ...base,
           headline: `${event.machine}'s install did not finish`,
           supporting: event.said,
+          verbatim: true,
           mark: 'needs',
           open: event.machine,
           wrap: true,
@@ -109,6 +114,7 @@ function ofEvent(event: Event, index: number): Entry {
       ...base,
       headline: `${who}: ${watched.headline}`,
       supporting: event.said,
+      verbatim: true,
       mark: watched.mark,
       workspace: event.workspace ?? undefined,
     }
@@ -124,11 +130,13 @@ function ofEvent(event: Event, index: number): Entry {
           : event.kind === 'crashed' || event.kind === 'killed'
             ? `${who} ${event.kind}`
             : `${who} ${event.kind.replace('_', ' ')}`
-  const supporting = event.machine && event.workspace ? `${event.said} · ${event.machine}` : event.said
+  const said = event.kind === 'relay-test' ? capital(event.said) : event.said
+  const supporting = event.machine && event.workspace ? `${said} · ${event.machine}` : said
   return {
     ...base,
     headline,
     supporting,
+    verbatim: event.kind !== 'relay-test',
     workspace: event.workspace ?? undefined,
     open: !event.workspace && event.kind === 'unreachable' ? (event.machine ?? undefined) : undefined,
     answer: event.kind === 'awaiting_trust' && event.workspace ? event.workspace : undefined,
@@ -182,6 +190,7 @@ export function merge(events: Event[], attention: Attention | null): Entry[] {
             tile: { kind: 'github' },
             headline: `Review requested on ${item.repo.split('/')[1]}#${item.number}`,
             supporting: item.title,
+            verbatim: true,
             href: item.url,
           }),
         ),
@@ -192,6 +201,7 @@ export function merge(events: Event[], attention: Attention | null): Entry[] {
             tile: { kind: 'github' },
             headline: `Issue assigned: ${item.repo.split('/')[1]}#${item.number}`,
             supporting: item.title,
+            verbatim: true,
             href: item.url,
           }),
         ),
