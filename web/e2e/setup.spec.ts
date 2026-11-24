@@ -56,7 +56,7 @@ test.describe('the first run', () => {
   })
 
   test('says the key is made by the first join, and reads the relay', async ({ page }) => {
-    await expect(page.getByText('the key is made when the first machine joins')).toBeVisible()
+    await expect(page.getByText('The key is made when the first machine joins')).toBeVisible()
     await expect(page.getByText(/yantra ssh-identity/)).toHaveCount(0)
     await expect(page.getByText(/no relay yet/)).toBeVisible()
     await expect(page.getByText(/One step runs in a terminal: the join command/)).toBeVisible()

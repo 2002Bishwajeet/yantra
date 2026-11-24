@@ -113,7 +113,7 @@ export function Providers() {
               <Box />
             </Lead>
           }
-          supporting={phone ? 'nothing uses it yet · Later' : 'not set up · for a future agent, nothing uses it yet · Later'}
+          supporting={phone ? 'Nothing uses it yet · Later' : 'Not set up · for a future agent, nothing uses it yet · Later'}
         />
       </Group>
       <Note>

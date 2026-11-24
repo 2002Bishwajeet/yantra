@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { apart, notYours, runsSessions } from './platform'
+import { apart, notYours, osName, runsSessions } from './platform'
 
 const yours = 'yours' as const
 
@@ -21,18 +21,23 @@ describe('what a node is', () => {
   /** Owner, 2026-09-12: phones and tablets open the dashboard, and Windows
    *  is coming. */
   it('says what each other node is, and never hides one', () => {
-    expect(apart({ os: 'iOS', ownership: yours })).toBe('opens the dashboard · runs no session')
-    expect(apart({ os: 'android', ownership: yours })).toBe('opens the dashboard · runs no session')
+    expect(apart({ os: 'iOS', ownership: yours })).toBe('Opens the dashboard · runs no session')
+    expect(apart({ os: 'android', ownership: yours })).toBe('Opens the dashboard · runs no session')
     expect(apart({ os: 'windows', ownership: yours })).toContain('coming soon')
-    expect(apart({ os: 'freebsd', ownership: yours })).toBe('freebsd · runs no session')
-    expect(apart({ os: '', ownership: yours })).toBe('an unnamed system · runs no session')
+    expect(apart({ os: 'freebsd', ownership: yours })).toBe('Freebsd · runs no session')
+    expect(apart({ os: '', ownership: yours })).toBe('An unnamed system · runs no session')
+  })
+
+  it('spells a system as a line shows it', () => {
+    expect(['linux', 'windows', 'android', 'macOS', 'iOS', ''].map(osName)).toEqual(['Linux', 'Windows', 'Android', 'macOS', 'iOS', ''])
   })
 
   it('names why a node is not yours before what system it runs', () => {
     expect(notYours({ ownership: yours })).toBeNull()
-    expect(apart({ os: 'linux', ownership: 'shared' })).toBe('shared from another account · not supported yet')
+    expect(notYours({ ownership: 'shared' })).toBe('shared from another account · not supported yet')
+    expect(apart({ os: 'linux', ownership: 'shared' })).toBe('Shared from another account · not supported yet')
     expect(apart({ os: 'iOS', ownership: 'tagged' })).toBe(
-      'tagged, so the tailnet owns it and not your account · not supported yet',
+      'Tagged, so the tailnet owns it and not your account · not supported yet',
     )
   })
 })

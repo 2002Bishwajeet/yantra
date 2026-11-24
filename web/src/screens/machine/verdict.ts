@@ -179,33 +179,33 @@ export function titleOf(verdict: Verdict, name: string): string {
 export function chipOf(verdict: Verdict, lastSeen: string | null): { state: MarkState; word: string; error: boolean } {
   switch (verdict.kind) {
     case 'asleep':
-      return { state: 'unknown', word: lastSeen ? `asleep · ${lastSeen}` : 'asleep', error: false }
+      return { state: 'unknown', word: lastSeen ? `Asleep · ${lastSeen}` : 'Asleep', error: false }
     case 'expired':
-      return { state: 'failed', word: 'key expired', error: true }
+      return { state: 'failed', word: 'Key expired', error: true }
     case 'refused':
-      return { state: 'failed', word: 'key refused', error: true }
+      return { state: 'failed', word: 'Key refused', error: true }
     case 'unjoined':
-      return { state: 'failed', word: 'not joined', error: true }
+      return { state: 'failed', word: 'Not joined', error: true }
     case 'browser':
-      return { state: 'failed', word: 'browser sign-in', error: true }
+      return { state: 'failed', word: 'Browser sign-in', error: true }
     case 'changed':
-      return { state: 'failed', word: 'host key changed', error: true }
+      return { state: 'failed', word: 'Host key changed', error: true }
     case 'unreachable':
       return { state: 'failed', word: 'ssh failing', error: true }
     case 'installing':
-      return { state: 'running', word: 'installing', error: false }
+      return { state: 'running', word: 'Installing', error: false }
     case 'sudo':
     case 'missing':
       // Y-740: a tool that is there is not missing, and Install is still what fixes it.
       return { state: 'needs', word: `${verdict.missing.length} ${verdict.unrunnable ? 'to install' : 'missing'}`, error: false }
     case 'manual':
       return verdict.ready
-        ? { state: 'done', word: `ready · ${verdict.absent.length} to fix`, error: false }
+        ? { state: 'done', word: `Ready · ${verdict.absent.length} to fix`, error: false }
         : { state: 'needs', word: `${verdict.absent.length} to fix`, error: false }
     case 'ready':
-      return { state: 'done', word: 'ready', error: false }
+      return { state: 'done', word: 'Ready', error: false }
     default:
-      return { state: 'idle', word: 'not checked', error: false }
+      return { state: 'idle', word: 'Not checked', error: false }
   }
 }
 

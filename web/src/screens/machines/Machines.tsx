@@ -5,7 +5,8 @@ import type { Machine } from '@/api'
 import { fromReading } from '@/api/client'
 import { Button } from '@/m3/button/Button'
 import { loaded, useMachines, useReadiness, useSessions, useWorkspaces } from '@/api/hooks'
-import { notYours, runsSessions } from '@/lib/platform'
+import { apart, runsSessions } from '@/lib/platform'
+import { capital } from '@/lib/words'
 import { Card } from '@/m3/card/Card'
 import { Chip } from '@/m3/chip/Chip'
 import { ErrorBoundary } from '@/m3/error-boundary/ErrorBoundary'
@@ -157,8 +158,8 @@ export function Machines() {
                 <ListItem
                   headline={device.name}
                   key={device.name}
-                  supporting={notYours(device)}
-                  trailing={<Chip>{device.ownership}</Chip>}
+                  supporting={apart(device)}
+                  trailing={<Chip>{capital(device.ownership)}</Chip>}
                 />
               ))}
             </List>

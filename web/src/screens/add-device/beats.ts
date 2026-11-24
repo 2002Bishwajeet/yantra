@@ -166,7 +166,7 @@ export const installable = (report: Readiness | null) =>
  *  under it say what to run. */
 export function password(report: Readiness | null): string {
   const tools = missingBasics(report).map((one) => nameOf(one.check))
-  if (tools.length === 0) return 'the install needs your password'
+  if (tools.length === 0) return 'Install needs your password'
   return `${listed(tools)} need${tools.length === 1 ? 's' : ''} your password`
 }
 

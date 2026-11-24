@@ -33,7 +33,7 @@ test.describe('one machine on a busy fleet', () => {
     await expect(filled(ready)).toHaveCount(1)
 
     const about = card(page, 'About')
-    await expect(about.getByText(/linux/).first()).toBeVisible()
+    await expect(about.getByText(/Linux/).first()).toBeVisible()
   })
 
   test('lists only this machine’s workspaces, each with its one verb', async ({ page }) => {
@@ -146,7 +146,7 @@ test.describe('one device that runs no session', () => {
   })
 
   test('shows its state and offers no ssh or sudo', async ({ page }) => {
-    await expect(page.getByText('opens the dashboard · runs no session')).toBeVisible()
+    await expect(page.getByText('Opens the dashboard · runs no session')).toBeVisible()
     for (const name of ['Readiness', 'Sessions', 'Owner terminal']) {
       await expect(card(page, name)).toHaveCount(0)
     }
@@ -313,7 +313,7 @@ test.describe('the problems on a machine page', () => {
     const ready = card(page, 'Readiness')
     await expect(ready.getByRole('heading', { name: 'claude is installed, but this account cannot run it' })).toBeVisible({ timeout: 15_000 })
     const cause = ready.locator('.machine__check', { hasText: 'claude' }).first().locator('.machine__cause')
-    await expect(cause).toHaveText('installed, no access; Install')
+    await expect(cause).toHaveText('Installed, no access; Install')
     // Beside the Fix button the line is at its narrowest, and it is still whole.
     const [client, scroll] = await cause.evaluate((el) => [el.clientWidth, el.scrollWidth])
     expect(scroll).toBeLessThanOrEqual(client)

@@ -49,7 +49,7 @@ describe('the machine page’s verdict', () => {
     const v = verdict(all({ tmux: 'absent' }), { machine: machine({ online: false }) })
     expect(v).toEqual({ kind: 'asleep' })
     expect(titleOf(v, 'pi')).toBe('pi is asleep')
-    expect(chipOf(v, '3h')).toEqual({ state: 'unknown', word: 'asleep · 3h', error: false })
+    expect(chipOf(v, '3h')).toEqual({ state: 'unknown', word: 'Asleep · 3h', error: false })
   })
 
   it('reads a Tailscale browser check as its own failure', () => {
@@ -57,7 +57,7 @@ describe('the machine page’s verdict', () => {
     const v = verdict(all({ reachable: 'absent' }, { reachable: detail }))
     expect(v).toEqual({ kind: 'browser', detail })
     expect(titleOf(v, 'pi')).toBe('pi needs a browser sign-in')
-    expect(chipOf(v, null)).toEqual({ state: 'failed', word: 'browser sign-in', error: true })
+    expect(chipOf(v, null)).toEqual({ state: 'failed', word: 'Browser sign-in', error: true })
     expect(startable(v)).toBe(false)
   })
 
@@ -72,7 +72,7 @@ describe('the machine page’s verdict', () => {
     const v = verdict(all({ reachable: 'absent' }, { reachable: CHANGED_KEY }))
     expect(v).toEqual({ kind: 'changed', detail: CHANGED_KEY })
     expect(titleOf(v, 'pi')).toBe('pi’s host key changed')
-    expect(chipOf(v, null)).toEqual({ state: 'failed', word: 'host key changed', error: true })
+    expect(chipOf(v, null)).toEqual({ state: 'failed', word: 'Host key changed', error: true })
     expect(startable(v)).toBe(false)
     expect(sessionsFailure(v, `${SSH} No route to host`)).toBe(v)
     expect(sessionsFailure({ kind: 'pending' }, `${SSH} Host key verification failed.`).kind).toBe('changed')
@@ -127,7 +127,7 @@ describe('the machine page’s verdict', () => {
   it('tells a refused key from ssh that fails for another reason', () => {
     const refused = verdict(all({ reachable: 'absent' }, { reachable: 'Permission denied (publickey).' }))
     expect(refused.kind).toBe('refused')
-    expect(chipOf(refused, null)).toEqual({ state: 'failed', word: 'key refused', error: true })
+    expect(chipOf(refused, null)).toEqual({ state: 'failed', word: 'Key refused', error: true })
     expect(verdict(all({ reachable: 'absent' }, { reachable: 'No route to host' })).kind).toBe('unreachable')
   })
 
@@ -137,7 +137,7 @@ describe('the machine page’s verdict', () => {
     const unjoined = verdict(all({ reachable: 'absent' }, { reachable: 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).' }))
     expect(unjoined).toEqual({ kind: 'unjoined', detail: 'the ssh config here names no account for cachyos-g14, so ssh tried `yantra` — run the join command on cachyos-g14 (Add a device, or `yantra join-script`) · Permission denied (publickey).' })
     expect(titleOf(unjoined, 'cachyos-g14')).toBe('cachyos-g14 has not joined')
-    expect(chipOf(unjoined, null)).toEqual({ state: 'failed', word: 'not joined', error: true })
+    expect(chipOf(unjoined, null)).toEqual({ state: 'failed', word: 'Not joined', error: true })
   })
 
   it('names the missing basics and offers no session', () => {
@@ -218,7 +218,7 @@ describe('the machine page’s verdict', () => {
   it('says ready beside the optional fixes, and not while a session check is open', () => {
     const optional = verdict(all({ 'provider-auth': 'absent', hooks: 'absent' }))
     expect(optional).toMatchObject({ kind: 'manual', ready: true })
-    expect(chipOf(optional, null)).toEqual({ state: 'done', word: 'ready · 2 to fix', error: false })
+    expect(chipOf(optional, null)).toEqual({ state: 'done', word: 'Ready · 2 to fix', error: false })
 
     const held = verdict(all({ 'login-session': 'absent', hooks: 'absent' }))
     expect(held).toMatchObject({ kind: 'manual', ready: false })
@@ -283,7 +283,7 @@ describe('the machine page’s verdict', () => {
     const checks = ok.looked === 'ok' ? ok.data.checks : []
     const v = verdict(report([...checks, check('mic', 'absent', 'not installed — the microphone is optional')]))
     expect(v.kind).toBe('ready')
-    expect(chipOf(v, null).word).toBe('ready')
+    expect(chipOf(v, null).word).toBe('Ready')
   })
 
   /** ADR-0031 §2: with every basic there, the step sudo stopped is linger. */
@@ -342,7 +342,7 @@ describe('the machine page’s verdict', () => {
   it('is ready when nothing is absent', () => {
     const v = verdict(all())
     expect(titleOf(v, 'pi')).toBe('Ready for sessions')
-    expect(chipOf(v, null)).toEqual({ state: 'done', word: 'ready', error: false })
+    expect(chipOf(v, null)).toEqual({ state: 'done', word: 'Ready', error: false })
   })
 
   it('sorts missing lines first', () => {

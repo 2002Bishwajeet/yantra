@@ -314,7 +314,7 @@ describe('beat 4, ready', () => {
 
   it('names each tool that needs the password', () => {
     expect(password(report(tools('absent', 'absent')))).toBe('tmux and claude need your password')
-    expect(password(whole)).toBe('the install needs your password')
+    expect(password(whole)).toBe('Install needs your password')
   })
 
   it('is stuck, with the error, when the install did not start or the ask failed', () => {

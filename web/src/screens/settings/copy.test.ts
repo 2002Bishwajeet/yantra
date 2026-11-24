@@ -1,6 +1,7 @@
 /**
  * Y-763: copy that named the plumbing. Reading the sources is the only check
  * that sees every string at once, including those on screens a test never opens.
+ * It cannot read a line that code puts together: `test/capitals.ts` reads those as each test draws them.
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -24,8 +25,11 @@ const FILES = [
   'screens/session-terminal/SessionTerminal.tsx',
   'screens/usage/Usage.tsx',
   'screens/repair/Repair.tsx',
+  'screens/setup/steps.ts',
   'api/client.ts',
   'lib/github.ts',
+  'lib/platform.ts',
+  'lib/checks.ts',
 ]
 
 const PHRASES = [
@@ -49,13 +53,8 @@ describe('the copy that named the plumbing', () => {
     for (const phrase of PHRASES) expect(text, phrase).not.toContain(phrase)
   })
 
-  it.each(FILES)('%s starts each supporting line, blurb, reason and note with a capital', (file) => {
+  it.each(FILES)('%s starts each written supporting line, blurb, reason and note with a capital', (file) => {
     const lower = /(?:supporting=(?:["']|\{`)|blurb: ['"`]|why=["']|<Note>)[a-z]+[ ·]/g
     expect(read(file).match(lower) ?? []).toEqual([])
-  })
-
-  it.each(FILES)('%s returns no computed line that starts in lower case', (file) => {
-    const lower = /^\s*(?:return|if \(.*\) return|case .*: return) [`'"][a-z]+ [a-z]/
-    expect(read(file).split('\n').filter((line) => lower.test(line))).toEqual([])
   })
 })

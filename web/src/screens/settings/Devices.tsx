@@ -57,7 +57,7 @@ function Session(props: { session: DeviceSession }) {
         }
         supporting={
           <>
-            {session.this_device ? 'this device · ' : ''}with {session.passkey} · ends <Num>{when(session.ends)}</Num>
+            {session.this_device ? 'This device · with' : 'With'} {session.passkey} · ends <Num>{when(session.ends)}</Num>
           </>
         }
         trailing={
@@ -85,7 +85,7 @@ function Passkey(props: { name: string; made: number }) {
         }
         supporting={
           <>
-            enrolled <Num>{when(made)}</Num>
+            Enrolled <Num>{when(made)}</Num>
           </>
         }
         trailing={

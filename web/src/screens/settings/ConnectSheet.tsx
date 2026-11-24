@@ -16,9 +16,9 @@ import { Sheet } from './Sheet'
 /** What ADR-0023 asks for, and nothing more. The daemon's own list; the
  *  page repeats it so the person sees it before typing the code. */
 const SCOPES = [
-  ['repo', 'private repositories'],
-  ['read:org', 'your organisations'],
-  ['notifications', 'reviews and issues'],
+  ['repo', 'Private repositories'],
+  ['read:org', 'Your organisations'],
+  ['notifications', 'Reviews and issues'],
 ] as const
 
 /** The device flow (SettingsProviderConnect). One write starts it; the daemon

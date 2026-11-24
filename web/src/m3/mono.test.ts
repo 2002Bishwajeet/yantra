@@ -89,7 +89,7 @@ describe('mono is for code', () => {
   it('sets a date in Num', () => {
     const devices = readFileSync(join(src, 'screens/settings/Devices.tsx'), 'utf8')
     expect(devices).toMatch(/ends <Num>\{when\(session\.ends\)\}<\/Num>/)
-    expect(devices).toMatch(/enrolled <Num>\{when\(made\)\}<\/Num>/)
+    expect(devices).toMatch(/Enrolled <Num>\{when\(made\)\}<\/Num>/)
     expect(monoBodies('<Mono>{day(d)}</Mono>').some((b) => NUMBER_CALLS.test(b))).toBe(true)
   })
 

@@ -42,7 +42,7 @@ describe('Providers', () => {
     expect(await screen.findByText('Connected as 2002Bishwajeet')).toBeTruthy()
     expect(screen.queryByText(/repositories, reviews, issues/)).toBeNull()
     expect(await screen.findByText(/^Signed in on 0 of \d+ machines$/)).toBeTruthy()
-    expect(screen.getByText('nothing uses it yet · Later')).toBeTruthy()
+    expect(screen.getByText('Nothing uses it yet · Later')).toBeTruthy()
     expect(screen.queryByText(/for a future agent/)).toBeNull()
   })
 

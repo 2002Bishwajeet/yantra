@@ -108,7 +108,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
   fleet: { 'New session': url('/new'), 'Sign in': url('/settings/providers') },
   machines: {
     Open: url('/m/yantra-box'),
-    Check: text('ready'),
+    Check: text('Ready'),
     'Add a device': url('/machines/add'),
   },
   ...Object.fromEntries(MACHINES.map((name) => [`machine-${name}`, MACHINE_PAGE])),

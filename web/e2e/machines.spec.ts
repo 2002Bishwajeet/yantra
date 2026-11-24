@@ -19,14 +19,14 @@ test.describe('the machines on a busy fleet', () => {
 
     const good = card(page, 'cachyos-g14')
     // Every basic is present, so the chip reads the verdict (D7 §3.3).
-    await expect(good.getByText('ready')).toBeVisible()
+    await expect(good.getByText('Ready')).toBeVisible()
     await expect(good.getByText('10 of 10')).toBeVisible()
     await expect(good.getByRole('button')).toHaveCount(0)
 
     const short = card(page, 'pi-5')
     // The check name table, never a raw id (D7 §3.5).
     await expect(short.getByText('claude', { exact: true })).toBeVisible()
-    await expect(short.getByText('not found')).toBeVisible()
+    await expect(short.getByText('Not found')).toBeVisible()
     await expect(short.getByText('6 of 9 · 2 failing · 1 unknown')).toBeVisible()
     // `git` is not in pi-5's report at all, so it counts as missing too.
     await expect(short.getByText('2 missing')).toBeVisible()
@@ -35,7 +35,7 @@ test.describe('the machines on a busy fleet', () => {
     const gone = card(page, 'thinkpad')
     // The tailnet says thinkpad is off: asleep, not failed (D7 §3.3).
     // Finding 128: the board dates the chip `7 Jul`, not `2026-07-07`.
-    await expect(gone.getByText('asleep · 7 Jul', { exact: true })).toBeVisible()
+    await expect(gone.getByText('Asleep · 7 Jul', { exact: true })).toBeVisible()
     // ssh failed too, so one sentence stands in for a tally nobody could ask (Y-714).
     await expect(gone.getByText(/can’t reach thinkpad over ssh/)).toBeVisible()
     await expect(gone.getByRole('button', { name: /install|copy|again/i })).toHaveCount(0)
@@ -153,14 +153,14 @@ test.describe('the machines list with devices that open the dashboard', () => {
     await expect(card(page, 'missing-mac').getByRole('button', { name: 'Install' })).toBeVisible()
 
     const refused = card(page, 'refused-box')
-    await expect(refused.getByText('key refused')).toBeVisible()
+    await expect(refused.getByText('Key refused')).toBeVisible()
     await expect(refused.getByRole('button', { name: 'Copy join command' })).toBeVisible()
     await expect(refused.getByRole('button', { name: 'Install' })).toHaveCount(0)
   })
 
   test('is asleep, not failed, and offers nothing to press', async ({ page }) => {
     const asleep = card(page, 'asleep-laptop')
-    await expect(asleep.getByText(/^asleep · /)).toBeVisible()
+    await expect(asleep.getByText(/^Asleep · /)).toBeVisible()
     await expect(asleep.getByRole('button', { name: /install|copy|again/i })).toHaveCount(0)
   })
 
@@ -196,11 +196,11 @@ test.describe('the problems on a machine card', () => {
     await expect(rows.first()).toBeVisible()
     // The phone hides the row's word, so the cause itself says installed and names Install.
     await expect(closed.locator('.machines__detail')).toBeVisible()
-    await expect(closed.locator('.machines__detail')).toHaveText('installed, no access; Install')
+    await expect(closed.locator('.machines__detail')).toHaveText('Installed, no access; Install')
     await expect(closed.getByText('1 to install')).toBeVisible()
     await expect(closed.getByRole('button', { name: 'Install' })).toBeVisible()
     await expect(closed).not.toContainText(/missing|not found/)
-    await expect(mac.getByText('installed; update it')).toBeVisible()
+    await expect(mac.getByText('Installed; update it')).toBeVisible()
     // Every tool on macbook is installed: gh, the hooks and sudo are faults, not gaps.
     await expect(mac).not.toContainText(/missing|not found/)
     for (const row of [...(await rows.all()), ...(await closed.locator('.machines__check').all())]) {

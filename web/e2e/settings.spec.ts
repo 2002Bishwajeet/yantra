@@ -364,7 +364,7 @@ test.describe('settings · Providers', () => {
     await page.goto('/settings/providers')
     await opened(page, 'Providers', size)
     await expect(page.getByText('Connected as 2002Bishwajeet')).toBeVisible()
-    await expect(page.getByText('nothing uses it yet · Later')).toBeVisible()
+    await expect(page.getByText('Nothing uses it yet · Later')).toBeVisible()
     await expect(page.getByText(/repositories, reviews, issues/)).toHaveCount(0)
     await expect(page.getByText(/for a future agent/)).toHaveCount(0)
   })

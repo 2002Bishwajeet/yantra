@@ -167,7 +167,7 @@ describe("a machine's line", () => {
   it('is not ready while a check a session needs is missing, and says whether Install fixes it', () => {
     expect(line(machine(), report(needs({ terminfo: 'absent' })), null)).toMatchObject({
       kind: 'missing',
-      words: 'missing terminfo',
+      words: 'Missing terminfo',
       installable: false,
     })
   })
@@ -178,7 +178,7 @@ describe("a machine's line", () => {
       kind: 'missing',
       present: 5,
       total: 8,
-      words: 'missing tmux · could not ask about claude signed in',
+      words: 'Missing tmux · could not ask about claude signed in',
       installable: true,
     })
   })
@@ -197,7 +197,7 @@ describe('what holds a machine back', () => {
 
   it('still offers Install on that line', () => {
     const one = line(machine(), report(needs({ 'agent-cli': 'absent' }).map((each) => (each.check === 'agent-cli' ? closed : each))), null)
-    expect(one).toMatchObject({ kind: 'missing', words: 'this account cannot run claude', installable: true })
+    expect(one).toMatchObject({ kind: 'missing', words: 'This account cannot run claude', installable: true })
   })
 })
 

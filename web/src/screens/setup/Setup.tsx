@@ -6,7 +6,7 @@ import { fromReading } from '@/api/client'
 import { asApiError } from '@/api/errors'
 import { useRecheckReadiness } from '@/api/mutations'
 import { forgetHostKey, joinFixes, reachWords } from '@/lib/checks'
-import { apart, notYours, platformOf } from '@/lib/platform'
+import { apart, platformOf } from '@/lib/platform'
 import { ago, seen } from '@/lib/time'
 import { Button } from '@/m3/button/Button'
 import { Copyable } from '@/m3/copyable/Copyable'
@@ -226,7 +226,7 @@ function MachineLine(props: {
     return () => running(name, false)
   }, [name, install.running, running])
 
-  const words = view === 'installing' ? `installing on ${name}…` : view === 'blocked' ? password(report) : wordsOf(said, name)
+  const words = view === 'installing' ? `Installing on ${name}…` : view === 'blocked' ? password(report) : wordsOf(said, name)
 
   const check = (label: string) => (
     <Button disabled={recheck.isPending} onClick={() => recheck.mutate(name)} variant="text">
@@ -278,7 +278,7 @@ function MachineLine(props: {
         ) : null}
         {bad(said) && joinFixes(said.kind) ? join : null}
         {bad(said) ? <SshSaid detail={said.detail} quiet /> : null}
-        {view === 'installing' ? <Track label={`installing on ${name}`} /> : null}
+        {view === 'installing' ? <Track label={`Installing on ${name}`} /> : null}
         {view === 'blocked'
           ? stop?.commands.map((command) => <Copyable key={command} text={command} what={`the command for ${name}`} />)
           : null}
@@ -431,7 +431,7 @@ export function Setup() {
                 </>
               ) : (
                 <Text scale="body-small" tone="variant">
-                  the key is made when the first machine joins
+                  The key is made when the first machine joins
                 </Text>
               )}
               {machines.looked === 'failed' ? (
@@ -447,7 +447,7 @@ export function Setup() {
                       <li className="setup__line" data-kind="apart" key={one.name}>
                         <span className="setup__machine">{one.name}</span>
                         <Text className="setup__said" scale="body-small" tone="variant">
-                          {notYours(one)}
+                          {apart(one)}
                         </Text>
                       </li>
                     ))}
