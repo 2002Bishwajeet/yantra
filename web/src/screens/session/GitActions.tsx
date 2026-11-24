@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ArrowUpRight, BookMarked, ChevronDown, GitCommitHorizontal, GitMerge, GitPullRequest, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { ArrowUpRight, BookMarked, Check, ChevronDown, GitCommitHorizontal, GitMerge, GitPullRequest, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { useCommit, useDraftMessage, useMergePr, useOpenPr, usePendingPr, usePush, useRemoveThread } from '@/api/mutations'
 import type { ThreadPr, ThreadPrPending } from '@/api'
 import { Button } from '@/m3/button/Button'
+import { useFormFactor } from '@/shell/formFactor'
 import { useRegisterLoopCommands } from '@/shell/loopCommands'
 import { Dialog, DialogClose, DialogPopup } from '@/m3/dialog/Dialog'
 import { EmptyState } from '@/m3/empty-state/EmptyState'
@@ -91,6 +92,7 @@ export function GitActions(props: {
   refreshDiff?: () => void
 }) {
   const { workspace, thread, busy, diffs, listed, refresh, onRemoved, readOnly, gone, refreshDiff } = props
+  const phone = useFormFactor() === 'phone'
   const whyId = useId()
   const menuWhyId = useId()
   const [note, setNote] = useState('')
@@ -260,6 +262,8 @@ export function GitActions(props: {
   const busyWord = (verb: GitVerb, label: string) =>
     verb === 'push' && push.isPending ? 'Pushing…' : verb === 'pr' && openPr.isPending ? 'Opening…' : label
   const verb = quick.kind === 'commit' || quick.kind === 'push' || quick.kind === 'pr' ? quick.kind : null
+  // A hint that reads Commit is the disabled Commit and keeps its glyph; Up to date is a tick.
+  const glyph = verb ? ICON[verb] : quick.kind === 'hint' ? (quick.label === 'Commit' ? ICON.commit : <Check />) : null
   const pending = verb !== null && busyWord(verb, quick.label) !== quick.label
 
   return (
@@ -375,13 +379,36 @@ export function GitActions(props: {
       </Dialog>
       <div className="git__split">
         {quick.kind === 'open_pr_link' && pr ? (
-          <Button
-            icon={<GitPullRequest />}
-            render={<a href={pr.url} rel="noopener noreferrer" target="_blank" />}
-            variant="tonal"
+          phone ? (
+            <IconButton
+              label={quick.label}
+              role="link"
+              render={<a href={pr.url} rel="noopener noreferrer" target="_blank" />}
+              variant="tonal"
+            >
+              {ICON.pr}
+            </IconButton>
+          ) : (
+            <Button
+              icon={<GitPullRequest />}
+              render={<a href={pr.url} rel="noopener noreferrer" target="_blank" />}
+              variant="tonal"
+            >
+              {quick.label}
+            </Button>
+          )
+        ) : glyph && phone ? (
+          // Y-757: the labelled verb took the thread picker's room on a phone, so the verb is its glyph and the label its name.
+          <IconButton
+            aria-describedby={quick.kind === 'hint' ? whyId : undefined}
+            disabled={quick.disabled || pending}
+            label={verb ? busyWord(verb, quick.label) : quick.label}
+            onClick={() => verb && run(verb, quickButton.current)}
+            ref={quickButton}
+            variant={quick.kind === 'hint' ? 'standard' : 'tonal'}
           >
-            {quick.label}
-          </Button>
+            {glyph}
+          </IconButton>
         ) : (
           <Button
             aria-describedby={quick.kind === 'hint' ? whyId : undefined}

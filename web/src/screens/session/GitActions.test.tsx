@@ -124,6 +124,57 @@ describe('the quick action', () => {
   })
 })
 
+/** Y-757: the width the form factor reads. A phone has no room for a labelled verb beside the thread picker. */
+const media = (wide: boolean) =>
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: wide && query === '(min-width: 1240px)',
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
+
+describe('the quick action on a phone', () => {
+  it('is an icon button named by its label, so the label takes no room', () => {
+    media(false)
+    open()
+    const button = quick('Commit')
+    expect(button.querySelector('.m3-icon-button__icon svg')).not.toBeNull()
+    expect(button.classList.contains('m3-icon-button')).toBe(true)
+    expect(button.textContent).toBe('Commit')
+  })
+
+  it('keeps the reason a disabled Commit gives as its description', () => {
+    media(false)
+    open({ thread: null })
+    const button = quick('Commit') as HTMLButtonElement
+    expect(button.classList.contains('m3-icon-button')).toBe(true)
+    expect(button.disabled).toBe(true)
+    expect(document.getElementById(button.getAttribute('aria-describedby')!)?.textContent).toMatch(/no thread yet/)
+  })
+
+  it('draws Up to date as a tick named by its words', () => {
+    media(false)
+    open({ diffs: 0 })
+    expect(quick('Up to date').classList.contains('m3-icon-button')).toBe(true)
+  })
+
+  it('draws the PR as an icon link named by its number', () => {
+    media(false)
+    open({ diffs: 0, listed: { state: 'open', ...openPr } })
+    const link = screen.getByRole('link', { name: 'PR #7' })
+    expect(link.classList.contains('m3-icon-button')).toBe(true)
+    expect(link.getAttribute('href')).toBe(openPr.url)
+  })
+
+  it('keeps its text on the desktop', () => {
+    media(true)
+    open()
+    expect(quick('Commit').classList.contains('m3-icon-button')).toBe(false)
+    expect(quick('Commit').textContent).toBe('Commit')
+    expect(quick('Commit').classList.contains('m3-button')).toBe(true)
+  })
+})
+
 describe('the menu', () => {
   it('holds Commit, Push and Open PR, on when the thread is idle', async () => {
     open({ diffs: 0 })

@@ -1,6 +1,6 @@
 import { axe, expect, keyboardWalk, scenario, screenshot, test } from './lib/test'
 import { route } from './lib/routes'
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 
 /** `/w/{name}` (Y-348) on the `busy` scenario. The Chat tab streams over the
  *  chat socket (Y-356, ADR-0026), and the fixture replays what `yantrad`
@@ -9,6 +9,17 @@ import type { Page } from '@playwright/test'
 const NAME = 'yantra-web'
 const PATH = `/w/${NAME}`
 const THREAD = '1a2b3c4d'
+
+/** The menu opens the way a phone opens it: WebKit has touch, so a tap, and Chromium clicks. */
+async function openMore(page: Page, within: Locator = page.locator('.m3-top-app-bar')) {
+  const more = within.getByRole('button', { name: 'More actions' })
+  if (test.info().project.name === 'phone-webkit') await more.tap()
+  else await more.click()
+  const menu = page.getByRole('menu')
+  await expect(menu).toBeVisible()
+  await expect(menu).toBeInViewport()
+  return menu
+}
 
 const views = (page: Page) => page.getByRole('navigation', { name: 'Views' })
 
@@ -44,6 +55,14 @@ async function paneSettled(page: Page) {
     .toBe(true)
 }
 
+/** True when the picker's title is cut by its ellipsis. */
+const clipped = (page: Page) =>
+  page.locator('.chat__title-text').evaluate((el) => {
+    const bar = el.closest('.chat__header')!
+    const widths = [...bar.children].map((one) => `${one.className || one.tagName}:${Math.round(one.getBoundingClientRect().width)}`)
+    return el.scrollWidth > el.clientWidth ? `${el.textContent} ${el.scrollWidth}>${el.clientWidth} in ${widths.join(' ')}` : false
+  })
+
 test.describe('the session screen, chat first', () => {
   test.beforeEach(async ({ page }) => {
     await scenario(page, 'busy')
@@ -61,8 +80,8 @@ test.describe('the session screen, chat first', () => {
     // The header, because the reason Resume gives for being off names the
     // state too, and that reason is not on screen.
     if (size === 'phone') {
-      await page.getByRole('button', { name: 'More actions' }).click()
-      await expect(page.getByRole('menu')).toContainText('waiting for trust')
+      const menu = await openMore(page)
+      await expect(menu.locator('.session__status').getByText('waiting for trust')).toBeVisible()
     } else {
       await expect(page.locator('.m3-page-header')).toContainText('waiting for trust')
     }
@@ -211,17 +230,32 @@ test.describe('the session screen, chat first', () => {
     test.skip(size !== 'phone', 'the app bar slot is the phone board')
     const bar = page.locator('.m3-top-app-bar')
     await expect(bar.getByRole('button', { name: /^(Stop|Resume)$/ })).toHaveCount(0)
-    await bar.getByRole('button', { name: 'More actions' }).click()
-    await expect(page.getByRole('menu')).toContainText('waiting for trust')
+    const menu = await openMore(page)
+    await expect(menu.locator('.session__status').getByText('waiting for trust')).toBeVisible()
+    await expect(menu.getByRole('menuitem', { name: /^Stop/ })).toBeVisible()
+    await screenshot(page, 'session-more-menu', 'busy', size)
     await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toBeHidden()
 
     await page.goto(`${PATH}?thread=${THREAD}`)
     const picker = await page.getByRole('button', { name: /^Threads,/ }).boundingBox()
     const split = await page.locator('.git__split').boundingBox()
     expect(Math.abs(picker!.y - split!.y)).toBeLessThan(8)
+    expect(await clipped(page), 'the picker label is cut').toBe(false)
     // The turns sit at the foot of the region (justify-end), so the region's top is where the thread begins.
     const thread = await page.getByRole('region', { name: 'Conversation' }).boundingBox()
     expect(thread!.y).toBeLessThan(page.viewportSize()!.height * 0.4)
+  })
+
+  /** Y-757: a new thread and a titled one both keep the whole picker label beside the git action. */
+  test('does not clip the thread picker at 390 px', async ({ page, size }) => {
+    test.skip(size !== 'phone', 'the one-row header is the phone board')
+    await page.goto(PATH)
+    await expect(page.getByRole('button', { name: /^Threads, New thread/ })).toBeVisible()
+    expect(await clipped(page), 'the picker label is cut').toBe(false)
+    const picker = await page.getByRole('button', { name: /^Threads,/ }).boundingBox()
+    const split = await page.locator('.git__split').boundingBox()
+    expect(Math.abs(picker!.y - split!.y)).toBeLessThan(8)
   })
 
   /** **Finding 120.** `yantra-web` is waiting for trust, so Resume is off and

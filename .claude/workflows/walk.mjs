@@ -1,6 +1,6 @@
 // Y-660: walk.sh runs this in the Playwright image, from web/, so the dashboard's own @playwright/test is used.
 import { createRequire } from 'node:module'
-import { appendFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 
 const [base, out, ...routes] = process.argv.slice(2)
 const { chromium, webkit, devices } = createRequire(`${process.cwd()}/package.json`)('@playwright/test')
@@ -158,10 +158,23 @@ async function workspaceScene(page, name, file, menu) {
   const more = page.getByRole('button', { name: 'More actions' })
   if (phone) await more.tap()
   else await more.click()
-  await page.getByRole('menu').waitFor()
+  // The picture is of a menu that is on screen: Delete is its last item, and a menu that Base UI holds closed
+  // or off the viewport never shows it. A tap that opened and shut the menu fails here, not in the PR.
+  const last = page.getByRole('menuitem', { name: 'Delete' })
+  await last.waitFor({ state: 'visible' })
+  const box = await last.boundingBox()
+  const { width, height } = page.viewportSize()
+  if (!box || box.x < 0 || box.y < 0 || box.x + box.width > width || box.y + box.height > height) {
+    errors.push(`${name} workspace scene: the menu's Delete is outside the screen at ${JSON.stringify(box)}`)
+    return
+  }
   await page.waitForTimeout(500)
   // The phone's picture ends in -1, as its other screens do, so walk.sh publish puts it in the PR's table.
+  const shot = `${phone ? `${menu}-1` : menu}.png`
   await snap(page, phone ? `${menu}-1` : menu, false)
+  if (readFileSync(shot).equals(readFileSync(`${file}.png`))) {
+    errors.push(`${name} workspace scene: menu shot equals the closed screen`)
+  }
   await page.keyboard.press('Escape')
 }
 for (const [name, type, options] of looks) {

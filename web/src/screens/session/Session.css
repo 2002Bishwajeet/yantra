@@ -75,12 +75,22 @@
 /* Y-757: on the phone the picker, the two toggles and the git split share one row. The title takes what is
    left and truncates; a git failure (.git__fail, a full-width basis) still wraps below, because it is an error. */
 [data-shell="phone"] .session__chatbar .chat__header {
-  gap: 4px;
+  gap: 2px;
 }
 
 [data-shell="phone"] .session__chatbar .chat__crumbs {
   flex: 1 1 0;
   min-width: 0;
+}
+
+[data-shell="phone"] .session__chatbar .chat__title {
+  gap: 2px;
+  padding: 0 4px 0 8px;
+}
+
+[data-shell="phone"] .session__chatbar .chat__title svg {
+  width: 18px;
+  height: 18px;
 }
 
 [data-shell="phone"] .session__chatbar .chat__header > :not(.chat__crumbs, .git__fail) {
@@ -682,6 +692,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Y-757: empty, it is a live region and nothing to see, so on a phone it takes no gap in the one-row header. */
+[data-shell="phone"] .chat__added:empty {
+  position: absolute;
 }
 
 .chat__added {
