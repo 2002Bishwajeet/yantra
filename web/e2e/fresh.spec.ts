@@ -205,6 +205,10 @@ function lookup(table: Record<string, Expect>, name: string) {
 async function press(page: Page, el: Locator, rule: Rule) {
   if (rule.kind === 'disabled') return expect(el).toBeDisabled()
   if (rule.kind === 'url' && rule.value.startsWith('http')) return expect(el).toHaveAttribute('href', rule.value)
+  // Read the card before the press: the pressed button may leave the page, and `el` counts by position.
+  const card = rule.within
+    ? await el.evaluate((one, cls) => one.closest(`.${cls}`)?.getAttribute('aria-labelledby') ?? null, rule.within)
+    : null
   await el.click()
   switch (rule.kind) {
     case 'url':
@@ -218,9 +222,7 @@ async function press(page: Page, el: Locator, rule: Rule) {
     case 'value':
       return expect(page.getByRole('textbox', { name: rule.value, exact: true })).not.toHaveValue('')
     case 'text':
-      const scope = rule.within
-        ? el.locator(`xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ${rule.within} ')][1]`)
-        : page
+      const scope = card ? page.locator(`.${rule.within}[aria-labelledby="${card}"]`) : page
       await expect(scope.getByText(rule.value, { exact: true }).first()).toBeVisible()
       if (rule.gone) await expect(scope.getByText(rule.gone, { exact: true })).toHaveCount(0)
   }
