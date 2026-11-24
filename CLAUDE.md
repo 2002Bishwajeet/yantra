@@ -314,7 +314,10 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
 - **It looks at the real box first.** Each run starts by reading the live dashboard on the box, the
   pages the owner uses, after the box has the nightly. It files a row for each wrong state it sees,
   such as a stale check, a missing chip or wrong copy. A fixture or a laptop copy of `yantrad` does not
-  replace this look (owner, 2026-11-24). It needs a read-only session ([Y-835](tracker.md#3-task-board)); until then the run says it skipped the look.
+  replace this look (owner, 2026-11-24). [`look.sh`](.claude/workflows/look.sh) reads the box with
+  the owner's read-only session in `~/.config/yantra/walk-session` (Y-835). It opens pages and
+  presses nothing. With no session, or one that has ended, the run says it skipped the look and asks
+  the owner to make one in Settings, Devices.
 - **It runs up to three rows at once.** Rows that edit the same file do not run at the same time.
   CI tests only what a row changed: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607).
 - **It keeps rows apart and small rows short.** A row does not edit `tracker.md`, the session log,

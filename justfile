@@ -20,7 +20,7 @@ default:
 check: fmt-check lint test deny no-node pinned agents
 
 # Everything CI runs — the workflow calls these same recipes, so they cannot drift.
-ci: check appliance shellcheck
+ci: check appliance shellcheck look-test
 
 fmt:
     cargo fmt --all
@@ -102,6 +102,11 @@ appliance target=appliance_target:
 # Lint the shell scripts users pipe into sh; no --severity, so any finding fails.
 shellcheck:
     shellcheck install.sh crates/yantra-core/src/join.sh crates/yantra-core/src/keep.sh crates/yantra-core/src/login_server.sh
+
+# Y-835: the build loop's look at the box reaches its browser from a checkout that has no packages.
+# The test puts stand-ins for the network, the installer and the container on PATH, so it runs anywhere.
+look-test:
+    bash .claude/workflows/look.test.sh
 
 # R-24's assertion, and it is a negative one: no recipe the Rust gate runs may
 # turn `embed-dashboard` on, pass `--all-features`, or reach npm. A green build

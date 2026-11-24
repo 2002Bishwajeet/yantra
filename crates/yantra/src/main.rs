@@ -514,6 +514,12 @@ enum SessionAction {
         /// The session's id, as `yantra passkey list` shows it
         id: String,
     },
+    /// Make a session that only reads, for the build loop's look at this
+    /// box. Its token shows once
+    Read {
+        /// A name for it, as `yantra passkey list` will show it
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -863,6 +869,13 @@ async fn main() -> ExitCode {
             "DELETE",
             &format!("/api/sessions/{}", passkey::segment(&id)),
             |_| Ok(format!("signed out session {id}")),
+        ),
+        Some(Command::Session {
+            action: SessionAction::Read { name },
+        }) => hub_call(
+            "POST",
+            &format!("/api/sessions/read/{}", passkey::segment(&name)),
+            passkey::read_only,
         ),
         Some(Command::Room {
             action: RoomAction::Resume { room, daemon },
@@ -3807,6 +3820,11 @@ mod tests {
             Ok(Some(Command::Session { action: SessionAction::Revoke { id } })) if id == "ab12"
         ));
         assert!(Cli::try_parse_from(["yantra", "session", "revoke"]).is_err());
+        assert!(matches!(
+            Cli::try_parse_from(["yantra", "session", "read", "walk"]).map(|cli| cli.command),
+            Ok(Some(Command::Session { action: SessionAction::Read { name } })) if name == "walk"
+        ));
+        assert!(Cli::try_parse_from(["yantra", "session", "read"]).is_err());
         let parsed = Cli::try_parse_from(["yantra", "mcp", "--daemon", "http://x:7717"])
             .expect("`mcp --daemon <url>` parses");
         assert!(matches!(

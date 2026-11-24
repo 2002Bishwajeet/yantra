@@ -1052,6 +1052,186 @@ mod tests {
         );
     }
 
+    /// [`signed_in`], and the cookie and id of a read-only session that the
+    /// phone's session made through the route.
+    async fn with_a_read_only_session() -> (Router, String, String, String) {
+        let (passkeys, full) = signed_in();
+        let app = gated(passkeys);
+        let (status, headers, body) = answered(
+            &app,
+            PHONE,
+            "POST",
+            "/api/sessions/read/walk",
+            &[("cookie", &full)],
+            None,
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert!(
+            !headers.contains_key("set-cookie"),
+            "a cookie would replace the owner's own session"
+        );
+        let made: serde_json::Value = serde_json::from_str(&body).expect("JSON");
+        assert_eq!(made["session"]["read_only"], true, "{body}");
+        assert_eq!(made["session"]["device"], "walk", "{body}");
+        let token = made["token"].as_str().expect("a token");
+        let id = made["session"]["id"].as_str().expect("an id").to_owned();
+        (app, full, format!("{}={token}", passkey::COOKIE), id)
+    }
+
+    const READ_ONLY: &str = "this session is read-only";
+
+    /// The 2026-11-24 note on ADR-0044: a read-only session reads what a full
+    /// one reads, from the owner's own node, until it is revoked.
+    #[tokio::test]
+    async fn a_read_only_session_reads_from_the_owners_node_until_it_is_revoked() {
+        let (app, full, reader, id) = with_a_read_only_session().await;
+        let ok = axum::http::StatusCode::OK;
+
+        for path in [
+            "/api/workspaces",
+            "/api/sessions",
+            "/api/machines",
+            "/api/layout",
+            "/api/here",
+            "/api/rooms",
+            "/api/tasks",
+        ] {
+            let (status, body) = send(&app, "GET", path, &[("cookie", &reader)]).await;
+            let owner = send(&app, "GET", path, &[("cookie", &full)]).await;
+            assert_eq!((status, &body), (owner.0, &owner.1), "{path}");
+            assert_eq!(status, ok, "{path}: {body}");
+        }
+        let (status, body) = send(&app, "GET", "/api/passkey", &[("cookie", &full)]).await;
+        assert_eq!(status, ok, "{body}");
+        assert!(body.contains("\"read_only\":true"), "it is listed: {body}");
+
+        let (status, body) = send_from(
+            &app,
+            THEIRS,
+            "GET",
+            "/api/workspaces",
+            &[("cookie", &reader)],
+            None,
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::FORBIDDEN,
+            "another user's node: {body}"
+        );
+
+        let path = format!("/api/sessions/{id}");
+        let (status, body) = send(&app, "DELETE", &path, &[("cookie", &full)]).await;
+        assert_eq!(status, axum::http::StatusCode::NO_CONTENT, "{body}");
+        let (status, _) = send(&app, "GET", "/api/workspaces", &[("cookie", &reader)]).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "revoked");
+    }
+
+    /// Every write, MCP call, passkey route and session route, the `GET` that
+    /// makes the Web Push key, and the routes that leave the gate before
+    /// `identify`: the four ceremony halves and the two join routes.
+    #[tokio::test]
+    async fn a_read_only_session_gets_403_on_everything_but_a_read() {
+        let (app, _, reader, id) = with_a_read_only_session().await;
+        let session = format!("/api/sessions/{id}");
+
+        for (method, path) in [
+            ("POST", "/api/workspaces/web/up"),
+            ("PUT", "/api/layout"),
+            ("POST", "/api/viewing"),
+            ("POST", "/api/mcp"),
+            ("GET", "/api/mcp"),
+            ("GET", "/api/passkey"),
+            ("POST", "/api/passkey/code"),
+            ("DELETE", "/api/passkey/iPhone"),
+            ("DELETE", session.as_str()),
+            ("POST", "/api/sessions/revoke-others"),
+            ("POST", "/api/sessions/read/x"),
+            ("GET", "/api/push/key"),
+            ("GET", "/api/workspaces/web/repair"),
+            ("POST", "/api/passkey/register/start"),
+            ("POST", "/api/passkey/register/finish"),
+            ("POST", "/api/passkey/login/start"),
+            ("POST", "/api/passkey/login/finish"),
+            ("POST", "/api/join"),
+            ("POST", "/api/join/forget-host-key"),
+            ("POST", "/api/machines/mac/readiness"),
+            ("POST", "/api/nosuch"),
+        ] {
+            let (status, body) = send(&app, method, path, &[("cookie", &reader)]).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::FORBIDDEN,
+                "{method} {path}: {body}"
+            );
+            assert!(body.starts_with(READ_ONLY), "{method} {path}: {body}");
+        }
+        for path in ["/api/workspaces", "/api/about"] {
+            let (status, body) = send(&app, "GET", path, &[("cookie", &reader)]).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{path}: {body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_only_session_gets_403_on_every_socket_upgrade() {
+        let (app, _, reader, _) = with_a_read_only_session().await;
+
+        for path in [
+            "/api/workspaces/web/terminal",
+            "/api/machines/mac/sessions/main/terminal",
+            "/api/machines/mac/install/0/terminal",
+            "/api/machines/mac/owner/terminal?as=admin",
+            "/api/workspaces/web/chat",
+            "/api/machines/mac/chat",
+            "/api/machines/mac/mic",
+            "/api/dictate",
+        ] {
+            let upgrade = [
+                ("cookie", reader.as_str()),
+                ("connection", "upgrade"),
+                ("upgrade", "websocket"),
+                ("sec-websocket-version", "13"),
+                ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+            ];
+            let (status, body) = send(&app, "GET", path, &upgrade).await;
+            assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{path}: {body}");
+            assert!(body.starts_with(READ_ONLY), "{path}: {body}");
+        }
+    }
+
+    /// The join script's code skips `identify`, and the gate still refuses a
+    /// read-only cookie beside it.
+    #[tokio::test]
+    async fn a_read_only_session_with_a_join_code_header_gets_403() {
+        let (app, _, reader, _) = with_a_read_only_session().await;
+
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/api/machines/mac/readiness",
+            &[("cookie", &reader), ("x-yantra-join-code", "WRONGONE")],
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{body}");
+        assert!(body.starts_with(READ_ONLY), "{body}");
+    }
+
+    #[tokio::test]
+    async fn only_the_owner_makes_a_read_only_session() {
+        let (passkeys, _) = signed_in();
+        let minted = passkeys.mint_agent("web");
+        let bearer = format!("Bearer {}", minted.token);
+        let app = gated(passkeys);
+        let path = "/api/sessions/read/walk";
+
+        let (status, body) = send(&app, "POST", path, &[("authorization", &bearer)]).await;
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{body}");
+        let (status, body) = send(&app, "POST", path, &[]).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{body}");
+    }
+
     /// ADR-0044 decision 8, amended 2026-11-12 (Y-789): a caller that is not
     /// the owner's own node gets 403 on all four ceremony routes, before its
     /// body is read, and the owner's node needs no cookie.

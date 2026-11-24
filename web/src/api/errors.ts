@@ -64,6 +64,14 @@ export const PROXY_SENTENCE =
 export const isOwnAddress = (status: number | null | undefined, said: string) =>
   status === 403 && said.startsWith(OWN_ADDRESS)
 
+/** The start of `Refused::ReadOnly`'s body (write.rs): the caller is the
+ *  owner, on a session that only reads. */
+export const READ_ONLY = 'this session is read-only'
+export const READ_ONLY_SENTENCE = 'This session only reads. Sign in with a passkey to do this.'
+
+export const isReadOnly = (status: number | null | undefined, said: string) =>
+  status === 403 && said.startsWith(READ_ONLY)
+
 const sentences: Record<Kind, string> = {
   network: 'The daemon did not answer.',
   refused: 'The daemon refused.',
@@ -133,6 +141,7 @@ export class ApiError extends Error {
   describe(): string {
     if (this.sentence) return this.sentence
     if (isOwnAddress(this.status, this.said)) return PROXY_SENTENCE
+    if (isReadOnly(this.status, this.said)) return READ_ONLY_SENTENCE
     if (this.kind === 'refused' && this.status !== undefined) {
       return refusals[this.status] ?? sentences.refused
     }

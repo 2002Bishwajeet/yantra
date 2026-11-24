@@ -216,6 +216,11 @@ device and every `/api` request then carries a session cookie; with none it gets
 hub, `yantra passkey code` makes the code that enrols a device, and `yantra passkey list`,
 `yantra passkey remove` and `yantra session revoke` manage them over the socket.
 
+`yantra session read <name>`, or Settings, Devices in the dashboard, makes a session that only
+reads. Its token shows once. It passes on a `GET` from the owner's own node for 30 days, and every
+write, socket, MCP call, passkey route and session route answers **403**. The build loop keeps one
+in `~/.config/yantra/walk-session`, mode `0600`, and reads the box's pages with it.
+
 The passkey belongs to the dashboard's name, `https://<MagicDNS>:8443` by default. To serve it on
 a name you own, set `YANTRA_ORIGIN=https://yantra.example.com` in `/etc/yantra/daemon.env`. It holds
 one https origin with no path, and a bad value stops the daemon at start. **Changing it costs every

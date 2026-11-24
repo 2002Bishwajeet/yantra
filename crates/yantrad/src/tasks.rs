@@ -219,10 +219,24 @@ async fn scoped<I: Inventory>(
     from: &Peer,
     headers: &HeaderMap,
 ) -> Result<(String, Option<String>), Refused> {
-    Ok(match identify(&state.authoriser, from, headers).await? {
-        Who::Owner(caller, _) => (caller.node, None),
-        Who::Agent { caller, workspace } => (caller.node, Some(workspace)),
-    })
+    match identify(&state.authoriser, from, headers).await? {
+        Who::Owner(caller, _) => Ok((caller.node, None)),
+        Who::Reader(_) => Err(Refused::ReadOnly),
+        Who::Agent { caller, workspace } => Ok((caller.node, Some(workspace))),
+    }
+}
+
+/// The workspace an agent caller is bound to, for a `GET`. The owner's
+/// read-only session reads what the owner reads.
+async fn seen<I: Inventory>(
+    state: &Delegates<I>,
+    from: &Peer,
+    headers: &HeaderMap,
+) -> Result<Option<String>, Refused> {
+    match identify(&state.authoriser, from, headers).await? {
+        Who::Owner(..) | Who::Reader(_) => Ok(None),
+        Who::Agent { workspace, .. } => Ok(Some(workspace)),
+    }
 }
 
 fn bad(said: String) -> Refused {
@@ -310,7 +324,7 @@ async fn list<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<Listed>>, Refused> {
-    let (_, scope) = scoped(&state, &from, &headers).await?;
+    let scope = seen(&state, &from, &headers).await?;
     let tasks = state.tasks.lock().unwrap_or_else(PoisonError::into_inner);
     Ok(Json(
         tasks
@@ -330,7 +344,7 @@ async fn read<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Read>, Refused> {
-    let (_, scope) = scoped(&state, &from, &headers).await?;
+    let scope = seen(&state, &from, &headers).await?;
     let entry = find(&state.tasks, &id, scope.as_deref())?;
     Ok(Json(read_out(&id, &entry)))
 }
@@ -377,7 +391,7 @@ async fn wait<I: Inventory + Clone + Send + Sync + 'static>(
     Path(id): Path<String>,
     RawQuery(query): RawQuery,
 ) -> Result<Json<Waited>, Refused> {
-    let (_, scope) = scoped(&state, &from, &headers).await?;
+    let scope = seen(&state, &from, &headers).await?;
     let limit = limit(query.as_deref()).map_err(bad)?;
     let entry = find(&state.tasks, &id, scope.as_deref())?;
     let settled = until_closing(&state.closing, entry.task.wait(limit))

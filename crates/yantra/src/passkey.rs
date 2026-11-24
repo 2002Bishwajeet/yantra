@@ -117,15 +117,32 @@ pub fn listed(body: &str) -> Result<String, String> {
         ));
     }
     for session in listed["sessions"].as_array().cloned().unwrap_or_default() {
+        let how = if session["read_only"] == true {
+            "reads only".to_owned()
+        } else {
+            format!("with {}", session["passkey"].as_str().unwrap_or("?"))
+        };
         out.push_str(&format!(
-            "session  {}  {} with {}  ends {}\n",
+            "session  {}  {} {how}  ends {}\n",
             session["id"].as_str().unwrap_or("?"),
             session["device"].as_str().unwrap_or("?"),
-            session["passkey"].as_str().unwrap_or("?"),
             when(&session["ends"])
         ));
     }
     Ok(out)
+}
+
+/// `POST /api/sessions/read/{name}`: the token on a line of its own, then
+/// what to do with it. The daemon keeps only its hash, so this is its one showing.
+pub fn read_only(body: &str) -> Result<String, String> {
+    let made: Value =
+        serde_json::from_str(body).map_err(|error| format!("yantrad sent no session: {error}"))?;
+    let token = made["token"].as_str().ok_or("yantrad sent no token")?;
+    Ok(format!(
+        "{token}\nSave it on the laptop as ~/.config/yantra/walk-session with mode 600. \
+         It shows once, reads only and ends on {}.",
+        when(&made["session"]["ends"])
+    ))
 }
 
 fn when(seconds: &Value) -> String {
@@ -180,5 +197,33 @@ mod tests {
             out.contains("session  ab12  Mac with iPhone  ends 2025-12-11"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn the_list_marks_a_read_only_session() {
+        let body = r#"{"passkeys":[{"name":"iPhone","made":1762819200}],
+            "sessions":[{"id":"cd34","passkey":"","device":"walk","made":1762819200,
+                         "ends":1765411200,"this_device":false,"read_only":true}]}"#;
+
+        let out = listed(body).expect("a list");
+
+        assert!(
+            out.contains("session  cd34  walk reads only  ends 2025-12-11"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_read_only_session_prints_its_token_and_where_to_save_it() {
+        let body = r#"{"token":"s3cr3t","session":{"id":"cd34","ends":1765411200}}"#;
+
+        let out = read_only(body).expect("a session");
+
+        assert_eq!(
+            out,
+            "s3cr3t\nSave it on the laptop as ~/.config/yantra/walk-session with mode 600. \
+             It shows once, reads only and ends on 2025-12-11."
+        );
+        assert!(read_only(r#"{"session":{}}"#).is_err(), "no token");
     }
 }

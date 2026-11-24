@@ -37,6 +37,24 @@ ADR-0016's predicate on them with no cookie, so only the owner's own node starts
 Wrong codes count for each caller node, and a node holds at most 16 open ceremonies. `passkey.rs`
 keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and never a token.
 
+**A session may be read-only** (ADR-0044's note of 2026-11-24, Y-835). The build loop reads the box
+with one. `POST /api/sessions/read/{name}` makes it for the owner and answers the token once, in the
+body and in no cookie. `identify` names its caller `Who::Reader`. Three rules bind it:
+
+- **The gate passes it on `write::reader_may` only**: a `GET` or a `HEAD` with no `Upgrade` header,
+  on any path but `/mcp`, `/passkey…`, `/sessions/…` and `/push/key`. Everything else is a 403
+  whose text starts *this session is read-only*, which the dashboard reads. The four ceremony
+  routes, the two join routes and a login test with a join code skip `identify`, so `passes`
+  refuses the cookie on them before they leave. `GET /api/about` still answers it.
+- **`allowed` refuses it, and `reading` is the one check that passes it.** `POST
+  /api/join/forget-host-key` skips `identify` in the gate and then asks `allowed`, so a handler does
+  not rely on the gate. A handler that acts calls `allowed`, and only a `GET` that changes nothing
+  calls `reading`. `tasks.rs` does the same with `seen`. A new `match` on `Who` does not compile
+  until it decides for `Reader`.
+- **Its row keeps SHA-256 of `passkey::READS` and the token, and a full row keeps SHA-256 of the
+  token.** A daemon older than the field reads the row as a full session. `READS` ends in a NUL,
+  which no cookie can hold, so no token matches the row there.
+
 **The dashboard's origin is `https://<MagicDNS>:8443` unless `YANTRA_ORIGIN` names one** (ADR-0044,
 amended 2026-11-12). `main.rs` reads it from `/etc/yantra/daemon.env` once at start, and
 `passkey::configured_origin` accepts exactly one https origin with no path; anything else stops the

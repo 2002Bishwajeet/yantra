@@ -293,3 +293,17 @@ describe('the own-address refusal', () => {
     expect(new ApiError('refused', said, { status: 400 }).headline).toBeUndefined()
   })
 })
+
+describe('the read-only refusal', () => {
+  const said = 'this session is read-only: it reads the dashboard and changes nothing'
+
+  it('says the session only reads, not that the node is a stranger', () => {
+    const error = new ApiError('refused', said, { status: 403 })
+    expect(error.describe()).toBe('This session only reads. Sign in with a passkey to do this.')
+    expect(error.said).toBe(said)
+  })
+
+  it('needs the 403 as well as the words', () => {
+    expect(new ApiError('refused', said, { status: 409 }).describe()).not.toMatch(/only reads/)
+  })
+})
