@@ -73,7 +73,7 @@ const KillSession = lazy(() =>
 const Setup = lazy(() => import('@/screens/setup/Setup').then((it) => ({ default: it.Setup })))
 
 const kill = (ready: boolean) => (
-  <Button className="dash__kill" disabled={!ready} tone="error" variant="text">
+  <Button className="dash__kill" disabled={!ready} tone="error" variant="outlined">
     Kill
   </Button>
 )
@@ -219,11 +219,7 @@ function GithubRow(props: { item: Item; kind: 'review' | 'issue'; now: number; p
       {phone ? (
         <Go out />
       ) : (
-        <Button
-          render={<a href={item.url} rel="noreferrer" target="_blank" />}
-          role="link"
-          variant={kind === 'review' ? 'tonal' : 'text'}
-        >
+        <Button render={<a href={item.url} rel="noreferrer" target="_blank" />} role="link" variant="tonal">
           {kind === 'review' ? 'Review' : 'Open'}
         </Button>
       )}
@@ -252,7 +248,7 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number; phone: bo
         {phone ? (
           <Go />
         ) : (
-          <Button render={<Link params={{ name: row.name }} to="/w/$name/repair" />} role="link" variant="text">
+          <Button render={<Link params={{ name: row.name }} to="/w/$name/repair" />} role="link" variant="tonal">
             Repair
           </Button>
         )}
@@ -315,7 +311,7 @@ function NeedsRow(props: { row: WorkRow; events: Event[]; now: number; phone: bo
       {phone ? (
         <Go />
       ) : state?.state === 'unclear' ? null : (
-        <Button render={chat} role="link" variant="text">
+        <Button render={chat} role="link" variant="tonal">
           Open
         </Button>
       )}
