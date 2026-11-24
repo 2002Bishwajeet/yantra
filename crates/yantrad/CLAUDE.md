@@ -192,6 +192,14 @@ the list's envelope carries the youngest. With nothing kept the list answers fro
 machine nothing has reached is a **404**, and asking a machine per *polled* request is the thing
 this shape refuses. It is memory, so a restart empties it and the next sweep fills it again (Y-044).
 
+**The hub is checked at start, before the first sweep** (Y-830). New session hides a hub with no
+report, and a sweep settles only when its slowest machine answers. So `look_at_hub` runs before each
+sweep and asks the hub alone when `checks` holds nothing for it. The hub is the node that holds a
+bound address, and the rule is `runsSessions` without `online`, as the web's is. The update unit
+ends in a restart, so an update takes the same path. The first readiness look waits for the first
+machines reading, at most 10 s, so the first sweep also knows the tailnet peers. Until the hub's
+report lands, `GET /api/readiness` says `never`, and New session draws the hub's chip as *checking*.
+
 **`POST /api/machines/{name}/readiness` is where a person may ask anyway** (Y-197,
 [ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)): someone who has just
 installed `tmux` by hand needs the answer before the next sweep, and the `GET` beside it can only

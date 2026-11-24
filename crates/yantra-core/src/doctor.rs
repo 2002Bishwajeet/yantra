@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use tokio::sync::Semaphore;
 use tokio::time::Instant;
 
 use crate::agent::{self, Claude};
@@ -104,6 +105,11 @@ fn no_login_server(check: &'static str) -> Check {
 /// holds the auth stage, so wording [`ssh::BROWSER_CHECK`] misses would otherwise
 /// cost ServerAlive's 45 s on every sweep.
 const REACH_LIMIT: Duration = Duration::from_secs(20);
+
+/// How many probes of one check run at the same time. sshd's default
+/// `MaxSessions` is 10, and past it ssh makes new logins without an error (R7).
+/// A sweep and a pressed Check on one machine make 4 + 4.
+const AT_ONCE: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -250,8 +256,14 @@ pub async fn of<E: Exec>(exec: &E, term: &str) -> Vec<Check> {
 
 /// [`of`], reusing `machine`'s recent `sudo -n` answer where there is one (see
 /// [`no_sudo`]). `None` always asks.
+///
+/// The probes run at the same time, so a check takes about as long as its
+/// slowest probe (Y-830). The report keeps its order.
 async fn of_with<E: Exec>(exec: &E, term: &str, machine: Option<&str>) -> Vec<Check> {
-    let (reachable, sshd) = timed(reached(exec)).await;
+    let gate = &Semaphore::new(AT_ONCE);
+    // Alone and first: this command opens the ControlMaster, so the probes
+    // below never race to make one.
+    let (reachable, sshd) = timed(gate, reached(exec)).await;
     let sshd = Check {
         took_ms: reachable.took_ms,
         ..sshd
@@ -265,54 +277,99 @@ async fn of_with<E: Exec>(exec: &E, term: &str, machine: Option<&str>) -> Vec<Ch
         return checks;
     }
 
-    let (tmux, found_tmux) = timed(tmux(exec)).await;
-    let (agent_cli, found_claude) = timed(agent_cli(exec)).await;
-    let (provider_cli, providers) = timed(provider_cli(exec)).await;
-    let gated = found_tmux.is_some() && found_claude.is_some();
-    let has_provider = !providers.is_empty();
-    let os = ssh::os(exec).await;
+    let chain = async {
+        let ((tmux, found_tmux), (agent_cli, found_claude), (provider_cli, providers), os) = tokio::join!(
+            timed(gate, tmux(exec)),
+            timed(gate, agent_cli(exec)),
+            timed(gate, provider_cli(exec)),
+            held(gate, ssh::os(exec)),
+        );
+        let asks_login = found_tmux.is_some() && found_claude.is_some();
+        let has_provider = !providers.is_empty();
+        let (provider_auth, login_session, hooks) = tokio::join!(
+            timed_if(
+                gate,
+                has_provider,
+                provider_auth(exec, providers, found_tmux.as_ref(), &os),
+            ),
+            timed_if(
+                gate,
+                asks_login,
+                login_session(exec, found_tmux.as_ref(), found_claude.as_ref(), &os),
+            ),
+            timed_one(gate, hooks(exec, found_tmux.as_ref(), &os)),
+        );
+        (
+            tmux,
+            agent_cli,
+            provider_cli,
+            provider_auth,
+            login_session,
+            hooks,
+        )
+    };
+    // The chain is first: its second half holds the slow probes, so its first
+    // half must not wait for a permit.
+    let (
+        (tmux, agent_cli, provider_cli, provider_auth, login_session, hooks),
+        git,
+        terminfo,
+        mic,
+        folder_access,
+        no_sudo,
+    ) = tokio::join!(
+        chain,
+        timed_one(gate, git(exec)),
+        timed_one(gate, terminfo(exec, term)),
+        timed_one(gate, mic(exec)),
+        timed_one(gate, folder_access(exec)),
+        timed_one(gate, no_sudo(exec, machine)),
+    );
 
     vec![
         reachable,
         sshd,
         tmux,
-        timed_one(git(exec)).await,
+        git,
         agent_cli,
-        timed_one(terminfo(exec, term)).await,
+        terminfo,
         provider_cli,
-        timed_if(
-            has_provider,
-            provider_auth(exec, providers, found_tmux.as_ref(), &os),
-        )
-        .await,
-        timed_if(
-            gated,
-            login_session(exec, found_tmux.as_ref(), found_claude.as_ref(), &os),
-        )
-        .await,
-        timed_one(mic(exec)).await,
-        timed_one(folder_access(exec)).await,
-        timed_one(hooks(exec, found_tmux.as_ref(), &os)).await,
-        timed_one(no_sudo(exec, machine)).await,
+        provider_auth,
+        login_session,
+        mic,
+        folder_access,
+        hooks,
+        no_sudo,
         heartbeat(),
     ]
 }
 
-async fn timed<T>(step: impl Future<Output = (Check, T)>) -> (Check, T) {
-    let started = Instant::now();
-    let (mut check, found) = step.await;
-    check.took_ms = Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
-    (check, found)
+/// Runs `step` with one of `gate`'s permits. The gate is never closed, so the
+/// wait cannot fail.
+async fn held<T>(gate: &Semaphore, step: impl Future<Output = T>) -> T {
+    let _permit = gate.acquire().await;
+    step.await
 }
 
-async fn timed_one(step: impl Future<Output = Check>) -> Check {
-    timed(async { (step.await, ()) }).await.0
+/// The clock starts after the permit, so `took_ms` does not count the wait.
+async fn timed<T>(gate: &Semaphore, step: impl Future<Output = (Check, T)>) -> (Check, T) {
+    held(gate, async {
+        let started = Instant::now();
+        let (mut check, found) = step.await;
+        check.took_ms = Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+        (check, found)
+    })
+    .await
+}
+
+async fn timed_one(gate: &Semaphore, step: impl Future<Output = Check>) -> Check {
+    timed(gate, async { (step.await, ()) }).await.0
 }
 
 /// `asked` is false where a step has nothing to ask with and answers at once.
-async fn timed_if(asked: bool, step: impl Future<Output = Check>) -> Check {
+async fn timed_if(gate: &Semaphore, asked: bool, step: impl Future<Output = Check>) -> Check {
     if asked {
-        timed_one(step).await
+        timed_one(gate, step).await
     } else {
         step.await
     }
@@ -1457,6 +1514,8 @@ fn unknown(check: &'static str, detail: impl Into<String>) -> Check {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
 
     /// Every diagnosis is one OpenSSH really writes into ADR-0006's `-E` log.
@@ -1626,6 +1685,82 @@ mod tests {
         assert_eq!(took(&checks, PROVIDER_AUTH), None);
         assert_eq!(took(&checks, LOGIN_SESSION), None);
         assert_eq!(took(&checks, HEARTBEAT), None);
+    }
+
+    /// Every command takes a second and the mic probe ten. It counts the
+    /// commands in flight.
+    #[derive(Default)]
+    struct Slow {
+        in_flight: AtomicUsize,
+        most: AtomicUsize,
+    }
+
+    impl Exec for Slow {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most.fetch_max(now, Ordering::SeqCst);
+            let slow = command == mic_probe();
+            tokio::time::sleep(Duration::from_secs(if slow { 10 } else { 1 })).await;
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            Ok(ssh::Output {
+                status: 0,
+                stdout: b"/usr/bin/found\n".to_vec(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    /// Y-830: in turn this check takes 24 s. The login takes one second and
+    /// the mic probe waits one turn for a permit.
+    #[tokio::test(start_paused = true)]
+    async fn a_check_takes_about_as_long_as_its_slowest_probe() {
+        let machine = Slow::default();
+        let started = Instant::now();
+        of(&machine, "alacritty").await;
+        let took = started.elapsed();
+        assert!(took < Duration::from_secs(13), "{took:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_probes_run_at_once_and_never_more_than_the_limit() {
+        let machine = Slow::default();
+        of(&machine, "alacritty").await;
+        let most = machine.most.load(Ordering::SeqCst);
+        assert!(most > 1, "{most}");
+        assert!(most <= AT_ONCE, "{most}");
+    }
+
+    /// The wait for a permit is not the probe's time.
+    #[tokio::test(start_paused = true)]
+    async fn a_probe_that_waited_for_a_permit_does_not_count_the_wait() {
+        let checks = of(&Slow::default(), "alacritty").await;
+        assert_eq!(took(&checks, MIC), Some(10_000));
+        assert_eq!(took(&checks, NO_SUDO), Some(1_000));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_report_keeps_its_checks_their_order_and_their_states() {
+        let checks = of(&Slow::default(), "alacritty").await;
+        let said: Vec<(&str, State)> = checks.iter().map(|c| (c.check, c.state)).collect();
+        assert_eq!(
+            said,
+            [
+                (REACHABLE, State::Present),
+                (SSHD, State::Present),
+                (TMUX, State::Present),
+                (GIT, State::Present),
+                (AGENT_CLI, State::Present),
+                (TERMINFO, State::Present),
+                (PROVIDER_CLI, State::Present),
+                (PROVIDER_AUTH, State::Present),
+                (LOGIN_SESSION, State::Unknown),
+                (MIC, State::Unknown),
+                (FOLDER_ACCESS, State::Unknown),
+                (HOOKS, State::Unknown),
+                (NO_SUDO, State::Unknown),
+                (HEARTBEAT, State::Unknown),
+            ]
+        );
     }
 
     /// Finds no `claude` it can run, and one link in `/usr/local/bin` (Y-740).

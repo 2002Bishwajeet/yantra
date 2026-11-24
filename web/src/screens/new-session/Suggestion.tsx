@@ -31,9 +31,16 @@ function Failed(props: { title: string; error: ApiError | null; retry: () => voi
 }
 
 /** Step 1 (Y-517): asks once with no source, and preselects the top machine
- *  unless a preset, a default machine or a pick by hand already decided. */
-export function SuggestMachine(props: { form: SessionForm; values: Values; machines: Machine[]; preset: string }) {
-  const { form, values, machines, preset } = props
+ *  unless a preset, a default machine or a pick by hand already decided.
+ *  `hold` is a hub still being checked: its chip may be the preset or the top machine. */
+export function SuggestMachine(props: {
+  form: SessionForm
+  values: Values
+  machines: Machine[]
+  preset: string
+  hold: boolean
+}) {
+  const { form, values, machines, preset, hold } = props
   const placement = usePlacement()
   const { mutate } = placement
   useEffect(() => mutate({}), [mutate])
@@ -49,8 +56,8 @@ export function SuggestMachine(props: { form: SessionForm; values: Values; machi
     if (usable !== '') form.setFieldValue('machine', usable)
   })
   useEffect(() => {
-    if (top) choose(top.machine)
-  }, [top])
+    if (top && !hold) choose(top.machine)
+  }, [top, hold])
 
   // Setup reads the same reports, so the two screens agree on which machine is ready.
   const sweep = useReadiness()
