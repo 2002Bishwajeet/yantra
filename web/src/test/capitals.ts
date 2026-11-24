@@ -1,7 +1,7 @@
 import { afterEach, expect } from 'vitest'
 
 /** The second line of a list row, the lines Setup and a Machines card draw under a name, their chips,
- *  and the state word of a Fleet, Machine or Machines session row. */
+ *  and the words beside every state mark. */
 const LINES = [
   '.m3-list-item__supporting',
   '.m3-row__supporting',
@@ -13,9 +13,7 @@ const LINES = [
   '.machines__detail',
   '.machines__head .m3-chip',
   '.m3-list-item__trailing .m3-chip',
-  '.fleet__state',
-  '.machine__state',
-  '.machines__session .m3-state',
+  '.m3-state',
   '.machine__where',
 ].join(', ')
 

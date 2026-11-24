@@ -23,13 +23,13 @@ describe('presence (ADR-0045)', () => {
   })
 
   it('says offline and when the machine was last seen, and is read-only', () => {
-    expect(presenceWord(offline!, seen + 184_000)).toBe('offline · seen 3m 04s ago')
-    expect(presenceWord({ ...offline!, seen: null }, seen)).toBe('offline')
+    expect(presenceWord(offline!, seen + 184_000)).toBe('Offline · seen 3m 04s ago')
+    expect(presenceWord({ ...offline!, seen: null }, seen)).toBe('Offline')
     expect(readOnlyWhy(offline)).toMatch(/machine is offline/)
   })
 
   it('says gone for a worktree the machine no longer has, and is read-only', () => {
-    expect(presenceWord(gone!, seen)).toBe('gone')
+    expect(presenceWord(gone!, seen)).toBe('Gone')
     expect(readOnlyWhy(gone)).toMatch(/no longer has/)
   })
 })

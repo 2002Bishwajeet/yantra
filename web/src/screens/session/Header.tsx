@@ -149,7 +149,7 @@ export function Header(props: HeaderProps) {
           <>
             <div className="session__status">
               <State state={mark}>
-                {words}
+                {capital(words)}
                 {age}
               </State>
               <Text scale="body-small" tone="variant" clip>
@@ -224,7 +224,7 @@ export function Header(props: HeaderProps) {
         subtitle={
           phone ? undefined : (
             <State state={mark}>
-              {words}
+              {capital(words)}
               {age}
             </State>
           )

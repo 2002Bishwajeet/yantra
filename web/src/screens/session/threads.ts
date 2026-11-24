@@ -13,7 +13,7 @@ import type { MarkState } from '@/m3/mark/Mark'
 export function prMark(pr: ThreadPr): { state: MarkState; word: string } {
   switch (pr.state) {
     case 'none':
-      return { state: 'idle', word: 'no PR' }
+      return { state: 'idle', word: 'No PR' }
     case 'open':
       return { state: 'running', word: `PR #${pr.number} open` }
     case 'closed':
@@ -36,9 +36,9 @@ export function presenceWord(one: Thread, now: number): string | null {
     case 'here':
       return null
     case 'gone':
-      return 'gone'
+      return 'Gone'
     case 'offline':
-      return one.seen === null ? 'offline' : `offline · seen ${elapsed(one.seen, now)} ago`
+      return one.seen === null ? 'Offline' : `Offline · seen ${elapsed(one.seen, now)} ago`
   }
 }
 

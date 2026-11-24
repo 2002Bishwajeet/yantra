@@ -641,11 +641,11 @@ describe('the chat', () => {
       expect(row().getAttribute('aria-expanded')).toBe('true')
       expect(within(log).getByText('Command')).toBeTruthy()
       // One call: the row shows the state, so the call does not draw it again.
-      expect(within(log).queryByText('running')).toBeNull()
+      expect(within(log).queryByText('Running')).toBeNull()
 
       say(of('item.completed'))
       // The call is done while the turn still runs, so the two states differ and the call says so.
-      await settled(() => expect(within(log).getByText('done')).toBeTruthy())
+      await settled(() => expect(within(log).getByText('Done')).toBeTruthy())
 
       ended({ state: 'completed', stopReason: 'end_turn', durationMs: 4000 })
       await settled(() => expect(row().textContent).toContain('Worked for 4s'))
@@ -688,7 +688,7 @@ describe('the chat', () => {
       say(of('item.started'))
       say({ ...of('item.completed'), payload: { ...of('item.completed').payload, status: 'failed' } })
       const log = await settled(() => screen.getByText('cargo test').closest('article')!)
-      expect(within(log).getByText('failed')).toBeTruthy()
+      expect(within(log).getByText('Failed')).toBeTruthy()
     })
   })
 

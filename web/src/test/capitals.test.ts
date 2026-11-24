@@ -37,7 +37,12 @@ describe('the capitals guard (Y-763)', () => {
       <span class="machines__detail">not found</span>
       <div class="machines__head"><span class="m3-chip">not checked</span></div>
     `)
-    expect(lowerLines(drawn)).toHaveLength(9)
+    expect(lowerLines(drawn)).toHaveLength(10)
+  })
+
+  it('reads the word beside a state mark wherever it is drawn', () => {
+    expect(lowerLines(page('<span class="m3-state">running</span>'))).toEqual(['running'])
+    expect(lowerLines(page('<span class="m3-state">Running</span>'))).toEqual([])
   })
 
   it('passes a line that starts with a capital or a number', () => {

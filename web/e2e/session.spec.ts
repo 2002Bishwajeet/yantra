@@ -83,7 +83,7 @@ test.describe('the session screen, chat first', () => {
       const menu = await openMore(page)
       await expect(menu.locator('.session__status').getByText('waiting for trust')).toBeVisible()
     } else {
-      await expect(page.locator('.m3-page-header')).toContainText('waiting for trust')
+      await expect(page.locator('.m3-page-header')).toContainText('Waiting for trust')
     }
   })
 

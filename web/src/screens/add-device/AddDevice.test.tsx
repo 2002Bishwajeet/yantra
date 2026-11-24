@@ -71,7 +71,7 @@ describe('the platform', () => {
   it('ends a phone at the home screen, with nothing after the tailnet to wait on', async () => {
     const phone = aMachine({ name: 'iphone', os: 'iOS', online: true })
     mountSettings('phone', at('platform=mobile&machine=iphone'), fleet([phone], []))
-    expect(await screen.findByText(/done · iphone is on the tailnet/)).toBeTruthy()
+    expect(await screen.findByText(/Done · iphone is on the tailnet/)).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Open the dashboard on it and add it to your home screen' })).toBeTruthy()
     expect(screen.getByText(/Add to Home Screen/)).toBeTruthy()
     expect(screen.queryByRole('img', { name: /QR code/ })).toBeNull()
@@ -184,10 +184,10 @@ describe('a desktop draws the code at once', () => {
 describe('beat 1, on the tailnet', () => {
   it("watches with Tailscale's commands, and offers the nodes already there", async () => {
     mountSettings('desktop', at('platform=linux'), fleet([laptop], []))
-    expect(await screen.findByText(/waiting · watching the tailnet for a new Linux machine/)).toBeTruthy()
+    expect(await screen.findByText(/Waiting · watching the tailnet for a new Linux machine/)).toBeTruthy()
     expect(screen.getByText('curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'laptop' }).getAttribute('href')).toBe('/machines/add?platform=linux&machine=laptop')
-    expect(beat('Joined').getByText(/not yet · waits for the device to be on the tailnet/)).toBeTruthy()
+    expect(beat('Joined').getByText(/Not yet · waits for the device to be on the tailnet/)).toBeTruthy()
   })
 
   it('never offers the hub as a device to add', async () => {
@@ -200,13 +200,13 @@ describe('beat 1, on the tailnet', () => {
   it('draws no pick note when the hub is the only node', async () => {
     const box = aMachine({ name: 'box', os: 'linux', hub: true })
     mountSettings('desktop', at('platform=linux'), fleet([box], []))
-    expect(await screen.findByText(/waiting · watching the tailnet for a new Linux machine/)).toBeTruthy()
+    expect(await screen.findByText(/Waiting · watching the tailnet for a new Linux machine/)).toBeTruthy()
     expect(screen.queryByText(/Already on the tailnet\? Pick it/)).toBeNull()
   })
 
   it('draws the failure inline when the tailnet list could not be read', async () => {
     mountSettings('desktop', at('platform=linux'), { 'GET /api/machines': [200, looked.failed('tailscaled is down')] })
-    expect(await screen.findByText(/stuck · the tailnet list could not be read/)).toBeTruthy()
+    expect(await screen.findByText(/Stuck · the tailnet list could not be read/)).toBeTruthy()
     expect(within(beat('On the tailnet').getByRole('alert')).getByText('tailscaled is down')).toBeTruthy()
   })
 
@@ -221,7 +221,7 @@ describe('beat 2, joined', () => {
     const writeText = vi.fn(() => Promise.resolve())
     vi.stubGlobal('navigator', { userAgent: navigator.userAgent, clipboard: { writeText } })
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], []))
-    expect(await screen.findByText(/waiting · run this in a terminal on laptop/)).toBeTruthy()
+    expect(await screen.findByText(/Waiting · run this in a terminal on laptop/)).toBeTruthy()
     expect(await screen.findByText(COMMAND)).toBeTruthy()
     expect(screen.getByText(HERE)).toBeTruthy()
     expect(await screen.findByRole('img', { name: `A QR code for ${HERE}` })).toBeTruthy()
@@ -264,7 +264,7 @@ describe('beat 2, joined', () => {
 
   it('is done on the join event, and folds its body away', async () => {
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean]))
-    expect(await screen.findByText(/done · joined as biswa/)).toBeTruthy()
+    expect(await screen.findByText(/Done · joined as biswa/)).toBeTruthy()
     expect(screen.queryByText(COMMAND)).toBeNull()
   })
 
@@ -272,8 +272,8 @@ describe('beat 2, joined', () => {
   it('is stuck, and says so, when the ssh config logs in as another account', async () => {
     const other = event('joined', 5, { user: 'biswa', kept: true, logs_in_as: 'yantra' })
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [other]))
-    expect(await screen.findByText(/stuck · joined as biswa, and ssh logs in as yantra; a config you wrote was kept · edit the Host block for laptop in the appliance's ~\/\.ssh\/config/)).toBeTruthy()
-    expect(beat('Reachable over ssh').getByText(/not yet · waits for the join/)).toBeTruthy()
+    expect(await screen.findByText(/Stuck · joined as biswa, and ssh logs in as yantra; a config you wrote was kept · edit the Host block for laptop in the appliance's ~\/\.ssh\/config/)).toBeTruthy()
+    expect(beat('Reachable over ssh').getByText(/Not yet · waits for the join/)).toBeTruthy()
   })
 
   it('draws the failure inline when the events could not be read', async () => {
@@ -281,7 +281,7 @@ describe('beat 2, joined', () => {
       ...fleet([laptop], []),
       'GET /api/notifications': [503, 'tailscale did not answer'],
     })
-    expect(await screen.findByText(/stuck · the daemon's events could not be read/)).toBeTruthy()
+    expect(await screen.findByText(/Stuck · the daemon's events could not be read/)).toBeTruthy()
     expect(within(beat('Joined').getByRole('alert')).getByText('tailscale did not answer')).toBeTruthy()
   })
 
@@ -351,14 +351,14 @@ describe('beat 3, reachable', () => {
     expect(await screen.findByText(/Check asks now/)).toBeTruthy()
     expect(asked).not.toContain('POST /api/machines/laptop/readiness')
     fireEvent.click(beat('Reachable over ssh').getByRole('button', { name: 'Check again' }))
-    expect(await screen.findByText(/done · reachable over ssh/)).toBeTruthy()
+    expect(await screen.findByText(/Done · reachable over ssh/)).toBeTruthy()
   })
 
   /** Y-585, #520: beat 2 has folded, so beat 3 carries the command itself. */
   it('is stuck on the plain cause and the join command, with ssh behind a press', async () => {
     const refused = { machine: 'laptop', checks: [{ check: 'reachable', state: 'absent', detail: 'Permission denied (publickey)' }] } as Readiness
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean], [refused]))
-    expect(await screen.findByText(/stuck · laptop did not take the appliance’s key\./)).toBeTruthy()
+    expect(await screen.findByText(/Stuck · laptop did not take the appliance’s key\./)).toBeTruthy()
     const third = beat('Reachable over ssh')
     expect(third.getByText('Run the join command on laptop; it places the key.')).toBeTruthy()
     expect(await third.findByRole('button', { name: 'Copy the join command' })).toBeTruthy()
@@ -370,7 +370,7 @@ describe('beat 3, reachable', () => {
   it('offers no join command to a machine it would not help', async () => {
     const silent = { machine: 'laptop', checks: [{ check: 'reachable', state: 'absent', detail: 'No route to host' }] } as Readiness
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean], [silent]))
-    expect(await screen.findByText(/stuck · Yantra can’t reach laptop over ssh\./)).toBeTruthy()
+    expect(await screen.findByText(/Stuck · Yantra can’t reach laptop over ssh\./)).toBeTruthy()
     expect(beat('Reachable over ssh').queryByRole('button', { name: 'Copy the join command' })).toBeNull()
   })
 
@@ -393,9 +393,9 @@ describe('beat 4, ready', () => {
       ...fleet([laptop], [clean], [reached]),
       'POST /api/machines/laptop/install': [202],
     })
-    expect(await screen.findByText(/waiting · missing tmux · Install adds tmux, git and claude/)).toBeTruthy()
+    expect(await screen.findByText(/Waiting · missing tmux · Install adds tmux, git and claude/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
-    expect(await screen.findByText(/waiting · installing…/)).toBeTruthy()
+    expect(await screen.findByText(/Waiting · installing…/)).toBeTruthy()
     expect(screen.getByRole('progressbar', { name: 'installing on laptop' })).toBeTruthy()
     expect(asked).toContain('POST /api/machines/laptop/install')
     expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
@@ -407,7 +407,7 @@ describe('beat 4, ready', () => {
       commands: ['sudo apt-get install -y tmux'],
     })
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [stopped, clean], [reached]))
-    expect(await screen.findByText(/stuck · tmux needs your password/)).toBeTruthy()
+    expect(await screen.findByText(/Stuck · tmux needs your password/)).toBeTruthy()
     expect(screen.getByText('sudo apt-get install -y tmux')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Copy the command for laptop' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Install' }).dataset.variant).toBe('tonal')
@@ -435,7 +435,7 @@ describe('beat 4, ready', () => {
 
   it('ends at New session when every check is present', async () => {
     mountSettings('desktop', at('platform=linux&machine=laptop'), fleet([laptop], [clean], [whole]))
-    expect(await screen.findByText(/done · ready · open a session on laptop/)).toBeTruthy()
+    expect(await screen.findByText(/Done · ready · open a session on laptop/)).toBeTruthy()
     expect(beat('Ready').getByRole('link', { name: 'New session' }).getAttribute('href')).toBe('/new')
   })
 })

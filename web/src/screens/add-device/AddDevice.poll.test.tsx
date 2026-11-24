@@ -45,7 +45,7 @@ describe('what the flow sees arrive', () => {
       'GET /api/readiness': [200, looked.ok([])],
     })
     expect(await screen.findByText(/watching the tailnet for a new Linux machine/)).toBeTruthy()
-    expect(await screen.findByText(/done · laptop is on the tailnet/)).toBeTruthy()
+    expect(await screen.findByText(/Done · laptop is on the tailnet/)).toBeTruthy()
     await waitFor(() => expect(location.search).toBe('?platform=linux&machine=laptop'))
   })
 
@@ -63,13 +63,13 @@ describe('what the flow sees arrive', () => {
     })
     expect(await screen.findByText(/watching the tailnet for a new Linux machine/)).toBeTruthy()
     vi.setSystemTime(start + 4 * 60_000)
-    expect(await screen.findByText(/stuck · Not seen yet/)).toBeTruthy()
+    expect(await screen.findByText(/Stuck · Not seen yet/)).toBeTruthy()
     arrived = true
-    expect(await screen.findByText(/done · laptop is on the tailnet/)).toBeTruthy()
-    expect(await screen.findByText(/waiting · run this in a terminal on laptop/)).toBeTruthy()
+    expect(await screen.findByText(/Done · laptop is on the tailnet/)).toBeTruthy()
+    expect(await screen.findByText(/Waiting · run this in a terminal on laptop/)).toBeTruthy()
     expect(screen.queryByText(/No join yet/)).toBeNull()
     vi.setSystemTime(start + 8 * 60_000)
-    expect(await screen.findByText(/stuck · No join yet/)).toBeTruthy()
+    expect(await screen.findByText(/Stuck · No join yet/)).toBeTruthy()
   })
 
   /** ADR-0019: one ask per join seen arriving, and none on a timer. */
@@ -81,7 +81,7 @@ describe('what the flow sees arrive', () => {
       'GET /api/readiness': [200, looked.ok([])],
       'POST /api/machines/laptop/readiness': [200, looked.ok(whole)],
     })
-    expect(await screen.findByText(/done · ready · open a session on laptop/)).toBeTruthy()
+    expect(await screen.findByText(/Done · ready · open a session on laptop/)).toBeTruthy()
     await new Promise((resolve) => setTimeout(resolve, 400))
     expect(asked.filter((one) => one === 'POST /api/machines/laptop/readiness')).toHaveLength(1)
   })

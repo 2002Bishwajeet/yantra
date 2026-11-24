@@ -171,7 +171,7 @@ export function Waiting(props: { name: string; subject: string | null }) {
   const { name, subject } = props
   return (
     <Card className="turns__waiting" surface="primary">
-      <State state="needs">waiting for you</State>
+      <State state="needs">Waiting for you</State>
       <Text render={<p />} scale="body-medium">
         {subject ? (
           <>

@@ -37,7 +37,7 @@ describe('the Dashboard on a busy fleet', () => {
     await drawn()
     expect(screen.getByText(/5 of 6/).textContent).toBe('5 of 6 machines online')
     // D7 §3.3: a machine the tailnet sees off is asleep, and Open replaces Fix.
-    expect(screen.getByText(/thinkpad asleep/)).toBeTruthy()
+    expect(screen.getByText(/^asleep/)).toBeTruthy()
     const open = screen.getAllByRole('link').find((one) => one.getAttribute('href') === '/m/thinkpad')
     expect(open?.textContent).toMatch(/^Open/)
   })
@@ -232,7 +232,7 @@ describe('the Dashboard on a busy fleet', () => {
     mount('desktop', '/', state)
     await drawn()
     expect(screen.getByText(/of 6/).textContent).toBe('4 of 6 machines online')
-    expect(screen.getByText(/macbook not answering/)).toBeTruthy()
+    expect(screen.getByText(/^not answering/)).toBeTruthy()
   })
 
   it('asks before Kill, because a killed session cannot be brought back', async () => {

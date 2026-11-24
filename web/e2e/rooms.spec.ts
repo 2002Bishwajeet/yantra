@@ -23,10 +23,10 @@ test.describe('rooms', () => {
 
     const live = page.getByRole('link', { name: /design-review/ })
     await expect(live).toContainText('3/20 · 2 members · 3 messages')
-    await expect(live).not.toContainText('paused')
+    await expect(live).not.toContainText('Paused')
     const paused = page.getByRole('link', { name: /release/ })
     await expect(paused).toContainText('20/20')
-    await expect(paused).toContainText('paused')
+    await expect(paused).toContainText('Paused')
 
     await paused.click()
     await expect(heading(page, 'release')).toBeVisible()
@@ -54,7 +54,7 @@ test.describe('rooms', () => {
     await expect(page.getByText('0/20 · 2 members · 2 messages')).toBeVisible()
 
     await page.goto('/rooms')
-    await expect(page.getByRole('link', { name: /release/ })).not.toContainText('paused')
+    await expect(page.getByRole('link', { name: /release/ })).not.toContainText('Paused')
   })
 
   test('a room the daemon does not hold is named, with a way back', async ({ page }) => {

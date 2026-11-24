@@ -36,11 +36,11 @@ const marks: Record<Stage['state'], MarkState> = {
 }
 
 const words: Record<Stage['state'], string> = {
-  waiting: 'waiting',
-  running: 'running',
-  done: 'done',
-  skipped: 'not needed',
-  refused: 'refused',
+  waiting: 'Waiting',
+  running: 'Running',
+  done: 'Done',
+  skipped: 'Not needed',
+  refused: 'Refused',
 }
 
 const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms))

@@ -107,8 +107,8 @@ describe('State', () => {
   })
 
   it('takes a longer word from the caller', () => {
-    render(<State state="needs">waiting for trust · cachyos-g14</State>)
-    expect(screen.getByText('waiting for trust · cachyos-g14')).toBeTruthy()
+    render(<State state="needs">Waiting for trust · cachyos-g14</State>)
+    expect(screen.getByText('Waiting for trust · cachyos-g14')).toBeTruthy()
   })
 
   it('has a small size for a row', () => {

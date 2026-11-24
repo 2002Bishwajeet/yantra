@@ -171,7 +171,7 @@ function Strip(props: {
               ·
             </span>
             <State className={one.asleep ? undefined : 'dash__down'} state="unknown">
-              {one.name} {one.asleep ? 'asleep' : 'not answering'}
+              <span data-name>{one.name}</span> {one.asleep ? 'asleep' : 'not answering'}
               {one.since ? (
                 <span className="dash__long">
                   {' '}
@@ -511,7 +511,7 @@ function Worth(props: {
       {sessions.looked === 'never' ? (
         <NotLooked what="Sessions have" />
       ) : unknown ? (
-        <State state="unknown">no workspace list to check these against, so none can be called unclaimed</State>
+        <State state="unknown">Without the workspace list, Yantra cannot tell which sessions are unclaimed</State>
       ) : (
         <ul className="dash__rows">
           {rows.map(({ machine, session }) => {
@@ -574,7 +574,7 @@ function IdleRow(props: { row: Extract<WorkRow, { kind: 'workspace' }>; sessions
         <Tile name={row.workspace.name} size="small" />
         <span className="dash__name m3-wrap">{row.workspace.name}</span>
         <State size="small" state={mark}>
-          {words}
+          {capital(words)}
         </State>
         {started === null ? null : <Num className="dash__age dash__when">{ago(now / 1000 - started, now).text}</Num>}
       </Row>
@@ -865,7 +865,9 @@ export function Dashboard() {
       {unread.length > 0 ? (
         <div className="dash__line">
           <Eyebrow render={<h2 />}>Not read yet</Eyebrow>
-          <State state="unknown">{names(unread)}</State>
+          <State data-name state="unknown">
+            {names(unread)}
+          </State>
         </div>
       ) : null}
     </Page>

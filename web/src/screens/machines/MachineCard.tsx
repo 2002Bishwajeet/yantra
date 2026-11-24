@@ -29,7 +29,7 @@ function CheckLine(props: { check: Check; pressable: boolean }) {
   return (
     <li className="machines__check">
       {/* An agent that reports but is older needs an update, not a red failure (Y-740). */}
-      <State size="small" state={olderAgent(check) ? 'needs' : markOf(check.state)}>
+      <State data-name size="small" state={olderAgent(check) ? 'needs' : markOf(check.state)}>
         {nameOf(check.check)}
       </State>
       <Text className="machines__word" scale="label-small">

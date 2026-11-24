@@ -24,9 +24,9 @@ const KIND: Record<ItemType, string> = {
 }
 
 const STATUS: Record<Tool['status'], { state: MarkState; word: string }> = {
-  inProgress: { state: 'running', word: 'running' },
-  completed: { state: 'done', word: 'done' },
-  failed: { state: 'failed', word: 'failed' },
+  inProgress: { state: 'running', word: 'Running' },
+  completed: { state: 'done', word: 'Done' },
+  failed: { state: 'failed', word: 'Failed' },
 }
 
 function Call(props: { tool: Tool; alone: boolean; turn: MarkState; machine: string; harness: Harness | null }) {
