@@ -9,6 +9,7 @@ import { paintThemeColor, syncThemeColor } from './themeColor'
 
 const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8')
 const css = readFileSync(resolve(process.cwd(), 'src/m3/tokens.css'), 'utf8')
+const theme = readFileSync(resolve(process.cwd(), 'public/theme.js'), 'utf8')
 
 const metas = [
   ...html.matchAll(/<meta\s+name="theme-color"\s+media="\(prefers-color-scheme: (light|dark)\)"\s+data-scheme="\1"\s+content="(#[0-9A-Fa-f]{6})"\s*\/?>/g),
@@ -37,12 +38,22 @@ describe('index.html', () => {
     expect(by.dark).toBe(dark!.toLowerCase())
   })
 
-  it('puts the metas before the inline script', () => {
-    expect(html.lastIndexOf('<meta name="theme-color"')).toBeLessThan(html.indexOf('<script>'))
+  it('puts the metas before the theme script, which blocks the first paint', () => {
+    const at = html.indexOf('<script src="/theme.js"></script>')
+    expect(at).toBeGreaterThan(html.lastIndexOf('<meta name="theme-color"'))
+    expect(at).toBeLessThan(html.indexOf('</head>'))
   })
 
   it('rewrites the metas in the explicit-theme branch', () => {
-    expect(html).toMatch(/data-scheme[\s\S]*p\.theme[\s\S]*not all/)
+    expect(theme).toMatch(/p\.theme[\s\S]*dataset\.scheme[\s\S]*not all/)
+  })
+
+  // Y-785: the daemon's policy is `script-src 'self'`, which runs no inline script.
+  it('has no inline script and no inline handler', () => {
+    const scripts = [...html.matchAll(/<script\b([^>]*)>/g)]
+    expect(scripts).toHaveLength(2)
+    for (const [, attributes] of scripts) expect(attributes).toMatch(/\bsrc="\//)
+    expect(html).not.toMatch(/\son[a-z]+=/i)
   })
 })
 

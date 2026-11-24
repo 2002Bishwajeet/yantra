@@ -174,7 +174,7 @@
 .readiness__fold.m3-disclosure {
   border: 0;
   border-radius: var(--md-sys-shape-corner-medium);
-  background: var(--md-sys-color-surface-container-lowest);
+  background: var(--m3-raised-surface);
   color: var(--md-sys-color-on-surface);
 }
 

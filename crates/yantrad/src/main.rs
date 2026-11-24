@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use axum::Router;
+use axum::extract::State;
+use axum::http::{HeaderName, HeaderValue, header};
 use axum::routing::get;
 use tracing_subscriber::filter::{FilterFn, filter_fn};
 use tracing_subscriber::layer::SubscriberExt;
@@ -26,6 +28,7 @@ use yantra_core::inventory::{Inventory, Tailscale};
 use yantra_core::notify::RELAY_URL;
 
 mod api;
+mod bind;
 mod carry;
 mod chat;
 // Y-124: it only compares the routes against the dashboard's committed fixture.
@@ -182,6 +185,40 @@ fn dashboard(configured: Option<PathBuf>) -> Result<Router, Error> {
     }
 }
 
+/// Y-785: the security headers on every answer, and `no-store` under `/api`.
+/// `same-origin`, because `no-referrer` can put `Origin: null` on a same-origin
+/// write, which the gate refuses.
+async fn secured(
+    State(fleet): State<heartbeat::Fleet>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let path = request.uri().path();
+    let api = path == "/api" || path.starts_with("/api/");
+    let mut response = next.run(request).await;
+    let origin = api::https(&*fleet.model.read().await, &fleet.facts.listening_on);
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        web::policy(origin.as_deref()),
+    );
+    for (name, value) in [
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::REFERRER_POLICY, "same-origin"),
+        (
+            HeaderName::from_static("cross-origin-opener-policy"),
+            "same-origin",
+        ),
+    ] {
+        headers.insert(name, HeaderValue::from_static(value));
+    }
+    if api {
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    response
+}
+
 /// Apart from `serve` so a test can drive the whole tree without binding a
 /// port. What only the whole tree shows is the dashboard's reach: it is the
 /// fallback, so a path no route above it claims is answered by the app —
@@ -191,6 +228,7 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
     authoriser: write::Authoriser<I>,
     dashboard: Router,
 ) -> Router {
+    let secured = axum::middleware::from_fn_with_state(fleet.clone(), secured);
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         // Y-387: `curl …/join | sh` is the command a person types, so it sits
@@ -224,6 +262,8 @@ fn app<I: Inventory + Clone + Send + Sync + 'static>(
         .merge(heartbeat::router())
         .with_state(fleet)
         .fallback_service(dashboard)
+        // Last, so it covers the routes, the gate's refusals and the dashboard.
+        .layer(secured)
 }
 
 async fn serve<I: Inventory + Clone + Send + Sync + 'static>(inventory: &I) -> Result<(), Error> {
@@ -706,6 +746,19 @@ mod tests {
         headers: &[(&str, &str)],
         body: Option<serde_json::Value>,
     ) -> (axum::http::StatusCode, String) {
+        let (status, _, body) = answered(app, from, method, path, headers, body).await;
+        (status, body)
+    }
+
+    /// [`send_from`] with the answer's headers.
+    async fn answered(
+        app: &Router,
+        from: SocketAddr,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<serde_json::Value>,
+    ) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
         use axum::body::Body;
         use tower::ServiceExt;
 
@@ -725,11 +778,11 @@ mod tests {
             .extensions_mut()
             .insert(axum::extract::ConnectInfo(write::Peer::from(from)));
         let response = app.clone().oneshot(request).await.expect("infallible");
-        let status = response.status();
+        let (status, headers) = (response.status(), response.headers().clone());
         let body = axum::body::to_bytes(response.into_body(), 1 << 20)
             .await
             .expect("in memory");
-        (status, String::from_utf8_lossy(&body).into_owned())
+        (status, headers, String::from_utf8_lossy(&body).into_owned())
     }
 
     /// The owner's second device.
@@ -799,6 +852,117 @@ mod tests {
             let (status, body) = send(&app, "GET", path, &[]).await;
             assert_eq!(status, axum::http::StatusCode::OK, "{path}: {body}");
         }
+    }
+
+    /// Y-785, F-09: the headers are on the page, on an open API answer, and on
+    /// the answers that never reach a handler: the gate's 401 and the JSON 404.
+    #[tokio::test]
+    async fn every_answer_carries_the_security_headers_and_api_answers_are_not_stored() {
+        let dir = std::env::temp_dir().join("yantra-web-y785");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        std::fs::write(dir.join("index.html"), "<title>Yantra</title>").expect("index");
+        let (passkeys, cookie) = signed_in();
+        let app = app(
+            named_hub(),
+            write::Authoriser::new(owner_at(PHONE), &[], Path::new(SOCKET), passkeys)
+                .served_at(Some("https://yantra.example".to_owned())),
+            dashboard(Some(dir)).expect("a directory with an index"),
+        );
+        let ok = axum::http::StatusCode::OK;
+        let cookie = [("cookie", cookie.as_str())];
+
+        for (path, with, status, stored) in [
+            ("/", &[][..], ok, true),
+            ("/w/yantra", &[], ok, true),
+            ("/healthz", &[], ok, true),
+            ("/api/about", &[], ok, false),
+            (
+                "/api/workspaces",
+                &[],
+                axum::http::StatusCode::UNAUTHORIZED,
+                false,
+            ),
+            (
+                "/api/nosuch",
+                &cookie,
+                axum::http::StatusCode::NOT_FOUND,
+                false,
+            ),
+        ] {
+            let (answered, headers, body) = answered(&app, PHONE, "GET", path, with, None).await;
+            assert_eq!(answered, status, "{path}: {body}");
+            let header = |name: &str| {
+                headers
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or_default()
+            };
+
+            let policy = header("content-security-policy");
+            for part in [
+                "default-src 'self'",
+                "style-src 'self' 'unsafe-inline'",
+                "img-src 'self' data: blob: https://avatars.githubusercontent.com",
+                "object-src 'none'",
+                "base-uri 'none'",
+                "frame-ancestors 'none'",
+                "form-action 'self'",
+                "script-src 'self'",
+                // About's `https`, which the plain page asks before it moves,
+                // and not the configured origin.
+                "connect-src 'self' https://hub.example.ts.net:8443",
+            ] {
+                assert!(
+                    policy.split("; ").any(|directive| directive == part),
+                    "{path}: no `{part}` in `{policy}`"
+                );
+            }
+            assert!(!policy.contains("unsafe-eval"), "{path}: {policy}");
+            assert_eq!(header("x-content-type-options"), "nosniff", "{path}");
+            assert_eq!(header("x-frame-options"), "DENY", "{path}");
+            assert_eq!(header("referrer-policy"), "same-origin", "{path}");
+            assert_eq!(
+                header("cross-origin-opener-policy"),
+                "same-origin",
+                "{path}"
+            );
+            assert_eq!(
+                header("cache-control") != "no-store",
+                stored,
+                "{path}: `{}`",
+                header("cache-control")
+            );
+        }
+
+        let (_, about) = send(&app, "GET", "/api/about", &[]).await;
+        assert!(
+            about.contains("\"https\":\"https://hub.example.ts.net:8443\""),
+            "the policy must name the origin About serves: {about}"
+        );
+    }
+
+    /// Before the first tailnet look there is no origin to name.
+    #[tokio::test]
+    async fn a_daemon_that_knows_no_https_origin_names_only_itself() {
+        let app = app(
+            heartbeat::Fleet::default(),
+            write::Authoriser::new(
+                owner_at(PHONE),
+                &[],
+                Path::new(SOCKET),
+                passkey::Passkeys::memory(),
+            ),
+            web::placeholder(),
+        );
+
+        let (_, headers, _) = answered(&app, PHONE, "GET", "/", &[], None).await;
+
+        let policy = headers["content-security-policy"].to_str().expect("ascii");
+        assert!(
+            policy.ends_with("; script-src 'self'; connect-src 'self'"),
+            "{policy}"
+        );
     }
 
     fn signed_in() -> (passkey::Passkeys, String) {
@@ -886,6 +1050,186 @@ mod tests {
             axum::http::StatusCode::UNAUTHORIZED,
             "an ended token"
         );
+    }
+
+    /// [`signed_in`], and the cookie and id of a read-only session that the
+    /// phone's session made through the route.
+    async fn with_a_read_only_session() -> (Router, String, String, String) {
+        let (passkeys, full) = signed_in();
+        let app = gated(passkeys);
+        let (status, headers, body) = answered(
+            &app,
+            PHONE,
+            "POST",
+            "/api/sessions/read/walk",
+            &[("cookie", &full)],
+            None,
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert!(
+            !headers.contains_key("set-cookie"),
+            "a cookie would replace the owner's own session"
+        );
+        let made: serde_json::Value = serde_json::from_str(&body).expect("JSON");
+        assert_eq!(made["session"]["read_only"], true, "{body}");
+        assert_eq!(made["session"]["device"], "walk", "{body}");
+        let token = made["token"].as_str().expect("a token");
+        let id = made["session"]["id"].as_str().expect("an id").to_owned();
+        (app, full, format!("{}={token}", passkey::COOKIE), id)
+    }
+
+    const READ_ONLY: &str = "this session is read-only";
+
+    /// The 2026-11-24 note on ADR-0044: a read-only session reads what a full
+    /// one reads, from the owner's own node, until it is revoked.
+    #[tokio::test]
+    async fn a_read_only_session_reads_from_the_owners_node_until_it_is_revoked() {
+        let (app, full, reader, id) = with_a_read_only_session().await;
+        let ok = axum::http::StatusCode::OK;
+
+        for path in [
+            "/api/workspaces",
+            "/api/sessions",
+            "/api/machines",
+            "/api/layout",
+            "/api/here",
+            "/api/rooms",
+            "/api/tasks",
+        ] {
+            let (status, body) = send(&app, "GET", path, &[("cookie", &reader)]).await;
+            let owner = send(&app, "GET", path, &[("cookie", &full)]).await;
+            assert_eq!((status, &body), (owner.0, &owner.1), "{path}");
+            assert_eq!(status, ok, "{path}: {body}");
+        }
+        let (status, body) = send(&app, "GET", "/api/passkey", &[("cookie", &full)]).await;
+        assert_eq!(status, ok, "{body}");
+        assert!(body.contains("\"read_only\":true"), "it is listed: {body}");
+
+        let (status, body) = send_from(
+            &app,
+            THEIRS,
+            "GET",
+            "/api/workspaces",
+            &[("cookie", &reader)],
+            None,
+        )
+        .await;
+        assert_eq!(
+            status,
+            axum::http::StatusCode::FORBIDDEN,
+            "another user's node: {body}"
+        );
+
+        let path = format!("/api/sessions/{id}");
+        let (status, body) = send(&app, "DELETE", &path, &[("cookie", &full)]).await;
+        assert_eq!(status, axum::http::StatusCode::NO_CONTENT, "{body}");
+        let (status, _) = send(&app, "GET", "/api/workspaces", &[("cookie", &reader)]).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "revoked");
+    }
+
+    /// Every write, MCP call, passkey route and session route, the `GET` that
+    /// makes the Web Push key, and the routes that leave the gate before
+    /// `identify`: the four ceremony halves and the two join routes.
+    #[tokio::test]
+    async fn a_read_only_session_gets_403_on_everything_but_a_read() {
+        let (app, _, reader, id) = with_a_read_only_session().await;
+        let session = format!("/api/sessions/{id}");
+
+        for (method, path) in [
+            ("POST", "/api/workspaces/web/up"),
+            ("PUT", "/api/layout"),
+            ("POST", "/api/viewing"),
+            ("POST", "/api/mcp"),
+            ("GET", "/api/mcp"),
+            ("GET", "/api/passkey"),
+            ("POST", "/api/passkey/code"),
+            ("DELETE", "/api/passkey/iPhone"),
+            ("DELETE", session.as_str()),
+            ("POST", "/api/sessions/revoke-others"),
+            ("POST", "/api/sessions/read/x"),
+            ("GET", "/api/push/key"),
+            ("GET", "/api/workspaces/web/repair"),
+            ("POST", "/api/passkey/register/start"),
+            ("POST", "/api/passkey/register/finish"),
+            ("POST", "/api/passkey/login/start"),
+            ("POST", "/api/passkey/login/finish"),
+            ("POST", "/api/join"),
+            ("POST", "/api/join/forget-host-key"),
+            ("POST", "/api/machines/mac/readiness"),
+            ("POST", "/api/nosuch"),
+        ] {
+            let (status, body) = send(&app, method, path, &[("cookie", &reader)]).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::FORBIDDEN,
+                "{method} {path}: {body}"
+            );
+            assert!(body.starts_with(READ_ONLY), "{method} {path}: {body}");
+        }
+        for path in ["/api/workspaces", "/api/about"] {
+            let (status, body) = send(&app, "GET", path, &[("cookie", &reader)]).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{path}: {body}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_only_session_gets_403_on_every_socket_upgrade() {
+        let (app, _, reader, _) = with_a_read_only_session().await;
+
+        for path in [
+            "/api/workspaces/web/terminal",
+            "/api/machines/mac/sessions/main/terminal",
+            "/api/machines/mac/install/0/terminal",
+            "/api/machines/mac/owner/terminal?as=admin",
+            "/api/workspaces/web/chat",
+            "/api/machines/mac/chat",
+            "/api/machines/mac/mic",
+            "/api/dictate",
+        ] {
+            let upgrade = [
+                ("cookie", reader.as_str()),
+                ("connection", "upgrade"),
+                ("upgrade", "websocket"),
+                ("sec-websocket-version", "13"),
+                ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+            ];
+            let (status, body) = send(&app, "GET", path, &upgrade).await;
+            assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{path}: {body}");
+            assert!(body.starts_with(READ_ONLY), "{path}: {body}");
+        }
+    }
+
+    /// The join script's code skips `identify`, and the gate still refuses a
+    /// read-only cookie beside it.
+    #[tokio::test]
+    async fn a_read_only_session_with_a_join_code_header_gets_403() {
+        let (app, _, reader, _) = with_a_read_only_session().await;
+
+        let (status, body) = send(
+            &app,
+            "POST",
+            "/api/machines/mac/readiness",
+            &[("cookie", &reader), ("x-yantra-join-code", "WRONGONE")],
+        )
+        .await;
+
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{body}");
+        assert!(body.starts_with(READ_ONLY), "{body}");
+    }
+
+    #[tokio::test]
+    async fn only_the_owner_makes_a_read_only_session() {
+        let (passkeys, _) = signed_in();
+        let minted = passkeys.mint_agent("web");
+        let bearer = format!("Bearer {}", minted.token);
+        let app = gated(passkeys);
+        let path = "/api/sessions/read/walk";
+
+        let (status, body) = send(&app, "POST", path, &[("authorization", &bearer)]).await;
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{body}");
+        let (status, body) = send(&app, "POST", path, &[]).await;
+        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{body}");
     }
 
     /// ADR-0044 decision 8, amended 2026-11-12 (Y-789): a caller that is not

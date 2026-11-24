@@ -1,6 +1,6 @@
 // Y-660: walk.sh runs this in the Playwright image, from web/, so the dashboard's own @playwright/test is used.
 import { createRequire } from 'node:module'
-import { writeFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 
 const [base, out, ...routes] = process.argv.slice(2)
 const { chromium, webkit, devices } = createRequire(`${process.cwd()}/package.json`)('@playwright/test')
@@ -95,11 +95,94 @@ async function searchScene(page, name, url, out) {
   await snap(page, `${out}/search-typed-${name}`, false)
   await page.keyboard.press('Escape')
 }
+// Y-761: the Account menu's heading and vertical shape, shot open.
+async function accountScene(page, name, url, out) {
+  await page.goto(url, { waitUntil: 'load' })
+  await page.waitForTimeout(1500)
+  const avatar = page.getByRole('button', { name: 'Account', exact: true })
+  if (name === 'desktop-chromium') await avatar.click()
+  else await avatar.tap()
+  // A visibility wait passes a popup that Base UI holds at opacity 0 until it has a position, and one under
+  // another layer. Neither is in the picture, so the scene asks what is painted and reports what is not.
+  const fault = () =>
+    page.evaluate(() => {
+      const menu = document.querySelector('.m3-menu[data-open]')
+      if (!menu) return 'no menu is open'
+      const box = menu.getBoundingClientRect()
+      const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      const opacity = [menu, menu.closest('.m3-menu__positioner')].map((one) => getComputedStyle(one).opacity).join(' in ')
+      if (opacity === '1 in 1' && menu.contains(top)) return ''
+      return `opacity ${opacity}, box ${[box.x, box.y, box.width, box.height].map(Math.round)}, on top <${top?.tagName ?? 'nothing'} class="${top?.getAttribute('class') ?? ''}">`
+    })
+  let wrong = await fault()
+  for (let n = 0; wrong && n < 20; n++) {
+    await page.waitForTimeout(150)
+    wrong = await fault()
+  }
+  if (wrong) errors.push(`${name} account scene: the open menu is not painted: ${wrong}`)
+  const text = await page.locator('.m3-menu[data-open]').innerText({ timeout: 1000 }).catch(() => '')
+  writeFileSync(`${out}/account-open-${name}.txt`, text)
+  await page.screenshot({ path: `${out}/account-open-${name}.png` })
+  if (!wrong && (await fault())) errors.push(`${name} account scene: the menu closed while the picture was taken`)
+  await page.keyboard.press('Escape')
+}
+// Y-754: a phone's Needs-you row is the link and a desktop's row ends in one. A GitHub row leaves the dashboard, so it is not opened.
+async function needsScene(page, name, url, out) {
+  await page.goto(url, { waitUntil: 'load' })
+  await page.waitForTimeout(5000)
+  const desktop = name === 'desktop-chromium'
+  const band = page.getByRole('region', { name: 'Needs you' })
+  const link = band.locator(desktop ? '.m3-row a.m3-button:not([target])' : 'a.m3-row:not([target])').first()
+  if ((await link.count()) === 0) return
+  if (desktop) await link.click()
+  else await link.tap()
+  await page.waitForTimeout(2000)
+  await snap(page, `${out}/needs-you-open-${name}${desktop ? '' : '-1'}`, desktop)
+}
+// Y-757: the phone keeps the status and Stop in the More menu, so the walk opens it. The row's 40 % is a
+// number, so the phone's text file gets the measured tops; a reader cannot take them from a picture.
+async function workspaceScene(page, name, file, menu) {
+  const phone = name !== 'desktop-chromium'
+  await page.evaluate(() => window.scrollTo(0, 0))
+  if (phone) {
+    const top = async (part) => Math.round((await part.boundingBox()).y)
+    const thread = await top(page.getByRole('region', { name: 'Conversation' }))
+    const picker = await top(page.getByRole('button', { name: /^Threads,/ }))
+    const git = await top(page.locator('.git__split'))
+    const { height } = page.viewportSize()
+    appendFileSync(
+      `${file}.txt`,
+      `\n\nThe walk measured, on a ${height} px screen: the conversation starts at ${thread} px, ${Math.round((thread / height) * 100)} % down. The thread picker starts at ${picker} px and the git action at ${git} px.\n`,
+    )
+  }
+  const more = page.getByRole('button', { name: 'More actions' })
+  if (phone) await more.tap()
+  else await more.click()
+  // The picture is of a menu that is on screen: Delete is its last item, and a menu that Base UI holds closed
+  // or off the viewport never shows it. A tap that opened and shut the menu fails here, not in the PR.
+  const last = page.getByRole('menuitem', { name: 'Delete' })
+  await last.waitFor({ state: 'visible' })
+  const box = await last.boundingBox()
+  const { width, height } = page.viewportSize()
+  if (!box || box.x < 0 || box.y < 0 || box.x + box.width > width || box.y + box.height > height) {
+    errors.push(`${name} workspace scene: the menu's Delete is outside the screen at ${JSON.stringify(box)}`)
+    return
+  }
+  await page.waitForTimeout(500)
+  // The phone's picture ends in -1, as its other screens do, so walk.sh publish puts it in the PR's table.
+  const shot = `${phone ? `${menu}-1` : menu}.png`
+  await snap(page, phone ? `${menu}-1` : menu, false)
+  if (readFileSync(shot).equals(readFileSync(`${file}${phone ? '-1' : ''}.png`))) {
+    errors.push(`${name} workspace scene: menu shot equals the closed screen`)
+  }
+  await page.keyboard.press('Escape')
+}
 for (const [name, type, options] of looks) {
   const browser = await type.launch()
   const context = await browser.newContext({ ...options, reducedMotion: 'reduce', colorScheme: 'light' })
   let belled = false
   let searched = false
+  let accounted = false
   // The loop below adds to the queue, so each look starts from the routes the walk named.
   const queue = [...shots]
   for (const [url, shot, scheme] of queue) {
@@ -134,6 +217,29 @@ for (const [name, type, options] of looks) {
         await page.waitForTimeout(300)
         await page.screenshot({ path: `${file}-${n}.png` })
       }
+      // Y-761: the phone scrolls `main`, not the window (Y-670), and no walked page is taller than the screen.
+      // A spacer inside `main` makes it scroll, so the shot shows the bar toned over content. Sign-in has no shell.
+      const scrolled = await page.evaluate(() => {
+        const main = document.querySelector('[data-shell="phone"] .shell__main')
+        if (!main) return false
+        const spacer = document.createElement('div')
+        spacer.id = 'walk-spacer'
+        spacer.style.cssText = 'flex: none; height: 1600px'
+        main.append(spacer)
+        main.scrollTop = 400
+        return main.scrollTop > 0
+      })
+      if (scrolled) {
+        await page.waitForTimeout(400)
+        if (!(await page.locator('[data-shell="phone"][data-scrolled]').count())) errors.push(`${name} ${shot}: the bar kept its resting tone over scrolled content`)
+        await page.screenshot({ path: `${file}-scrolled.png` })
+      }
+      // The scenes below shoot this page again.
+      await page.evaluate(() => {
+        const main = document.querySelector('[data-shell="phone"] .shell__main')
+        document.getElementById('walk-spacer')?.remove()
+        if (main) main.scrollTop = 0
+      })
     }
     if (shot === 'machines') {
       const also = (route) => queue.some(([, other]) => other === slug(route)) || queue.push([`${base}${route}`, slug(route), 'light'])
@@ -151,6 +257,13 @@ for (const [name, type, options] of looks) {
         errors.push(`${name} machines: the daemon's list could not be read: ${e.message}`)
       }
     }
+    if (/^\/w\/[^/]+$/.test(new URL(url).pathname)) {
+      try {
+        await workspaceScene(page, name, file, `${out}/${shot}-menu-${name}`)
+      } catch (e) {
+        errors.push(`${name} workspace scene: ${e.message}`)
+      }
+    }
     if (shot === 'settings-about') {
       try {
         await channelScene(page, name, (scene) => `${out}/${scene}-${name}`)
@@ -166,12 +279,27 @@ for (const [name, type, options] of looks) {
         errors.push(`${name} bell scene: ${e.message}`)
       }
     }
+    if (shot !== 'sign-in' && !accounted) {
+      accounted = true
+      try {
+        await accountScene(page, name, url, out)
+      } catch (e) {
+        errors.push(`${name} account scene: ${e.message}`)
+      }
+    }
     if (shot !== 'sign-in' && !searched) {
       searched = true
       try {
         await searchScene(page, name, url, out)
       } catch (e) {
         errors.push(`${name} search scene: ${e.message}`)
+      }
+    }
+    if (shot === 'home') {
+      try {
+        await needsScene(page, name, url, out)
+      } catch (e) {
+        errors.push(`${name} needs-you scene: ${e.message}`)
       }
     }
     await page.close()

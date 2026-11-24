@@ -46,6 +46,9 @@ describe('About', () => {
     const listens = screen.getByText('Listens on').closest('.settings__fact')!
     expect(within(listens as HTMLElement).getByText('100.64.0.1:7717').getAttribute('title')).toBe('100.64.0.1:7717')
     expect(within(listens as HTMLElement).getByText('[fd7a:115c:a1e0::1]:7717')).toBeTruthy()
+    const address = within(listens as HTMLElement).getByText('100.64.0.1:7717')
+    expect(address.classList.contains('m3-num')).toBe(true)
+    expect(address.classList.contains('m3-mono')).toBe(false)
   })
 
   it('draws the boundary when the daemon answers something else', async () => {

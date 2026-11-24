@@ -9,11 +9,11 @@
   min-width: 112px;
   max-width: 280px;
   max-height: var(--available-height);
-  padding: 8px 0;
-  /* M3's menu container is extra-small; nothing on a board says otherwise. */
-  border-radius: var(--md-sys-shape-corner-extra-small);
+  padding: 8px 4px;
+  /* The Expressive vertical menu: corner-large, surface-container-low, items inset and rounded. */
+  border-radius: var(--md-sys-shape-corner-large);
   color: var(--md-sys-color-on-surface);
-  background: var(--md-sys-color-surface-container);
+  background: var(--md-sys-color-surface-container-low);
   box-shadow: var(--md-sys-elevation-level2);
   overflow-y: auto;
   outline: none;
@@ -37,6 +37,7 @@
   box-sizing: border-box;
   min-height: 48px;
   padding: 0 12px;
+  border-radius: var(--md-sys-shape-corner-medium);
   font: var(--md-sys-typescale-label-large);
   letter-spacing: var(--md-sys-typescale-label-large-tracking);
   color: inherit;
@@ -87,4 +88,12 @@
   height: 1px;
   margin: 8px 0;
   background: var(--md-sys-color-outline-variant);
+}
+
+.m3-menu__heading {
+  display: block;
+  padding: 8px 12px;
+  font: var(--md-sys-typescale-label-large);
+  letter-spacing: var(--md-sys-typescale-label-large-tracking);
+  color: var(--md-sys-color-on-surface-variant);
 }

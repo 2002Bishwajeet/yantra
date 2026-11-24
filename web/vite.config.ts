@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
@@ -52,6 +53,13 @@ export default defineConfig({
         target: process.env.YANTRA_API ?? 'http://127.0.0.1:7717',
         ws: true,
       },
+    },
+  },
+  // Y-785: the e2e suite reads the built page under yantrad's policy, so a screen it
+  // breaks fails console.spec.ts. Not the dev server: its HMR preamble is inline.
+  preview: {
+    headers: {
+      'Content-Security-Policy': readFileSync(new URL('../crates/yantrad/src/web/policy.txt', import.meta.url), 'utf8').trim(),
     },
   },
   test: {

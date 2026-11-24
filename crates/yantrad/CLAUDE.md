@@ -37,6 +37,24 @@ ADR-0016's predicate on them with no cookie, so only the owner's own node starts
 Wrong codes count for each caller node, and a node holds at most 16 open ceremonies. `passkey.rs`
 keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and never a token.
 
+**A session may be read-only** (ADR-0044's note of 2026-11-24, Y-835). The build loop reads the box
+with one. `POST /api/sessions/read/{name}` makes it for the owner and answers the token once, in the
+body and in no cookie. `identify` names its caller `Who::Reader`. Three rules bind it:
+
+- **The gate passes it on `write::reader_may` only**: a `GET` or a `HEAD` with no `Upgrade` header,
+  on any path but `/mcp`, `/passkey…`, `/sessions/…` and `/push/key`. Everything else is a 403
+  whose text starts *this session is read-only*, which the dashboard reads. The four ceremony
+  routes, the two join routes and a login test with a join code skip `identify`, so `passes`
+  refuses the cookie on them before they leave. `GET /api/about` still answers it.
+- **`allowed` refuses it, and `reading` is the one check that passes it.** `POST
+  /api/join/forget-host-key` skips `identify` in the gate and then asks `allowed`, so a handler does
+  not rely on the gate. A handler that acts calls `allowed`, and only a `GET` that changes nothing
+  calls `reading`. `tasks.rs` does the same with `seen`. A new `match` on `Who` does not compile
+  until it decides for `Reader`.
+- **Its row keeps SHA-256 of `passkey::READS` and the token, and a full row keeps SHA-256 of the
+  token.** A daemon older than the field reads the row as a full session. `READS` ends in a NUL,
+  which no cookie can hold, so no token matches the row there.
+
 **The dashboard's origin is `https://<MagicDNS>:8443` unless `YANTRA_ORIGIN` names one** (ADR-0044,
 amended 2026-11-12). `main.rs` reads it from `/etc/yantra/daemon.env` once at start, and
 `passkey::configured_origin` accepts exactly one https origin with no path; anything else stops the
@@ -192,6 +210,14 @@ the list's envelope carries the youngest. With nothing kept the list answers fro
 machine nothing has reached is a **404**, and asking a machine per *polled* request is the thing
 this shape refuses. It is memory, so a restart empties it and the next sweep fills it again (Y-044).
 
+**The hub is checked at start, before the first sweep** (Y-830). New session hides a hub with no
+report, and a sweep settles only when its slowest machine answers. So `look_at_hub` runs before each
+sweep and asks the hub alone when `checks` holds nothing for it. The hub is the node that holds a
+bound address, and the rule is `runsSessions` without `online`, as the web's is. The update unit
+ends in a restart, so an update takes the same path. The first readiness look waits for the first
+machines reading, at most 10 s, so the first sweep also knows the tailnet peers. Until the hub's
+report lands, `GET /api/readiness` says `never`, and New session draws the hub's chip as *checking*.
+
 **`POST /api/machines/{name}/readiness` is where a person may ask anyway** (Y-197,
 [ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)): someone who has just
 installed `tmux` by hand needs the answer before the next sweep, and the `GET` beside it can only
@@ -276,17 +302,22 @@ back, and `tracing` names the caller and never the topic. `GET /api/about` says 
 process started with a relay, as `relay: bool` (Y-388), so the setup checklist can tell a relay the
 daemon uses from one saved for its next start.
 
-**Nothing is pushed while a dashboard is open** (D3 §13). `notify::Viewers` is a last-seen-a-viewer
-timestamp beside the snapshot, `POST /api/viewing` writes it, and `refresh` hands the notifier a
-bool. **The diff still runs when it is suppressed**: what a watched look produced is dropped rather
-than held, so closing the tab does not deliver a backlog of things the page already showed. It is in
-memory and a restart forgets it, which is Y-044 exactly as written — that state is not the exception
-ADR-0021 carved.
+**Nothing is pushed to a device that is being looked at** (D3 §13, Y-829,
+[ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md) decision 6). `notify::Viewers` holds
+when any dashboard last beaconed, and when each device that named its push endpoint did.
+`POST /api/viewing` writes it, and `refresh` hands the notifier a `notify::Watched`. Web Push skips
+only the devices that beaconed inside the window, so a laptop tab does not silence the phone. The
+relay skips a look that any dashboard watched, because the daemon cannot tell which device a relay
+reaches. A beacon with no body quiets the relay only. The map keeps at most 16 endpoints of at most
+2048 bytes, and it never logs one. **The diff still runs when it is suppressed**: what a watched look
+produced is dropped rather than held, so closing the tab does not deliver a backlog of things the
+page already showed. It is in memory and a restart forgets it, which is Y-044 exactly as written —
+that state is not the exception ADR-0021 carved.
 
 **The PR watch is the second caller of the relay** (Y-494, [`watch.rs`](src/watch.rs)). It runs on
 its own task in `refresh.rs` and keeps the agents notifier's rules through the shared `notify::Teller`:
-remembered first, not pushed while a dashboard is open, one 5 s budget, no retry, and the quiet
-`Log`. Its notes are *Check failed*, *Checks passed* and *PR reviewed*. The body is
+remembered first, not pushed to a device that is being looked at, one 5 s budget, no retry, and the
+quiet `Log`. Its notes are *Check failed*, *Checks passed* and *PR reviewed*. The body is
 `{workspace}: PR #{n} …`, cut at 160 characters, with no repo, no check output and no review text.
 **Its reads are conditional**: each sends the last `ETag` back as `If-None-Match`, so an unchanged PR
 costs GitHub no quota, and a 304 reuses what the watch already holds.
@@ -295,7 +326,8 @@ costs GitHub no quota, and a 304 reuses what the watch already holds.
 [ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md), [`push.rs`](src/push.rs)).
 `notify::told` is the one send: `Push::send` to every device in the store and, at the same time,
 the relay when one is set. The agents notifier, the PR watch, the chat's waits and the rooms' pauses all call it, and
-each keeps its own rules. The payload is `{title, body, url}`, where `url` is `Message::path`, a path
+each keeps its own rules. The agents notifier and the PR watch leave out the devices that are being
+looked at; the chat's waits and the rooms' pauses do not read the beacon. The payload is `{title, body, url}`, where `url` is `Message::path`, a path
 in the dashboard. Four rules bind `push.rs`:
 
 - **The crypto is composed here, and RFC 8291's example is the test.** No published Web Push crate
@@ -337,6 +369,25 @@ reaches the phone ([M16](../../docs/plans/m16-the-coding-loop.md) §3.6).
 `YANTRA_WEB` names a directory of **built** assets and `web.rs` serves it as the router's fallback,
 so `/api`, `/healthz` and `/heartbeat` keep winning and everything else is the app. Unknown paths get
 `index.html` rather than a 404, which is what makes a deep link work.
+
+**Every answer carries the security headers** (Y-785, F-09 of the 2026-11-12 audit). `main.rs`'s
+`secured` is the last layer on `app`, so it covers the routes, the gate's refusals, the JSON 404 and
+the dashboard. It sends a `Content-Security-Policy`, `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: same-origin` and `Cross-Origin-Opener-Policy: same-origin`.
+It sends `Cache-Control: no-store` on `/api` and under it. The policy is
+[`src/web/policy.txt`](src/web/policy.txt). `web::policy` adds the https origin About serves to
+`connect-src`, the file's last directive, because the plain page asks that origin for `/healthz`
+before it moves there. The layer fails closed: `web::policy` leaves out an origin that would add a
+source or a directive, or that no header value holds, and still sends the policy.
+`web/vite.config.ts` reads the same file, so the e2e suite runs every screen under the policy.
+
+- **`Referrer-Policy` is `same-origin`, and not the audit's `no-referrer`.** `same-origin` sends no
+  `Referer` to another origin. `no-referrer` makes a browser send `Origin: null` on some same-origin
+  writes, and the gate refuses that.
+- **`index.html` has no inline script.** `script-src` names no hash, so an inline script does not
+  run. The theme script is `web/public/theme.js`, and `themeColor.test.ts` fails on an inline one.
+- **Do not add `upgrade-insecure-requests`.** The plain page on `:7717` would stop working. The
+  build has no eval and no wasm, so the policy has no `unsafe-eval`.
 
 **Both halves answer `Accept-Encoding: gzip` with a file gzipped at build time** (Y-357).
 `npm run build` writes a `.gz` beside every `.js`, `.css`, `.svg` and `.html` in `dist`; the directory half
@@ -492,7 +543,10 @@ startup command of a tmux session on the machine and the route answers `202` wit
 nothing awaits the clone, progress is that session's terminal socket (ADR-0022) and completion is the
 probe. Both values are checked in [`clone.rs`](../yantra-core/src/clone.rs) before ssh, and a URL
 carrying a credential is refused: it would sit in the pane's start command for as long as the session
-lives (ADR-0023 §4).
+lives (ADR-0023 §4). **The clone record is written when `git clone` exits 0, and never when it starts**
+(Y-782): a clone that git refused leaves the folder as it was, and a record of it binds every later
+thread to a repository the folder does not hold. A task the daemon owns follows the pane after the
+`202`. A restart or a clone longer than an hour leaves no record, and those threads take `origin`.
 
 **`GET /api/notifications` and the ring behind it are
 [ADR-0025](../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md)** (Y-343), proposed rather than
@@ -1136,7 +1190,7 @@ or not anyone is looking, so a handler that calls `sessions::list` per request t
 into a permanent ssh storm. `refresh.rs` looks on its own schedule; a handler clones the snapshot and
 reads memory. **Never `await` ssh inside a handler.**
 
-**Thirteen things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
+**Fourteen things hold ssh anyway, and each says so where it does it.** `write.rs` awaits it because a
 person tapped a button once. `terminal.rs` holds a connection open for as long as someone is looking
 at a terminal — and pays for it *after* the upgrade has answered, in a task belonging to the socket
 rather than to a request. **`write.rs`'s probe route is the third, and it is a read**
@@ -1198,11 +1252,15 @@ polls it.
 bounded `claude -p` that answers `initialize` and exits. The composer asks once when a person types
 `/` at the start of a prompt, and holds the answer for five minutes.
 
+**Y-782 is the fourteenth, and no request awaits it.** After the clone route answers `202`, a task
+reads the clone session's pane every 3 s until `git clone` ends, for at most an hour. A person
+started that clone, and the task ends with it.
+
 **`room_read` waits beside the tasks licence, and holds no ssh at all** (Y-534). Its wait is in
 memory, it ends at 50 s or when the daemon shuts down, and a `room_send` spawns its wakes as tasks
 rather than awaiting them.
 
-None of the thirteen licenses a **read handler** that awaits ssh, which is still the bug this module
+None of the fourteen licenses a **read handler** that awaits ssh, which is still the bug this module
 exists to prevent. ADR-0019 sets the test for the next candidate, and it is two halves rather than
 one: **a person initiated it, and nothing polls it.** A route a page calls on a timer fails the
 second half however it is spelled, and choosing `POST` does not rescue it.
@@ -1283,10 +1341,10 @@ unreachable GitHub that stays shows after 5 s. A status error that stays shows o
 - **The CLI is the honesty check.** Anything the web UI can do must be expressible in `yantra`
   first. That is what stops the daemon growing a second, richer API that the CLI cannot reach.
 - Stack: `axum` and `tokio`, both in use since Y-069. **One store, and only one**: `src/store.rs` keeps
-  a row per Chat thread in `~/.local/state/yantra/threads.sqlite` ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md),
+  a row per Chat thread and a row per clone that Yantra completed in `~/.local/state/yantra/threads.sqlite` ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md),
   Y-688). It answers the first question about the past, which threads a machine had and what they
-  were called, and the store wins over git config for a session id. Only `DELETE …/threads/{thread}`
-  forgets a row: the web's *Forget thread* and `yantra chat rm --daemon` send it for a `gone` thread. A second table,
+  were called, and the store wins over git config for a session id and for the GitHub repository (Y-782). Only `DELETE …/threads/{thread}`
+  forgets a row: the web's *Forget thread* and `yantra chat rm --daemon` send it for a `gone` thread. A third table,
   `push_devices`, holds each device that gets Web Push ([ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md)). `rusqlite` with hand-written SQL,
   every call on a blocking thread, and the pragmas on every connection (I-12, I-13, I-14). The daemon
   refuses to start when the store does not open. Everything else is still declared in the workspace

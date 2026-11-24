@@ -14,7 +14,7 @@ export type MenuPopupProps = Base.Popup.Props & {
   children: ReactNode
 }
 
-/** The avatar and overflow menus: surface-container, 48 px items. */
+/** The avatar and overflow menus: surface-container-low, 48 px items. */
 export function MenuPopup(props: MenuPopupProps) {
   const { side, align, anchor, keepMounted, className, ...rest } = props
   return (
@@ -63,6 +63,15 @@ export function MenuLinkItem(props: MenuLinkItemProps) {
       ) : null}
       {children}
     </Base.LinkItem>
+  )
+}
+
+/** A non-interactive line at the top of a menu; the arrow keys skip it. */
+export function MenuHeading(props: { children: ReactNode }) {
+  return (
+    <Base.Group>
+      <Base.GroupLabel className="m3-menu__heading">{props.children}</Base.GroupLabel>
+    </Base.Group>
   )
 }
 

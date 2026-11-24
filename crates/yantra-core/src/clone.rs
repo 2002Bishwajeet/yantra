@@ -1,11 +1,13 @@
 //! Cloning a repository onto a machine, inside a tmux session there (Y-344).
 //!
-//! **Nothing here waits for the clone.** A clone of a large repository takes
+//! **[`clone`] does not wait for the clone.** A clone of a large repository takes
 //! minutes, and a handler that awaited it would hold a request open for all of
 //! them ([R13] §4.2). So `git clone` runs as the startup command of a session
 //! named `clone-<slug>`: progress is that session's terminal socket
 //! ([ADR-0022]), completion is [`crate::probe`], and the session is opened
 //! with [`Tmux::ensure`], so asking twice attaches rather than clones twice.
+//! [`landed`] is for a caller that must know how git ended: it follows the
+//! pane, and no request may await it.
 //!
 //! **The machine's own git credential does the fetch.** No token of the
 //! daemon's goes with the command ([ADR-0023] §4), and a URL carrying one is
@@ -15,6 +17,8 @@
 //! [R13]: ../../../docs/research/13-dashboard-revamp-and-github.md
 //! [ADR-0022]: ../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md
 //! [ADR-0023]: ../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md
+
+use std::time::Duration;
 
 use crate::ssh::{self, Exec, Os, Ssh};
 use crate::tmux::{self, Opened, Tmux, sq};
@@ -220,6 +224,41 @@ pub async fn clone_on<E: Exec>(
     })
 }
 
+/// The dashboard's own probe interval.
+const LOOK: Duration = Duration::from_secs(3);
+
+/// Follows the clone that `cloning` started until its pane ends, and answers
+/// whether `git clone` exited 0. It sets no time limit; the caller does.
+pub async fn landed(cloning: &Cloning) -> Result<bool, Error> {
+    let ssh = Ssh::new(ssh::machine_at(&cloning.machine).ok_or(Error::NoStateDir)?)?;
+    let tmux = Tmux::resolve(&ssh).await?;
+    landed_on(&ssh, &tmux, cloning, LOOK).await
+}
+
+/// The testable half. The exit status is the only proof it reads: the command
+/// names the URL and the path, and an agent in the folder cannot change how
+/// git ended. `probe` cannot say this, because `origin` is there before the
+/// fetch is done. A session that is gone, or one with another pane, is not
+/// this clone, so it did not land.
+pub async fn landed_on<E: Exec>(
+    exec: &E,
+    tmux: &Tmux,
+    cloning: &Cloning,
+    every: Duration,
+) -> Result<bool, Error> {
+    let started = &cloning.opened.session().pane_id;
+    loop {
+        let pane = tmux.pane(exec, &cloning.session).await?;
+        let Some(pane) = pane.filter(|pane| pane.id == *started) else {
+            return Ok(false);
+        };
+        if pane.dead {
+            return Ok(pane.status == Some(0));
+        }
+        tokio::time::sleep(every).await;
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -361,5 +400,62 @@ mod tests {
             command(&absolute),
             "git clone --progress -- 'git@github.com:o/r.git' '/srv/r'"
         );
+    }
+
+    /// A machine whose clone session answers each `list-panes` in turn.
+    struct Panes(std::sync::Mutex<Vec<(i32, &'static str, &'static str)>>);
+
+    impl Exec for Panes {
+        async fn exec(&self, command: &str) -> Result<ssh::Output, ssh::Error> {
+            let (status, stdout, stderr) = if command.contains("command -v tmux") {
+                (0, "Linux\n/usr/bin/tmux\n", "")
+            } else {
+                self.0.lock().expect("the answers").remove(0)
+            };
+            Ok(ssh::Output {
+                status,
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: stderr.as_bytes().to_vec(),
+            })
+        }
+    }
+
+    async fn landed_after(answers: &[(i32, &'static str, &'static str)]) -> bool {
+        let machine = Panes(std::sync::Mutex::new(answers.to_vec()));
+        let tmux = Tmux::resolve(&machine).await.expect("a tmux");
+        let cloning = Cloning {
+            machine: "m".to_owned(),
+            session: "clone-r".to_owned(),
+            opened: Opened::Created(tmux::Session {
+                name: "clone-r".to_owned(),
+                session_id: "$1".to_owned(),
+                window_id: "@1".to_owned(),
+                pane_id: "%1".to_owned(),
+            }),
+        };
+        let landed = landed_on(&machine, &tmux, &cloning, Duration::ZERO).await;
+        assert!(machine.0.lock().expect("the answers").is_empty());
+        landed.expect("an answer")
+    }
+
+    const RUNNING: (i32, &str, &str) = (0, "%1|0|||41|git clone\n", "");
+
+    #[tokio::test]
+    async fn a_clone_lands_when_git_exits_0_and_not_before() {
+        assert!(landed_after(&[RUNNING, RUNNING, (0, "%1|1|0|||git clone\n", "")]).await);
+    }
+
+    /// Y-782: `destination path already exists` is status 128, and the folder
+    /// then holds whatever it held before.
+    #[tokio::test]
+    async fn a_clone_that_git_refused_or_that_was_killed_did_not_land() {
+        assert!(!landed_after(&[RUNNING, (0, "%1|1|128|||git clone\n", "")]).await);
+        assert!(!landed_after(&[(0, "%1|1||15||git clone\n", "")]).await);
+    }
+
+    #[tokio::test]
+    async fn a_session_that_is_gone_or_holds_another_pane_did_not_land() {
+        assert!(!landed_after(&[RUNNING, (1, "", "can't find session: clone-r")]).await);
+        assert!(!landed_after(&[(0, "%7|1|0|||git clone\n", "")]).await);
     }
 }

@@ -49,7 +49,7 @@ API the CLI cannot reach.
 | `POST /api/workspaces/{name}/threads/{thread}/message` | `yantra commit --draft` |
 | `POST /api/workspaces/{name}/threads/{thread}/commit` | `yantra commit [-m MSG]` |
 | `POST /api/workspaces/{name}/threads/{thread}/push` | `yantra push` |
-| `POST /api/workspaces/{name}/threads/{thread}/pr` | `yantra pr open`; an optional `{"title", "body"}` body is `--title` and `--body`. Answers `{number, url, created}`; `409` for no grant, an unpushed or diverged branch, a remote off github.com, a repository the grant cannot see, or a GitHub `422` |
+| `POST /api/workspaces/{name}/threads/{thread}/pr` | `yantra pr open`; an optional `{"title", "body"}` body is `--title` and `--body`. Answers `{number, url, created, repo}`; `409` for no grant, an unpushed or diverged branch, a remote off github.com, a remote that names another repository than the thread's (the CLI does not check this), a repository the grant cannot see, or a GitHub `422` |
 | `POST /api/workspaces/{name}/tokens` | `yantra tokens`; an optional `{"since": <RFC 3339>}` body is the dashboard's window and has no CLI flag (Y-354) |
 | `GET /api/workspaces/{name}/repair` | — (`cat` the file the refusal names) |
 | `POST /api/workspaces/{name}/repair` | `yantra repair` |
@@ -62,7 +62,7 @@ API the CLI cannot reach.
 | `GET /api/notifications` | `yantra ls notifications` (which says where the daemon's list is) |
 | `GET /api/pulls` | no verb, because it reads the PR watch's memory and asks GitHub nothing: each watched PR's checks with their output, its reviews and its line comments, for the Chat's Checks (Y-512, Y-495) |
 | `POST /api/machines/{machine}/dirs` with `make` | `yantra ls dirs --make` |
-| `POST /api/machines/{machine}/clone` | `yantra clone` |
+| `POST /api/machines/{machine}/clone` | `yantra clone`; after `git clone` exits 0, the daemon also records which github.com repository it cloned into the path |
 | `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/{id}`, `POST /api/tasks/{id}/steer`, `GET /api/tasks/{id}/wait`, `POST /api/tasks/{id}/stop`, `DELETE /api/tasks/{id}` | `yantra mcp`'s tools — `start_task`, `list_tasks`, `task_status`, `steer_task`, `wait_task`, `cancel_task`, `remove_task` (ADR-0033, Y-435, Y-454). The `GET`s read memory |
 | `POST /api/mcp` | `yantra mcp`'s `room_send`, `room_read`, `room_info` and `room_status`, which forward here. MCP over HTTP for agents in a room: a Chat turn reaches it through `--mcp-config`, and a message wakes an idle Claude thread (ADR-0038, Y-534). An agent token reaches a room only when the room's file names its workspace, and cannot make one (Y-784). `GET` is `405` |
 | `POST /api/rooms/{room}/resume` | `yantra room resume` (204; a room this daemon does not hold is `404`; the owner only, and an agent token is `403`, Y-783) |
@@ -145,7 +145,8 @@ background like every other read, and `GET /api/machines/{name}/readiness` is on
 sweep asks the machines a workspace names and each online Linux or macOS machine you own on the
 tailnet. The daemon keeps
 the latest check of each machine in memory, with its own `age_seconds`, so a later sweep that skips
-the machine or fails does not lose it. A machine no check has reached is a `404` here even though
+the machine or fails does not lose it. A restart empties that memory, so the daemon checks the hub
+at each start, before the first sweep (Y-830). The first sweep waits for the first machines reading. A machine no check has reached is a `404` here even though
 `yantra doctor <machine>` would go and ask it. Each check that ran a step carries `took_ms`,
 and a check with no step leaves the key out.
 
@@ -215,6 +216,11 @@ device and every `/api` request then carries a session cookie; with none it gets
 hub, `yantra passkey code` makes the code that enrols a device, and `yantra passkey list`,
 `yantra passkey remove` and `yantra session revoke` manage them over the socket.
 
+`yantra session read <name>`, or Settings, Devices in the dashboard, makes a session that only
+reads. Its token shows once. It passes on a `GET` from the owner's own node for 30 days, and every
+write, socket, MCP call, passkey route and session route answers **403**. The build loop keeps one
+in `~/.config/yantra/walk-session`, mode `0600`, and reads the box's pages with it.
+
 The passkey belongs to the dashboard's name, `https://<MagicDNS>:8443` by default. To serve it on
 a name you own, set `YANTRA_ORIGIN=https://yantra.example.com` in `/etc/yantra/daemon.env`. It holds
 one https origin with no path, and a bad value stops the daemon at start. **Changing it costs every
@@ -260,6 +266,8 @@ amendment and [`docs/development.md`](../../docs/development.md).
 
 It keeps one file of state, `~/.local/state/yantra/threads.sqlite`: a row per Chat thread, so the
 thread list and the titles work while a machine is offline ([ADR-0045](../../docs/adr/0045-the-hub-keeps-a-thread-store.md)).
+A row also holds the thread's GitHub repository, and a second table records each clone that Yantra
+completed. The PR routes write only that repository, whatever the remote in git config says.
 It holds no message and no secret, and the daemon refuses to start when it does not open.
 
 [tracker.md](tracker.md) collects what research already settled about it — SQLite handling, scheduling

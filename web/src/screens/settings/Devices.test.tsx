@@ -12,10 +12,13 @@ const DEVICES: Devices = {
   relying_party: 'hub.example.ts.net',
   passkeys: [{ name: 'iPhone', made: 1_762_819_200 }],
   sessions: [
-    { id: 'a1', passkey: 'iPhone', device: 'iPhone', made: 1_762_819_200, ends: 1_765_411_200, this_device: true },
-    { id: 'b2', passkey: 'iPhone', device: 'Mac', made: 1_762_819_200, ends: 1_765_411_200, this_device: false },
+    { id: 'a1', passkey: 'iPhone', device: 'iPhone', made: 1_762_819_200, ends: 1_765_411_200, this_device: true, read_only: false },
+    { id: 'b2', passkey: 'iPhone', device: 'Mac', made: 1_762_819_200, ends: 1_765_411_200, this_device: false, read_only: false },
   ],
 }
+
+const WALK = { id: 'c3', passkey: 'iPhone', device: 'walk', made: 1_762_819_200, ends: 1_765_411_200, this_device: false, read_only: true }
+const TOKEN = 'Zm9yLXRoZS10ZXN0LW9ubHktbm90LWEtcmVhbC10b2tlbg'
 
 const row = (name: string) => screen.getByText(name, { selector: '*' }).closest('li') as HTMLElement
 
@@ -25,7 +28,9 @@ describe('Devices', () => {
     expect(await screen.findByText('Passkeys work at hub.example.ts.net.')).toBeTruthy()
     expect(screen.getByText(/^this device · with iPhone/)).toBeTruthy()
     expect(screen.getByText('Mac')).toBeTruthy()
-    expect(screen.getByText(/^enrolled /)).toBeTruthy()
+    const date = screen.getByText(/^enrolled/).querySelector('.m3-num')!
+    expect(date.textContent).toMatch(/\d/)
+    expect(date.classList.contains('m3-mono')).toBe(false)
   })
 
   it('leads with Add a device and says the list is empty when there is no passkey', async () => {
@@ -40,6 +45,7 @@ describe('Devices', () => {
     const passkeys = screen.getByRole('region', { name: 'Passkeys' })
     expect(within(passkeys).getByText('Passkeys work at hub.example.ts.net.')).toBeTruthy()
     expect(screen.queryByText('Removing a passkey signs out every device it signed in.')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Read-only session' })).toBeNull()
   })
 
   it('says no device is signed in when a passkey has signed none in', async () => {
@@ -96,12 +102,12 @@ describe('Devices', () => {
       'GET /api/passkey': [200, DEVICES],
       'DELETE /api/passkey/iPhone': [403, 'an agent token cannot act as the owner'],
     })
-    await screen.findByText(/^enrolled /)
+    await screen.findByText(/^enrolled/)
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
     const row = await screen.findByRole('alert')
     expect(within(row).getByRole('heading', { name: 'iPhone was not removed' })).toBeTruthy()
     expect(row.textContent).not.toContain('agent token')
-    expect(screen.getByText(/^enrolled /)).toBeTruthy()
+    expect(screen.getByText(/^enrolled/)).toBeTruthy()
     fireEvent.click(within(row).getByRole('button', { name: 'Details' }))
     expect(within(row).getByText('an agent token cannot act as the owner')).toBeTruthy()
   })
@@ -115,6 +121,51 @@ describe('Devices', () => {
     const row = await screen.findByRole('alert')
     expect(within(row).getByRole('heading', { name: 'The proxy hides who is calling' })).toBeTruthy()
     expect(screen.getByText('or run yantra passkey code on the hub')).toBeTruthy()
+  })
+
+  it('marks a read-only session and signs it out like any other', async () => {
+    const asked = mountSettings('phone', '/settings/devices', {
+      'GET /api/passkey': [200, { ...DEVICES, sessions: [...DEVICES.sessions, WALK] }],
+      'DELETE /api/sessions/c3': [204],
+    })
+    await screen.findByText('walk')
+    expect(within(row('walk')).getByText(/^reads only · ends/)).toBeTruthy()
+    expect(row('walk').textContent).not.toContain('with iPhone')
+    fireEvent.click(within(row('walk')).getByRole('button', { name: 'Sign out' }))
+    await waitFor(() => expect(asked).toContain('DELETE /api/sessions/c3'))
+  })
+
+  it('makes a read-only session and shows its token with where to save it', async () => {
+    const asked = mountSettings('phone', '/settings/devices', {
+      'GET /api/passkey': [200, DEVICES],
+      'POST /api/sessions/read/walk': [200, { token: TOKEN, session: WALK }],
+    })
+    const group = await screen.findByRole('region', { name: 'Read-only session' })
+    expect(within(group).getByText(/changes nothing/)).toBeTruthy()
+    expect(screen.queryByText(TOKEN)).toBeNull()
+    fireEvent.click(within(group).getByRole('button', { name: 'Make a token' }))
+    expect(await within(group).findByText(TOKEN)).toBeTruthy()
+    expect(within(group).getByRole('button', { name: 'Copy the token' })).toBeTruthy()
+    expect(within(group).getByText(/^This token shows once\./).textContent).toContain(
+      '~/.config/yantra/walk-session with mode 600',
+    )
+    expect(within(group).getByRole('button', { name: 'Make another' })).toBeTruthy()
+    // The list is read again, so the new session shows under Signed in.
+    await waitFor(() => expect(asked.filter((one) => one === 'GET /api/passkey')).toHaveLength(2))
+  })
+
+  it('says a read-only session cannot make one, and shows no token', async () => {
+    mountSettings('desktop', '/settings/devices', {
+      'GET /api/passkey': [200, DEVICES],
+      'POST /api/sessions/read/walk': [403, 'this session is read-only: it reads the dashboard and changes nothing'],
+    })
+    const group = await screen.findByRole('region', { name: 'Read-only session' })
+    fireEvent.click(within(group).getByRole('button', { name: 'Make a token' }))
+    const failed = await within(group).findByRole('alert')
+    expect(within(failed).getByRole('heading', { name: 'No read-only session was made' })).toBeTruthy()
+    expect(failed.textContent).toContain('This session only reads. Sign in with a passkey to do this.')
+    expect(failed.textContent).not.toContain("tailnet's owner")
+    expect(within(group).queryByRole('button', { name: 'Copy the token' })).toBeNull()
   })
 
   it('draws the read’s failure with the daemon’s words', async () => {

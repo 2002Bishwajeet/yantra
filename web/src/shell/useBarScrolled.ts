@@ -1,17 +1,22 @@
 import { useEffect } from 'react'
 
-/** M3 on-scroll: the desktop top bar changes tone once the document scrolls. The state is one attribute on
- *  the shell, so a scroll never re-renders React. */
-export function useBarScrolled(active: boolean, pathname: string) {
+/** M3 on-scroll: the top bar changes tone once the page scrolls. The scroller is the document on the desktop and
+ *  `.shell__main` on the phone (Y-670). The state is one attribute on the shell, so a scroll never re-renders React. */
+export function useBarScrolled(factor: 'phone' | 'tablet' | 'desktop', pathname: string) {
   useEffect(() => {
     const shell = document.querySelector<HTMLElement>('[data-shell]')
-    if (!active || !shell) return
-    const onScroll = () => shell.toggleAttribute('data-scrolled', window.scrollY > 0)
+    // The tablet draws a rail and no top bar, so it has nothing to tone.
+    if (factor === 'tablet' || !shell) return
+    const main = document.querySelector<HTMLElement>('.shell__main')
+    const scroller: HTMLElement | Window | null = factor === 'phone' ? main : window
+    if (!scroller) return
+    const top = () => (scroller === window ? window.scrollY : (scroller as HTMLElement).scrollTop)
+    const onScroll = () => shell.toggleAttribute('data-scrolled', top() > 0)
     onScroll()
-    window.addEventListener('scroll', onScroll, { passive: true })
+    scroller.addEventListener('scroll', onScroll, { passive: true })
     return () => {
-      window.removeEventListener('scroll', onScroll)
+      scroller.removeEventListener('scroll', onScroll)
       shell.removeAttribute('data-scrolled')
     }
-  }, [active, pathname])
+  }, [factor, pathname])
 }

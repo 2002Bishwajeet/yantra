@@ -57,6 +57,10 @@ const RETRY: Duration = Duration::from_secs(5);
 /// Where Caddy's admin API listens unless the Caddyfile says `admin off` (Y-777).
 const PROXY_ADMIN: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 2019);
 
+/// The longest the first readiness look waits for the first machines reading,
+/// so a `tailscale` that does not answer cannot stop the sweep.
+const FIRST_MACHINES: Duration = Duration::from_secs(10);
+
 /// Loopback answers or refuses at once, so a connect this slow is not an answer.
 const PROXY_ADMIN_LIMIT: Duration = Duration::from_secs(2);
 
@@ -93,9 +97,12 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
 
     let machines = model.clone();
     let flips = fleet.events.clone();
+    let looked = Arc::new(tokio::sync::Notify::new());
+    let first_machines = looked.clone();
     tokio::spawn(async move {
         loop {
             look_at_machines(&machines, &inventory, &flips).await;
+            looked.notify_one();
             tokio::time::sleep(EVERY).await;
         }
     });
@@ -131,8 +138,12 @@ pub fn spawn<I: Inventory + Send + Sync + 'static>(
     });
 
     let readiness = model.clone();
+    let facts = fleet.facts.clone();
     tokio::spawn(async move {
+        // The hub and the tailnet peers come from the first machines reading.
+        let _ = tokio::time::timeout(FIRST_MACHINES, first_machines.notified()).await;
         loop {
+            look_at_hub(&readiness, &facts.listening_on).await;
             look_at_readiness(&readiness).await;
             tokio::time::sleep(EVERY).await;
         }
@@ -335,6 +346,31 @@ pub(crate) async fn look_at_readiness(model: &Model) {
     let peers = candidates(&*model.read().await);
     let reading = Reading::new(doctor::fleet_with(&peers, crate::write::term()).await);
     settle(&mut *model.write().await, reading);
+}
+
+/// Y-830: a restart empties the kept checks, and New session hides a hub that
+/// has none. The sweep settles only when its slowest machine answers, so the
+/// hub is asked alone and first. A hub that has a check is left to the sweep.
+///
+/// The rule is [`counted`] and not `online`, because the web offers the hub by
+/// that rule too.
+pub(crate) async fn look_at_hub(model: &Model, listening_on: &[SocketAddr]) {
+    let hub = {
+        let snapshot = model.read().await;
+        let tailnet = snapshot.machines.as_deref().map(Reading::value);
+        tailnet
+            .and_then(|looked| looked.as_ref().ok())
+            .into_iter()
+            .flatten()
+            .find(|machine| crate::api::is_this_node(machine, listening_on))
+            .filter(|hub| counted(hub) && !snapshot.checks.contains_key(&hub.name))
+            .map(|hub| hub.name.clone())
+    };
+    let Some(hub) = hub else {
+        return;
+    };
+    let report = doctor::machine(&hub, crate::write::term()).await;
+    model.write().await.keep(report);
 }
 
 /// `runsSessions` in `web/src/lib/platform.ts`: the checks feed the dashboard's
@@ -598,7 +634,7 @@ async fn look_at_agents(
     model.write().await.agents = Some(reading.clone());
     if let Ok(fleet) = reading.value() {
         notifier
-            .tell(fleet, crate::notify::watched(viewers).await, events)
+            .tell(fleet, &crate::notify::watched(viewers).await, events)
             .await;
     }
 }
@@ -910,6 +946,106 @@ mod tests {
         settle(&mut snapshot, Reading::new(Ok(Vec::new())));
 
         assert_eq!(detail(&snapshot, "pi"), "kept");
+    }
+
+    const BOUND: &str = "100.64.0.1:7717";
+
+    /// `.invalid` does not resolve, so ssh fails fast and the report is honest
+    /// unknowns.
+    fn hub() -> MachineInfo {
+        MachineInfo {
+            addresses: vec!["100.64.0.1".parse().expect("an address")],
+            ..machine("yantra-box.invalid")
+        }
+    }
+
+    async fn look_at_hub_of(snapshot: Snapshot, bound: &str) -> Fleet {
+        let fleet = Fleet {
+            model: Arc::new(RwLock::new(snapshot)),
+            ..Fleet::default()
+        };
+        look_at_hub(&fleet.model, &[bound.parse().expect("an address")]).await;
+        fleet
+    }
+
+    /// Y-830: after a start the hub has a report before anybody presses Check.
+    #[tokio::test]
+    async fn the_hub_is_checked_with_no_sweep_and_no_post() {
+        let fleet = look_at_hub_of(on_the_tailnet(vec![machine("pi"), hub()]), BOUND).await;
+
+        let body = crate::api::tests::get_json(fleet, "/readiness").await;
+        assert_eq!(body["looked"], "ok", "{body}");
+        let named: Vec<_> = body["data"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|report| report["machine"].clone())
+            .collect();
+        assert_eq!(named, ["yantra-box.invalid"], "{body}");
+    }
+
+    /// The hub does not have to be online on the tailnet list: the web offers
+    /// it by `runsSessions` alone.
+    #[tokio::test]
+    async fn a_hub_the_tailnet_calls_offline_is_still_checked() {
+        let offline = MachineInfo {
+            online: false,
+            ..hub()
+        };
+        let fleet = look_at_hub_of(on_the_tailnet(vec![offline]), BOUND).await;
+        assert!(
+            fleet
+                .model
+                .read()
+                .await
+                .checks
+                .contains_key("yantra-box.invalid")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_daemon_bound_to_no_nodes_address_asks_nothing() {
+        let fleet = look_at_hub_of(on_the_tailnet(vec![hub()]), "127.0.0.1:7717").await;
+
+        assert!(fleet.model.read().await.checks.is_empty());
+        let body = crate::api::tests::get_json(fleet, "/readiness").await;
+        assert_eq!(body, serde_json::json!({"looked": "never"}));
+    }
+
+    #[tokio::test]
+    async fn no_machines_reading_asks_nothing() {
+        let fleet = look_at_hub_of(Snapshot::default(), BOUND).await;
+        assert!(fleet.model.read().await.checks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_hub_the_dashboard_does_not_count_is_not_asked() {
+        for uncounted in [
+            MachineInfo {
+                os: Os::Windows,
+                ..hub()
+            },
+            MachineInfo {
+                ownership: Ownership::Tagged,
+                ..hub()
+            },
+        ] {
+            let fleet = look_at_hub_of(on_the_tailnet(vec![uncounted]), BOUND).await;
+            assert!(fleet.model.read().await.checks.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_hub_that_has_a_check_is_left_to_the_sweep() {
+        let mut snapshot = on_the_tailnet(vec![hub()]);
+        snapshot.keep(report("yantra-box.invalid", "kept"));
+
+        let fleet = look_at_hub_of(snapshot, BOUND).await;
+
+        assert_eq!(
+            detail(&*fleet.model.read().await, "yantra-box.invalid"),
+            "kept"
+        );
     }
 
     #[test]

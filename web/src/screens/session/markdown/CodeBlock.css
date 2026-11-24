@@ -64,3 +64,15 @@
   color: var(--md-sys-color-primary);
   text-decoration: underline;
 }
+
+.chat__image {
+  overflow-wrap: anywhere;
+}
+
+.chat__image-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-inline-end: 4px;
+  vertical-align: -0.125em;
+}

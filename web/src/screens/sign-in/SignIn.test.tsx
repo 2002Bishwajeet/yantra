@@ -31,7 +31,7 @@ function hub(extra: Answers = {}) {
     'GET /api/passkey': gated({
       relying_party: 'hub.example.ts.net',
       passkeys: [{ name: 'iPhone', made: 1_762_819_200 }],
-      sessions: [{ id: 'a1', passkey: 'iPhone', device: 'iPhone', made: 1_762_819_200, ends: 1_765_411_200, this_device: true }],
+      sessions: [{ id: 'a1', passkey: 'iPhone', device: 'iPhone', made: 1_762_819_200, ends: 1_765_411_200, this_device: true, read_only: false }],
     }),
     'POST /api/passkey/login/start': [200, { ceremony: 'c1', options: OPTIONS }],
     'POST /api/passkey/register/start': [200, { ceremony: 'c2', options: OPTIONS }],

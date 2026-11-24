@@ -134,6 +134,8 @@ test('an open PR is merged after the owner confirms, and the Chat offers to remo
       { exact: true },
     ),
   ).toBeVisible()
+  // Y-782: the dialog names the repository the thread is bound to.
+  await expect(confirm.getByText('2002Bishwajeet/yantra', { exact: true })).toBeVisible()
   // Y-781: the dialog shows the head it read, and the merge names that head.
   const head = confirm.getByRole('link', { name: /3 commits/ })
   await expect(head).toContainText('Head 89abcde')

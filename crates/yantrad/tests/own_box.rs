@@ -48,6 +48,9 @@ const JOIN: &str = "curl -fsSL --unix-socket /run/yantra/yantrad.sock http://yan
 /// `refresh.rs` looks every 30 s, and the first look is before the key is there.
 const TWO_SWEEPS: Duration = Duration::from_secs(90);
 
+/// Less than the 30 s between sweeps, so only the check at start answers in time.
+const BEFORE_THE_SECOND_SWEEP: Duration = Duration::from_secs(20);
+
 /// In `/usr/bin` because `sudo`'s `secure_path` omits `/usr/local/bin`. `serve`
 /// reports HTTPS as on, so `--yes` has no question to answer about it.
 const TAILSCALE_STUB: &str = r#"#!/bin/sh
@@ -223,25 +226,53 @@ impl OwnBox {
         Ok(())
     }
 
+    /// On the socket as the daemon's account, which needs no passkey (ADR-0044).
+    /// A daemon that does not answer is an empty body.
+    fn get(&self, path: &str) -> Result<String> {
+        let said = self.systemd.exec_as(
+            "yantra",
+            &[
+                "curl",
+                "-fsS",
+                "--max-time",
+                "5",
+                "--unix-socket",
+                "/run/yantra/yantrad.sock",
+                &format!("http://yantra{path}"),
+            ],
+        )?;
+        Ok(String::from_utf8_lossy(&said.stdout).into_owned())
+    }
+
+    /// Polls `path` with `GET` only until `done` accepts the body, and returns it.
+    fn wait_for(&self, path: &str, within: Duration, done: fn(&Value) -> bool) -> Result<Value> {
+        let deadline = Instant::now() + within;
+        let mut last = String::new();
+        while Instant::now() < deadline {
+            last = self.get(path)?;
+            if let Ok(body) = serde_json::from_str::<Value>(&last)
+                && done(&body)
+            {
+                return Ok(body);
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        bail!(
+            "GET {path} never gave the answer. It last said:\n{last}\n--- yantrad ---\n{}",
+            self.systemd.journal("yantrad.service")
+        )
+    }
+
+    fn daemon_pid(&self) -> Result<String> {
+        self.sh("systemctl show -p MainPID --value yantrad.service")
+    }
+
     /// Polls until the daemon's own sweep has logged in here and read tmux.
     fn wait_for_listing(&self) -> Result<()> {
         let deadline = Instant::now() + TWO_SWEEPS;
         let mut last = String::new();
         while Instant::now() < deadline {
-            // On the socket as the daemon's account, which needs no passkey (ADR-0044).
-            let said = self.systemd.exec_as(
-                "yantra",
-                &[
-                    "curl",
-                    "-fsS",
-                    "--max-time",
-                    "5",
-                    "--unix-socket",
-                    "/run/yantra/yantrad.sock",
-                    "http://yantra/api/sessions",
-                ],
-            )?;
-            last = String::from_utf8_lossy(&said.stdout).into_owned();
+            last = self.get("/api/sessions")?;
             if lists_session(&last) {
                 return Ok(());
             }
@@ -284,6 +315,20 @@ fn lists_session(body: &str) -> bool {
     body["data"]
         .as_array()
         .is_some_and(|answers| answers.iter().any(holds))
+}
+
+fn reaches_the_hub(body: &Value) -> bool {
+    let reached = |report: &Value| {
+        report["machine"] == MACHINE
+            && report["checks"].as_array().is_some_and(|checks| {
+                checks
+                    .iter()
+                    .any(|check| check["check"] == "reachable" && check["state"] == "present")
+            })
+    };
+    body["data"]
+        .as_array()
+        .is_some_and(|reports| reports.iter().any(reached))
 }
 
 /// What the run printed, having ended well and on the dashboard's address.
@@ -468,5 +513,46 @@ fn an_update_touches_no_ssh_file() -> Result<()> {
         "the unit did not install v{NEXT_VERSION}:\n{journal}"
     );
     assert_eq!(own.ssh_files()?, "", "{journal}");
+    Ok(())
+}
+
+/// Y-830: a start empties the kept checks, and New session hides a hub that
+/// has none. So the daemon checks the hub at each start, and an update is a
+/// start. Nobody presses Check here: the test sends no `POST`.
+#[test]
+fn a_restart_and_an_update_check_the_hub_with_no_press() -> Result<()> {
+    let Some(own) = OwnBox::start()? else {
+        return Ok(());
+    };
+    own.publish(VERSION, "first")?;
+    own.sh("systemctl start sshd.service")?;
+    finished(own.install_as_person()?)?;
+    own.sh("systemctl enable --now yantrad.service yantra-update.path")?;
+
+    let machines = own.wait_for("/api/machines", TWO_SWEEPS, |body| body["data"].is_array())?;
+    let hubs: Vec<&Value> = machines["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|machine| machine["hub"] == true)
+        .collect();
+    assert_eq!(hubs.len(), 1, "{machines}");
+    assert_eq!(hubs[0]["name"], MACHINE, "{machines}");
+
+    let first = own.daemon_pid()?;
+    own.sh("systemctl restart yantrad.service")?;
+    let restarted = own.daemon_pid()?;
+    assert_ne!(restarted, first, "the daemon did not restart");
+    own.wait_for("/api/readiness", BEFORE_THE_SECOND_SWEEP, reaches_the_hub)?;
+
+    own.publish(NEXT_VERSION, "second")?;
+    own.sh("systemctl start yantra-update.service")?;
+    assert_ne!(
+        own.daemon_pid()?,
+        restarted,
+        "the update did not restart the daemon:\n{}",
+        own.systemd.journal("yantra-update.service")
+    );
+    own.wait_for("/api/readiness", BEFORE_THE_SECOND_SWEEP, reaches_the_hub)?;
     Ok(())
 }

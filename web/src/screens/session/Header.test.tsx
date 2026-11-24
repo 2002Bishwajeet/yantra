@@ -4,11 +4,21 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import type { WorkspaceStatus } from '@/api'
 import { answer } from '@/test/daemon'
 import { renderInApp } from '@/test/inApp'
+import { setAppBarSlot } from '@/shell/appBarSlot'
 import { Header } from './Header'
 
 const workspace = { loaded: 'yes', name: 'api', machine: 'pi', repo: '/home/biswa/api', startup: null } as const
 
 const unreached = (error: string): WorkspaceStatus => ({ workspace: 'api', machine: 'pi', reached: 'no', error })
+
+/** The width the form factor reads: true is the desktop, false the phone. */
+const media = (wide: boolean) =>
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: wide && query === '(min-width: 1240px)',
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
 
 const open = (error: string) =>
   renderInApp(
@@ -22,12 +32,7 @@ const open = (error: string) =>
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(answer(404, 'no'))))
-  vi.stubGlobal('matchMedia', (media: string) => ({
-    matches: false,
-    media,
-    addEventListener: () => {},
-    removeEventListener: () => {},
-  }))
+  media(true)
 })
 
 afterEach(() => {
@@ -86,6 +91,11 @@ describe('the session header actions (Y-717)', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy()
   })
 
+  it('draws Stop tonal, as a Fleet row does (Y-755)', async () => {
+    await show('running')
+    expect((await screen.findByRole('button', { name: 'Stop' })).getAttribute('data-variant')).toBe('tonal')
+  })
+
   it('mounts the menu closed once idle, so the first tap only opens it (Y-765)', async () => {
     await show('running')
     const more = await screen.findByRole('button', { name: 'More actions' })
@@ -121,5 +131,76 @@ describe('the session header actions (Y-717)', () => {
     await show(state)
     fireEvent.click(await screen.findByRole('button', { name: verb }))
     expect(await screen.findByText(new RegExp(`api ${title}`))).toBeTruthy()
+  })
+})
+
+/** Y-757: on a phone the verbs live in the app bar, and the status in its menu. */
+describe('the session header on a phone', () => {
+  const onPhone = (state: 'running' | 'stopped', status: WorkspaceStatus | null = reached(state)) => {
+    media(false)
+    return renderInApp(
+      <>
+        <header className="m3-top-app-bar">
+          <div ref={setAppBarSlot} />
+        </header>
+        <Header now={0} sessions={{ looked: 'pending' }} status={status} workspace={workspace} />
+      </>,
+    )
+  }
+  const bar = () => document.querySelector<HTMLElement>('.m3-top-app-bar')!
+
+  it('keeps Stop out of the app bar while the agent runs, so no glyph there reads as the composer interrupt', async () => {
+    await onPhone('running')
+    expect(await within(bar()).findByRole('button', { name: 'More actions' })).toBeTruthy()
+    expect(within(bar()).queryByRole('button', { name: /Stop|Resume/ })).toBeNull()
+    expect(document.querySelector('.m3-page-header__actions')).toBeNull()
+    expect(document.querySelector('.m3-page-header')?.hasAttribute('data-bare')).toBe(true)
+  })
+
+  it('puts Resume in the app bar once the agent has stopped, and Stop waits in the menu', async () => {
+    await onPhone('stopped')
+    expect(await within(bar()).findByRole('button', { name: 'Resume' })).toBeTruthy()
+    fireEvent.click(within(bar()).getByRole('button', { name: 'More actions' }))
+    expect(await screen.findByRole('menuitem', { name: /^Stop/ })).toBeTruthy()
+  })
+
+  it('shows the state, the age, the machine and the path in the menu, not on the page', async () => {
+    await onPhone('running')
+    expect(screen.queryByText(/pi · ~/)).toBeNull()
+    fireEvent.click(await within(bar()).findByRole('button', { name: 'More actions' }))
+    const menu = await screen.findByRole('menu')
+    expect(menu.textContent).toContain('running')
+    expect(within(menu).getByText(/pi · ~\/api/)).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: /^Stop/ })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Delete' })).toBeTruthy()
+  })
+
+  it('badges the menu button while the agent waits for the owner, so the app bar shows it', async () => {
+    const waiting = { ...reached('running'), status: { state: 'awaiting_trust' } } as WorkspaceStatus
+    await onPhone('running', waiting)
+    const more = await within(bar()).findByRole('button', { name: /More actions/ })
+    expect(more.textContent).toContain('waiting for trust')
+    expect(more.querySelector('.m3-badge')).not.toBeNull()
+  })
+
+  it('draws no badge while the agent runs', async () => {
+    await onPhone('running')
+    const more = await within(bar()).findByRole('button', { name: 'More actions' })
+    expect(more.querySelector('.m3-badge')).toBeNull()
+  })
+
+  it('keeps the reason of a verb that cannot run as its accessible description', async () => {
+    await onPhone('stopped', null)
+    const resume = await within(bar()).findByRole('button', { name: 'Resume' })
+    expect(resume).toHaveProperty('disabled', true)
+    expect(document.getElementById(resume.getAttribute('aria-describedby') ?? '')?.textContent).toContain('has not read api')
+  })
+
+  it('draws the refusal of a failed stop inline on the page', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(answer(500, 'boom'))))
+    await onPhone('running')
+    fireEvent.click(await within(bar()).findByRole('button', { name: 'More actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Stop/ }))
+    expect(await screen.findByText(/api was not stopped/)).toBeTruthy()
   })
 })

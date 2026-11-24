@@ -132,3 +132,16 @@ describe('a disabled item (CSS read as text; jsdom applies none)', () => {
     expect(css.indexOf('.m3-menu-item[data-disabled] {')).toBeGreaterThan(toneAt)
   })
 })
+
+describe('the Expressive vertical menu (CSS read as text)', () => {
+  const css = readFileSync(resolve(process.cwd(), 'src/m3/menu/Menu.css'), 'utf8')
+
+  it('holds corner-large, surface-container-low and level 2, with rounded medium items', () => {
+    const container = /\.m3-menu \{([^}]*)\}/.exec(css)![1]
+    expect(container).toContain('border-radius: var(--md-sys-shape-corner-large);')
+    expect(container).toContain('background: var(--md-sys-color-surface-container-low);')
+    expect(container).toContain('box-shadow: var(--md-sys-elevation-level2);')
+    expect(container).toContain('padding: 8px 4px;')
+    expect(/\.m3-menu-item \{([^}]*)\}/.exec(css)![1]).toContain('border-radius: var(--md-sys-shape-corner-medium);')
+  })
+})

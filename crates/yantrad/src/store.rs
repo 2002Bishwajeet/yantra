@@ -47,9 +47,17 @@ const MIGRATIONS: &[&str] = &[
         auth TEXT NOT NULL,
         created INTEGER NOT NULL
     ) STRICT",
+    "ALTER TABLE threads ADD COLUMN repo TEXT;
+    CREATE TABLE clones (
+        machine TEXT NOT NULL,
+        path TEXT NOT NULL,
+        repo TEXT NOT NULL,
+        created INTEGER NOT NULL,
+        PRIMARY KEY (machine, path)
+    ) STRICT",
 ];
 
-const COLUMNS: &str = "workspace, id, machine, branch, worktree, harness, session, title, status, created, active, seen";
+const COLUMNS: &str = "workspace, id, machine, branch, worktree, harness, session, title, status, created, active, seen, repo";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -116,6 +124,9 @@ pub struct Row {
     pub active: i64,
     /// The last time the machine answered.
     pub seen: Option<i64>,
+    /// The GitHub repository the thread's PR verbs may write, `owner/repo`.
+    /// Only [`Store::bind`] writes it (Y-782).
+    pub repo: Option<String>,
 }
 
 /// One device's Web Push subscription, as its browser gave it (ADR-0047
@@ -155,6 +166,7 @@ fn row(at: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
         created: at.get(9)?,
         active: at.get(10)?,
         seen: at.get(11)?,
+        repo: at.get(12)?,
     })
 }
 
@@ -384,16 +396,19 @@ impl Store {
     }
 
     /// Inserts each row the store does not have, and never overwrites one
-    /// (decision 6).
+    /// (decision 6). A row that only [`Store::bind`] made holds no harness, no
+    /// session and no title, so it takes those three. A row's repository is
+    /// never written here.
     pub async fn adopt(&self, rows: Vec<Row>) -> Result<(), Error> {
         self.call(move |db| {
             let tx = db.transaction()?;
             for row in rows {
                 tx.execute(
-                    &format!(
-                        "INSERT OR IGNORE INTO threads ({COLUMNS})
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
-                    ),
+                    "INSERT INTO threads (workspace, id, machine, branch, worktree, harness, session, title, status, created, active, seen)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                     ON CONFLICT (workspace, id) DO UPDATE SET harness = excluded.harness,
+                         session = excluded.session, title = excluded.title
+                     WHERE threads.harness IS NULL AND threads.session IS NULL AND threads.title IS NULL",
                     params![
                         row.workspace,
                         row.id,
@@ -506,6 +521,77 @@ impl Store {
         .await
     }
 
+    /// Binds thread `id` to the GitHub repository `repo` when its row has
+    /// none, and answers the repository the row holds, so the first binding
+    /// wins (ADR-0045, 2026-11-12 note). No other statement writes it.
+    pub async fn bind(
+        &self,
+        workspace: &str,
+        id: &str,
+        machine: &str,
+        branch: &str,
+        worktree: &str,
+        repo: &str,
+    ) -> Result<String, Error> {
+        let values = (
+            workspace.to_owned(),
+            id.to_owned(),
+            machine.to_owned(),
+            branch.to_owned(),
+            worktree.to_owned(),
+            repo.to_owned(),
+        );
+        self.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute(
+                "INSERT INTO threads (workspace, id, machine, branch, worktree, repo, created, active)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+                 ON CONFLICT (workspace, id) DO UPDATE SET repo = excluded.repo
+                 WHERE threads.repo IS NULL",
+                params![values.0, values.1, values.2, values.3, values.4, values.5, now()],
+            )?;
+            let held = tx.query_row(
+                "SELECT repo FROM threads WHERE workspace = ?1 AND id = ?2",
+                params![values.0, values.1],
+                |at| at.get(0),
+            )?;
+            tx.commit()?;
+            Ok(held)
+        })
+        .await
+    }
+
+    /// Records that Yantra cloned `repo` into `path` on `machine` (ADR-0045,
+    /// 2026-11-23 note). A later clone of the path replaces the record.
+    pub async fn put_clone(&self, machine: &str, path: &str, repo: &str) -> Result<(), Error> {
+        let values = (machine.to_owned(), path.to_owned(), repo.to_owned());
+        self.call(move |db| {
+            db.execute(
+                "INSERT INTO clones (machine, path, repo, created) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (machine, path) DO UPDATE SET repo = excluded.repo,
+                     created = excluded.created",
+                params![values.0, values.1, values.2, now()],
+            )
+            .map(drop)
+        })
+        .await
+    }
+
+    /// The repository Yantra cloned into `path` on `machine`, as the owner
+    /// typed both.
+    pub async fn cloned(&self, machine: &str, path: &str) -> Result<Option<String>, Error> {
+        let (machine, path) = (machine.to_owned(), path.to_owned());
+        self.call(move |db| {
+            db.query_row(
+                "SELECT repo FROM clones WHERE machine = ?1 AND path = ?2",
+                params![machine, path],
+                |at| at.get(0),
+            )
+            .optional()
+        })
+        .await
+    }
+
     /// Forgets a thread the daemon removed. `false` is a row it did not have.
     pub async fn remove(&self, workspace: &str, id: &str) -> Result<bool, Error> {
         let (workspace, id) = (workspace.to_owned(), id.to_owned());
@@ -564,6 +650,7 @@ pub(crate) mod tests {
             created: 1,
             active: 1,
             seen: Some(1),
+            repo: None,
         }
     }
 
@@ -730,6 +817,137 @@ pub(crate) mod tests {
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("word word"), "the title is there");
         assert!(!text.contains("SECRET-PAST-THE-CUT"));
+    }
+
+    /// Y-782: a file from before the repository column opens, keeps its rows
+    /// and gains the clone table.
+    #[tokio::test]
+    async fn a_version_1_file_migrates_and_its_rows_have_no_repository() {
+        let (store, path) = scratch();
+        drop(store);
+        std::fs::remove_file(&path).expect("the file goes");
+        let _ = std::fs::remove_file(path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite-shm"));
+        let old = Connection::open(&path).expect("a version 1 file");
+        old.execute_batch(MIGRATIONS[0]).expect("the first schema");
+        old.pragma_update(None, "user_version", 1)
+            .expect("version 1");
+        old.execute(
+            "INSERT INTO threads (workspace, id, machine, title, created, active)
+             VALUES ('web', 'a', 'm', 'kept', 1, 1)",
+            [],
+        )
+        .expect("an old row");
+        drop(old);
+
+        let store = open(&path).expect("the migration runs");
+
+        let rows = store.list("web").await.expect("rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            (rows[0].title.as_deref(), rows[0].repo.as_deref()),
+            (Some("kept"), None)
+        );
+        assert_eq!(store.cloned("m", "~/src/r").await.expect("a read"), None);
+    }
+
+    /// Y-782: the first binding wins, for a row that was there and for one that was not.
+    #[tokio::test]
+    async fn bind_keeps_the_first_repository() {
+        let (store, _) = scratch();
+        store
+            .adopt(vec![live("old", Some("an old thread"), Some("S"))])
+            .await
+            .expect("adopted");
+
+        for id in ["old", "new"] {
+            let at = place(id);
+            let bind = |repo| store.bind("web", id, "m", &at.branch, &at.worktree, repo);
+            let first = bind("o/r").await;
+            let second = bind("evil/x").await;
+            assert_eq!(first.expect("bound"), "o/r");
+            assert_eq!(second.expect("the first one"), "o/r");
+        }
+
+        let rows = store.list("web").await.expect("rows");
+        assert!(rows.iter().all(|row| row.repo.as_deref() == Some("o/r")));
+        let old = rows.iter().find(|row| row.id == "old").unwrap();
+        assert_eq!(
+            (old.title.as_deref(), old.session.as_deref()),
+            (Some("an old thread"), Some("S"))
+        );
+        let new = rows.iter().find(|row| row.id == "new").unwrap();
+        assert_eq!(new.branch, place("new").branch);
+    }
+
+    /// No other write reaches the repository, and a row that only `bind` made
+    /// still takes what git config keeps.
+    #[tokio::test]
+    async fn only_bind_writes_the_repository() {
+        let (store, _) = scratch();
+        let bind = async |id| {
+            let at = place(id);
+            let bound = store.bind("web", id, "m", &at.branch, &at.worktree, "o/r");
+            bound.await.expect("bound");
+        };
+        bind("a").await;
+        let mut claimed = live("a", Some("#7 Fix it"), Some("S"));
+        claimed.repo = Some("evil/x".to_owned());
+
+        store.adopt(vec![claimed.clone()]).await.expect("adopted");
+        store
+            .put_title("web", "a", "m", &place("a"), "renamed")
+            .await
+            .expect("a title");
+        store
+            .put_session("web", "a", "m", &place("a"), "codex", "T")
+            .await
+            .expect("a session");
+        store
+            .observe("web", "m", vec![claimed])
+            .await
+            .expect("observed");
+
+        let row = store.get("web", "a").await.expect("a read").expect("a row");
+        assert_eq!(row.repo.as_deref(), Some("o/r"));
+        assert_eq!(row.title.as_deref(), Some("renamed"));
+
+        bind("b").await;
+        store
+            .adopt(vec![live("b", Some("#7 Fix it"), Some("S"))])
+            .await
+            .expect("adopted");
+        let row = store.get("web", "b").await.expect("a read").expect("a row");
+        assert_eq!(
+            (
+                row.title.as_deref(),
+                row.harness.as_deref(),
+                row.repo.as_deref()
+            ),
+            (Some("#7 Fix it"), Some("claude"), Some("o/r"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_later_clone_of_a_path_replaces_its_record() {
+        let (store, _) = scratch();
+        store.put_clone("m", "~/src/r", "o/r").await.expect("kept");
+        store
+            .put_clone("mac", "~/src/r", "o/mac")
+            .await
+            .expect("kept");
+
+        store
+            .put_clone("m", "~/src/r", "o/fork")
+            .await
+            .expect("kept");
+
+        let cloned = async |machine: &'static str, path: &'static str| {
+            store.cloned(machine, path).await.expect("a read")
+        };
+        assert_eq!(cloned("m", "~/src/r").await.as_deref(), Some("o/fork"));
+        assert_eq!(cloned("mac", "~/src/r").await.as_deref(), Some("o/mac"));
+        assert_eq!(cloned("m", "~/src/other").await, None);
     }
 
     /// ADR-0046 decision 1.4: a home row has no workspace, branch or worktree.

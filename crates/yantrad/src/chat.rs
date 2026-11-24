@@ -691,6 +691,11 @@ trait Machine: Send + Sync + 'static {
     }
     /// Makes the thread `id` names, an id [`thread::new_id`] gave.
     fn open(&self, id: &str) -> impl Future<Output = Result<Place, String>> + Send;
+    /// The GitHub repository a thread made now is bound to (Y-782). `None` is
+    /// a machine with none to name, as a home thread's is.
+    fn repository(&self) -> impl Future<Output = Option<String>> + Send {
+        std::future::ready(None)
+    }
     fn find(&self, thread: &str) -> impl Future<Output = Result<Option<Place>, String>> + Send;
     /// Removes a thread whose harness never started, so it is not taken for
     /// a Claude thread later.
@@ -939,6 +944,11 @@ impl Machine for Fleet {
         thread::open_as(&self.ssh, &self.workspace, id)
             .await
             .map_err(|error| chain(&error))
+    }
+
+    async fn repository(&self) -> Option<String> {
+        let store = self.registry.store.as_ref()?;
+        crate::bind::repository(store, &self.workspace, &self.ssh).await
     }
 
     async fn find(&self, id: &str) -> Result<Option<Place>, String> {
@@ -3388,6 +3398,32 @@ async fn titled<M: Machine>(machine: &M, name: &str, place: &Place, prompt: &str
     }
 }
 
+/// Binds a thread just made to its repository, before any agent runs in it
+/// (ADR-0045, Y-782). A thread left unbound binds on its first PR verb.
+async fn bind<M: Machine>(machine: &M, name: &str, place: &Place) {
+    let Some((store, key)) = stored_as(machine, place) else {
+        return;
+    };
+    let Some(repo) = machine.repository().await else {
+        return;
+    };
+    let bound = store.bind(
+        &key.workspace,
+        &key.thread,
+        machine.machine(),
+        &key.place.branch,
+        &key.place.worktree,
+        &repo,
+    );
+    if let Err(error) = bound.await {
+        tracing::warn!(
+            "chat {name}: thread {} is not bound to {repo}: {}",
+            key.thread,
+            chain(&error)
+        );
+    }
+}
+
 /// A new thread, and for an ACP harness its keeper, agent and session. A
 /// thread whose agent never started is removed again: without a harness in
 /// its git config it would read as Claude's.
@@ -3407,6 +3443,7 @@ async fn open<M: Machine>(
         failure(Kind::Unreachable, said)
     })?;
     tracing::info!("chat {name} opened thread {id} for {}", name_of(pick));
+    bind(machine.as_ref(), name, &place).await;
     let Some(harness) = pick else {
         return Ok((
             Here {
@@ -5598,6 +5635,8 @@ mod tests {
         start_acp_fails: bool,
         /// What the thread's git config keeps.
         kept: Option<(Harness, String)>,
+        /// The GitHub repository a new thread is bound to.
+        repo: Option<String>,
         /// The thread's keeper, which a test may start the script with.
         keep: Mutex<Option<Keep>>,
         runs: Mutex<u32>,
@@ -5750,6 +5789,10 @@ mod tests {
             }
             *lock(&self.opened) += 1;
             Ok(if self.home { home_place() } else { place() })
+        }
+
+        async fn repository(&self) -> Option<String> {
+            self.repo.clone()
         }
 
         async fn find(&self, id: &str) -> Result<Option<Place>, String> {
@@ -6543,6 +6586,31 @@ mod tests {
             ..Script::default()
         });
         (script, store)
+    }
+
+    /// Y-782: a new thread's row takes the repository when the thread opens,
+    /// and the title that follows does not move it.
+    #[tokio::test]
+    async fn a_new_thread_is_bound_to_its_repository_when_it_opens() {
+        let (store, _) = crate::store::tests::scratch();
+        let script = Arc::new(Script {
+            repo: Some("o/r".to_owned()),
+            registry: Registry::default().storing(store.clone()),
+            ..Script::default()
+        });
+
+        a_claude_turn_in(&script, None).await;
+
+        let row = store.get("web", THREAD).await.expect("a read");
+        let row = row.expect("a row");
+        assert_eq!(
+            (
+                row.repo.as_deref(),
+                row.title.as_deref(),
+                row.machine.as_str()
+            ),
+            (Some("o/r"), Some("fix it"), "m")
+        );
     }
 
     /// ADR-0045 decision 4: an agent in the worktree that rewrites git config

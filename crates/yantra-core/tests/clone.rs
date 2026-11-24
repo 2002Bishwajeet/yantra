@@ -128,6 +128,42 @@ async fn a_clone_runs_in_its_session_lands_where_probe_looks_and_asks_twice_once
     Ok(())
 }
 
+/// Y-782: `landed_on` reads how git ended. `probe` cannot: a folder that was
+/// there before answers `exists` for a clone that git refused.
+#[tokio::test]
+async fn a_clone_lands_only_when_git_exits_0() -> Result<()> {
+    let Some((fixture, ssh, tmux)) = lab("clone-landed").await? else {
+        return Ok(());
+    };
+    if !arrange(&fixture, &ssh).await? {
+        return Ok(());
+    }
+    let plan = clone::plan(ORIGIN, "~/cloned/origin")?;
+    let landed = async |cloning: &clone::Cloning| {
+        let every = Duration::from_millis(250);
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            clone::landed_on(&ssh, &tmux, cloning, every),
+        )
+        .await
+    };
+
+    let first = clone::clone_on(&ssh, &tmux, Os::Other, "fixture", &plan).await?;
+    assert!(landed(&first).await??, "git cloned into an empty path");
+
+    tmux.kill(&ssh, "clone-origin").await?;
+    assert!(!landed(&first).await??, "a session that is gone");
+
+    let second = clone::clone_on(&ssh, &tmux, Os::Other, "fixture", &plan).await?;
+    assert!(second.opened.was_created(), "a new session");
+    assert!(!landed(&second).await??, "the path is taken");
+    let found = probe::probe_on(&ssh, "fixture", &format!("/home/{USER}/cloned/origin")).await?;
+    assert!(found.exists, "and probe still answers yes: {found:?}");
+
+    tmux.kill(&ssh, "clone-origin").await?;
+    Ok(())
+}
+
 /// ADR-0018 §1 reaches this verb too: a tmux server started here on macOS
 /// would be one every later agent session inherits, so the refusal is `up`'s.
 #[tokio::test]

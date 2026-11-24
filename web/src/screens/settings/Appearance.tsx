@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, Monitor, Moon, Sun } from 'lucide-react'
 import { Card } from '@/m3/card/Card'
 import { Segment, Segmented } from '@/m3/segmented/Segmented'
-import { Eyebrow, Mono, Text } from '@/m3/text/Text'
+import { Eyebrow, Num, Text } from '@/m3/text/Text'
 import { TextField } from '@/m3/text-field/TextField'
 import type { Role, Scheme } from '@/m3/theme/scheme'
 import { type Prefs, usePrefs, writePrefs } from '@/shell/prefs'
@@ -147,8 +147,8 @@ export function Appearance() {
                 className="settings__tile"
                 style={{ background: scheme ? scheme[role] : `var(--md-sys-color-${role})` }}
               />
-              <Mono className="settings__role-name">{role.replace(/-/g, ' ')}</Mono>
-              {scheme ? <Mono className="settings__role-hex">{scheme[role]}</Mono> : null}
+              <span className="settings__role-name">{role.replace(/-/g, ' ')}</span>
+              {scheme ? <Num className="settings__role-hex">{scheme[role]}</Num> : null}
             </li>
           ))}
         </ul>

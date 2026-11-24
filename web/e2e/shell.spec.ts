@@ -21,6 +21,17 @@ const heading = (page: Parameters<typeof axe>[0], name: string) =>
 // The shell's FAB, found by class because the page's own links share its name.
 const fab = (page: Page) => page.locator('.shell__fab, .shell__rail-fab')
 
+/** The colour a role resolves to in this scheme. */
+const token = (page: Page, name: string) =>
+  page.evaluate((n) => {
+    const probe = document.createElement('div')
+    probe.style.backgroundColor = `var(${n})`
+    document.body.append(probe)
+    const colour = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    return colour
+  }, name)
+
 /** D7 §4.1, S11 and S12 (Y-401): on the first run the checklist is `/`. */
 test.describe('the FAB on the first run', () => {
   test.beforeEach(async ({ page }) => {
@@ -106,15 +117,6 @@ test.describe('the desktop bar on a scrolling page', () => {
   const shell = (page: Page) => page.locator('[data-shell="desktop"]')
   const scrollY = (page: Page) => page.evaluate(() => window.scrollY)
   const tone = (page: Page) => bar(page).evaluate((el) => getComputedStyle(el).backgroundColor)
-  const token = (page: Page, name: string) =>
-    page.evaluate((n) => {
-      const probe = document.createElement('div')
-      probe.style.backgroundColor = `var(${n})`
-      document.body.append(probe)
-      const colour = getComputedStyle(probe).backgroundColor
-      probe.remove()
-      return colour
-    }, name)
   const toBottom = async (page: Page) => {
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
     await expect.poll(() => scrollY(page)).toBeGreaterThan(0)
@@ -505,6 +507,34 @@ test.describe('the shell on busy', () => {
     await expect.poll(() => layer(about)).toBeGreaterThan(0)
     await expect(about).toHaveCSS('cursor', 'pointer')
   })
+
+  /** Y-761: `toBeVisible` passes an open popup that Base UI holds at opacity 0 until it has a position, and one
+   *  under another layer. This asks what a person sees after a tap: the menu painted and on top. */
+  test('paints the account menu, with the account line first, inside the screen', async ({ page, size }) => {
+    const account = page.getByRole('button', { name: 'Account' })
+    if (size === 'desktop') await account.click()
+    else await account.tap()
+
+    const menu = page.locator('.m3-menu[data-open]')
+    await expect(menu).toBeInViewport({ ratio: 0.9 })
+    await expect(menu).toHaveCSS('opacity', '1')
+    await expect(page.locator('.m3-menu__positioner').filter({ has: menu })).toHaveCSS('opacity', '1')
+    await expect
+      .poll(() =>
+        menu.evaluate((el) => {
+          const box = el.getBoundingClientRect()
+          return el.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
+        }),
+      )
+      .toBe(true)
+    await expect(menu).toHaveCSS('border-radius', '16px')
+
+    const line = menu.locator('.m3-menu__heading')
+    await expect(line).toHaveText(/^(Signed in|This device)/)
+    await expect(line).toBeInViewport()
+    const first = menu.getByRole('menuitem').first()
+    expect((await line.boundingBox())!.y).toBeLessThan((await first.boundingBox())!.y)
+  })
 })
 
 /** Y-583: the GitHub profile image fills the account button at every width,
@@ -618,6 +648,31 @@ test.describe('the phone shell is an app frame', () => {
 
   test('keeps both bars still while main scrolls', async ({ page }) => {
     await holdsWhileMainScrolls(page, '/')
+  })
+
+  /** Y-761: M3 on-scroll. The bar and the status strip above it take `surface container` while main is scrolled. */
+  test('tones the top bar and the status strip while main is scrolled', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.locator('[data-slot="skeleton"]')).toHaveCount(0)
+    const shell = page.locator('[data-shell="phone"]')
+    const bar = page.locator('.m3-top-app-bar')
+    const tone = () => bar.evaluate((el) => getComputedStyle(el).backgroundColor)
+    const strip = () => shell.evaluate((el) => getComputedStyle(el, '::before').backgroundColor)
+    const surface = await token(page, '--md-sys-color-surface')
+    const container = await token(page, '--md-sys-color-surface-container')
+    expect(container).not.toBe(surface)
+    await expect.poll(tone).toBe(surface)
+    await expect.poll(strip).toBe(surface)
+
+    await main(page).evaluate((el) => el.scrollTo(0, 300))
+    await expect(shell).toHaveAttribute('data-scrolled', '')
+    await expect.poll(tone).toBe(container)
+    await expect.poll(strip).toBe(container)
+    expect((await bar.boundingBox())!.y).toBe(0)
+
+    await main(page).evaluate((el) => el.scrollTo(0, 0))
+    await expect(shell).not.toHaveAttribute('data-scrolled')
+    await expect.poll(tone).toBe(surface)
   })
 
   test('keeps the back bar at the top of a pushed route', async ({ page }) => {

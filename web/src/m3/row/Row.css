@@ -8,7 +8,7 @@
   padding: var(--m3-row-padding);
   border-radius: var(--m3-row-radius);
   color: var(--md-sys-color-on-surface);
-  background: var(--md-sys-color-surface-container-lowest);
+  background: var(--m3-raised-surface);
   text-decoration: none;
   transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
 }
@@ -24,7 +24,7 @@
 
 /* The boards' rows inside a tinted hero card. */
 .m3-row[data-tone="translucent"] {
-  background: color-mix(in srgb, var(--md-sys-color-surface-container-lowest) 70%, transparent);
+  background: color-mix(in srgb, var(--m3-raised-surface) 70%, transparent);
 }
 
 .m3-row__text {

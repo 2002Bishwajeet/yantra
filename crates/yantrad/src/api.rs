@@ -121,7 +121,7 @@ fn tailnet(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
 pub(crate) const HTTPS_PORT: u16 = 8443;
 
 /// Where the microphone works: a browser needs a secure context (ADR-0031 §4).
-fn https(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
+pub(crate) fn https(snapshot: &Snapshot, listening_on: &[SocketAddr]) -> Option<String> {
     https_of(
         snapshot.machines.as_deref()?.value().as_ref().ok()?,
         listening_on,
@@ -160,7 +160,7 @@ fn node_name<'a>(
 
 /// Which node is this one is answered by the addresses `listen_on` bound — the
 /// same join the heartbeat makes, in the other direction.
-fn is_this_node(
+pub(crate) fn is_this_node(
     machine: &yantra_core::inventory::MachineInfo,
     listening_on: &[SocketAddr],
 ) -> bool {

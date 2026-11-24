@@ -63,12 +63,31 @@ async function open() {
   return screen.findByRole('dialog')
 }
 
+describe('the GitHub list', () => {
+  it('draws every action tonal', async () => {
+    daemon()
+    await renderInApp(<Github attention={attention} grant={held} />)
+    await screen.findAllByRole('button', { name: /^Start session on / })
+    const actions = [...document.querySelectorAll('.github__actions .m3-button')]
+    expect(actions.length).toBeGreaterThan(2)
+    for (const one of actions) expect(one.getAttribute('data-variant')).toBe('tonal')
+  })
+})
+
 describe('Start session', () => {
   it('is on every issue and on no review', async () => {
     daemon()
     await renderInApp(<Github attention={attention} grant={held} />)
     expect(await issues().findAllByRole('button', { name: /^Start session on / })).toHaveLength(contract.attention.data.issues.length)
     expect(screen.getAllByRole('button', { name: /^Start session on / })).toHaveLength(contract.attention.data.issues.length)
+  })
+
+  it('sets the repository id in the brand face', async () => {
+    daemon()
+    await renderInApp(<Github attention={attention} grant={held} />)
+    const ref = (await screen.findAllByText(/^2002Bishwajeet\/yantra#\d+$/))[0]!
+    expect(ref.classList.contains('m3-num')).toBe(true)
+    expect(ref.classList.contains('m3-mono')).toBe(false)
   })
 
   it('opens a picker of the workspaces that hold the repository, with the machine and its reason', async () => {

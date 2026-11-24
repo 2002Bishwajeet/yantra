@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Merges PR $1 with subject $2 once CI is green, one merge at a time across watchers.
-# A branch behind main is updated on GitHub and waits for CI again (the ruleset wants it current).
+# Since Y-836 the ruleset lets a branch behind main merge; BEHIND stays handled in case that returns.
 # Exits 0 on merge, 1 on a red check or a conflict, so the watcher's exit wakes the session.
 set -uo pipefail
 pr=$1 subject=$2

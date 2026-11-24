@@ -18,6 +18,24 @@
   z-index: 5;
   height: var(--m3-safe-top);
   background: var(--md-sys-color-surface);
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+/* Y-761: M3 on-scroll on the phone, a change of tone for the bar and the strip above it (useBarScrolled). */
+[data-shell="phone"] .m3-top-app-bar {
+  transition: background-color var(--md-sys-motion-duration-fast-effects) var(--md-sys-motion-spring-fast-effects);
+}
+
+[data-shell="phone"][data-scrolled] .m3-top-app-bar,
+[data-shell="phone"][data-scrolled].shell::before {
+  background-color: var(--md-sys-color-surface-container);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-shell="phone"] .m3-top-app-bar,
+  .shell::before {
+    transition: none;
+  }
 }
 
 [data-shell="tablet"],
@@ -225,6 +243,13 @@
 }
 
 /* Phone: the app bar is the h1, so the screen's own is not drawn. */
+
+/* Y-757: a pushed screen portals its verbs here (appBarSlot.ts). */
+.shell__bar-slot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 
 /* Shell.tsx keeps one contents box at every width so the tree survives a
    form-factor change (Y-361). The phone's draws no box of its own. */

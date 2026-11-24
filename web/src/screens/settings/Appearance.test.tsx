@@ -37,6 +37,10 @@ describe('Appearance', () => {
     expect(screen.getByRole('button', { name: 'terracotta' }).getAttribute('aria-pressed')).toBe('true')
     // The engine is lazy; the hex arrives once it has loaded.
     await waitFor(() => expect(screen.getAllByText(/^#[0-9A-F]{6}$/)).toHaveLength(5))
+    for (const hex of screen.getAllByText(/^#[0-9A-F]{6}$/)) {
+      expect(hex.classList.contains('m3-num')).toBe(true)
+      expect(hex.classList.contains('m3-mono')).toBe(false)
+    }
     const hexes = screen.getAllByText(/^#[0-9A-F]{6}$/).map((one) => one.textContent)
     expect(hexes).toHaveLength(5)
     expect(hexes[0]).not.toBe('#9A4523')

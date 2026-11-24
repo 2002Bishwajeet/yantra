@@ -128,6 +128,10 @@ pub struct Authoriser<I> {
 pub(crate) enum Who {
     /// The owner: on the socket with no session, or on the network with one.
     Owner(Caller, Option<passkey::Session>),
+    /// The owner's read-only session (the 2026-11-24 note on decisions 4 and
+    /// 9). It passes the gate on [`reader_may`]'s reads, and a handler that
+    /// checks its caller passes it only through [`reading`].
+    Reader(Caller),
     /// A session or Chat turn the daemon started, by the workspace it is in.
     Agent { caller: Caller, workspace: String },
 }
@@ -135,7 +139,7 @@ pub(crate) enum Who {
 impl Who {
     pub(crate) fn caller(&self) -> &Caller {
         match self {
-            Self::Owner(caller, _) | Self::Agent { caller, .. } => caller,
+            Self::Owner(caller, _) | Self::Reader(caller) | Self::Agent { caller, .. } => caller,
         }
     }
 }
@@ -282,6 +286,7 @@ impl<I: Inventory> Authoriser<I> {
         let caller = self.judge(hop, headers, signed_in).await?;
         Ok(match presented {
             Presented::Socket => Who::Owner(caller, None),
+            Presented::Session(session) if session.read_only => Who::Reader(caller),
             Presented::Session(session) => Who::Owner(caller, Some(session)),
             Presented::Agent(workspace) => Who::Agent { caller, workspace },
         })
@@ -409,7 +414,6 @@ where
         )
         .route("/machines/{machine}/probe", post(ask::<I>))
         .route("/machines/{machine}/dirs", post(walk::<I>))
-        .route("/machines/{machine}/clone", post(fetch::<I>))
         .route(
             "/workspaces/{name}/threads/{thread}/terminal",
             post(thread_terminal::<I>),
@@ -439,6 +443,8 @@ where
         .route("/join/forget-host-key", post(forget_host_key::<I>))
         .route("/update", post(renew::<I>))
         .route("/update/channel", put(rechannel::<I>))
+        // Here for the store, which keeps where each clone came from (Y-782).
+        .route("/machines/{machine}/clone", post(fetch::<I>))
         .route("/threads", get(threads_found::<I>))
         // Here for the grant: a thread's PR and its issue are read with it.
         .route(
@@ -531,8 +537,9 @@ struct Remembered<I> {
 }
 
 /// Every route that acts calls this, and only the two join routes call
-/// [`joining`] in its place. It passes the owner alone; an agent token gets
-/// 403 here, and the routes an agent may use call [`identify`].
+/// [`joining`] in its place. It passes the owner alone; an agent token and a
+/// read-only session get 403 here, and the routes an agent may use call
+/// [`identify`].
 pub(crate) async fn allowed<I: Inventory>(
     authoriser: &Authoriser<I>,
     peer: &Peer,
@@ -540,6 +547,21 @@ pub(crate) async fn allowed<I: Inventory>(
 ) -> Result<Caller, Refused> {
     match identify(authoriser, peer, headers).await? {
         Who::Owner(caller, _) => Ok(caller),
+        Who::Reader(_) => Err(Refused::ReadOnly),
+        Who::Agent { .. } => Err(Refused::AgentScope),
+    }
+}
+
+/// [`allowed`] for a `GET` that changes nothing, which also passes the
+/// owner's read-only session. [`forget_host_key`] skips the gate and then
+/// calls [`allowed`], so a route that acts must never call this.
+pub(crate) async fn reading<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    peer: &Peer,
+    headers: &HeaderMap,
+) -> Result<Caller, Refused> {
+    match identify(authoriser, peer, headers).await? {
+        Who::Owner(caller, _) | Who::Reader(caller) => Ok(caller),
         Who::Agent { .. } => Err(Refused::AgentScope),
     }
 }
@@ -594,6 +616,7 @@ pub(crate) async fn allowed_socket<I: Inventory>(
             let revoked = session.map(|session| authoriser.passkeys.ended(&session.id));
             Ok((caller, revoked))
         }
+        Who::Reader(_) => Err(Refused::ReadOnly),
         Who::Agent { .. } => Err(Refused::AgentScope),
     }
 }
@@ -609,6 +632,7 @@ pub(crate) async fn signed_in_socket<I: Inventory>(
     match identify(authoriser, peer, headers).await? {
         Who::Owner(caller, Some(session)) => Ok((caller, authoriser.passkeys.ended(&session.id))),
         Who::Owner(_, None) => Err(Refused::SignIn),
+        Who::Reader(_) => Err(Refused::ReadOnly),
         Who::Agent { .. } => Err(Refused::AgentScope),
     }
 }
@@ -639,7 +663,8 @@ pub(crate) struct Gate<I> {
 /// ADR-0044 decision 8: every `/api` route checks its caller here, the reads
 /// in `api.rs` among them, before its own handler runs. A write, and every
 /// WebSocket upgrade, also needs the dashboard's `Origin` when it names one
-/// (decision 5), and an agent token reaches only [`agent_may`]'s routes.
+/// (decision 5), an agent token reaches only [`agent_may`]'s routes, and a
+/// read-only session only [`reader_may`]'s.
 pub(crate) async fn gate<I: Inventory + Clone + Send + Sync + 'static>(
     State(gate): State<Gate<I>>,
     request: axum::extract::Request,
@@ -665,7 +690,19 @@ async fn passes<I: Inventory>(
     headers: &HeaderMap,
     peer: Option<Peer>,
 ) -> Result<(), Refused> {
-    if unchecked(method, path) || (join_code(headers).is_some() && readiness(method, path)) {
+    let skips =
+        unchecked(method, path) || (join_code(headers).is_some() && readiness(method, path));
+    // These leave before `identify`, which is where a read-only cookie is
+    // refused. `GET /about` stays open to it: the dashboard loads it.
+    if (skips || ceremony(method, path))
+        && *method != axum::http::Method::GET
+        && passkey::token_in(headers)
+            .and_then(|token| gate.authoriser.passkeys.session(token))
+            .is_some_and(|session| session.read_only)
+    {
+        return Err(Refused::ReadOnly);
+    }
+    if skips {
         return Ok(());
     }
     let peer = peer.ok_or(Refused::Account(None))?;
@@ -675,6 +712,9 @@ async fn passes<I: Inventory>(
     let who = identify(&gate.authoriser, &peer, headers).await?;
     let writes = !matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD)
         || headers.contains_key(axum::http::header::UPGRADE);
+    if matches!(who, Who::Reader(_)) && (writes || !reader_may(path)) {
+        return Err(Refused::ReadOnly);
+    }
     if writes && let Some(origin) = headers.get(axum::http::header::ORIGIN) {
         let origin = origin.to_str().unwrap_or("an unreadable origin");
         if Some(origin)
@@ -687,8 +727,19 @@ async fn passes<I: Inventory>(
     }
     match who {
         Who::Agent { .. } if !agent_may(method, path) => Err(Refused::AgentScope),
-        _ => Ok(()),
+        Who::Owner(..) | Who::Reader(_) | Who::Agent { .. } => Ok(()),
     }
+}
+
+/// The paths a read-only session may `GET`: all but MCP, the passkey and
+/// session routes, and the Web Push key, which its first `GET` makes and
+/// writes. `/sessions` itself is the tmux sessions, a read.
+fn reader_may(path: &str) -> bool {
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    !matches!(
+        parts.as_slice(),
+        ["mcp" | "passkey", ..] | ["sessions", _, ..] | ["push", "key"]
+    )
 }
 
 /// `YANTRA_ORIGIN` when it is set, and otherwise `https://<MagicDNS>:8443`
@@ -779,7 +830,7 @@ async fn here<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Here>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let caller = reading(&state.authoriser, &from, &headers).await?;
     let looked = state.fleet.model.read().await.machines.clone();
     let machines = match looked.as_deref().map(|reading| reading.value()) {
         None => {
@@ -1212,19 +1263,23 @@ fn from_dirs(error: &dirs::Error) -> StatusCode {
 /// ([ADR-0022]) and completion is [`ask`]. Nothing here awaits the clone, and
 /// a handler that did would hold a request for as long as a repository takes.
 ///
+/// **A task the daemon owns follows a github.com clone after the answer**
+/// (Y-782), and [`record_clone`] says why. It holds ssh for one pane read
+/// every three seconds until git ends, and for [`CLONE_BUDGET`] at most.
+///
 /// **No token goes with it** ([ADR-0023] §4): the machine's own git credential
 /// fetches, and a URL carrying one is a `400` before any machine is asked.
 ///
 /// [ADR-0022]: ../../../docs/adr/0022-a-socket-may-address-a-session-rather-than-a-workspace.md
 /// [ADR-0023]: ../../../docs/adr/0023-the-github-grant-lives-beside-the-relay.md
 async fn fetch<I: Inventory + Clone + Send + Sync + 'static>(
-    State(authoriser): State<Authoriser<I>>,
+    State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
     Path(machine): Path<String>,
     Json(asked): Json<Fetch>,
 ) -> Result<(StatusCode, Json<Cloning>), Refused> {
-    let caller = allowed(&authoriser, &from, &headers).await?;
+    let caller = allowed(&state.authoriser, &from, &headers).await?;
     let plan = clone::plan(&asked.url, &asked.path).map_err(|error| Refused::Verb {
         status: from_clone(&error),
         said: chain(&error),
@@ -1237,14 +1292,66 @@ async fn fetch<I: Inventory + Clone + Send + Sync + 'static>(
             status: from_clone(&error),
             said: chain(&error),
         })?;
+    let answer = Cloning {
+        machine: cloning.machine.clone(),
+        session: cloning.session.clone(),
+    };
+    if let (Some(store), Some(repo)) = (state.fleet.store.clone(), to_record(&plan, &cloning)) {
+        tokio::spawn(async move {
+            let landed = clone::landed(&cloning);
+            record_clone(&store, &cloning.machine, &plan.path, &repo, landed).await;
+        });
+    }
 
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(Cloning {
-            machine: cloning.machine,
-            session: cloning.session,
-        }),
-    ))
+    Ok((StatusCode::ACCEPTED, Json(answer)))
+}
+
+/// How long the daemon follows one clone.
+const CLONE_BUDGET: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// The github.com repository a clone record would name, for a clone this call
+/// started. A session that was already there can be another URL with the same
+/// last segment, so it gets no record.
+fn to_record(plan: &clone::Plan, cloning: &clone::Cloning) -> Option<String> {
+    let (owner, repo) = github::repo_of(&plan.url)?;
+    cloning
+        .opened
+        .was_created()
+        .then(|| format!("{owner}/{repo}"))
+}
+
+/// Keeps which github.com repository Yantra cloned into the path (ADR-0045,
+/// 2026-11-23 note), for the threads made there later. It writes only after
+/// `landed` says `git clone` exited 0. A clone that git refused leaves the
+/// folder as it was, and a record of it would bind every later thread to a
+/// repository the folder does not hold (Y-782).
+///
+/// No record is the safe answer: those threads take the folder's `origin`
+/// ([`crate::bind`]). A daemon restart, a clone longer than [`CLONE_BUDGET`]
+/// and a failed write all end there. An older record of the path stays.
+async fn record_clone(
+    store: &Store,
+    machine: &str,
+    path: &str,
+    repo: &str,
+    landed: impl Future<Output = Result<bool, clone::Error>>,
+) {
+    let said = match tokio::time::timeout(CLONE_BUDGET, landed).await {
+        Ok(Ok(true)) => {
+            let kept = store.put_clone(machine, path, repo).await;
+            kept.err().map(|error| chain(&error))
+        }
+        // git refused it and said why in the pane, or the session is gone.
+        Ok(Ok(false)) => return,
+        Ok(Err(error)) => Some(chain(&error)),
+        Err(_) => Some(format!(
+            "it still ran after {} minutes",
+            CLONE_BUDGET.as_secs() / 60
+        )),
+    };
+    if let Some(said) = said {
+        tracing::warn!("clone into {machine}:{path}: the store has no record of it: {said}");
+    }
 }
 
 /// The two refusals are the caller's; a macOS machine with no tmux server is
@@ -1804,23 +1911,28 @@ fn from_update(error: &update::Error) -> StatusCode {
 }
 
 /// The dashboard saying it is on screen (D3 §13), so the notifier stops pushing
-/// what the page is already showing.
+/// what the page is already showing. A subscribed browser names its push
+/// endpoint, and Web Push then skips that device alone (ADR-0047 decision 6).
+/// A beacon with no body quiets the relay only.
 ///
 /// **It is a write and it is authorised like one**: silencing someone's phone
 /// is an act, and `whois` costs one subprocess per beacon — the page beacons
 /// once every `BEACON_MS` and only while the tab is visible, which is the same
 /// order as the sweep this daemon already runs.
 ///
-/// **The state is one timestamp in memory** and a restart forgets it, which is
-/// what Y-044 means here. It is not the exception ADR-0021 carved: nothing
-/// about a viewer needs to survive anything.
+/// **The state is a few timestamps in memory** and a restart forgets them,
+/// which is what Y-044 means here. It is not the exception ADR-0021 carved:
+/// nothing about a viewer needs to survive anything. The endpoint is a
+/// capability, so it is never logged.
 async fn viewing<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
+    named: Option<Json<crate::push::Named>>,
 ) -> Result<StatusCode, Refused> {
     allowed(&state.authoriser, &from, &headers).await?;
-    *state.fleet.viewers.write().await = Some(std::time::Instant::now());
+    let endpoint = named.map(|Json(named)| named.endpoint);
+    state.fleet.viewers.write().await.beacon(endpoint);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -2419,6 +2531,7 @@ fn row_of(
         created: now,
         active: now,
         seen: Some(now),
+        repo: None,
     }
 }
 
@@ -2434,7 +2547,7 @@ async fn thread_states<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<ThreadState>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     let mut states: Vec<_> = state
         .fleet
         .chats
@@ -2457,7 +2570,7 @@ async fn threads_found<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     uri: Uri,
 ) -> Result<Json<Vec<ThreadFound>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     let store = state.fleet.store.as_ref().ok_or_else(|| Refused::Verb {
         status: StatusCode::SERVICE_UNAVAILABLE,
         said: "the daemon keeps no thread store".to_owned(),
@@ -2572,7 +2685,23 @@ async fn thread_new<I: Inventory + Clone + Send + Sync + 'static>(
     let opened = thread::start(&name, &issue, &github::Github::default(), &token)
         .await
         .map_err(refuse)?;
+    if let Some(store) = &state.fleet.store {
+        bind_new(store, &name, &opened).await;
+    }
     Ok(Json(ThreadOpened::of(opened)))
+}
+
+/// [`crate::bind::created`] for the thread `opened` names. The thread is made
+/// by now, so a workspace or a machine that cannot be read leaves it unbound.
+async fn bind_new(store: &Store, name: &str, opened: &thread::Opened) {
+    let reached = workspace::load(name).ok().and_then(|workspace| {
+        let ssh = ssh::Ssh::new(ssh::machine_at(&workspace.machine)?).ok()?;
+        Some((workspace, ssh))
+    });
+    match reached {
+        Some((workspace, ssh)) => crate::bind::created(store, &workspace, &ssh, opened).await,
+        None => tracing::warn!("thread new {name}: the thread is not bound to a repository"),
+    }
 }
 
 /// The machine name reaches `ssh`'s argv, so it is checked first (I-63).
@@ -2603,7 +2732,7 @@ async fn machine_threads<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(machine): Path<String>,
 ) -> Result<Json<Vec<MachineThread>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     checked(&machine)?;
     let store = state.fleet.store.as_ref().ok_or_else(no_store)?;
     let rows = store
@@ -2832,13 +2961,15 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
         .await
         .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
     tracing::info!("pr open {name} {id} for {}", caller.node);
-    let opened = commit::open_pr_for(
-        &name,
-        &id,
+    let (ssh, found, bound) = bound_thread(&state.fleet, &name, &id).await?;
+    let opened = commit::open_pr(
+        &ssh,
+        &found,
         &github::Github::default(),
         &token,
         title.as_deref(),
         body.as_deref(),
+        Some(&bound),
     )
     .await
     .map_err(refuse_commit)?;
@@ -2858,6 +2989,7 @@ async fn opening_pr<I: Inventory + Clone + Send + Sync + 'static>(
         number: opened.number,
         url: opened.url,
         created: opened.created,
+        repo: bound,
     }))
 }
 
@@ -2877,7 +3009,8 @@ async fn pending_pr<I: Inventory + Clone + Send + Sync + 'static>(
         .await
         .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
     tracing::info!("pr pending {name} {id} for {}", caller.node);
-    let pending = commit::pending_pr_for(&name, &id, &github::Github::default(), &token)
+    let (_, found, bound) = bound_thread(&state.fleet, &name, &id).await?;
+    let pending = commit::pending_pr(&found, &github::Github::default(), &token, Some(&bound))
         .await
         .map_err(refuse_commit)?;
     Ok(Json(ThreadPrPending {
@@ -2885,6 +3018,7 @@ async fn pending_pr<I: Inventory + Clone + Send + Sync + 'static>(
         url: pending.url,
         head_sha: pending.head_sha,
         commits: pending.commits,
+        repo: bound,
     }))
 }
 
@@ -2922,13 +3056,14 @@ async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
         .await
         .ok_or_else(|| refuse_commit(github::Error::NoGrant.into()))?;
     tracing::info!("pr merge {name} {id} #{number} for {}", caller.node);
-    let merged = commit::merge_pr_for(
-        &name,
-        &id,
+    let (_, found, bound) = bound_thread(&state.fleet, &name, &id).await?;
+    let merged = commit::merge_pr(
+        &found,
         &github::Github::default(),
         &token,
         number,
         &seen,
+        Some(&bound),
     )
     .await
     .map_err(refuse_commit)?;
@@ -2937,6 +3072,27 @@ async fn merging_pr<I: Inventory + Clone + Send + Sync + 'static>(
         url: merged.url,
         branch_deleted: merged.kept.is_none(),
     }))
+}
+
+/// Thread `id` of workspace `name`, and the repository its PR verbs may write
+/// (ADR-0045, Y-782). The CLI's verbs stay unbound; these three do not.
+async fn bound_thread(
+    fleet: &Fleet,
+    name: &str,
+    id: &str,
+) -> Result<(ssh::Ssh, thread::Listed, String), Refused> {
+    let store = fleet.store.as_ref().ok_or_else(no_store)?;
+    let (workspace, ssh, found) = commit::find_listed(name, id).await.map_err(refuse_commit)?;
+    let bound = crate::bind::bound(store, &workspace, &found)
+        .await
+        .map_err(|error| match error {
+            crate::bind::Error::Commit(failed) => refuse_commit(failed),
+            crate::bind::Error::Store(failed) => Refused::Verb {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                said: chain(&failed),
+            },
+        })?;
+    Ok((ssh, found, bound))
 }
 
 /// `yantra chat rm <workspace> <thread>` on the wire (Y-496): the thread's keeper, worktree and
@@ -3009,6 +3165,7 @@ fn from_commit(error: &commit::Failed) -> StatusCode {
         | commit::Failed::NoPr
         | commit::Failed::AlreadyMerged { .. }
         | commit::Failed::NotThatPr { .. }
+        | commit::Failed::OtherRepository { .. }
         | commit::Failed::Unseen { .. } => StatusCode::CONFLICT,
         commit::Failed::Github(github) => from_github(github),
         commit::Failed::Thread(thread) => crate::tasks::from_delegate(thread),
@@ -3606,6 +3763,8 @@ struct ThreadPrOpened {
     url: String,
     /// `false` when the PR was already open.
     created: bool,
+    /// `owner/repo`, the repository the thread is bound to (Y-782).
+    repo: String,
 }
 
 /// `head_sha` is spelled as `/api/pulls` spells it, and the merge body sends it back.
@@ -3615,6 +3774,8 @@ struct ThreadPrPending {
     url: String,
     head_sha: String,
     commits: u64,
+    /// `owner/repo`, which the merge dialog names (Y-782).
+    repo: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -4141,6 +4302,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                             created: SEEN,
                             active: SEEN,
                             seen: Some(SEEN),
+                            repo: None,
                         },
                         None,
                     )
@@ -4185,6 +4347,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                         created: SEEN,
                         active: SEEN,
                         seen: Some(SEEN),
+                        repo: None,
                     },
                     &crate::chat::Registry::default(),
                 )
@@ -4215,6 +4378,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 created: SEEN,
                 active: SEEN,
                 seen: Some(SEEN),
+                repo: None,
             })]),
         ),
         (
@@ -4311,6 +4475,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 number: 497,
                 url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
                 created: true,
+                repo: "2002Bishwajeet/yantra".to_owned(),
             }),
         ),
         (
@@ -4321,6 +4486,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
                 url: "https://github.com/2002Bishwajeet/yantra/pull/497".to_owned(),
                 head_sha: "89abcdef0123456789abcdef0123456789abcdef".to_owned(),
                 commits: 3,
+                repo: "2002Bishwajeet/yantra".to_owned(),
             }),
         ),
         (
@@ -4484,6 +4650,9 @@ pub(crate) enum Refused {
     /// ADR-0044 decision 12: an agent token outside its workspace's room and
     /// task routes.
     AgentScope,
+    /// The 2026-11-24 note on decisions 4 and 9: a read-only session on
+    /// anything but a `GET` that only reads.
+    ReadOnly,
     /// The last tailnet look is missing or failed, so "which machine" has no
     /// answer yet; 503, because `null` would read as "no machine holds it".
     Unlooked(String),
@@ -4576,6 +4745,11 @@ impl IntoResponse for Refused {
             Self::AgentScope => (
                 StatusCode::FORBIDDEN,
                 "an agent reaches only its own workspace's room and task tools".to_owned(),
+            ),
+            // The dashboard reads this prefix (`web/src/api/errors.ts`).
+            Self::ReadOnly => (
+                StatusCode::FORBIDDEN,
+                "this session is read-only: it reads the dashboard and changes nothing".to_owned(),
             ),
             Self::Verb { status, said } | Self::Unlogged { status, said } => (status, said),
         };
@@ -5924,13 +6098,32 @@ mod tests {
         );
     }
 
-    /// D3 §13's beacon reaching the one timestamp the notifier reads, and
-    /// nothing else: the daemon knows a viewer is there and knows nothing about
-    /// who or where.
+    fn beacon(from: u8, endpoint: Option<&str>) -> axum::http::Request<axum::body::Body> {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+
+        let post = Request::post("/viewing");
+        let mut beacon = match endpoint {
+            Some(endpoint) => {
+                post.header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "endpoint": endpoint }).to_string(),
+                    ))
+            }
+            None => post.body(Body::empty()),
+        }
+        .expect("a POST");
+        beacon
+            .extensions_mut()
+            .insert(ConnectInfo(tcp(address(from))));
+        beacon
+    }
+
+    /// D3 §13's beacon reaching what the notifier reads, and nothing else: the
+    /// daemon knows a viewer is there, and which device when the page says so.
+    /// A page with no subscription, or a cached older page, sends no body.
     #[tokio::test]
     async fn a_beacon_from_this_owner_is_what_the_notifier_reads() {
-        use axum::body::Body;
-        use axum::http::Request;
         use tower::ServiceExt as _;
 
         let fleet = Fleet::default();
@@ -5938,23 +6131,32 @@ mod tests {
             direct(tailnet(vec![(address(2), caller(ME, &[]))])),
             fleet.clone(),
         );
-        let mut beacon = Request::post("/viewing")
-            .body(Body::empty())
-            .expect("a POST");
-        beacon.extensions_mut().insert(ConnectInfo(tcp(address(2))));
+        let say = |endpoint| app.clone().oneshot(beacon(2, endpoint));
 
-        let answered = app.oneshot(beacon).await.expect("the router is infallible");
-
+        let answered = say(None).await.expect("the router is infallible");
         assert_eq!(answered.status(), StatusCode::NO_CONTENT);
-        assert!(crate::notify::watched(&fleet.viewers).await);
+        let watched = crate::notify::watched(&fleet.viewers).await;
+        assert!(watched.anyone && watched.devices.is_empty(), "{watched:?}");
+
+        let laptop = "https://push.example/laptop";
+        let answered = say(Some(laptop)).await.expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::NO_CONTENT);
+        let long = "a".repeat(2049);
+        let answered = say(Some(&long)).await.expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::NO_CONTENT);
+        let watched = crate::notify::watched(&fleet.viewers).await;
+        assert!(watched.anyone);
+        assert_eq!(
+            watched.devices,
+            std::collections::HashSet::from([laptop.to_owned()]),
+            "an endpoint that is too long is not kept"
+        );
     }
 
     /// ADR-0016 covers it like every other write, and the reason is what it
     /// does: a beacon stops this daemon pushing to somebody's phone.
     #[tokio::test]
     async fn a_beacon_from_a_node_that_is_not_this_owners_silences_nothing() {
-        use axum::body::Body;
-        use axum::http::Request;
         use tower::ServiceExt as _;
 
         let fleet = Fleet::default();
@@ -5962,15 +6164,17 @@ mod tests {
             direct(tailnet(vec![(address(3), caller(ME + 1, &[]))])),
             fleet.clone(),
         );
-        let mut beacon = Request::post("/viewing")
-            .body(Body::empty())
-            .expect("a POST");
-        beacon.extensions_mut().insert(ConnectInfo(tcp(address(3))));
 
-        let answered = app.oneshot(beacon).await.expect("the router is infallible");
+        let answered = app
+            .oneshot(beacon(3, Some("https://push.example/phone")))
+            .await
+            .expect("the router is infallible");
 
         assert_eq!(answered.status(), StatusCode::FORBIDDEN);
-        assert!(!crate::notify::watched(&fleet.viewers).await);
+        assert_eq!(
+            crate::notify::watched(&fleet.viewers).await,
+            crate::notify::Watched::default()
+        );
     }
 
     /// The route that writes a secret to disk is behind the same gate as the
@@ -6770,6 +6974,10 @@ mod tests {
             commit::Failed::Diverged,
             commit::Failed::NotGithub,
             commit::Failed::NoTitle,
+            commit::Failed::OtherRepository {
+                bound: "o/r".to_owned(),
+                remote: "evil/x".to_owned(),
+            },
         ] {
             assert_eq!(from_commit(&refused), StatusCode::CONFLICT, "{refused}");
         }
@@ -7327,6 +7535,64 @@ mod tests {
         let (status, said) = answered(from_dirs(&not_made), &not_made).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(said.contains("File exists"), "{said}");
+    }
+
+    /// Y-782: only a clone that this call started from github.com gets a
+    /// record. A session that was already there, and another host, get none.
+    #[test]
+    fn only_a_clone_yantra_started_from_github_is_recorded() {
+        use yantra_core::tmux::{Opened, Session};
+        let session = || Session {
+            name: "clone-r".to_owned(),
+            session_id: "$1".to_owned(),
+            window_id: "@1".to_owned(),
+            pane_id: "%1".to_owned(),
+        };
+        let repo = |url: &str, opened: Opened| {
+            let plan = clone::plan(url, "~/src/r").expect("a plan");
+            let cloning = clone::Cloning {
+                machine: "pi".to_owned(),
+                session: plan.session.clone(),
+                opened,
+            };
+            to_record(&plan, &cloning)
+        };
+
+        let attached = repo("https://github.com/evil/r", Opened::Attached(session()));
+        assert_eq!(attached, None);
+        let foreign = repo("https://gitlab.com/o/r.git", Opened::Created(session()));
+        assert_eq!(foreign, None);
+        let started = repo("git@github.com:o/r.git", Opened::Created(session()));
+        assert_eq!(started.as_deref(), Some("o/r"));
+    }
+
+    /// Y-782: the record is written when git exits 0 and at no other ending.
+    /// A clone that git refused leaves the folder as it was, so it leaves the
+    /// record of an older clone as it was too.
+    #[tokio::test(start_paused = true)]
+    async fn a_clone_is_recorded_only_after_it_lands() {
+        let (store, _) = crate::store::tests::scratch();
+        let record = async |repo: &str, landed: Option<Result<bool, clone::Error>>| {
+            let ending = async {
+                match landed {
+                    Some(landed) => landed,
+                    None => std::future::pending().await,
+                }
+            };
+            record_clone(&store, "pi", "~/src/r", repo, ending).await;
+            store.cloned("pi", "~/src/r").await.expect("a read")
+        };
+
+        assert_eq!(record("fork/r", Some(Ok(false))).await, None);
+        let unknown = record("fork/r", Some(Err(clone::Error::NoStateDir)));
+        assert_eq!(unknown.await, None);
+        assert_eq!(record("fork/r", None).await, None, "past the budget");
+
+        assert_eq!(record("o/r", Some(Ok(true))).await.as_deref(), Some("o/r"));
+        let refused = record("fork/r", Some(Ok(false))).await;
+        assert_eq!(refused.as_deref(), Some("o/r"), "the record stays");
+        let again = record("fork/r", Some(Ok(true))).await;
+        assert_eq!(again.as_deref(), Some("fork/r"), "a later clone");
     }
 
     /// The clone route is gated like every other write, and the mapper sends

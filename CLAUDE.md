@@ -150,7 +150,8 @@ to `~/.config/yantra/rooms/<name>.toml`, with no message, no fleet state and no 
 state and no secret value ([ADR-0044](docs/adr/0044-a-write-needs-the-owners-passkey.md)). The appliance may keep a conversation history that the daemon never touches —
 [ADR-0032](docs/adr/0032-the-appliance-keeps-the-conversation-history-encrypted.md).
 **Since 2026-11-09 the daemon also keeps one store**, `~/.local/state/yantra/threads.sqlite`: one row per Chat
-thread with its session id, title, machine and status, and no message text and no secret
+thread with its session id, title, machine, status and GitHub repository, one row per clone that
+Yantra completed, and no message text and no secret
 ([ADR-0045](docs/adr/0045-the-hub-keeps-a-thread-store.md)).
 **Since 2026-11-20 it also writes the Web Push signing key** to `/etc/yantra/daemon.env`, beside the
 relay and the grant, and keeps each device's push subscription in the thread store, with no fleet
@@ -302,13 +303,30 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   path runs the branch's `yantrad` against the real fleet, and the PR carries WebKit and Chromium
   screenshots. A machine row also passes `just test-mac` on the real Mac.
   [`walk.sh`](.claude/workflows/walk.sh) holds the paths, and its guard refuses the merge without them (Y-660).
-- **It picks by priority.** Until the owner calls Yantra a daily driver, a row that closes the daily-driver gap ([M18](tracker.md#2-milestones)) goes first and feature milestones wait (owner, 2026-11-05). 1: closes or unblocks an open milestone. 2: a defect or a red suite.
-  3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
+- **It picks by priority.** Until the owner calls Yantra a daily driver, what the owner hits on the
+  real product goes first (owner, 2026-11-24). 0: a defect the owner or the box walk found on the real
+  box. 1: a row that closes the daily-driver gap ([M18](tracker.md#2-milestones)). 2: closes or
+  unblocks an open milestone. 3: another defect or a red suite. 4: a feature whose dependencies are
+  done. 5: debt. Ties go to the lower Y-number.
+- **It does not fill time with easy rows.** When a row of priority 0 or 1 is blocked only on the
+  owner, the run builds no row of priority 3 or lower. It sends the owner one ask with the exact step
+  and why, and the report opens with it (owner, 2026-11-24: six days of polish while the blockers waited).
+- **It looks at the real box first.** Each run starts by reading the live dashboard on the box, the
+  pages the owner uses, after the box has the nightly. It files a row for each wrong state it sees,
+  such as a stale check, a missing chip or wrong copy. A fixture or a laptop copy of `yantrad` does not
+  replace this look (owner, 2026-11-24). [`look.sh`](.claude/workflows/look.sh) reads the box with
+  the owner's read-only session in `~/.config/yantra/walk-session` (Y-835). It opens pages and
+  presses nothing. With no session, or one that has ended, the run says it skipped the look and asks
+  the owner to make one in Settings, Devices.
 - **It runs up to three rows at once.** Rows that edit the same file do not run at the same time.
   CI tests only what a row changed: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607).
+- **It keeps rows apart and small rows short.** A row does not edit `tracker.md`, the session log,
+  or any `llms.txt` or `README.md`. One record PR after the wave updates them for every merged row,
+  which is the build loop's exception to §B5's same-PR rule. A small row skips the planner and the
+  second review. Owner, 2026-11-24 (Y-836): each row edited those files, so each merge conflicted.
 - **CI is the gate.** A row pushes its branch and opens its PR, and its checks on CI are the gate.
-  Rows verify on CI in parallel. Only merges run one at a time, because each rebase must see the
-  merge before it. The laptop runs the walk and `just test-mac`. Owner, 2026-11-09 (Y-694).
+  Rows verify on CI in parallel. Merges run one at a time, and a branch need not be up to date with
+  main to merge (Y-836): that rule sent every open PR through CI again after each merge. The laptop runs the walk and `just test-mac`. Owner, 2026-11-09 (Y-694).
   A row's own extra checks go through [`gate.sh`](.claude/workflows/gate.sh) to an idle tailnet
   machine, one gate at a time on each machine, under `nice` and a memory cap. The laptop is the
   fallback, and the report names the machine (Y-703).

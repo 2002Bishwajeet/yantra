@@ -16,6 +16,7 @@
 //!
 //! [ADR-0047]: ../../../docs/adr/0047-the-dashboard-gets-web-push.md
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,7 +49,10 @@ const KEPT: Duration = Duration::from_secs(12 * 60 * 60);
 const TIMEOUT: Duration = Duration::from_secs(3);
 
 /// The most devices the store keeps, so one look's sends stay in its budget.
-const DEVICES: usize = 16;
+pub(crate) const DEVICES: usize = 16;
+
+/// The longest endpoint the daemon keeps, in bytes.
+pub(crate) const ENDPOINT_MAX: usize = 2048;
 
 /// RFC 8188's record size, as RFC 8291's example has it. One record holds the
 /// text, its one delimiter byte and the 16-byte tag.
@@ -136,7 +140,7 @@ fn scalar() -> Result<(SecretKey, [u8; 32]), Error> {
 /// A subscription whose three fields are checked: an `https` endpoint, a
 /// P-256 point and a 16-byte secret.
 fn checked(endpoint: &str, p256dh: &str, auth: &str) -> Result<Device, &'static str> {
-    let usable = endpoint.len() <= 2048
+    let usable = endpoint.len() <= ENDPOINT_MAX
         && endpoint.starts_with("https://")
         && !endpoint.contains(|c: char| c.is_whitespace() || c.is_control())
         && endpoint
@@ -365,10 +369,10 @@ impl Push {
         Ok(public)
     }
 
-    /// Sends `message` to every device, at once. A device its push service
-    /// no longer knows is removed. The first failure is the answer, and no
-    /// push is tried twice.
-    pub async fn send(&self, message: &Message) -> Result<(), String> {
+    /// Sends `message` to every device whose endpoint is not in `watching`,
+    /// at once. A device its push service no longer knows is removed. The
+    /// first failure is the answer, and no push is tried twice.
+    pub async fn send(&self, message: &Message, watching: &HashSet<String>) -> Result<(), String> {
         let Some(key) = self.key().await else {
             return Ok(());
         };
@@ -376,6 +380,7 @@ impl Push {
         let text: Arc<[u8]> = payload(message).into();
         let sends: Vec<_> = devices
             .into_iter()
+            .filter(|device| !watching.contains(&device.endpoint))
             .map(|device| {
                 let (key, text) = (key.clone(), text.clone());
                 tokio::task::spawn_blocking(move || {
@@ -548,8 +553,8 @@ async fn subscribe<I: Inventory + Clone + Send + Sync + 'static>(
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Named {
-    endpoint: String,
+pub(crate) struct Named {
+    pub(crate) endpoint: String,
 }
 
 /// 204 whether or not the store had the device, so a second tap is not an error.
@@ -872,12 +877,22 @@ pub(crate) mod tests {
     pub(crate) async fn pushing_at(address: SocketAddr) -> (Push, Device, SecretKey, [u8; 16]) {
         let (push, _) = scratch();
         push.public_key().await.expect("a key");
-        let (device, secret, auth) = device(&format!("http://{address}/push/abc"));
+        let (device, secret, auth) = another(&push, address, "abc").await;
+        (push, device, secret, auth)
+    }
+
+    /// One more device in `push`'s store, at `/push/{name}` on `address`.
+    pub(crate) async fn another(
+        push: &Push,
+        address: SocketAddr,
+        name: &str,
+    ) -> (Device, SecretKey, [u8; 16]) {
+        let (device, secret, auth) = device(&format!("http://{address}/push/{name}"));
         push.store
             .put_device(device.clone(), DEVICES)
             .await
             .expect("sql");
-        (push, device, secret, auth)
+        (device, secret, auth)
     }
 
     fn said(title: &str, body: &str, path: Option<&str>) -> Message {
@@ -896,9 +911,12 @@ pub(crate) mod tests {
     async fn a_push_is_signed_for_its_service_and_only_the_device_reads_it() {
         let (push, device, secret, auth, served) = pushing_to(&["201 Created"]).await;
 
-        push.send(&said("Approval needed", "api: waiting", Some("/w/api")))
-            .await
-            .expect("it lands");
+        push.send(
+            &said("Approval needed", "api: waiting", Some("/w/api")),
+            &HashSet::new(),
+        )
+        .await
+        .expect("it lands");
 
         let (head, body) = served.join().expect("the listener").remove(0);
         assert!(head.starts_with("POST /push/abc "), "{head}");
@@ -952,7 +970,7 @@ pub(crate) mod tests {
         for gone in ["410 Gone", "404 Not Found"] {
             let statuses: &'static [&'static str] = Box::leak(Box::new([gone]));
             let (push, _, _, _, served) = pushing_to(statuses).await;
-            push.send(&said("t", "b", None))
+            push.send(&said("t", "b", None), &HashSet::new())
                 .await
                 .expect("not a failure");
             served.join().expect("the listener");
@@ -963,7 +981,10 @@ pub(crate) mod tests {
         }
 
         let (push, device, _, _, served) = pushing_to(&["503 Service Unavailable"]).await;
-        let failed = push.send(&said("t", "b", None)).await.expect_err("refused");
+        let failed = push
+            .send(&said("t", "b", None), &HashSet::new())
+            .await
+            .expect_err("refused");
         served.join().expect("the listener");
         assert_eq!(failed, "the push service answered 503");
         assert!(!failed.contains(&device.endpoint));
@@ -981,7 +1002,10 @@ pub(crate) mod tests {
         let statuses: &'static [&'static str] = Box::leak(Box::new([status]));
         let (push, device, _, _, served) = pushing_to(statuses).await;
 
-        let failed = push.send(&said("t", "b", None)).await.expect_err("a 302");
+        let failed = push
+            .send(&said("t", "b", None), &HashSet::new())
+            .await
+            .expect_err("a 302");
 
         served.join().expect("the listener");
         assert_eq!(failed, "the push service answered 302");
@@ -995,11 +1019,11 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn with_no_key_or_no_device_nothing_is_sent() {
         let (push, _) = scratch();
-        push.send(&said("t", "b", None))
+        push.send(&said("t", "b", None), &HashSet::new())
             .await
             .expect("nothing to do");
         push.public_key().await.expect("a key");
-        push.send(&said("t", "b", None))
+        push.send(&said("t", "b", None), &HashSet::new())
             .await
             .expect("nothing to do");
         assert!(matches!(
