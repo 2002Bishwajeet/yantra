@@ -307,3 +307,18 @@ Accessed 2026-11-09.
 > for that workspace* means the rooms whose definition names that workspace, and a room whose file
 > the owner lists that workspace in. A room that no workspace defines is out of reach.
 > [ADR-0038](0038-rooms-and-guest-devices.md) decision 2's dated note records the change there.
+
+> **Decisions 4 and 9 gain a read-only session, 2026-11-24 ([Y-835](../../tracker.md), owner).**
+> The build loop must look at the real box before it builds (CLAUDE.md §B7), and decision 8 makes
+> every read need a cookie. A copy of a full session on the laptop would also allow writes. So a
+> session row gains one field, `read_only`. The owner makes a read-only session from the Devices
+> screen or with `yantra session read <name>` on the hub. The token shows once. The daemon keeps its
+> hash, as decision 6 says. A read-only session passes decision 5 on a `GET` only. Every write
+> route, every WebSocket upgrade, every MCP call and every passkey and session route refuses it with
+> 403. It still needs the owner's own node, it ends after 30 days like any session, and the Devices
+> screen lists it and revokes it. The walker keeps the token in `~/.config/yantra/walk-session`,
+> mode `0600`, on the owner's laptop.
+>
+> **The cost:** whoever reads that file on the laptop can read the dashboard from the owner's own
+> nodes for up to 30 days. That is the exfiltration decision 8 names, limited to reads from the
+> owner's own nodes. The daemon still holds no new secret value.
