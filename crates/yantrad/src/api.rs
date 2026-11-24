@@ -160,7 +160,7 @@ fn node_name<'a>(
 
 /// Which node is this one is answered by the addresses `listen_on` bound — the
 /// same join the heartbeat makes, in the other direction.
-fn is_this_node(
+pub(crate) fn is_this_node(
     machine: &yantra_core::inventory::MachineInfo,
     listening_on: &[SocketAddr],
 ) -> bool {

@@ -66,8 +66,8 @@ function Machines(props: { form: SessionForm; values: Values; preset: string }) 
   const { form, values, preset } = props
   const machines = useMachines()
   const client = useQueryClient()
-  const { yours, shown, waiting } = useOffered()
-  const hub = yours.find((one) => one.hub && !shown.includes(one))
+  const { yours, shown, checking, waiting } = useOffered()
+  const hub = yours.find((one) => one.hub && one !== checking && !shown.includes(one))
   // The hub's chip waits on readiness, so a read still in flight draws the skeleton rather than a chip that pops in.
   if (machines.looked === 'pending' || waiting) {
     return (
@@ -94,15 +94,17 @@ function Machines(props: { form: SessionForm; values: Values; preset: string }) 
       />
     )
   }
+  // Y-830: the hub keeps its place while the daemon checks it, so its chip does not pop in.
+  const drawn = yours.filter((one) => one === checking || shown.includes(one))
   return (
     <>
       <div aria-label="Machine" className="ns__chips" role="group">
         {/* Y-404: a node another owner holds is not a place to run sessions. */}
-        {shown.map((one) => {
-          const reachable = one.online && !one.expired
+        {drawn.map((one) => {
+          const off = one === checking ? 'checking' : one.online && !one.expired ? null : 'unreachable'
           return (
             <FilterChip
-              disabled={!reachable}
+              disabled={off !== null}
               key={one.name}
               onPressedChange={(pressed) => {
                 if (!pressed) return
@@ -112,11 +114,16 @@ function Machines(props: { form: SessionForm; values: Values; preset: string }) 
               }}
               pressed={values.machine === one.name}
             >
-              {reachable ? one.name : `${one.name} · unreachable`}
+              {off ? `${one.name} · ${off}` : one.name}
             </FilterChip>
           )
         })}
       </div>
+      {checking ? (
+        <p className="m3-sr-only" role="status">
+          Checking {checking.name}.
+        </p>
+      ) : null}
       {hub ? <HubJoin name={hub.name} /> : null}
       {/* ADR-0046 decision 1.1: Claude in the machine's home folder, with no workspace. */}
       {shown.some((one) => one.name === values.machine) ? (
@@ -131,7 +138,7 @@ function Machines(props: { form: SessionForm; values: Values; preset: string }) 
           </Button>
         </div>
       ) : null}
-      <SuggestMachine form={form} machines={shown} preset={preset} values={values} />
+      <SuggestMachine form={form} hold={checking !== null} machines={shown} preset={preset} values={values} />
       <LoginServerWarning chosen={values.machine} machines={machines.data} />
     </>
   )
