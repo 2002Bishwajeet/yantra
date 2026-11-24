@@ -303,8 +303,18 @@ start it with the `build-rows` workflow and `args.today`. It writes a report to
   path runs the branch's `yantrad` against the real fleet, and the PR carries WebKit and Chromium
   screenshots. A machine row also passes `just test-mac` on the real Mac.
   [`walk.sh`](.claude/workflows/walk.sh) holds the paths, and its guard refuses the merge without them (Y-660).
-- **It picks by priority.** Until the owner calls Yantra a daily driver, a row that closes the daily-driver gap ([M18](tracker.md#2-milestones)) goes first and feature milestones wait (owner, 2026-11-05). 1: closes or unblocks an open milestone. 2: a defect or a red suite.
-  3: a feature whose dependencies are done. 4: debt. Ties go to the lower Y-number.
+- **It picks by priority.** Until the owner calls Yantra a daily driver, what the owner hits on the
+  real product goes first (owner, 2026-11-24). 0: a defect the owner or the box walk found on the real
+  box. 1: a row that closes the daily-driver gap ([M18](tracker.md#2-milestones)). 2: closes or
+  unblocks an open milestone. 3: another defect or a red suite. 4: a feature whose dependencies are
+  done. 5: debt. Ties go to the lower Y-number.
+- **It does not fill time with easy rows.** When a row of priority 0 or 1 is blocked only on the
+  owner, the run builds no row of priority 3 or lower. It sends the owner one ask with the exact step
+  and why, and the report opens with it (owner, 2026-11-24: six days of polish while the blockers waited).
+- **It looks at the real box first.** Each run starts by reading the live dashboard on the box, the
+  pages the owner uses, after the box has the nightly. It files a row for each wrong state it sees,
+  such as a stale check, a missing chip or wrong copy. A fixture or a laptop copy of `yantrad` does not
+  replace this look (owner, 2026-11-24). It needs a read-only session ([Y-835](tracker.md#3-task-board)); until then the run says it skipped the look.
 - **It runs up to three rows at once.** Rows that edit the same file do not run at the same time.
   CI tests only what a row changed: a docs or tracker change runs no Rust or web job, a web change runs the web jobs, and a Rust change runs the Rust jobs (owner, 2026-11-03, Y-607).
 - **CI is the gate.** A row pushes its branch and opens its PR, and its checks on CI are the gate.

@@ -79,7 +79,7 @@ const TRIAGE_SCHEMA = {
           title: { type: 'string' },
           kind: { type: 'string', enum: Object.keys(BUILDER) },
           paths: { type: 'array', items: { type: 'string' }, description: 'the files the change will edit, e.g. web/src/m3/Card.tsx; a folder only for new files in it' },
-          priority: { type: 'integer', minimum: 0, maximum: 4 },
+          priority: { type: 'integer', minimum: 0, maximum: 5 },
           reason: { type: 'string' },
           risk: { type: 'string', enum: ['normal', 'hard', 'security'], description: 'security: touches auth, sessions, passkeys, write routes, agent permissions, the updater, install or join, secrets, or builds a shell, ssh or tmux command from input. hard: a design or a bug a plain build is likely to get wrong. Else normal.' },
         },
@@ -90,8 +90,13 @@ const TRIAGE_SCHEMA = {
       type: 'array',
       items: { type: 'object', properties: { id: { type: 'string' }, reason: { type: 'string' } }, required: ['id', 'reason'] },
     },
+    owner_asks: {
+      type: 'array',
+      description: 'each priority 0 or 1 row that is blocked only on the owner',
+      items: { type: 'object', properties: { id: { type: 'string' }, step: { type: 'string', description: 'the exact step the owner takes, and why, in plain words without row ids' } }, required: ['id', 'step'] },
+    },
   },
-  required: ['rows', 'skipped'],
+  required: ['rows', 'skipped', 'owner_asks'],
 }
 
 const PLAN_SCHEMA = {
@@ -167,7 +172,8 @@ Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the o
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
 Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}. An open PR does not rule a retried row out: it continues on that PR's branch.` : ''}
 
-Priority, from CLAUDE.md §B7: 0 = a row that milestone M18 (the daily driver) lists, 1 = closes or unblocks another open milestone, 2 = a defect or a red suite, 3 = a feature whose dependencies are done, 4 = debt. Ties go to the lower Y-number.
+Priority, from CLAUDE.md §B7: 0 = a defect the owner or the box walk found on the real box (the row quotes the owner or the walk), 1 = a row that milestone M18 (the daily driver) lists, 2 = closes or unblocks another open milestone, 3 = another defect or a red suite, 4 = a feature whose dependencies are done, 5 = debt. Ties go to the lower Y-number.
+Put each priority 0 or 1 row that is blocked only on the owner in owner_asks, with the exact step the owner takes and why. If owner_asks is not empty, return no row of priority 3 or higher in rows: move them to skipped with the reason "waits behind an owner ask".
 For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs), its risk (security, hard or normal, as the schema says) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
 }
 
@@ -420,6 +426,7 @@ const only = A.rows || null
 phase('Triage')
 const t = await agent(triagePrompt([]), { label: 'triage', phase: 'Triage', schema: TRIAGE_SCHEMA, model: 'opus', effort: 'medium' })
 if (t) for (const s of t.skipped) skipped.set(s.id, s.reason)
+const asks = t?.owner_asks || []
 // A pool, not batches: a row starts as soon as a slot frees, so one slow row no longer holds the next two.
 const pool = t ? rank(t.rows.filter((r) => !only || only.includes(r.id))) : []
 // Y-723 (owner, 2026-11-11): PARALLEL caps the rows that plan and build. A row that waits on CI holds no slot.
@@ -452,7 +459,7 @@ if (pool.some((r) => !attempted.has(r.id))) log(`Stopped at maxRows=${MAX_ROWS};
 phase('Report')
 await agent(
   `Write ${REPORT} (create the folder if needed). If it exists, an earlier run today wrote it: keep its text and append this run under a \`## Another run\` heading. It is the owner's morning report for the build loop on ${TODAY}. Plain prose, CLAUDE.md §A6.
-Open with one line: how many rows merged, stayed open and parked.
+Open with what the owner must do, if anything: one short paragraph per ask, the exact step and why, no row ids. Asks: ${JSON.stringify(asks)}\nThen one line: how many rows merged, stayed open and parked.
 Then a table: row, title, outcome, PR, the machine that ran its gate (gateMachine), and for parked rows the reason and the branch that holds the work.
 Then the rows triage skipped, one line each.
 Results: ${JSON.stringify(results)}
@@ -460,4 +467,4 @@ Skipped: ${JSON.stringify([...skipped].map(([id, reason]) => ({ id, reason })))}
   { label: 'report', phase: 'Report', model: 'sonnet', effort: 'low' },
 )
 
-return { report: REPORT, results, skipped: [...skipped].map(([id, reason]) => ({ id, reason })) }
+return { report: REPORT, asks, results, skipped: [...skipped].map(([id, reason]) => ({ id, reason })) }
