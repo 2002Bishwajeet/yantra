@@ -1129,8 +1129,8 @@ mod tests {
     }
 
     /// Every write, MCP call, passkey route and session route, the `GET` that
-    /// makes the Web Push key, and `forget-host-key`, which skips the gate and
-    /// asks `allowed` itself.
+    /// makes the Web Push key, and the routes that leave the gate before
+    /// `identify`: the four ceremony halves and the two join routes.
     #[tokio::test]
     async fn a_read_only_session_gets_403_on_everything_but_a_read() {
         let (app, _, reader, id) = with_a_read_only_session().await;
@@ -1150,6 +1150,11 @@ mod tests {
             ("POST", "/api/sessions/read/x"),
             ("GET", "/api/push/key"),
             ("GET", "/api/workspaces/web/repair"),
+            ("POST", "/api/passkey/register/start"),
+            ("POST", "/api/passkey/register/finish"),
+            ("POST", "/api/passkey/login/start"),
+            ("POST", "/api/passkey/login/finish"),
+            ("POST", "/api/join"),
             ("POST", "/api/join/forget-host-key"),
             ("POST", "/api/machines/mac/readiness"),
             ("POST", "/api/nosuch"),
@@ -1162,8 +1167,10 @@ mod tests {
             );
             assert!(body.starts_with(READ_ONLY), "{method} {path}: {body}");
         }
-        let (status, _) = send(&app, "GET", "/api/workspaces", &[("cookie", &reader)]).await;
-        assert_eq!(status, axum::http::StatusCode::OK, "none of them ended it");
+        for path in ["/api/workspaces", "/api/about"] {
+            let (status, body) = send(&app, "GET", path, &[("cookie", &reader)]).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{path}: {body}");
+        }
     }
 
     #[tokio::test]
@@ -1193,10 +1200,10 @@ mod tests {
         }
     }
 
-    /// The join script's code skips the gate, and a read-only cookie beside
-    /// it adds nothing: the code decides.
+    /// The join script's code skips `identify`, and the gate still refuses a
+    /// read-only cookie beside it.
     #[tokio::test]
-    async fn a_read_only_session_with_a_join_code_header_is_judged_by_the_code() {
+    async fn a_read_only_session_with_a_join_code_header_gets_403() {
         let (app, _, reader, _) = with_a_read_only_session().await;
 
         let (status, body) = send(
@@ -1207,7 +1214,8 @@ mod tests {
         )
         .await;
 
-        assert_eq!(status, axum::http::StatusCode::UNAUTHORIZED, "{body}");
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN, "{body}");
+        assert!(body.starts_with(READ_ONLY), "{body}");
     }
 
     #[tokio::test]

@@ -43,12 +43,14 @@ body and in no cookie. `identify` names its caller `Who::Reader`. Three rules bi
 
 - **The gate passes it on `write::reader_may` only**: a `GET` or a `HEAD` with no `Upgrade` header,
   on any path but `/mcp`, `/passkey…`, `/sessions/…` and `/push/key`. Everything else is a 403
-  whose text starts *this session is read-only*, which the dashboard reads.
+  whose text starts *this session is read-only*, which the dashboard reads. The four ceremony
+  routes, the two join routes and a login test with a join code skip `identify`, so `passes`
+  refuses the cookie on them before they leave. `GET /api/about` still answers it.
 - **`allowed` refuses it, and `reading` is the one check that passes it.** `POST
-  /api/join/forget-host-key` skips the gate and then asks `allowed`, so the gate alone does not
-  stop a write. A handler that acts calls `allowed`, and only a `GET` that changes nothing calls
-  `reading`. `tasks.rs` does the same with `seen`. A new `match` on `Who` does not compile until it
-  decides for `Reader`.
+  /api/join/forget-host-key` skips `identify` in the gate and then asks `allowed`, so a handler does
+  not rely on the gate. A handler that acts calls `allowed`, and only a `GET` that changes nothing
+  calls `reading`. `tasks.rs` does the same with `seen`. A new `match` on `Who` does not compile
+  until it decides for `Reader`.
 - **Its row keeps SHA-256 of `passkey::READS` and the token, and a full row keeps SHA-256 of the
   token.** A daemon older than the field reads the row as a full session. `READS` ends in a NUL,
   which no cookie can hold, so no token matches the row there.

@@ -690,7 +690,19 @@ async fn passes<I: Inventory>(
     headers: &HeaderMap,
     peer: Option<Peer>,
 ) -> Result<(), Refused> {
-    if unchecked(method, path) || (join_code(headers).is_some() && readiness(method, path)) {
+    let skips =
+        unchecked(method, path) || (join_code(headers).is_some() && readiness(method, path));
+    // These leave before `identify`, which is where a read-only cookie is
+    // refused. `GET /about` stays open to it: the dashboard loads it.
+    if (skips || ceremony(method, path))
+        && *method != axum::http::Method::GET
+        && passkey::token_in(headers)
+            .and_then(|token| gate.authoriser.passkeys.session(token))
+            .is_some_and(|session| session.read_only)
+    {
+        return Err(Refused::ReadOnly);
+    }
+    if skips {
         return Ok(());
     }
     let peer = peer.ok_or(Refused::Account(None))?;
