@@ -118,8 +118,8 @@ export function ThisDevice() {
         </div>
       ) : null}
       <Note>
-        Yantra alerts this device when an agent needs you or a session ends. A tap opens that session. It stays quiet
-        while a dashboard is open.
+        Yantra alerts this device when an agent needs you or a session ends. A tap opens that session. This device
+        stays quiet while you look at it.
       </Note>
     </>
   )

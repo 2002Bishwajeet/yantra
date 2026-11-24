@@ -1,9 +1,14 @@
+import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, screen, waitFor } from '@testing-library/react'
 import { renderHookQueried } from '../test/inQuery'
 import { renderInApp } from '../test/inApp'
 import { answer, daemon } from '../test/daemon'
+import { json } from './client'
 import { aListed, aWorkspace, looked, spend } from './fixtures'
+import { keys } from './keys'
+import type { PushState } from './push'
 import {
   agentsWaiting,
   loaded,
@@ -283,13 +288,51 @@ describe('useViewing', () => {
   it('beacons only while the tab is visible', () => {
     const asked = daemon(204)
     visible('hidden')
-    const { unmount } = renderHook(() => useViewing())
+    const { unmount } = renderHookQueried(() => useViewing())
     expect(asked).not.toHaveBeenCalled()
     visible('visible')
     document.dispatchEvent(new Event('visibilitychange'))
     expect(asked).toHaveBeenCalledWith('/api/viewing', { method: 'POST' })
     unmount()
     visible('visible')
+  })
+
+  /** Y-829: the daemon quiets only the device a beacon names, so a browser
+   *  with no subscription names none. */
+  it('names this device only while its notifications are on', async () => {
+    const asked = daemon(204)
+    const endpoint = 'https://push.example/laptop'
+    const named = ['/api/viewing', { method: 'POST', ...json({ endpoint }) }]
+    const bare = ['/api/viewing', { method: 'POST' }]
+    const on: PushState = { kind: 'on', endpoint }
+    const client = new QueryClient()
+    client.setQueryData(keys.push(), on)
+    const becomes = async (push: PushState, beacons: number) => {
+      client.setQueryData(keys.push(), push)
+      await waitFor(() => expect(asked).toHaveBeenCalledTimes(beacons))
+    }
+
+    const { unmount } = renderHook(() => useViewing(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+    expect(asked.mock.calls).toEqual([named])
+
+    // Turn off and Turn on change the next beacon at once.
+    await becomes({ kind: 'off' }, 2)
+    await becomes(on, 3)
+    await becomes({ kind: 'unsupported', why: 'browser' }, 4)
+    expect(asked.mock.calls).toEqual([named, bare, named, bare])
+    unmount()
+  })
+
+  it('says nothing when the daemon does not answer', async () => {
+    const asked = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')))
+    vi.stubGlobal('fetch', asked)
+    const { unmount } = renderHookQueried(() => useViewing())
+    await waitFor(() => expect(asked).toHaveBeenCalled())
+    unmount()
   })
 })
 

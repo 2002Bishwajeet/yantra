@@ -18,8 +18,9 @@ import type {
   Workspace,
   WorkspaceStatus,
 } from '@/api'
-import type { Reading } from '@/api/client'
+import { json, type Reading } from '@/api/client'
 import { isApiError } from '@/api/errors'
+import { usePush } from '@/api/push'
 import {
   aboutQuery,
   attentionQuery,
@@ -330,16 +331,22 @@ const BEACON_MS = 20_000
  *  Page Visibility API is what tells the two apart, and it is the only thing
  *  that does — a phone locked with the tab open fires `visibilitychange`.
  *
+ *  **A subscribed browser names its push endpoint** (ADR-0047 decision 6), so
+ *  the daemon quiets this device alone and the others still get the alert.
+ *
  *  **A failure is silence, not an error.** The worst it costs is a notification
  *  you were going to get anyway, and a banner about it would be noise on every
  *  page. */
 export function useViewing() {
+  const push = usePush().data
+  const endpoint = push?.kind === 'on' ? push.endpoint : undefined
+
   useEffect(() => {
     let stop = false
 
     const beacon = () => {
       if (stop || document.visibilityState !== 'visible') return
-      void fetch('/api/viewing', { method: 'POST' }).catch(() => {})
+      void fetch('/api/viewing', { method: 'POST', ...(endpoint ? json({ endpoint }) : {}) }).catch(() => {})
     }
 
     beacon()
@@ -350,7 +357,7 @@ export function useViewing() {
       clearInterval(timer)
       document.removeEventListener('visibilitychange', beacon)
     }
-  }, [])
+  }, [endpoint])
 }
 
 /** What an `ErrorBoundary` around a route spreads, so a navigation clears both

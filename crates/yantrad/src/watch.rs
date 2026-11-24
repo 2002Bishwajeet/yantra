@@ -288,7 +288,7 @@ pub async fn poll(
         }
     }
     let watched = crate::notify::watched(viewers).await;
-    teller.tell_pulls(&notes, watched, events).await;
+    teller.tell_pulls(&notes, &watched, events).await;
 }
 
 /// What a [`discover`] pass did.
