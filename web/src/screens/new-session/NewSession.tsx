@@ -108,16 +108,17 @@ export function NewSession() {
   // The list can arrive after mount, so the preset is resolved once it reads
   // ok; a pick made meanwhile is never overwritten.
   const machines = useMachines()
-  const { shown, waiting } = useOffered()
+  const { shown, checking, waiting } = useOffered()
+  const held = waiting || checking !== null
   const seeded = useRef(false)
   useEffect(() => {
     // A hub is offered only once readiness shows an account on it joined (Y-627).
-    if (seeded.current || machines.looked !== 'ok' || waiting) return
+    if (seeded.current || machines.looked !== 'ok' || held) return
     seeded.current = true
     // Several usable machines with no preset leave the choice to the suggestion.
     const picked = pickMachine(preset, shown) || soleMachine(shown)
     if (picked !== '' && form.getFieldValue('machine') === '') form.setFieldValue('machine', picked)
-  }, [machines.looked, waiting, shown, preset, form])
+  }, [machines.looked, held, shown, preset, form])
 
   // A step the values do not reach yet draws the first one that is unfinished.
   const step = Math.min(requested, starting ? 4 : Math.min(3, reachable(values))) as Step

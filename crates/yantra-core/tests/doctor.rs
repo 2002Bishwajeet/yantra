@@ -660,6 +660,17 @@ async fn a_healthy_machine_times_every_step_and_stays_under_the_target() -> Resu
         );
     }
     assert!(took < HEALTHY_TARGET, "the check took {took:?}");
+
+    // Y-830: the probes run at the same time. `sshd` repeats `reachable`'s time.
+    let in_turn: u64 = checks
+        .iter()
+        .filter(|check| check.check != "sshd")
+        .filter_map(|check| check.took_ms)
+        .sum();
+    assert!(
+        took < Duration::from_millis(in_turn),
+        "the check took {took:?} and its steps add up to {in_turn} ms"
+    );
     Ok(())
 }
 

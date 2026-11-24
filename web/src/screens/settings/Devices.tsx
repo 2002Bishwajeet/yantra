@@ -1,7 +1,8 @@
-import { KeyRound, Laptop, LogOut, Plus } from 'lucide-react'
+import { Eye, KeyRound, Laptop, LogOut, Plus } from 'lucide-react'
 import {
   useDevices,
   useEnrolCode,
+  useReadOnlySession,
   useRemovePasskey,
   useSignOut,
   useSignOutOthers,
@@ -46,18 +47,25 @@ function Empty(props: { title: string; children: string }) {
 function Session(props: { session: DeviceSession }) {
   const { session } = props
   const out = useSignOut()
+  const how = session.read_only ? 'Reads only' : `${session.this_device ? 'This device · with' : 'With'} ${session.passkey}`
   return (
     <>
       <ListItem
         headline={session.device}
         leading={
-          <Lead tone={session.this_device ? 'primary' : undefined}>
-            <Laptop />
-          </Lead>
+          session.read_only ? (
+            <Lead tone="tertiary">
+              <Eye />
+            </Lead>
+          ) : (
+            <Lead tone={session.this_device ? 'primary' : undefined}>
+              <Laptop />
+            </Lead>
+          )
         }
         supporting={
           <>
-            {session.this_device ? 'This device · with' : 'With'} {session.passkey} · ends <Num>{when(session.ends)}</Num>
+            {how} · ends <Num>{when(session.ends)}</Num>
           </>
         }
         trailing={
@@ -122,6 +130,39 @@ function NewDevice(props: { first: boolean }) {
       />
       {code.error ? <Failed error={code.error} title="No code was made" /> : null}
       {code.data ? <Copyable text={code.data.code} what="the code" /> : null}
+    </Group>
+  )
+}
+
+/** ADR-0044's note of 2026-11-24: a session that reads and changes nothing,
+ *  for the build loop's look at this hub. Its token shows once, here. */
+function ReadOnly() {
+  const made = useReadOnlySession()
+  return (
+    <Group
+      label="Read-only session"
+      note={
+        made.data
+          ? 'This token shows once. Save it on the laptop as ~/.config/yantra/walk-session with mode 600.'
+          : 'It reads this dashboard from your own devices for 30 days and changes nothing. The build loop looks at this hub with it.'
+      }
+    >
+      <ListItem
+        headline="A session that only reads"
+        leading={
+          <Lead tone="tertiary">
+            <Eye />
+          </Lead>
+        }
+        supporting="or run yantra session read walk on the hub"
+        trailing={
+          <Button variant="tonal" onClick={() => made.mutate()} disabled={made.isPending}>
+            {made.data ? 'Make another' : 'Make a token'}
+          </Button>
+        }
+      />
+      {made.error ? <Failed error={made.error} title="No read-only session was made" /> : null}
+      {made.data ? <Copyable text={made.data.token} what="the token" /> : null}
     </Group>
   )
 }
@@ -193,6 +234,7 @@ export function Devices() {
         ))}
       </Group>
       <NewDevice first={false} />
+      <ReadOnly />
     </>
   )
 }

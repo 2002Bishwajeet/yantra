@@ -10,10 +10,13 @@
 //! The one thing this side adds is a budget, because the sends are sequential
 //! and the loop waits for them.
 //!
-//! **And nothing is pushed while someone is watching the page** (D3 §13). The
-//! dashboard says so itself, on [`crate::write`]'s beacon; here that is one
-//! bool, and the diff still runs under it — a change seen while a tab was open
-//! is a change already told, not one owed later.
+//! **And nothing is pushed to a device that is being looked at** (D3 §13,
+//! [ADR-0047] decision 6). The dashboard says so itself, on [`crate::write`]'s
+//! beacon, and names its push endpoint when it has one. Web Push skips only
+//! the devices that said so, and the relay skips a look that any dashboard
+//! watched, because the daemon cannot tell which device a relay reaches. The
+//! diff still runs — a change seen while a tab was open is a change already
+//! told, not one owed later.
 //!
 //! **Every notification is remembered before any of that** ([ADR-0025]): the
 //! diff runs with or without a relay, and what it produced goes into
@@ -21,11 +24,13 @@
 //! still a remembered event.
 //!
 //! **A message goes two ways** ([ADR-0047]): to each installed dashboard by
-//! Web Push, and to the ntfy relay when one is set. Every rule above binds both.
+//! Web Push, and to the ntfy relay when one is set. Every other rule above
+//! binds both.
 //!
 //! [ADR-0025]: ../../../docs/adr/0025-the-daemon-remembers-what-it-pushed.md
 //! [ADR-0047]: ../../../docs/adr/0047-the-dashboard-gets-web-push.md
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,7 +39,7 @@ use yantra_core::notify::{BODY_MAX, Message, Notification, Relay, Watch, post};
 use yantra_core::status::Fleet;
 
 use crate::events::{self, Event, Events};
-use crate::push::Push;
+use crate::push::{DEVICES, ENDPOINT_MAX, Push};
 
 /// The whole of what one look may spend telling someone, well under
 /// `refresh::EVERY`. Without it a fleet where several things changed at once,
@@ -42,10 +47,44 @@ use crate::push::Push;
 /// next look out by a multiple of the per-send timeout.
 const BUDGET: Duration = Duration::from_secs(5);
 
-/// When a browser last said it was looking. Beside the snapshot and the beats,
-/// **in memory** — a restart forgets it, which is correct: a restart forgets
-/// the snapshot too, and the first look after a start already says nothing.
-pub type Viewers = Arc<RwLock<Option<Instant>>>;
+/// When a browser last said it was looking, and when each device that named
+/// its push endpoint did. Beside the snapshot and the beats, **in memory** — a
+/// restart forgets it, which is correct: a restart forgets the snapshot too,
+/// and the first look after a start already says nothing.
+pub type Viewers = Arc<RwLock<Seen>>;
+
+/// An endpoint is a capability, so `Debug` prints how many and not which.
+#[derive(Default)]
+pub struct Seen {
+    anyone: Option<Instant>,
+    devices: HashMap<String, Instant>,
+}
+
+impl std::fmt::Debug for Seen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Seen")
+            .field("anyone", &self.anyone)
+            .field("devices", &self.devices.len())
+            .finish()
+    }
+}
+
+impl Seen {
+    /// One beacon. An endpoint that is too long, or one more than the store
+    /// may hold, is not kept: that device gets a push it did not need.
+    pub fn beacon(&mut self, endpoint: Option<String>) {
+        let now = Instant::now();
+        self.anyone = Some(now);
+        self.devices.retain(|_, seen| seen.elapsed() < WATCHED);
+        let Some(endpoint) = endpoint else {
+            return;
+        };
+        let room = self.devices.len() < DEVICES || self.devices.contains_key(&endpoint);
+        if endpoint.len() <= ENDPOINT_MAX && room {
+            self.devices.insert(endpoint, now);
+        }
+    }
+}
 
 /// How long one beacon speaks for. Longer than the page's own interval, which
 /// is `BEACON_MS` in [`web/src/useViewing.ts`](../../../web/src/useViewing.ts),
@@ -54,8 +93,37 @@ pub type Viewers = Arc<RwLock<Option<Instant>>>;
 /// refresh period.
 pub const WATCHED: Duration = Duration::from_secs(60);
 
-pub async fn watched(viewers: &Viewers) -> bool {
-    matches!(*viewers.read().await, Some(seen) if seen.elapsed() < WATCHED)
+/// What one look reads from the beacons. As with [`Seen`], `Debug` prints no
+/// endpoint.
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct Watched {
+    /// A dashboard is on screen somewhere. This is the relay's rule.
+    pub anyone: bool,
+    /// The push endpoints of the devices that are on screen.
+    pub devices: HashSet<String>,
+}
+
+impl std::fmt::Debug for Watched {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Watched")
+            .field("anyone", &self.anyone)
+            .field("devices", &self.devices.len())
+            .finish()
+    }
+}
+
+pub async fn watched(viewers: &Viewers) -> Watched {
+    let seen = viewers.read().await;
+    let fresh = |at: &Instant| at.elapsed() < WATCHED;
+    Watched {
+        anyone: seen.anyone.as_ref().is_some_and(fresh),
+        devices: seen
+            .devices
+            .iter()
+            .filter(|(_, at)| fresh(at))
+            .map(|(endpoint, _)| endpoint.clone())
+            .collect(),
+    }
 }
 
 #[derive(Debug)]
@@ -84,10 +152,10 @@ impl Notifier {
     /// reads is waiting on a relay.
     ///
     /// **The diff runs whether or not anyone is watching**, and that is the
-    /// whole of D3 §13: the notifications a watched look produced are dropped
-    /// here rather than held, so closing the tab does not deliver a backlog of
-    /// things the page already showed.
-    pub async fn tell(&mut self, fleet: &Fleet, watched: bool, events: &Events) {
+    /// whole of D3 §13: what a watched look produced is dropped here for the
+    /// devices that watched it rather than held, so closing the tab does not
+    /// deliver a backlog of things the page already showed.
+    pub async fn tell(&mut self, fleet: &Fleet, watched: &Watched, events: &Events) {
         let notifications = self.watch.look(fleet);
         for notification in &notifications {
             events::remember(events, Event::of(notification, fleet)).await;
@@ -122,7 +190,7 @@ impl Teller {
 
     /// What the PR watch saw (Y-494): remembered, then sent as the agents'
     /// notifications are.
-    pub async fn tell_pulls(&mut self, notes: &[PrNote], watched: bool, events: &Events) {
+    pub async fn tell_pulls(&mut self, notes: &[PrNote], watched: &Watched, events: &Events) {
         for note in notes {
             events::remember(
                 events,
@@ -134,21 +202,26 @@ impl Teller {
             .await;
     }
 
-    async fn deliver(&mut self, messages: Vec<Message>, watched: bool) {
-        if (self.relay.is_none() && self.push.is_none()) || messages.is_empty() {
+    async fn deliver(&mut self, messages: Vec<Message>, watched: &Watched) {
+        let relay = self.relay.as_ref().filter(|_| !watched.anyone);
+        if (relay.is_none() && self.push.is_none()) || messages.is_empty() {
             return;
         }
-        if watched {
+        if watched.anyone {
             tracing::debug!(
-                "{} notification(s) not pushed: the dashboard is open",
-                messages.len()
+                "{} notification(s) not sent to the relay or to {} device(s): a dashboard is open",
+                messages.len(),
+                watched.devices.len()
             );
-            return;
         }
-        let sending = send(self.push.as_ref(), self.relay.as_ref(), messages);
+        let sending = send(self.push.as_ref(), relay, messages, &watched.devices);
         let outcome = tokio::time::timeout(BUDGET, sending)
             .await
             .unwrap_or(Err("the budget for this look ran out".to_owned()));
+        // A look that left the relay out says nothing about the relay.
+        if outcome.is_ok() && watched.anyone && self.relay.is_some() {
+            return;
+        }
         if let Some(line) = self.log.line(outcome) {
             tracing::warn!("{line}");
         }
@@ -223,25 +296,38 @@ async fn send(
     push: Option<&Push>,
     relay: Option<&Relay>,
     messages: Vec<Message>,
+    watching: &HashSet<String>,
 ) -> Result<(), String> {
     let mut outcome = Ok(());
     for message in messages {
-        outcome = outcome.and(told(push, relay, message).await);
+        outcome = outcome.and(told_but(push, relay, message, watching).await);
     }
     outcome
 }
 
 /// One message to every installed dashboard and to the relay, where each
-/// exists (ADR-0047 decision 5). Both are tried at once, so a slow push
-/// service does not spend the relay's time. The first failure is the answer.
+/// exists (ADR-0047 decision 5). The chat's waits and the rooms' pauses call
+/// it with their own rule about who is watching.
 pub async fn told(
     push: Option<&Push>,
     relay: Option<&Relay>,
     message: Message,
 ) -> Result<(), String> {
+    told_but(push, relay, message, &HashSet::new()).await
+}
+
+/// [`told`], less the devices in `watching`. Both sends are tried at once, so
+/// a slow push service does not spend the relay's time. The first failure is
+/// the answer.
+async fn told_but(
+    push: Option<&Push>,
+    relay: Option<&Relay>,
+    message: Message,
+    watching: &HashSet<String>,
+) -> Result<(), String> {
     let pushing = async {
         match push {
-            Some(push) => push.send(&message).await,
+            Some(push) => push.send(&message, watching).await,
             None => Ok(()),
         }
     };
@@ -330,7 +416,11 @@ mod tests {
         let events = Events::default();
 
         notifier
-            .tell(&fleet("api", Verdict::Running), false, &events)
+            .tell(
+                &fleet("api", Verdict::Running),
+                &Watched::default(),
+                &events,
+            )
             .await;
 
         listener.set_nonblocking(true).expect("a nonblocking check");
@@ -347,7 +437,11 @@ mod tests {
         let served = thread::spawn(move || answer(&listener, "200 OK"));
 
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), false, &events)
+            .tell(
+                &fleet("api", Verdict::AwaitingTrust),
+                &Watched::default(),
+                &events,
+            )
             .await;
 
         assert_eq!(
@@ -370,12 +464,16 @@ mod tests {
         let events = Events::default();
         let mut quiet = Notifier::new(None);
         quiet
-            .tell(&fleet("api", Verdict::Running), false, &events)
+            .tell(
+                &fleet("api", Verdict::Running),
+                &Watched::default(),
+                &events,
+            )
             .await;
         quiet
             .tell(
                 &fleet("api", Verdict::Crashed { status: 2 }),
-                false,
+                &Watched::default(),
                 &events,
             )
             .await;
@@ -386,10 +484,18 @@ mod tests {
         let served = thread::spawn(move || answer(&listener, "503 Service Unavailable"));
         let mut refused = Notifier::new(Some(relay(address)));
         refused
-            .tell(&fleet("site", Verdict::Running), false, &events)
+            .tell(
+                &fleet("site", Verdict::Running),
+                &Watched::default(),
+                &events,
+            )
             .await;
         refused
-            .tell(&fleet("site", Verdict::Finished), false, &events)
+            .tell(
+                &fleet("site", Verdict::Finished),
+                &Watched::default(),
+                &events,
+            )
             .await;
         served.join().expect("the listener thread");
 
@@ -415,18 +521,30 @@ mod tests {
         let events = Events::default();
 
         notifier
-            .tell(&fleet("api", Verdict::Running), false, &events)
+            .tell(
+                &fleet("api", Verdict::Running),
+                &Watched::default(),
+                &events,
+            )
             .await;
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), false, &events)
+            .tell(
+                &fleet("api", Verdict::AwaitingTrust),
+                &Watched::default(),
+                &events,
+            )
             .await;
         notifier
-            .tell(&fleet("api", Verdict::Running), false, &events)
+            .tell(
+                &fleet("api", Verdict::Running),
+                &Watched::default(),
+                &events,
+            )
             .await;
         notifier
             .tell(
                 &fleet("api", Verdict::Crashed { status: 1 }),
-                false,
+                &Watched::default(),
                 &events,
             )
             .await;
@@ -463,14 +581,18 @@ mod tests {
         let events = Events::default();
 
         notifier
-            .tell(&fleet("api", Verdict::Running), true, &events)
+            .tell(&fleet("api", Verdict::Running), &open(), &events)
             .await;
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), true, &events)
+            .tell(&fleet("api", Verdict::AwaitingTrust), &open(), &events)
             .await;
         // The tab is closed now, and the fleet has not changed since.
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), false, &events)
+            .tell(
+                &fleet("api", Verdict::AwaitingTrust),
+                &Watched::default(),
+                &events,
+            )
             .await;
 
         listener.set_nonblocking(true).expect("a nonblocking check");
@@ -486,27 +608,36 @@ mod tests {
     }
 
     /// ADR-0047 decision 5: an installed dashboard gets the same words with
-    /// the page a tap opens, and nothing for a look that a dashboard watched.
+    /// the page a tap opens, and nothing for a look that it watched.
     #[tokio::test]
-    async fn a_change_is_pushed_to_an_installed_dashboard_unless_one_is_watched() {
-        let (push, _, secret, auth, served) =
+    async fn a_change_is_pushed_to_an_installed_dashboard_unless_it_is_watched() {
+        let (push, device, secret, auth, served) =
             crate::push::tests::pushing_to(&["201 Created"]).await;
         let mut notifier = Notifier::new(None).pushing(Some(push));
         let events = Events::default();
+        let watching = on_screen(device.endpoint);
 
         notifier
-            .tell(&fleet("api", Verdict::Running), false, &events)
+            .tell(
+                &fleet("api", Verdict::Running),
+                &Watched::default(),
+                &events,
+            )
             .await;
         notifier
-            .tell(&fleet("api", Verdict::AwaitingTrust), true, &events)
+            .tell(&fleet("api", Verdict::AwaitingTrust), &watching, &events)
             .await;
         notifier
-            .tell(&fleet("api", Verdict::Running), false, &events)
+            .tell(
+                &fleet("api", Verdict::Running),
+                &Watched::default(),
+                &events,
+            )
             .await;
         notifier
             .tell(
                 &fleet("api", Verdict::Crashed { status: 1 }),
-                false,
+                &Watched::default(),
                 &events,
             )
             .await;
@@ -527,19 +658,160 @@ mod tests {
         assert_eq!(events.read().await.len(), 2);
     }
 
+    /// Y-829, the row's test: a laptop tab on screen quiets the laptop and
+    /// the relay, and the phone still gets the push.
+    #[tokio::test]
+    async fn a_phone_gets_the_push_while_a_laptop_tab_is_visible() {
+        let (push, service, laptop, secret, auth) = laptop_and_phone().await;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let mut notifier = Notifier::new(Some(relay(address))).pushing(Some(push));
+        let events = Events::default();
+        let viewers = Viewers::default();
+        viewers.write().await.beacon(Some(laptop));
+        let watching = watched(&viewers).await;
+        let served = thread::spawn(move || {
+            let seen = crate::push::tests::request(&service, "201 Created");
+            (service, seen)
+        });
+
+        notifier
+            .tell(&fleet("api", Verdict::Running), &watching, &events)
+            .await;
+        notifier
+            .tell(&fleet("api", Verdict::AwaitingTrust), &watching, &events)
+            .await;
+
+        let (service, (head, body)) = served.join().expect("the push service");
+        assert_eq!(path(&head), "/push/phone");
+        let text: serde_json::Value =
+            serde_json::from_slice(&crate::push::tests::decrypt(&body, &secret, &auth))
+                .expect("JSON");
+        assert_eq!(text["body"], "api: waiting at claude's trust prompt");
+        assert!(silent(&service), "the laptop got a push");
+        assert!(silent(&listener), "the relay was told");
+        assert!(!notifier.teller.log.quiet);
+    }
+
+    /// A browser that is not subscribed names no device. Its beacon quiets
+    /// the relay, and every device still gets the push.
+    #[tokio::test]
+    async fn a_beacon_that_names_no_device_quiets_only_the_relay() {
+        let (push, service, ..) = laptop_and_phone().await;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let mut notifier = Notifier::new(Some(relay(address))).pushing(Some(push));
+        let events = Events::default();
+        let viewers = Viewers::default();
+        viewers.write().await.beacon(None);
+        let watching = watched(&viewers).await;
+        let served = thread::spawn(move || {
+            let mut paths =
+                [(); 2].map(|()| path(&crate::push::tests::request(&service, "201 Created").0));
+            paths.sort();
+            paths
+        });
+
+        notifier
+            .tell(&fleet("api", Verdict::Running), &watching, &events)
+            .await;
+        notifier
+            .tell(&fleet("api", Verdict::AwaitingTrust), &watching, &events)
+            .await;
+
+        assert_eq!(
+            served.join().expect("the push service"),
+            ["/push/abc", "/push/phone"]
+        );
+        assert!(silent(&listener), "the relay was told");
+    }
+
+    /// The relay was refusing before the laptop opened. A push that lands
+    /// while the relay is left out does not say the relay is back.
+    #[tokio::test]
+    async fn a_watched_look_does_not_end_the_relays_quiet() {
+        let (push, _, _, _, pushed) =
+            crate::push::tests::pushing_to(&["201 Created", "201 Created"]).await;
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = listener.local_addr().expect("the port it got");
+        let relayed = thread::spawn(move || {
+            request(&listener, "503 Service Unavailable");
+            listener
+        });
+        let mut teller = Teller::new(Some(relay(address))).pushing(Some(push));
+        let events = Events::default();
+
+        teller
+            .tell_pulls(&[note(PrPhase::CheckFailed)], &Watched::default(), &events)
+            .await;
+        teller
+            .tell_pulls(&[note(PrPhase::Reviewed)], &open(), &events)
+            .await;
+
+        assert_eq!(pushed.join().expect("the push service").len(), 2);
+        assert!(silent(&relayed.join().expect("the relay")));
+        assert!(teller.log.quiet, "the relay is still down");
+    }
+
     /// The window is what makes the beacon a *last seen* rather than a switch
     /// somebody has to turn off: a page that stopped saying anything is a page
-    /// nobody is watching, within a minute.
+    /// nobody is watching, within a minute. A device is the same.
     #[tokio::test]
     async fn a_beacon_older_than_the_window_is_no_longer_a_viewer() {
         let viewers = Viewers::default();
-        assert!(!watched(&viewers).await, "nobody has said anything yet");
+        assert_eq!(
+            watched(&viewers).await,
+            Watched::default(),
+            "nobody has said anything yet"
+        );
 
-        *viewers.write().await = Some(Instant::now());
-        assert!(watched(&viewers).await);
+        let laptop = "https://push.example/laptop".to_owned();
+        viewers.write().await.beacon(Some(laptop.clone()));
+        assert_eq!(watched(&viewers).await, on_screen(laptop.clone()));
 
-        *viewers.write().await = Instant::now().checked_sub(WATCHED);
-        assert!(!watched(&viewers).await);
+        let before = Instant::now()
+            .checked_sub(WATCHED)
+            .expect("a minute of uptime");
+        viewers.write().await.devices.insert(laptop, before);
+        assert_eq!(watched(&viewers).await, open(), "another tab still beacons");
+
+        viewers.write().await.anyone = Some(before);
+        assert_eq!(watched(&viewers).await, Watched::default());
+    }
+
+    /// The map is bounded as the store is, so a caller cannot grow it.
+    #[tokio::test]
+    async fn a_beacon_keeps_no_endpoint_that_is_too_long_stale_or_past_the_limit() {
+        let mut seen = Seen::default();
+        seen.beacon(Some("a".repeat(ENDPOINT_MAX + 1)));
+        assert!(seen.devices.is_empty() && seen.anyone.is_some());
+
+        let before = Instant::now()
+            .checked_sub(WATCHED)
+            .expect("a minute of uptime");
+        seen.devices.insert("stale".to_owned(), before);
+        for device in 0..=DEVICES {
+            seen.beacon(Some(device.to_string()));
+        }
+        assert_eq!(seen.devices.len(), DEVICES);
+        assert!(!seen.devices.contains_key("stale"));
+        assert!(!seen.devices.contains_key(&DEVICES.to_string()));
+
+        seen.beacon(Some("0".to_owned()));
+        assert_eq!(seen.devices.len(), DEVICES, "a kept device beacons again");
+    }
+
+    /// The endpoint is a capability: a `Debug` line names none.
+    #[tokio::test]
+    async fn no_debug_line_prints_an_endpoint() {
+        let viewers = Viewers::default();
+        viewers
+            .write()
+            .await
+            .beacon(Some("https://push.example/laptop".to_owned()));
+        let printed = format!("{viewers:?} {:?}", watched(&viewers).await);
+        assert!(!printed.contains("push.example"), "{printed}");
+        assert!(printed.contains("devices: 1"), "{printed}");
     }
 
     fn note(phase: PrPhase) -> PrNote {
@@ -561,7 +833,7 @@ mod tests {
         let events = Events::default();
 
         teller
-            .tell_pulls(&[note(PrPhase::CheckFailed)], false, &events)
+            .tell_pulls(&[note(PrPhase::CheckFailed)], &Watched::default(), &events)
             .await;
 
         let seen = served.join().expect("the listener thread");
@@ -615,20 +887,29 @@ mod tests {
         assert_eq!(long.message().body.chars().count(), 160);
     }
 
-    /// D3 §13 for the PR watch: watched means not pushed, and still remembered.
+    /// D3 §13 for the PR watch: a watched note is remembered, and it goes to
+    /// the phone alone while the laptop is on screen.
     #[tokio::test]
-    async fn a_pr_note_while_the_page_is_open_is_remembered_and_not_pushed() {
+    async fn a_pr_note_while_the_laptop_is_open_is_remembered_and_pushed_to_the_phone() {
+        let (push, service, laptop, ..) = laptop_and_phone().await;
         let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
         let address = listener.local_addr().expect("the port it got");
-        let mut teller = Teller::new(Some(relay(address)));
+        let mut teller = Teller::new(Some(relay(address))).pushing(Some(push));
         let events = Events::default();
+        let watching = on_screen(laptop);
+        let served = thread::spawn(move || {
+            let seen = crate::push::tests::request(&service, "201 Created");
+            (service, seen)
+        });
 
         teller
-            .tell_pulls(&[note(PrPhase::ChecksPassed)], true, &events)
+            .tell_pulls(&[note(PrPhase::ChecksPassed)], &watching, &events)
             .await;
 
-        listener.set_nonblocking(true).expect("a nonblocking check");
-        assert!(listener.accept().is_err(), "nothing reached the relay");
+        let (service, (head, _)) = served.join().expect("the push service");
+        assert_eq!(path(&head), "/push/phone");
+        assert!(silent(&service), "the laptop got a push");
+        assert!(silent(&listener), "the relay was told");
         assert_eq!(events::newest_first(&events).await[0].kind, "checks_passed");
     }
 
@@ -649,13 +930,13 @@ mod tests {
         teller
             .tell_pulls(
                 &[note(PrPhase::CheckFailed), note(PrPhase::Reviewed)],
-                false,
+                &Watched::default(),
                 &events,
             )
             .await;
         assert!(teller.log.quiet, "the drop was said");
         teller
-            .tell_pulls(&[note(PrPhase::ChecksPassed)], false, &events)
+            .tell_pulls(&[note(PrPhase::ChecksPassed)], &Watched::default(), &events)
             .await;
 
         let seen = served.join().expect("the listener thread");
@@ -687,7 +968,7 @@ mod tests {
         teller
             .tell_pulls(
                 &[note(PrPhase::CheckFailed), note(PrPhase::Reviewed)],
-                false,
+                &Watched::default(),
                 &Events::default(),
             )
             .await;
@@ -756,6 +1037,43 @@ mod tests {
 
     fn relay(address: std::net::SocketAddr) -> Relay {
         Relay::new(format!("http://{address}/yantra-test"), None)
+    }
+
+    /// A dashboard is on screen, and it named no device.
+    fn open() -> Watched {
+        Watched {
+            anyone: true,
+            devices: HashSet::new(),
+        }
+    }
+
+    /// The dashboard of the device at `endpoint` is on screen.
+    fn on_screen(endpoint: String) -> Watched {
+        Watched {
+            anyone: true,
+            devices: HashSet::from([endpoint]),
+        }
+    }
+
+    /// A `Push` with two devices at one push service: `/push/abc`, whose
+    /// endpoint this gives as the laptop, and `/push/phone` with its keys.
+    async fn laptop_and_phone() -> (Push, TcpListener, String, p256::SecretKey, [u8; 16]) {
+        let service = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+        let address = service.local_addr().expect("the port it got");
+        let (push, laptop, ..) = crate::push::tests::pushing_at(address).await;
+        let (_, secret, auth) = crate::push::tests::another(&push, address, "phone").await;
+        (push, service, laptop.endpoint, secret, auth)
+    }
+
+    /// Nothing has connected to `listener`.
+    fn silent(listener: &TcpListener) -> bool {
+        listener.set_nonblocking(true).expect("a nonblocking check");
+        listener.accept().is_err()
+    }
+
+    /// The path in a request's first line.
+    fn path(head: &str) -> String {
+        head.split(' ').nth(1).unwrap_or_default().to_owned()
     }
 
     /// One connection, answered with `status`, and the body it carried. Headers

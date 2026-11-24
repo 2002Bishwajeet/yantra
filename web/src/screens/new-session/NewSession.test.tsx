@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import * as contract from '@/contract.gen'
 import { aListed, aMachine, aWorkspace, looked } from '@/api/fixtures'
 import type { Readiness } from '@/api'
@@ -1240,6 +1240,96 @@ describe('the hub (Y-627)', () => {
     await screen.findByRole('dialog', { name: 'New session' })
     expect(screen.queryByRole('group', { name: 'Machine' })).toBeNull()
     expect(screen.queryByRole('note')).toBeNull()
+  })
+
+  describe('while the daemon checks the hub at its start (Y-830)', () => {
+    /** Readiness says `never` until `land`, and `after` from then on, as a daemon does after a restart. */
+    const restarted = (after: unknown) => {
+      let landed = false
+      return {
+        answers: { 'GET /api/readiness': () => [200, landed ? after : looked.never()] } as Answers,
+        land: () => {
+          landed = true
+          act(() => void window.dispatchEvent(new Event('visibilitychange')))
+        },
+      }
+    }
+    const pressed = (chips: Awaited<ReturnType<typeof group>>) =>
+      chips
+        .getAllByRole('button')
+        .filter((chip) => chip.getAttribute('aria-pressed') === 'true')
+        .map((chip) => chip.textContent)
+    const idle = { machine: 'cachyos-g14', score: 45, terms: {}, reason: 'it is idle' }
+
+    it('draws a chip that says checking and cannot be pressed, and no join note', async () => {
+      mount(looked.never())
+      const chips = await group()
+      expect(chips.getByRole('button', { name: 'yantra-box · checking' })).toHaveProperty('disabled', true)
+      expect(screen.getByText('Checking yantra-box.').getAttribute('role')).toBe('status')
+      expect(screen.queryByRole('note')).toBeNull()
+
+      press('cachyos-g14')
+      expect(pressed(chips)).toEqual(['cachyos-g14'])
+    })
+
+    it('gives the hub its chip when the check lands, with no press of Check', async () => {
+      const { answers, land } = restarted(swept(said('present', 'a command ran there')))
+      const asked = mount(null, '/new', answers)
+      const chips = await group()
+      expect(chips.getByRole('button', { name: 'yantra-box · checking' })).toBeTruthy()
+
+      land()
+      await waitFor(() => expect(chips.getByRole('button', { name: 'yantra-box' })).toHaveProperty('disabled', false))
+      expect(screen.queryByText('Checking yantra-box.')).toBeNull()
+      expect(screen.queryByRole('note')).toBeNull()
+      expect(asked.filter((one) => /^POST .*\/readiness$/.test(one))).toEqual([])
+    })
+
+    it('keeps a ?machine= hub for when its check lands, and no suggestion takes its place', async () => {
+      const { answers, land } = restarted(swept(said('present', '')))
+      mount(null, '/new?machine=yantra-box', {
+        ...answers,
+        'POST /api/placement': [200, { ranked: [idle], rejected: [] }],
+      })
+      const chips = await group()
+      await screen.findByText(/^Suggested: cachyos-g14, because it is idle/)
+      expect(pressed(chips)).toEqual([])
+
+      land()
+      await waitFor(() => expect(pressed(chips)).toEqual(['yantra-box']))
+    })
+
+    it('preselects a hub that is the one machine when its check lands', async () => {
+      const { answers, land } = restarted(looked.ok([said('present', '')]))
+      mount(null, '/new', { ...answers, 'GET /api/machines': [200, looked.ok([box])] })
+      const chips = await group()
+      expect(pressed(chips)).toEqual([])
+
+      land()
+      await waitFor(() => expect(pressed(chips)).toEqual(['yantra-box']))
+    })
+
+    it('keeps a pick made by hand while the check ran', async () => {
+      const { answers, land } = restarted(swept(said('present', '')))
+      mount(null, '/new?machine=yantra-box', answers)
+      const chips = await group()
+      press('pi')
+
+      land()
+      await chips.findByRole('button', { name: 'yantra-box' })
+      expect(pressed(chips)).toEqual(['pi'])
+    })
+
+    it('names the join step when the check lands and ssh did not get in', async () => {
+      const { answers, land } = restarted(swept(said('absent', 'Permission denied (publickey)')))
+      mount(null, '/new', answers)
+      const chips = await group()
+      expect(screen.queryByRole('note')).toBeNull()
+
+      land()
+      expect((await screen.findByRole('note')).textContent).toMatch(/yantra-box needs a karigar account/)
+      expect(chips.queryByRole('button', { name: /yantra-box/ })).toBeNull()
+    })
   })
 
   it('gives the note without the command when /api/about is missing', async () => {

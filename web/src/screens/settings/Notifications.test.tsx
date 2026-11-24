@@ -299,7 +299,7 @@ describe('the relay sheet', () => {
     for (const gone of ['When an agent needs you', 'When a session ends', 'Quiet while a dashboard is open', 'Sent', 'Not sent', 'Always']) {
       expect(screen.queryByText(gone)).toBeNull()
     }
-    expect(screen.getByText(/stays quiet while a dashboard is open/)).toBeTruthy()
+    expect(screen.getByText(/This device stays quiet while you look at it\./)).toBeTruthy()
   })
 
   it('masks the token until Show is pressed', async () => {

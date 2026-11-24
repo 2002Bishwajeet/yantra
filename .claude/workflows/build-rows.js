@@ -3,10 +3,12 @@ export const meta = {
   description: 'Build open tracker rows unattended: rank, build, verify, review, simplify, merge (CLAUDE.md §B7)',
   whenToUse: 'The owner wants open tracker rows built and merged without reviewing each one',
   phases: [
+    { title: 'Look', detail: 'read the real box with the read-only session, and add a row for each wrong state' },
     { title: 'Triage', detail: 'rank the rows an agent can finish alone' },
     { title: 'Build', detail: 'plan, build, CI gate, fix' },
     { title: 'Review', detail: 'independent review, fix, re-check' },
-    { title: 'Ship', detail: 'one row at a time: rebase, tracker, checks, merge' },
+    { title: 'Ship', detail: 'checks, merge' },
+    { title: 'Record', detail: 'one PR for the tracker, the session log and the summaries' },
     { title: 'Report' },
   ],
 }
@@ -48,7 +50,7 @@ const GATE = (row) => `Push the branch and open its PR first: ${PUSH_PR(row)} Th
 const RULES = (wt) => `
 Rules for this run (CLAUDE.md §B7, the build loop):
 - Work only inside the worktree ${wt}. Never touch ${REPO} itself.
-- Do not edit tracker.md or docs/session-log.md. The ship stage does that.
+- Do not edit tracker.md, docs/session-log.md, or any llms.txt or README.md. Every row edits them, so each one made the next merge conflict. The record stage updates them for the whole wave in one PR (Y-836).
 - Run every local cargo, npm, npx, just or podman command through \`~/.claude/bin/heavy\` (for example \`~/.claude/bin/heavy cargo nextest run -p yantrad foo\`). It is a machine-wide lock that other projects' agents on this laptop share, so two heavy commands never run at once and the laptop does not run out of memory. It waits for the lock by itself; do not kill a waiting command.
 - Do not create or change anything under docs/adr/, and do not add or change an invariant in a crate tracker. If the row needs either, stop and say so.
 - Commit messages are "Y-NNN: <what changed>" and carry no AI attribution of any kind.
@@ -81,9 +83,10 @@ const TRIAGE_SCHEMA = {
           paths: { type: 'array', items: { type: 'string' }, description: 'the files the change will edit, e.g. web/src/m3/Card.tsx; a folder only for new files in it' },
           priority: { type: 'integer', minimum: 0, maximum: 5 },
           reason: { type: 'string' },
+          size: { type: 'string', enum: ['small', 'large'], description: 'small: copy, a doc, or a change of one or two files with a plain done condition. Else large.' },
           risk: { type: 'string', enum: ['normal', 'hard', 'security'], description: 'security: touches auth, sessions, passkeys, write routes, agent permissions, the updater, install or join, secrets, or builds a shell, ssh or tmux command from input. hard: a design or a bug a plain build is likely to get wrong. Else normal.' },
         },
-        required: ['id', 'title', 'kind', 'paths', 'priority', 'reason', 'risk'],
+        required: ['id', 'title', 'kind', 'paths', 'priority', 'reason', 'size', 'risk'],
       },
     },
     skipped: {
@@ -163,6 +166,37 @@ const SHIP_SCHEMA = {
   required: ['status'],
 }
 
+const LOOK_SCHEMA = {
+  type: 'object',
+  properties: {
+    looked: { type: 'boolean', description: 'true only when look.sh exited 0 and you read its pictures and texts' },
+    skipped: { type: 'string', description: 'when looked is false: why, in one sentence. Else empty' },
+    ask: { type: 'string', description: 'the exact step the owner takes so that the next run can look, and why. Empty when the owner need do nothing' },
+    box: { type: 'string', description: 'the "box:" line look.sh printed, or empty' },
+    findings: { type: 'array', items: { type: 'string' }, description: 'one line per wrong state: the page, what it shows, what it must show. A finding that an open row already names says which row' },
+    rows: { type: 'array', items: { type: 'string' }, description: 'the Y-numbers of the rows you added' },
+    pr: { type: 'string', description: 'the PR that added them, or empty' },
+  },
+  required: ['looked', 'skipped', 'ask', 'box', 'findings', 'rows', 'pr'],
+}
+
+// Y-835: CLAUDE.md §B7, "It looks at the real box first". The rows it adds are on origin/main before triage reads it.
+const LOOK = `${REPO}/.claude/workflows/look.sh`
+const LOOK_DIR = `${REPO}/.claude/build-loop/look/${TODAY}`
+const LOOK_LOG = `${LOOK_DIR}/look.log`
+const LOOK_SESSION = '~/.config/yantra/walk-session'
+const LOOK_ASK = `Open the box's dashboard, go to Settings, then Devices, and press Make a token under Read-only session. Save the token on this laptop in ${LOOK_SESSION} and run chmod 600 on that file. The build loop reads the box's pages with it before it builds; without it each run skips that look.`
+function lookPrompt() {
+  return `Look at the real box before any row is built (CLAUDE.md §B7, "It looks at the real box first"). You open pages and press nothing: the box is the owner's real one.
+1. Run \`mkdir -p ${LOOK_DIR} && rm -f ${LOOK_LOG}\`. The look installs the dashboard's packages when the checkout has none, waits for the laptop's lock for heavy commands and then opens each page in two browsers, which can take longer than a Bash call. look.sh takes that lock by itself, and the lock does not nest: never put heavy in front of it. ${DETACH(LOOK_LOG, 'LOOK_EXIT', `bash ${LOOK} ${LOOK_DIR}`)} ${BLOCK(LOOK_LOG, 'LOOK_EXIT')} It reads the owner's read-only session from ${LOOK_SESSION}. Never read, print or copy that file, and never put what it holds in a command, a row, a PR or your answer.
+2. LOOK_EXIT=3 means the laptop holds no usable session. Return looked=false, the log's "look:" line as skipped, and this text as ask: "${LOOK_ASK}" LOOK_EXIT=4 means the box did not answer: return looked=false, the "look:" line as skipped and an empty ask. On any other value but 0, and when the line never comes, return looked=false, the last lines of the log as skipped and an empty ask. In each case findings and rows are empty.
+3. On LOOK_EXIT=0, put the log's "box:" line in box. Read every TXT and PNG file in ${LOOK_DIR} with the Read tool, and read responses.txt and errors.txt there. Check the copy word by word in the TXT files, never only in a picture.
+4. The session only reads, so the box answers 403 "this session is read-only" to some requests, and responses.txt lists each one. A surface that failed only on such a 403 is not a finding. Any other wrong state is one: a stale check, a missing chip, wrong or misspelt copy, an error or an empty screen where the page expects content, a layout broken at 390 px. When the box line says newer True, the box runs an older build than its channel offers: say so in each finding.
+5. Run git -C ${REPO} fetch origin and read tracker.md with git -C ${REPO} show origin/main:tracker.md. Drop each finding that an open row there already names, and say which row in its line.
+6. If findings remain, add one ⬜ todo row for each to tracker.md §3 in one docs PR. Run git -C ${REPO} worktree add -b look-${TODAY} ${WT_ROOT}/look-${TODAY} origin/main and work only there. Take the next free Y-numbers. A row says what to do and what done means, and stops (CLAUDE.md §B5). It opens with "**Box look, ${TODAY}:**" and what the page shows, which makes it priority 0. The repository is public: a row names no private repository, branch, thread title, address or person, and you commit or push no picture and no text file from the look. Commit "Y-NNN: add the rows from the box look" with the first new number, push the branch and open the PR with gh pr create --base main. Then run exactly one command, bare: bash ${MERGE_GUARD} <pr number> --merge "Y-NNN: add the rows from the box look (#<pr number>)". Never call \`gh pr merge\` yourself. After the merge, remove the worktree and the local branch. Return the row numbers and the PR. If the merge guard fails, return the PR and say so in skipped; the findings stay in your answer.
+No AI attribution anywhere.`
+}
+
 function triagePrompt(exclude) {
   return `Run git -C ${REPO} fetch origin, then read tracker.md from origin/main with git -C ${REPO} show origin/main:tracker.md. Do not read the file in the checkout: it can be stale or on another branch.
 Rank the open rows in its §3 that an agent can finish alone today.
@@ -172,9 +206,9 @@ Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the o
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
 Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}. An open PR does not rule a retried row out: it continues on that PR's branch.` : ''}
 
-Priority, from CLAUDE.md §B7: 0 = a defect the owner or the box walk found on the real box (the row quotes the owner or the walk), 1 = a row that milestone M18 (the daily driver) lists, 2 = closes or unblocks another open milestone, 3 = another defect or a red suite, 4 = a feature whose dependencies are done, 5 = debt. Ties go to the lower Y-number.
+Priority, from CLAUDE.md §B7: 0 = a defect the owner or the box look found on the real box (the row quotes the owner, the walk or the box look), 1 = a row that milestone M18 (the daily driver) lists, 2 = closes or unblocks another open milestone, 3 = another defect or a red suite, 4 = a feature whose dependencies are done, 5 = debt. Ties go to the lower Y-number.
 Put each priority 0 or 1 row that is blocked only on the owner in owner_asks, with the exact step the owner takes and why. If owner_asks is not empty, return no row of priority 3 or higher in rows: move them to skipped with the reason "waits behind an owner ask".
-For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs), its risk (security, hard or normal, as the schema says) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
+For each eligible row give its size, its kind (rust-transport for ssh, tmux or socket code; rust; web; docs), its risk (security, hard or normal, as the schema says) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
 }
 
 const rank = (rows) => [...rows].sort((a, b) => a.priority - b.priority || Number(a.id.slice(2)) - Number(b.id.slice(2)))
@@ -335,7 +369,13 @@ async function runRow(row, built = () => {}) {
   // A retried row was parked on review findings, and only the report remembers them.
   const retried = RETRY.includes(row.id) ? `\nThe owner asked to retry this parked row. Read why it was parked in the reports in ${REPO}/.claude/build-loop/, and fix those findings first.` : ''
 
-  const plan = await agent(
+  // Y-836: a small row skips the planner; the builder sets up and plans for itself.
+  const small = row.size === 'small' && !risky(row)
+  const SETUP = `First set up the worktree. In ${REPO}: git fetch origin. Keep any work already on branch ${branch}, and never reset or delete its commits: they are work a parked run kept.
+- If ${wt} exists, use it as it is.
+- Else if branch ${branch} exists, run git worktree add ${wt} ${branch}.
+- Else run git worktree add -b ${branch} ${wt} origin/main.`
+  const plan = small ? { plan: `${SETUP}\nThen read the row in tracker.md and the code it touches, and make the smallest change that meets its done condition.${retried}`, park: false } : await agent(
     `First set up the worktree. In ${REPO}: git fetch origin. Keep any work already on branch ${branch}, and never reset or delete its commits: they are work a parked run kept.
 - If ${wt} exists, use it as it is.
 - Else if branch ${branch} exists, run git worktree add ${wt} ${branch}.
@@ -376,6 +416,8 @@ ${REVIEW_RULE}`,
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after review fixes')
     w = await walkUntilGreen(row, wt, plan)
     if (typeof w === 'string') return park(w)
+    // Y-836: a small row trusts CI after one fix instead of a second review.
+    if (small) { r = { ...r, blocking: [], doneMet: true }; break }
     r = await agent(
       `Re-check the change for ${row.id} in ${wt}. You did not write it. An earlier review blocked it on:\n${issues}\n
 Read the fix (git diff ${base}..HEAD) and the code each point names. For each point, decide if the fix resolves it. Also report any new defect the fix brings in. Do not review the rest of the change again.${shown(w)}
@@ -391,15 +433,12 @@ ${REVIEW_RULE}`,
     serialShip(() =>
       agent(
         `Ship ${row.id} from ${wt}, branch ${branch}. CI passed on the branch.
-0. git fetch origin and rebase on origin/main. Resolve conflicts in tracker.md and docs/session-log.md by keeping both sides and deduplicating by Y-number. Do not change any other file except to resolve a conflict. If a conflict in any other file cannot be resolved, abort the rebase and return failed.
-1. In tracker.md set the ${row.id} row to 🔵 review and add "**Merged ${TODAY}** by the build loop." with one line on what shipped. A row does not close in its own PR: a later release PR marks it ✅ done. Update the row; never add a second one. Then check: grep -oE '^\\| Y-[0-9]+ \\|' tracker.md | sort | uniq -d prints nothing. Skip this step if the row already says it.
-2. Append one entry to docs/session-log.md for ${TODAY}, in the style of the entries above it. Plain prose, CLAUDE.md §A6. Skip this step if the entry exists.
-3. Commit "${row.id}: record the change in the tracker" if steps 1–2 changed anything.${DRY ? `
-4. Dry run: do not push. Return status open.` : `
-4. Push the branch: ${PUSH_PR(row)}
-5. ${w.needs.length ? `Run \`bash ${WALK} publish ${wt} <pr number>\`. It posts the walk's screenshots on the PR. If it fails, return failed with its output. ` : ''}Run exactly one command: bash ${WALK} guard <pr number> && bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> --merge "${title} (#<pr number>)". The merge guard merges only when every check is green; never call \`gh pr merge\` yourself. The walk guard exits non-zero when the PR changes a screen or a machine path and has no walk comment. The merge guard waits for every check on the rebased commit and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the walk guard fails, return failed with its output. If the merge guard fails, return checks-failed with the failing check's log tail.
-6. If GitHub says the branch is behind, return status behind; do not rebase here, because a rebase runs before the tracker step.
-7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
+0. git fetch origin. Run \`gh pr view ${branch} --json mergeStateStatus -q .mergeStateStatus\`. Only if it says DIRTY, rebase on origin/main and resolve the conflicts; if one cannot be resolved, abort the rebase and return failed. Do not edit tracker.md, docs/session-log.md or any summary file: the record stage does that.${DRY ? `
+1. Dry run: do not push. Return status open.` : `
+1. Push the branch: ${PUSH_PR(row)}
+2. ${w.needs.length ? `Run \`bash ${WALK} publish ${wt} <pr number>\`. It posts the walk's screenshots on the PR. If it fails, return failed with its output. ` : ''}Run exactly one command: bash ${WALK} guard <pr number> && bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> --merge "${title} (#<pr number>)". The merge guard merges only when every check is green; never call \`gh pr merge\` yourself. The walk guard exits non-zero when the PR changes a screen or a machine path and has no walk comment. The merge guard waits for every check on the rebased commit and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the walk guard fails, return failed with its output. If the merge guard fails, return checks-failed with the failing check's log tail.
+3. If GitHub says the branch conflicts, return status behind.
+4. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
         { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'sonnet', effort: 'medium' },
       ),
     )
@@ -421,6 +460,13 @@ const attempted = new Set()
 const results = []
 const skipped = new Map()
 const only = A.rows || null
+
+phase('Look')
+const NO_LOOK = (skipped) => ({ looked: false, skipped, ask: '', box: '', findings: [], rows: [], pr: '' })
+const look = DRY
+  ? NO_LOOK('a dry run does not look at the box')
+  : (await agent(lookPrompt(), { label: 'look', phase: 'Look', schema: LOOK_SCHEMA, model: 'sonnet', effort: 'medium' })) || NO_LOOK('the look agent died')
+log(look.looked ? `Look: ${look.box}; ${look.findings.length} findings, ${look.rows.length} new rows` : `Look skipped: ${look.skipped}`)
 
 // One triage serves the run: the 2026-11-02 run re-triaged before every batch and got the same ranking four times.
 phase('Triage')
@@ -456,10 +502,26 @@ for (;;) {
 }
 if (pool.some((r) => !attempted.has(r.id))) log(`Stopped at maxRows=${MAX_ROWS}; ${pool.filter((r) => !attempted.has(r.id)).map((r) => r.id).join(', ')} not started.`)
 
+// Y-836: one docs-only PR records the wave, so no row conflicts on the shared files and its CI takes seconds.
+const merged = results.filter((r) => r.status === 'merged')
+if (merged.length && !DRY) {
+  phase('Record')
+  await agent(
+    `Record the build loop's wave of ${TODAY}. In ${REPO}: git fetch origin, then git worktree add -b build-loop-record-${TODAY} ${WT_ROOT}/build-loop-record-${TODAY} origin/main, and work only there. These PRs merged: ${JSON.stringify(merged.map((r) => ({ id: r.id, title: r.title, pr: r.pr })))}.
+1. In tracker.md set each row to 🔵 review and add "**Merged ${TODAY}** by the build loop (#<pr>)." with one line on what shipped. Update the row; never add a second one. Then check: grep -oE '^\\| Y-[0-9]+ \\|' tracker.md | sort | uniq -d prints nothing.
+2. Append one entry per row to docs/session-log.md for ${TODAY}, in the style of the entries above it.
+3. Read each PR's diff (gh pr diff <pr>). Where it changed what a crate's llms.txt or README.md, the root llms.txt or README.md says, update that sentence (CLAUDE.md §B5). Change nothing else.
+4. Commit "build loop: record the wave of ${TODAY}", no AI attribution. Push, open a PR with that title, and run bash ${REPO}/.claude/workflows/merge-when-green.sh <pr> "build loop: record the wave of ${TODAY} (#<pr>)". Then run git worktree remove from ${REPO}.${RULES(`${WT_ROOT}/build-loop-record-${TODAY}`).replace(/- Do not edit tracker.md[^\n]*\n/, '')}`,
+    { label: 'record', phase: 'Record', model: 'sonnet', effort: 'medium' },
+  )
+}
+
 phase('Report')
 await agent(
   `Write ${REPORT} (create the folder if needed). If it exists, an earlier run today wrote it: keep its text and append this run under a \`## Another run\` heading. It is the owner's morning report for the build loop on ${TODAY}. Plain prose, CLAUDE.md §A6.
-Open with what the owner must do, if anything: one short paragraph per ask, the exact step and why, no row ids. Asks: ${JSON.stringify(asks)}\nThen one line: how many rows merged, stayed open and parked.
+Open with what the owner must do, if anything: one short paragraph per ask, the exact step and why, no row ids. The look's ask comes first when it has one. Asks: ${JSON.stringify(asks)}
+Then one paragraph on the look at the real box: the box's version and channel, what the look saw and the rows it added, or that the run skipped the look and why. Look: ${JSON.stringify(look)}
+Then one line: how many rows merged, stayed open and parked.
 Then a table: row, title, outcome, PR, the machine that ran its gate (gateMachine), and for parked rows the reason and the branch that holds the work.
 Then the rows triage skipped, one line each.
 Results: ${JSON.stringify(results)}
@@ -467,4 +529,4 @@ Skipped: ${JSON.stringify([...skipped].map(([id, reason]) => ({ id, reason })))}
   { label: 'report', phase: 'Report', model: 'sonnet', effort: 'low' },
 )
 
-return { report: REPORT, asks, results, skipped: [...skipped].map(([id, reason]) => ({ id, reason })) }
+return { report: REPORT, look, asks, results, skipped: [...skipped].map(([id, reason]) => ({ id, reason })) }

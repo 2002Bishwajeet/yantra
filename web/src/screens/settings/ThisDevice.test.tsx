@@ -257,6 +257,20 @@ describe('a device that has notifications on', () => {
     expect(named).toEqual({ endpoint: ENDPOINT })
   })
 
+  /** Y-829: the daemon quiets this device alone while its dashboard is on screen. */
+  it('names this device in the beacon that says the dashboard is open', async () => {
+    on()
+    const beacons: unknown[] = []
+    mount({
+      'POST /api/viewing': (init) => {
+        beacons.push(init?.body ? sent(init) : null)
+        return [204]
+      },
+    })
+
+    await waitFor(() => expect(beacons.at(-1)).toEqual({ endpoint: ENDPOINT }))
+  })
+
   it('turns off and says to turn it on again when the daemon no longer lists the device', async () => {
     on()
     const held = current

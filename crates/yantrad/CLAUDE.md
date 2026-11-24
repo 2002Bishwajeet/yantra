@@ -37,6 +37,24 @@ ADR-0016's predicate on them with no cookie, so only the owner's own node starts
 Wrong codes count for each caller node, and a node holds at most 16 open ceremonies. `passkey.rs`
 keeps the passkeys and token hashes in `passkeys.toml`, `0600`, and never a token.
 
+**A session may be read-only** (ADR-0044's note of 2026-11-24, Y-835). The build loop reads the box
+with one. `POST /api/sessions/read/{name}` makes it for the owner and answers the token once, in the
+body and in no cookie. `identify` names its caller `Who::Reader`. Three rules bind it:
+
+- **The gate passes it on `write::reader_may` only**: a `GET` or a `HEAD` with no `Upgrade` header,
+  on any path but `/mcp`, `/passkey…`, `/sessions/…` and `/push/key`. Everything else is a 403
+  whose text starts *this session is read-only*, which the dashboard reads. The four ceremony
+  routes, the two join routes and a login test with a join code skip `identify`, so `passes`
+  refuses the cookie on them before they leave. `GET /api/about` still answers it.
+- **`allowed` refuses it, and `reading` is the one check that passes it.** `POST
+  /api/join/forget-host-key` skips `identify` in the gate and then asks `allowed`, so a handler does
+  not rely on the gate. A handler that acts calls `allowed`, and only a `GET` that changes nothing
+  calls `reading`. `tasks.rs` does the same with `seen`. A new `match` on `Who` does not compile
+  until it decides for `Reader`.
+- **Its row keeps SHA-256 of `passkey::READS` and the token, and a full row keeps SHA-256 of the
+  token.** A daemon older than the field reads the row as a full session. `READS` ends in a NUL,
+  which no cookie can hold, so no token matches the row there.
+
 **The dashboard's origin is `https://<MagicDNS>:8443` unless `YANTRA_ORIGIN` names one** (ADR-0044,
 amended 2026-11-12). `main.rs` reads it from `/etc/yantra/daemon.env` once at start, and
 `passkey::configured_origin` accepts exactly one https origin with no path; anything else stops the
@@ -192,6 +210,14 @@ the list's envelope carries the youngest. With nothing kept the list answers fro
 machine nothing has reached is a **404**, and asking a machine per *polled* request is the thing
 this shape refuses. It is memory, so a restart empties it and the next sweep fills it again (Y-044).
 
+**The hub is checked at start, before the first sweep** (Y-830). New session hides a hub with no
+report, and a sweep settles only when its slowest machine answers. So `look_at_hub` runs before each
+sweep and asks the hub alone when `checks` holds nothing for it. The hub is the node that holds a
+bound address, and the rule is `runsSessions` without `online`, as the web's is. The update unit
+ends in a restart, so an update takes the same path. The first readiness look waits for the first
+machines reading, at most 10 s, so the first sweep also knows the tailnet peers. Until the hub's
+report lands, `GET /api/readiness` says `never`, and New session draws the hub's chip as *checking*.
+
 **`POST /api/machines/{name}/readiness` is where a person may ask anyway** (Y-197,
 [ADR-0019](../../docs/adr/0019-a-probe-that-asks-a-machine-is-a-post.md)): someone who has just
 installed `tmux` by hand needs the answer before the next sweep, and the `GET` beside it can only
@@ -276,17 +302,22 @@ back, and `tracing` names the caller and never the topic. `GET /api/about` says 
 process started with a relay, as `relay: bool` (Y-388), so the setup checklist can tell a relay the
 daemon uses from one saved for its next start.
 
-**Nothing is pushed while a dashboard is open** (D3 §13). `notify::Viewers` is a last-seen-a-viewer
-timestamp beside the snapshot, `POST /api/viewing` writes it, and `refresh` hands the notifier a
-bool. **The diff still runs when it is suppressed**: what a watched look produced is dropped rather
-than held, so closing the tab does not deliver a backlog of things the page already showed. It is in
-memory and a restart forgets it, which is Y-044 exactly as written — that state is not the exception
-ADR-0021 carved.
+**Nothing is pushed to a device that is being looked at** (D3 §13, Y-829,
+[ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md) decision 6). `notify::Viewers` holds
+when any dashboard last beaconed, and when each device that named its push endpoint did.
+`POST /api/viewing` writes it, and `refresh` hands the notifier a `notify::Watched`. Web Push skips
+only the devices that beaconed inside the window, so a laptop tab does not silence the phone. The
+relay skips a look that any dashboard watched, because the daemon cannot tell which device a relay
+reaches. A beacon with no body quiets the relay only. The map keeps at most 16 endpoints of at most
+2048 bytes, and it never logs one. **The diff still runs when it is suppressed**: what a watched look
+produced is dropped rather than held, so closing the tab does not deliver a backlog of things the
+page already showed. It is in memory and a restart forgets it, which is Y-044 exactly as written —
+that state is not the exception ADR-0021 carved.
 
 **The PR watch is the second caller of the relay** (Y-494, [`watch.rs`](src/watch.rs)). It runs on
 its own task in `refresh.rs` and keeps the agents notifier's rules through the shared `notify::Teller`:
-remembered first, not pushed while a dashboard is open, one 5 s budget, no retry, and the quiet
-`Log`. Its notes are *Check failed*, *Checks passed* and *PR reviewed*. The body is
+remembered first, not pushed to a device that is being looked at, one 5 s budget, no retry, and the
+quiet `Log`. Its notes are *Check failed*, *Checks passed* and *PR reviewed*. The body is
 `{workspace}: PR #{n} …`, cut at 160 characters, with no repo, no check output and no review text.
 **Its reads are conditional**: each sends the last `ETag` back as `If-None-Match`, so an unchanged PR
 costs GitHub no quota, and a 304 reuses what the watch already holds.
@@ -295,7 +326,8 @@ costs GitHub no quota, and a 304 reuses what the watch already holds.
 [ADR-0047](../../docs/adr/0047-the-dashboard-gets-web-push.md), [`push.rs`](src/push.rs)).
 `notify::told` is the one send: `Push::send` to every device in the store and, at the same time,
 the relay when one is set. The agents notifier, the PR watch, the chat's waits and the rooms' pauses all call it, and
-each keeps its own rules. The payload is `{title, body, url}`, where `url` is `Message::path`, a path
+each keeps its own rules. The agents notifier and the PR watch leave out the devices that are being
+looked at; the chat's waits and the rooms' pauses do not read the beacon. The payload is `{title, body, url}`, where `url` is `Message::path`, a path
 in the dashboard. Four rules bind `push.rs`:
 
 - **The crypto is composed here, and RFC 8291's example is the test.** No published Web Push crate

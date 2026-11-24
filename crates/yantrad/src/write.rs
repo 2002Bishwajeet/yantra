@@ -128,6 +128,10 @@ pub struct Authoriser<I> {
 pub(crate) enum Who {
     /// The owner: on the socket with no session, or on the network with one.
     Owner(Caller, Option<passkey::Session>),
+    /// The owner's read-only session (the 2026-11-24 note on decisions 4 and
+    /// 9). It passes the gate on [`reader_may`]'s reads, and a handler that
+    /// checks its caller passes it only through [`reading`].
+    Reader(Caller),
     /// A session or Chat turn the daemon started, by the workspace it is in.
     Agent { caller: Caller, workspace: String },
 }
@@ -135,7 +139,7 @@ pub(crate) enum Who {
 impl Who {
     pub(crate) fn caller(&self) -> &Caller {
         match self {
-            Self::Owner(caller, _) | Self::Agent { caller, .. } => caller,
+            Self::Owner(caller, _) | Self::Reader(caller) | Self::Agent { caller, .. } => caller,
         }
     }
 }
@@ -282,6 +286,7 @@ impl<I: Inventory> Authoriser<I> {
         let caller = self.judge(hop, headers, signed_in).await?;
         Ok(match presented {
             Presented::Socket => Who::Owner(caller, None),
+            Presented::Session(session) if session.read_only => Who::Reader(caller),
             Presented::Session(session) => Who::Owner(caller, Some(session)),
             Presented::Agent(workspace) => Who::Agent { caller, workspace },
         })
@@ -532,8 +537,9 @@ struct Remembered<I> {
 }
 
 /// Every route that acts calls this, and only the two join routes call
-/// [`joining`] in its place. It passes the owner alone; an agent token gets
-/// 403 here, and the routes an agent may use call [`identify`].
+/// [`joining`] in its place. It passes the owner alone; an agent token and a
+/// read-only session get 403 here, and the routes an agent may use call
+/// [`identify`].
 pub(crate) async fn allowed<I: Inventory>(
     authoriser: &Authoriser<I>,
     peer: &Peer,
@@ -541,6 +547,21 @@ pub(crate) async fn allowed<I: Inventory>(
 ) -> Result<Caller, Refused> {
     match identify(authoriser, peer, headers).await? {
         Who::Owner(caller, _) => Ok(caller),
+        Who::Reader(_) => Err(Refused::ReadOnly),
+        Who::Agent { .. } => Err(Refused::AgentScope),
+    }
+}
+
+/// [`allowed`] for a `GET` that changes nothing, which also passes the
+/// owner's read-only session. [`forget_host_key`] skips the gate and then
+/// calls [`allowed`], so a route that acts must never call this.
+pub(crate) async fn reading<I: Inventory>(
+    authoriser: &Authoriser<I>,
+    peer: &Peer,
+    headers: &HeaderMap,
+) -> Result<Caller, Refused> {
+    match identify(authoriser, peer, headers).await? {
+        Who::Owner(caller, _) | Who::Reader(caller) => Ok(caller),
         Who::Agent { .. } => Err(Refused::AgentScope),
     }
 }
@@ -595,6 +616,7 @@ pub(crate) async fn allowed_socket<I: Inventory>(
             let revoked = session.map(|session| authoriser.passkeys.ended(&session.id));
             Ok((caller, revoked))
         }
+        Who::Reader(_) => Err(Refused::ReadOnly),
         Who::Agent { .. } => Err(Refused::AgentScope),
     }
 }
@@ -610,6 +632,7 @@ pub(crate) async fn signed_in_socket<I: Inventory>(
     match identify(authoriser, peer, headers).await? {
         Who::Owner(caller, Some(session)) => Ok((caller, authoriser.passkeys.ended(&session.id))),
         Who::Owner(_, None) => Err(Refused::SignIn),
+        Who::Reader(_) => Err(Refused::ReadOnly),
         Who::Agent { .. } => Err(Refused::AgentScope),
     }
 }
@@ -640,7 +663,8 @@ pub(crate) struct Gate<I> {
 /// ADR-0044 decision 8: every `/api` route checks its caller here, the reads
 /// in `api.rs` among them, before its own handler runs. A write, and every
 /// WebSocket upgrade, also needs the dashboard's `Origin` when it names one
-/// (decision 5), and an agent token reaches only [`agent_may`]'s routes.
+/// (decision 5), an agent token reaches only [`agent_may`]'s routes, and a
+/// read-only session only [`reader_may`]'s.
 pub(crate) async fn gate<I: Inventory + Clone + Send + Sync + 'static>(
     State(gate): State<Gate<I>>,
     request: axum::extract::Request,
@@ -666,7 +690,19 @@ async fn passes<I: Inventory>(
     headers: &HeaderMap,
     peer: Option<Peer>,
 ) -> Result<(), Refused> {
-    if unchecked(method, path) || (join_code(headers).is_some() && readiness(method, path)) {
+    let skips =
+        unchecked(method, path) || (join_code(headers).is_some() && readiness(method, path));
+    // These leave before `identify`, which is where a read-only cookie is
+    // refused. `GET /about` stays open to it: the dashboard loads it.
+    if (skips || ceremony(method, path))
+        && *method != axum::http::Method::GET
+        && passkey::token_in(headers)
+            .and_then(|token| gate.authoriser.passkeys.session(token))
+            .is_some_and(|session| session.read_only)
+    {
+        return Err(Refused::ReadOnly);
+    }
+    if skips {
         return Ok(());
     }
     let peer = peer.ok_or(Refused::Account(None))?;
@@ -676,6 +712,9 @@ async fn passes<I: Inventory>(
     let who = identify(&gate.authoriser, &peer, headers).await?;
     let writes = !matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD)
         || headers.contains_key(axum::http::header::UPGRADE);
+    if matches!(who, Who::Reader(_)) && (writes || !reader_may(path)) {
+        return Err(Refused::ReadOnly);
+    }
     if writes && let Some(origin) = headers.get(axum::http::header::ORIGIN) {
         let origin = origin.to_str().unwrap_or("an unreadable origin");
         if Some(origin)
@@ -688,8 +727,19 @@ async fn passes<I: Inventory>(
     }
     match who {
         Who::Agent { .. } if !agent_may(method, path) => Err(Refused::AgentScope),
-        _ => Ok(()),
+        Who::Owner(..) | Who::Reader(_) | Who::Agent { .. } => Ok(()),
     }
+}
+
+/// The paths a read-only session may `GET`: all but MCP, the passkey and
+/// session routes, and the Web Push key, which its first `GET` makes and
+/// writes. `/sessions` itself is the tmux sessions, a read.
+fn reader_may(path: &str) -> bool {
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    !matches!(
+        parts.as_slice(),
+        ["mcp" | "passkey", ..] | ["sessions", _, ..] | ["push", "key"]
+    )
 }
 
 /// `YANTRA_ORIGIN` when it is set, and otherwise `https://<MagicDNS>:8443`
@@ -780,7 +830,7 @@ async fn here<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Here>, Refused> {
-    let caller = allowed(&state.authoriser, &from, &headers).await?;
+    let caller = reading(&state.authoriser, &from, &headers).await?;
     let looked = state.fleet.model.read().await.machines.clone();
     let machines = match looked.as_deref().map(|reading| reading.value()) {
         None => {
@@ -1861,23 +1911,28 @@ fn from_update(error: &update::Error) -> StatusCode {
 }
 
 /// The dashboard saying it is on screen (D3 §13), so the notifier stops pushing
-/// what the page is already showing.
+/// what the page is already showing. A subscribed browser names its push
+/// endpoint, and Web Push then skips that device alone (ADR-0047 decision 6).
+/// A beacon with no body quiets the relay only.
 ///
 /// **It is a write and it is authorised like one**: silencing someone's phone
 /// is an act, and `whois` costs one subprocess per beacon — the page beacons
 /// once every `BEACON_MS` and only while the tab is visible, which is the same
 /// order as the sweep this daemon already runs.
 ///
-/// **The state is one timestamp in memory** and a restart forgets it, which is
-/// what Y-044 means here. It is not the exception ADR-0021 carved: nothing
-/// about a viewer needs to survive anything.
+/// **The state is a few timestamps in memory** and a restart forgets them,
+/// which is what Y-044 means here. It is not the exception ADR-0021 carved:
+/// nothing about a viewer needs to survive anything. The endpoint is a
+/// capability, so it is never logged.
 async fn viewing<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
+    named: Option<Json<crate::push::Named>>,
 ) -> Result<StatusCode, Refused> {
     allowed(&state.authoriser, &from, &headers).await?;
-    *state.fleet.viewers.write().await = Some(std::time::Instant::now());
+    let endpoint = named.map(|Json(named)| named.endpoint);
+    state.fleet.viewers.write().await.beacon(endpoint);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -2492,7 +2547,7 @@ async fn thread_states<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<ThreadState>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     let mut states: Vec<_> = state
         .fleet
         .chats
@@ -2515,7 +2570,7 @@ async fn threads_found<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     uri: Uri,
 ) -> Result<Json<Vec<ThreadFound>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     let store = state.fleet.store.as_ref().ok_or_else(|| Refused::Verb {
         status: StatusCode::SERVICE_UNAVAILABLE,
         said: "the daemon keeps no thread store".to_owned(),
@@ -2677,7 +2732,7 @@ async fn machine_threads<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(machine): Path<String>,
 ) -> Result<Json<Vec<MachineThread>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     checked(&machine)?;
     let store = state.fleet.store.as_ref().ok_or_else(no_store)?;
     let rows = store
@@ -4595,6 +4650,9 @@ pub(crate) enum Refused {
     /// ADR-0044 decision 12: an agent token outside its workspace's room and
     /// task routes.
     AgentScope,
+    /// The 2026-11-24 note on decisions 4 and 9: a read-only session on
+    /// anything but a `GET` that only reads.
+    ReadOnly,
     /// The last tailnet look is missing or failed, so "which machine" has no
     /// answer yet; 503, because `null` would read as "no machine holds it".
     Unlooked(String),
@@ -4687,6 +4745,11 @@ impl IntoResponse for Refused {
             Self::AgentScope => (
                 StatusCode::FORBIDDEN,
                 "an agent reaches only its own workspace's room and task tools".to_owned(),
+            ),
+            // The dashboard reads this prefix (`web/src/api/errors.ts`).
+            Self::ReadOnly => (
+                StatusCode::FORBIDDEN,
+                "this session is read-only: it reads the dashboard and changes nothing".to_owned(),
             ),
             Self::Verb { status, said } | Self::Unlogged { status, said } => (status, said),
         };
@@ -6035,13 +6098,32 @@ mod tests {
         );
     }
 
-    /// D3 §13's beacon reaching the one timestamp the notifier reads, and
-    /// nothing else: the daemon knows a viewer is there and knows nothing about
-    /// who or where.
+    fn beacon(from: u8, endpoint: Option<&str>) -> axum::http::Request<axum::body::Body> {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+
+        let post = Request::post("/viewing");
+        let mut beacon = match endpoint {
+            Some(endpoint) => {
+                post.header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "endpoint": endpoint }).to_string(),
+                    ))
+            }
+            None => post.body(Body::empty()),
+        }
+        .expect("a POST");
+        beacon
+            .extensions_mut()
+            .insert(ConnectInfo(tcp(address(from))));
+        beacon
+    }
+
+    /// D3 §13's beacon reaching what the notifier reads, and nothing else: the
+    /// daemon knows a viewer is there, and which device when the page says so.
+    /// A page with no subscription, or a cached older page, sends no body.
     #[tokio::test]
     async fn a_beacon_from_this_owner_is_what_the_notifier_reads() {
-        use axum::body::Body;
-        use axum::http::Request;
         use tower::ServiceExt as _;
 
         let fleet = Fleet::default();
@@ -6049,23 +6131,32 @@ mod tests {
             direct(tailnet(vec![(address(2), caller(ME, &[]))])),
             fleet.clone(),
         );
-        let mut beacon = Request::post("/viewing")
-            .body(Body::empty())
-            .expect("a POST");
-        beacon.extensions_mut().insert(ConnectInfo(tcp(address(2))));
+        let say = |endpoint| app.clone().oneshot(beacon(2, endpoint));
 
-        let answered = app.oneshot(beacon).await.expect("the router is infallible");
-
+        let answered = say(None).await.expect("the router is infallible");
         assert_eq!(answered.status(), StatusCode::NO_CONTENT);
-        assert!(crate::notify::watched(&fleet.viewers).await);
+        let watched = crate::notify::watched(&fleet.viewers).await;
+        assert!(watched.anyone && watched.devices.is_empty(), "{watched:?}");
+
+        let laptop = "https://push.example/laptop";
+        let answered = say(Some(laptop)).await.expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::NO_CONTENT);
+        let long = "a".repeat(2049);
+        let answered = say(Some(&long)).await.expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::NO_CONTENT);
+        let watched = crate::notify::watched(&fleet.viewers).await;
+        assert!(watched.anyone);
+        assert_eq!(
+            watched.devices,
+            std::collections::HashSet::from([laptop.to_owned()]),
+            "an endpoint that is too long is not kept"
+        );
     }
 
     /// ADR-0016 covers it like every other write, and the reason is what it
     /// does: a beacon stops this daemon pushing to somebody's phone.
     #[tokio::test]
     async fn a_beacon_from_a_node_that_is_not_this_owners_silences_nothing() {
-        use axum::body::Body;
-        use axum::http::Request;
         use tower::ServiceExt as _;
 
         let fleet = Fleet::default();
@@ -6073,15 +6164,17 @@ mod tests {
             direct(tailnet(vec![(address(3), caller(ME + 1, &[]))])),
             fleet.clone(),
         );
-        let mut beacon = Request::post("/viewing")
-            .body(Body::empty())
-            .expect("a POST");
-        beacon.extensions_mut().insert(ConnectInfo(tcp(address(3))));
 
-        let answered = app.oneshot(beacon).await.expect("the router is infallible");
+        let answered = app
+            .oneshot(beacon(3, Some("https://push.example/phone")))
+            .await
+            .expect("the router is infallible");
 
         assert_eq!(answered.status(), StatusCode::FORBIDDEN);
-        assert!(!crate::notify::watched(&fleet.viewers).await);
+        assert_eq!(
+            crate::notify::watched(&fleet.viewers).await,
+            crate::notify::Watched::default()
+        );
     }
 
     /// The route that writes a secret to disk is behind the same gate as the

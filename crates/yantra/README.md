@@ -58,6 +58,7 @@ sudo yantra update               # install the current release and restart what 
 yantra mcp --daemon http://<appliance>:7717  # MCP server for a Chat turn's agent: tasks and rooms in its workspace; 401 without $YANTRA_AGENT_TOKEN
 sudo -u yantra yantra passkey code  # on the hub: a code that enrols one device (ADR-0044)
 sudo -u yantra yantra passkey list  # the passkeys and the devices signed in
+sudo -u yantra yantra session read walk  # a session that only reads; its token shows once
 yantra layout show               # the dashboard layout yantrad serves, as JSON
 yantra layout set <file|->        # replace it; a stale rev exits 1
 yantra room new <room> --workspace <ws> --daemon http://<appliance>:7717  # define a room; it outlives a restart

@@ -145,7 +145,8 @@ background like every other read, and `GET /api/machines/{name}/readiness` is on
 sweep asks the machines a workspace names and each online Linux or macOS machine you own on the
 tailnet. The daemon keeps
 the latest check of each machine in memory, with its own `age_seconds`, so a later sweep that skips
-the machine or fails does not lose it. A machine no check has reached is a `404` here even though
+the machine or fails does not lose it. A restart empties that memory, so the daemon checks the hub
+at each start, before the first sweep (Y-830). The first sweep waits for the first machines reading. A machine no check has reached is a `404` here even though
 `yantra doctor <machine>` would go and ask it. Each check that ran a step carries `took_ms`,
 and a check with no step leaves the key out.
 
@@ -214,6 +215,11 @@ listens is the first boundary. The second is the owner's passkey
 device and every `/api` request then carries a session cookie; with none it gets a **401**. On the
 hub, `yantra passkey code` makes the code that enrols a device, and `yantra passkey list`,
 `yantra passkey remove` and `yantra session revoke` manage them over the socket.
+
+`yantra session read <name>`, or Settings, Devices in the dashboard, makes a session that only
+reads. Its token shows once. It passes on a `GET` from the owner's own node for 30 days, and every
+write, socket, MCP call, passkey route and session route answers **403**. The build loop keeps one
+in `~/.config/yantra/walk-session`, mode `0600`, and reads the box's pages with it.
 
 The passkey belongs to the dashboard's name, `https://<MagicDNS>:8443` by default. To serve it on
 a name you own, set `YANTRA_ORIGIN=https://yantra.example.com` in `/etc/yantra/daemon.env`. It holds

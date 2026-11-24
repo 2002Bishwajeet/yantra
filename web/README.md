@@ -26,7 +26,9 @@ use Control, because ⌘⌥ I, C and J open DevTools and ⌘⌥M minimises the w
 **While a tab is visible the page says so**, and the daemon stops pushing what
 the page is already showing (D3 §13). `useViewing` posts `/api/viewing` every
 20 s. It is an explicit beacon rather than a read counted as presence: a
-background tab still polls, and a poll is not a person watching.
+background tab still polls, and a poll is not a person watching. A browser with
+notifications on sends its push endpoint, so the daemon quiets that device alone
+and a laptop tab does not silence the phone (Y-829).
 
 **The installed dashboard gets notifications by Web Push** (Y-825,
 [ADR-0047](../docs/adr/0047-the-dashboard-gets-web-push.md)). Settings → Notifications → *This

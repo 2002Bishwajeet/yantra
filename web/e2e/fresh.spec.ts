@@ -146,6 +146,7 @@ const PRESSES: Record<string, Record<string, Expect>> = {
     // The fixture holds one passkey, so removing it leaves the first-device prompt.
     Remove: text('A code for the first device', 'iPhone'),
     'Make a code': text('ABCD2345'),
+    'Make a token': text('Zm9yLXRoZS1maXh0dXJlLW9ubHktbm90LWEtdG9rZW4'),
   },
   'settings-about': {
     ...SETTINGS_NAV,
