@@ -27,9 +27,9 @@ describe('/fleet on the busy fleet', () => {
 
     const needs = region('Needs you')
     expect(needs.getByRole('link', { name: 'Answer' }).getAttribute('href')).toBe('/w/yantra-web?view=chat')
-    expect(needs.getByText('waiting for trust')).toBeTruthy()
+    expect(needs.getByText('Waiting for trust')).toBeTruthy()
     // An unreachable machine is one row and its workspaces are not listed.
-    expect(needs.getByText('unreachable')).toBeTruthy()
+    expect(needs.getByText('Unreachable')).toBeTruthy()
     // Y-585: the plain cause here, and the raw words on the machine page.
     expect(needs.getByText(/Yantra can’t reach thinkpad over ssh/)).toBeTruthy()
     expect(needs.queryByText(/No route to host/)).toBeNull()
@@ -37,7 +37,7 @@ describe('/fleet on the busy fleet', () => {
     expect(needs.getByRole('link', { name: 'Fix' }).getAttribute('href')).toBe('/m/thinkpad')
     expect(needs.queryByText('cargo-zig')).toBeNull()
     // A crashed agent still says so, and its verb is Resume.
-    expect(needs.getByText('crashed, exit 1')).toBeTruthy()
+    expect(needs.getByText('Crashed, exit 1')).toBeTruthy()
     expect(needs.getByRole('button', { name: 'Resume' })).toBeTruthy()
 
     const running = region('Running')
@@ -50,7 +50,7 @@ describe('/fleet on the busy fleet', () => {
     expect(idle.getByRole('button', { name: 'Show 1 more' })).toBeTruthy()
     fireEvent.click(idle.getByRole('button', { name: 'Show 1 more' }))
     expect(idle.getAllByRole('button', { name: /^(Start|Resume)$/ })).toHaveLength(4)
-    expect(idle.getByText('finished')).toBeTruthy()
+    expect(idle.getByText('Finished')).toBeTruthy()
     // Y-639: a stopped agent and a session that is gone read the same.
     expect(idle.getAllByText('stopped')).toHaveLength(3)
   })
@@ -248,9 +248,9 @@ describe('a machine row whose answer was a tmux error', () => {
         sessions={new Map()}
       />,
     )
-    expect(await screen.findByText('not listed')).toBeTruthy()
+    expect(await screen.findByText('Not listed')).toBeTruthy()
     expect(screen.getByText('Yantra could not list the sessions on pi.')).toBeTruthy()
-    for (const words of [/unreachable/, /can’t reach/, /appliance’s key/, /Permission denied/]) {
+    for (const words of [/unreachable/i, /can’t reach/, /appliance’s key/, /Permission denied/]) {
       expect(screen.queryByText(words)).toBeNull()
     }
   })

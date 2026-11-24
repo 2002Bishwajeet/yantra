@@ -63,26 +63,6 @@ export function About() {
         ) : (
           <Skeleton shape="text" />
         )}
-        <Disclosure summary="Technical details">
-          <dl className="settings__facts">
-              <Fact label="Target" value={facts ? <Num clip title={facts.target}>{facts.target}</Num> : null} wide />
-              <Fact label="Uptime" value={facts ? <Num>{uptime(facts.uptime_seconds)}</Num> : null} />
-              <Fact
-                label="Listens on"
-                value={
-                  facts
-                    ? facts.listening_on.map((address) => (
-                        <Num className="settings__line" clip key={address} title={address}>
-                          {address}
-                        </Num>
-                      ))
-                    : null
-                }
-                wide
-              />
-              <Fact label="Reached at" value={<Num>{location.host}</Num>} />
-          </dl>
-        </Disclosure>
         <dl className="settings__facts">
           {published?.looked === 'failed' ? null : (
             <Fact
@@ -109,6 +89,26 @@ export function About() {
             running={facts.version}
           />
         ) : null}
+        <Disclosure summary="Technical details">
+          <dl className="settings__facts">
+              <Fact label="Target" value={facts ? <Num clip title={facts.target}>{facts.target}</Num> : null} wide />
+              <Fact label="Uptime" value={facts ? <Num>{uptime(facts.uptime_seconds)}</Num> : null} />
+              <Fact
+                label="Listens on"
+                value={
+                  facts
+                    ? facts.listening_on.map((address) => (
+                        <Num className="settings__line" clip key={address} title={address}>
+                          {address}
+                        </Num>
+                      ))
+                    : null
+                }
+                wide
+              />
+              <Fact label="Reached at" value={<Num>{location.host}</Num>} />
+          </dl>
+        </Disclosure>
       </section>
       <Group label="Who can open the dashboard">
         <ListItem

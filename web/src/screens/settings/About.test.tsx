@@ -33,6 +33,13 @@ describe('About', () => {
     expect(screen.getByText(/keeps no fleet state/)).toBeTruthy()
   })
 
+  it('puts the channel and the update above the technical details', async () => {
+    mountSettings('desktop', '/settings/about')
+    const channel = await screen.findByRole('radio', { name: /Nightly/ })
+    const details = screen.getByRole('button', { name: /Technical details/ })
+    expect(channel.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('credits NVIDIA for the dictation model, as its CC-BY-4.0 licence asks', async () => {
     mountSettings('desktop', '/settings/about')
     const model = await screen.findByRole('link', { name: /Dictation model/ })

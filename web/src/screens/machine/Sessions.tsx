@@ -94,12 +94,12 @@ export function Sessions(props: {
                   className="machine__state"
                   state={workspace ? 'running' : 'unknown'}
                 >
-                  {workspace ? 'claimed' : 'unclaimed'}
+                  {workspace ? 'Claimed' : 'Unclaimed'}
                 </State>
                 <span className="machine__text">
                   <span className="machine__name m3-clip">{session.name}</span>
                   <span className="machine__where m3-clip">
-                    {workspace ? `workspace ${workspace}` : 'Not in a workspace'} ·{' '}
+                    {workspace ? `Workspace ${workspace}` : 'Not in a workspace'} ·{' '}
                     {session.windows} window{session.windows === 1 ? '' : 's'} ·{' '}
                     {session.attached === 0
                       ? 'detached'

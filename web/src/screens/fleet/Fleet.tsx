@@ -265,7 +265,7 @@ function Idle(props: { rows: WorkRow[]; sessions: Sessions; limit: number; pendi
         </Eyebrow>
         {rows.length > 0 ? <Num>{rows.length}</Num> : null}
         <Text scale="body-small" tone="variant">
-          {limit === 0 ? 'nothing running' : 'nothing running, most recent first'}
+          {limit === 0 ? 'Nothing running' : 'Nothing running, most recent first'}
         </Text>
         {limit === 0 ? <span className="fleet__spacer" /> : null}
         {limit === 0 ? toggle : null}
@@ -301,7 +301,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
     return (
       <Row className="fleet__row">
         <State className="fleet__state" state={listing ? 'unknown' : 'failed'}>
-          {listing ? 'not listed' : 'unreachable'}
+          {listing ? 'Not listed' : 'Unreachable'}
         </State>
         <span className="fleet__meta">
           <Link className="fleet__name m3-hit" params={{ machine: row.machine }} to="/m/$machine">
@@ -325,7 +325,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
     return (
       <Row className="fleet__row">
         <State className="fleet__state" state="failed">
-          will not load
+          Will not load
         </State>
         <span className="fleet__meta">
           <span className="fleet__name">{row.name}</span>

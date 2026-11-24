@@ -53,27 +53,27 @@ export function stoppable(status: WorkspaceStatus | null): boolean {
 /** Mark plus word, never colour alone (D3 §6). A group heading is not a
  *  state: `finished` still says *finished* inside Idle. */
 export function stateOf(status: WorkspaceStatus | null): { state: MarkState; word: string } {
-  if (!status) return { state: 'unknown', word: 'not read yet' }
-  if (status.reached === 'no') return { state: 'unknown', word: 'machine did not answer' }
+  if (!status) return { state: 'unknown', word: 'Not read yet' }
+  if (status.reached === 'no') return { state: 'unknown', word: 'Machine did not answer' }
   const agent = status.status
   switch (agent.state) {
     case 'awaiting_trust':
-      return { state: 'needs', word: 'waiting for trust' }
+      return { state: 'needs', word: 'Waiting for trust' }
     case 'running':
-      return { state: 'running', word: 'running' }
+      return { state: 'running', word: 'Running' }
     case 'no_agent':
-      return { state: 'running', word: 'no agent, opened as a shell' }
+      return { state: 'running', word: 'No agent, opened as a shell' }
     case 'finished':
-      return { state: 'idle', word: 'finished' }
+      return { state: 'idle', word: 'Finished' }
     case 'stopped':
     case 'no_session':
-      return { state: 'idle', word: 'stopped' }
+      return { state: 'idle', word: 'Stopped' }
     case 'crashed':
-      return { state: 'failed', word: `crashed, exit ${agent.exit_status}` }
+      return { state: 'failed', word: `Crashed, exit ${agent.exit_status}` }
     case 'killed':
-      return { state: 'failed', word: `killed, ${agent.signal}` }
+      return { state: 'failed', word: `Killed, ${agent.signal}` }
     case 'unclear':
-      return { state: 'unknown', word: 'unclear' }
+      return { state: 'unknown', word: 'Unclear' }
   }
 }
 

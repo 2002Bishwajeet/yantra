@@ -55,12 +55,12 @@ describe('confirming', () => {
 
 describe('the words', () => {
   it('are a mark and a word for every state, and never colour alone', () => {
-    expect(stateOf(reached({ state: 'awaiting_trust' }))).toEqual({ state: 'needs', word: 'waiting for trust' })
-    expect(stateOf(reached({ state: 'no_agent' }))).toEqual({ state: 'running', word: 'no agent, opened as a shell' })
-    expect(stateOf(reached({ state: 'crashed', exit_status: 137 }))).toEqual({ state: 'failed', word: 'crashed, exit 137' })
-    expect(stateOf(reached({ state: 'unclear', because: 'two verdicts' }))).toEqual({ state: 'unknown', word: 'unclear' })
-    expect(stateOf(null)).toEqual({ state: 'unknown', word: 'not read yet' })
-    expect(stateOf(gone).word).toBe('machine did not answer')
+    expect(stateOf(reached({ state: 'awaiting_trust' }))).toEqual({ state: 'needs', word: 'Waiting for trust' })
+    expect(stateOf(reached({ state: 'no_agent' }))).toEqual({ state: 'running', word: 'No agent, opened as a shell' })
+    expect(stateOf(reached({ state: 'crashed', exit_status: 137 }))).toEqual({ state: 'failed', word: 'Crashed, exit 137' })
+    expect(stateOf(reached({ state: 'unclear', because: 'two verdicts' }))).toEqual({ state: 'unknown', word: 'Unclear' })
+    expect(stateOf(null)).toEqual({ state: 'unknown', word: 'Not read yet' })
+    expect(stateOf(gone).word).toBe('Machine did not answer')
   })
 
   it('carries the reason where there is one', () => {

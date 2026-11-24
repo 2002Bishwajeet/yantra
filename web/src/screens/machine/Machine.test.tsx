@@ -46,7 +46,7 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
     const here = card('Workspaces on this machine')
     expect(here.getByRole('link', { name: 'yantra-web' })).toBeTruthy()
     expect(here.getByRole('link', { name: 'agent-sdk' })).toBeTruthy()
-    expect(here.getByText('waiting for trust')).toBeTruthy()
+    expect(here.getByText('Waiting for trust')).toBeTruthy()
     // `landing` lives on macbook, so it is not drawn here.
     expect(here.queryByText('landing')).toBeNull()
   })
@@ -81,6 +81,9 @@ describe('/m/cachyos-g14 on the busy fleet', () => {
       '/m/cachyos-g14/s/scratch',
     )
     expect(sessions.getByText(/Not in a workspace/)).toBeTruthy()
+    expect(sessions.getAllByText(/^Workspace \S/).length).toBeGreaterThan(0)
+    expect(sessions.getAllByText('Claimed').length).toBeGreaterThan(0)
+    expect(sessions.getByText('Unclaimed')).toBeTruthy()
     expect(sessions.queryByRole('button', { name: 'Adopt' })).toBeNull()
   })
 

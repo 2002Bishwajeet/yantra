@@ -74,7 +74,7 @@ function Editor(props: {
   return (
     <>
       <Card className="repair__alert" role="alert" surface="error">
-        <State state="failed">will not load</State>
+        <State state="failed">Will not load</State>
         <div className="repair__reason">
           <h2 className="repair__reason-title">
             {refused ? refusal(refused) : `${name} will not load.`}
