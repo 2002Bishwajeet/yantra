@@ -175,6 +175,20 @@ describe('the session header on a phone', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Delete' })).toBeTruthy()
   })
 
+  it('badges the menu button while the agent waits for the owner, so the app bar shows it', async () => {
+    const waiting = { ...reached('running'), status: { state: 'awaiting_trust' } } as WorkspaceStatus
+    await onPhone('running', waiting)
+    const more = await within(bar()).findByRole('button', { name: /More actions/ })
+    expect(more.textContent).toContain('waiting for trust')
+    expect(more.querySelector('.m3-badge')).not.toBeNull()
+  })
+
+  it('draws no badge while the agent runs', async () => {
+    await onPhone('running')
+    const more = await within(bar()).findByRole('button', { name: 'More actions' })
+    expect(more.querySelector('.m3-badge')).toBeNull()
+  })
+
   it('keeps the reason of a verb that cannot run as its accessible description', async () => {
     await onPhone('stopped', null)
     const resume = await within(bar()).findByRole('button', { name: 'Resume' })

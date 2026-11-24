@@ -8,6 +8,7 @@ import type { Reading } from '@/api/hooks'
 import { answerFailure, joinFixes, reachWords } from '@/lib/checks'
 import { ago } from '@/lib/time'
 import { useIdle } from '@/lib/useIdle'
+import { Badge } from '@/m3/badge/Badge'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { IconButton } from '@/m3/icon-button/IconButton'
@@ -131,7 +132,15 @@ export function Header(props: HeaderProps) {
   const menuVerbs = phone ? (live.stop ? [verb.stop, verb.resume] : [verb.stop]) : [other]
   const menu = (
     <Menu>
-      <MenuTrigger render={<IconButton label="More actions" ref={more} />}>
+      <MenuTrigger
+        render={
+          <IconButton
+            badge={phone && (mark === 'needs' || mark === 'failed') ? <Badge label={words} /> : undefined}
+            label="More actions"
+            ref={more}
+          />
+        }
+      >
         <Ellipsis />
       </MenuTrigger>
       <MenuPopup align="end" keepMounted={idle}>

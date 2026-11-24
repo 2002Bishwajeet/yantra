@@ -172,7 +172,7 @@ async function workspaceScene(page, name, file, menu) {
   // The phone's picture ends in -1, as its other screens do, so walk.sh publish puts it in the PR's table.
   const shot = `${phone ? `${menu}-1` : menu}.png`
   await snap(page, phone ? `${menu}-1` : menu, false)
-  if (readFileSync(shot).equals(readFileSync(`${file}.png`))) {
+  if (readFileSync(shot).equals(readFileSync(`${file}${phone ? '-1' : ''}.png`))) {
     errors.push(`${name} workspace scene: menu shot equals the closed screen`)
   }
   await page.keyboard.press('Escape')
