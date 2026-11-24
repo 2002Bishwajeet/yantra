@@ -174,3 +174,12 @@ One check is by hand, because it needs real hardware: the owner's iPhone, from t
 - **Key rotation.** No route makes a second key. Deleting the line from the file makes the next
   *Turn on* create one, and every device must turn on again.
 - **Which events push.** This ADR adds a channel. It adds no event and removes none.
+
+> **ADR-0047, decision 6, 2026-11-24 (Y-829):** the watched-look rule now applies to each device
+> for Web Push. One `viewing` timestamp stopped the push to every device, so a laptop tab on
+> screen silenced the owner's phone. The owner found it on the first test. The beacon now names
+> the device's push endpoint. The daemon skips only the devices that beaconed inside the window
+> and pushes to the rest. A beacon with no endpoint, from a browser that is not subscribed, still
+> means "someone is watching" for the ntfy relay. The relay keeps the old rule, because the daemon
+> cannot tell which device an ntfy message reaches. The done test "a watched look pushes nothing"
+> becomes "a watched device gets no push, and an unwatched device gets it".
