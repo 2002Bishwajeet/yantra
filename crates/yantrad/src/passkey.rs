@@ -56,6 +56,9 @@ const CODE_LIFE_ENV: &str = "YANTRA_PASSKEY_CODE_SECONDS";
 /// Every passkey belongs to the one owner, so one user handle names them all.
 /// An authenticator then keeps one Yantra passkey and replaces it on enrol.
 const OWNER: Uuid = Uuid::from_u128(0x7961_6e74_7261_2d6f_776e_6572_0000_0001);
+/// Hashed before a read-only token. A daemon older than `read_only` loads the
+/// row as a full session; no cookie can hold the NUL, so no token matches it there.
+const READS: &str = "yantra read-only session\0";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -90,15 +93,21 @@ struct Enrolled {
     key: Passkey,
 }
 
-/// One signed-in device. `hash` is SHA-256 of its token in hex.
+/// One signed-in device. `hash` is SHA-256 in hex of its token, or of
+/// [`READS`] and its token when it is read-only.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Session {
     pub id: String,
+    /// The passkey that made it. Empty for a read-only session the hub's
+    /// socket made.
     pub passkey: String,
     pub device: String,
     hash: String,
     pub made: u64,
     pub ends: u64,
+    /// It passes on a `GET` only (the 2026-11-24 note on decisions 4 and 9).
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -428,9 +437,13 @@ impl Passkeys {
     }
 
     fn session_at(&self, token: &str, now: u64) -> Option<Session> {
-        let hash = hash(token);
+        let (full, reads) = (hash(token), hash_of(token, true));
         let mut state = self.lock();
-        let found = state.saved.sessions.iter().position(|s| s.hash == hash)?;
+        let found = state
+            .saved
+            .sessions
+            .iter()
+            .position(|s| s.hash == if s.read_only { &*reads } else { &*full })?;
         if state.saved.sessions[found].ends > now {
             return Some(state.saved.sessions[found].clone());
         }
@@ -514,6 +527,17 @@ impl Passkeys {
         end_where(&mut state, |s| s.passkey == name);
         self.save(&state)?;
         Ok(true)
+    }
+
+    /// A read-only session named `device` (the 2026-11-24 note on decisions 4
+    /// and 9). `by` is the passkey of the session that asked, so removing that
+    /// passkey ends it; the hub's socket has none.
+    pub fn read_only(&self, device: &str, by: Option<&str>) -> Result<(String, Session), Error> {
+        let device = device_name(device)?;
+        let mut state = self.lock();
+        let made = sign_in(&mut state, by.unwrap_or_default(), &device, true, now());
+        self.save(&state)?;
+        Ok(made)
     }
 
     fn revoke_where(&self, revoked: impl Fn(&Session) -> bool) -> Result<usize, Error> {
@@ -606,7 +630,7 @@ impl Passkeys {
             made: now,
             key,
         });
-        let signed = sign_in(&mut state, &name, &name, now);
+        let signed = sign_in(&mut state, &name, &name, false, now);
         self.save(&state)?;
         Ok(signed)
     }
@@ -679,7 +703,7 @@ impl Passkeys {
         enrolled.key.update_credential(&result);
         let name = enrolled.name.clone();
         let device = device.unwrap_or_else(|| name.clone());
-        let signed = sign_in(&mut state, &name, &device, now);
+        let signed = sign_in(&mut state, &name, &device, false, now);
         self.save(&state)?;
         Ok(signed)
     }
@@ -730,16 +754,23 @@ fn write(file: &Path, saved: &Saved) -> Result<(), Error> {
     std::fs::rename(&temp, file).map_err(failed)
 }
 
-fn sign_in(state: &mut Held, passkey: &str, device: &str, now: u64) -> (String, Session) {
+fn sign_in(
+    state: &mut Held,
+    passkey: &str,
+    device: &str,
+    read_only: bool,
+    now: u64,
+) -> (String, Session) {
     let token = token();
     state.saved.sessions.retain(|s| s.ends > now);
     let session = Session {
         id: id(),
         passkey: passkey.to_owned(),
         device: device.to_owned(),
-        hash: hash(&token),
+        hash: hash_of(&token, read_only),
         made: now,
         ends: now + SESSION_LIFE,
+        read_only,
     };
     state.saved.sessions.push(session.clone());
     (token, session)
@@ -790,6 +821,14 @@ fn hash(token: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn hash_of(token: &str, read_only: bool) -> String {
+    if read_only {
+        hash(&format!("{READS}{token}"))
+    } else {
+        hash(token)
+    }
 }
 
 /// A failed `getrandom` aborts: an authoriser with no randomness must not
@@ -885,6 +924,7 @@ where
         .route("/passkey/login/finish", post(login_finish::<I>))
         .route("/sessions/{id}", delete(revoked::<I>))
         .route("/sessions/revoke-others", post(revoked_others::<I>))
+        .route("/sessions/read/{name}", post(read_only::<I>))
         .route("/join/code", post(join_code::<I>))
         .with_state(Signing { authoriser, fleet })
 }
@@ -1007,6 +1047,7 @@ struct Shown {
     made: u64,
     ends: u64,
     this_device: bool,
+    read_only: bool,
 }
 
 impl Shown {
@@ -1018,6 +1059,7 @@ impl Shown {
             device: session.device,
             made: session.made,
             ends: session.ends,
+            read_only: session.read_only,
         }
     }
 }
@@ -1095,6 +1137,7 @@ async fn owner<I: Inventory>(
 ) -> Result<Option<Session>, Refused> {
     match identify(&state.authoriser, from, headers).await? {
         Who::Owner(_, session) => Ok(session),
+        Who::Reader(_) => Err(Refused::ReadOnly),
         Who::Agent { .. } => Err(Refused::AgentScope),
     }
 }
@@ -1160,6 +1203,23 @@ async fn revoked_others<I: Inventory + Clone + Send + Sync + 'static>(
     let ended = state.passkeys().revoke_others(&keep).map_err(refused)?;
     tracing::info!("signed out {ended} other sessions");
     Ok(Json(serde_json::json!({"revoked": ended})))
+}
+
+/// `yantra session read <name>` on the wire. The token is in the body and in
+/// no cookie: a cookie would replace the session of the browser that asked.
+async fn read_only<I: Inventory + Clone + Send + Sync + 'static>(
+    State(state): State<Signing<I>>,
+    ConnectInfo(from): ConnectInfo<Peer>,
+    headers: HeaderMap,
+    Route(name): Route<String>,
+) -> Result<Json<serde_json::Value>, Refused> {
+    let this = owner(&state, &from, &headers).await?;
+    let by = this.as_ref().map(|session| session.passkey.as_str());
+    let (token, session) = state.passkeys().read_only(&name, by).map_err(refused)?;
+    tracing::info!("made the read-only session {}", session.id);
+    Ok(Json(
+        serde_json::json!({"token": token, "session": Shown::of(session, None)}),
+    ))
 }
 
 /// 204, and the cookie cleared when the session ended was this one.
@@ -1494,6 +1554,111 @@ pub(crate) mod tests {
             "a restart keeps the session"
         );
         assert_eq!(again.list().0.len(), 1);
+    }
+
+    #[test]
+    fn a_read_only_session_is_kept_as_a_hash_and_a_field_and_never_a_token() {
+        let file = scratch("read-only");
+        let passkeys = Passkeys::open(file.clone());
+        let (_, _, owner) = enrolled(&passkeys, "iPhone");
+
+        let (token, session) = passkeys
+            .read_only(" walk ", Some(&owner.passkey))
+            .expect("a usable name");
+
+        assert!(session.read_only);
+        assert_eq!(
+            (session.device.as_str(), session.passkey.as_str()),
+            ("walk", "iPhone")
+        );
+        assert_eq!(session.ends - session.made, SESSION_LIFE);
+        let text = std::fs::read_to_string(&file).expect("written");
+        assert!(text.contains("read_only = true"), "{text}");
+        assert!(text.contains(&session.hash), "{text}");
+        assert!(!text.contains(&token), "{text}");
+        assert_eq!(Passkeys::open(file).session(&token), Some(session));
+    }
+
+    /// The downgrade proof. A daemon older than `read_only` matches a row on
+    /// SHA-256 of the cookie's value. The stored hash is not that of the
+    /// token, and no header value holds the bytes it is the hash of.
+    #[test]
+    fn a_read_only_row_matches_no_cookie_as_a_full_session() {
+        let passkeys = Passkeys::memory();
+        let (token, session) = passkeys.read_only("walk", None).expect("a usable name");
+
+        assert_ne!(session.hash, hash(&token));
+        let hashed = format!("{READS}{token}");
+        assert_eq!(session.hash, hash(&hashed));
+        assert!(
+            axum::http::HeaderValue::from_str(&format!("{COOKIE}={hashed}")).is_err(),
+            "a cookie cannot carry what the row is the hash of"
+        );
+
+        // The row as an older daemon writes it back: the field is gone.
+        let mut state = passkeys.lock();
+        state.saved.sessions[0].read_only = false;
+        drop(state);
+        assert!(passkeys.session(&token).is_none());
+    }
+
+    #[test]
+    fn a_read_only_session_ends_after_30_days() {
+        let passkeys = Passkeys::memory();
+        let (token, session) = passkeys.read_only("walk", None).expect("a usable name");
+
+        assert!(passkeys.session_at(&token, session.ends - 1).is_some());
+        assert!(passkeys.session_at(&token, session.ends).is_none());
+        assert!(passkeys.list().1.is_empty(), "it is gone, not hidden");
+    }
+
+    #[test]
+    fn removing_a_passkey_revokes_the_read_only_sessions_it_made() {
+        let passkeys = Passkeys::memory();
+        let (_, _, owner) = enrolled(&passkeys, "iPhone");
+        let (mine, _) = passkeys
+            .read_only("walk", Some(&owner.passkey))
+            .expect("a usable name");
+        let (hubs, _) = passkeys.read_only("hub", None).expect("a usable name");
+
+        assert!(passkeys.remove("iPhone").expect("in memory"));
+
+        assert!(passkeys.session(&mine).is_none());
+        assert!(
+            passkeys.session(&hubs).is_some(),
+            "the socket made this one"
+        );
+        assert!(
+            !passkeys.remove("").expect("in memory"),
+            "no passkey is named so"
+        );
+    }
+
+    #[test]
+    fn a_read_only_session_needs_a_device_name() {
+        let passkeys = Passkeys::memory();
+
+        assert!(matches!(passkeys.read_only(" ", None), Err(Error::BadName)));
+        assert!(passkeys.list().1.is_empty());
+    }
+
+    #[test]
+    fn a_file_with_no_read_only_field_loads_as_full_sessions() {
+        let file = scratch("old-file");
+        let passkeys = Passkeys::open(file.clone());
+        let (_, token, _) = enrolled(&passkeys, "iPhone");
+        let text = std::fs::read_to_string(&file).expect("written");
+        let old: String = text
+            .lines()
+            .filter(|line| !line.starts_with("read_only"))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        assert_ne!(old, text, "the new file names the field");
+        std::fs::write(&file, old).expect("writable");
+
+        let session = Passkeys::open(file).session(&token).expect("it loads");
+
+        assert!(!session.read_only);
     }
 
     #[test]

@@ -3,6 +3,7 @@ export const meta = {
   description: 'Build open tracker rows unattended: rank, build, verify, review, simplify, merge (CLAUDE.md §B7)',
   whenToUse: 'The owner wants open tracker rows built and merged without reviewing each one',
   phases: [
+    { title: 'Look', detail: 'read the real box with the read-only session, and add a row for each wrong state' },
     { title: 'Triage', detail: 'rank the rows an agent can finish alone' },
     { title: 'Build', detail: 'plan, build, CI gate, fix' },
     { title: 'Review', detail: 'independent review, fix, re-check' },
@@ -163,6 +164,37 @@ const SHIP_SCHEMA = {
   required: ['status'],
 }
 
+const LOOK_SCHEMA = {
+  type: 'object',
+  properties: {
+    looked: { type: 'boolean', description: 'true only when look.sh exited 0 and you read its pictures and texts' },
+    skipped: { type: 'string', description: 'when looked is false: why, in one sentence. Else empty' },
+    ask: { type: 'string', description: 'the exact step the owner takes so that the next run can look, and why. Empty when the owner need do nothing' },
+    box: { type: 'string', description: 'the "box:" line look.sh printed, or empty' },
+    findings: { type: 'array', items: { type: 'string' }, description: 'one line per wrong state: the page, what it shows, what it must show. A finding that an open row already names says which row' },
+    rows: { type: 'array', items: { type: 'string' }, description: 'the Y-numbers of the rows you added' },
+    pr: { type: 'string', description: 'the PR that added them, or empty' },
+  },
+  required: ['looked', 'skipped', 'ask', 'box', 'findings', 'rows', 'pr'],
+}
+
+// Y-835: CLAUDE.md §B7, "It looks at the real box first". The rows it adds are on origin/main before triage reads it.
+const LOOK = `${REPO}/.claude/workflows/look.sh`
+const LOOK_DIR = `${REPO}/.claude/build-loop/look/${TODAY}`
+const LOOK_LOG = `${LOOK_DIR}/look.log`
+const LOOK_SESSION = '~/.config/yantra/walk-session'
+const LOOK_ASK = `Open the box's dashboard, go to Settings, then Devices, and press Make a token under Read-only session. Save the token on this laptop in ${LOOK_SESSION} and run chmod 600 on that file. The build loop reads the box's pages with it before it builds; without it each run skips that look.`
+function lookPrompt() {
+  return `Look at the real box before any row is built (CLAUDE.md §B7, "It looks at the real box first"). You open pages and press nothing: the box is the owner's real one.
+1. Run \`mkdir -p ${LOOK_DIR} && rm -f ${LOOK_LOG}\`. The look waits for the laptop's lock for heavy commands and then opens each page in two browsers, which can take longer than a Bash call. ${DETACH(LOOK_LOG, 'LOOK_EXIT', `~/.claude/bin/heavy bash ${LOOK} ${LOOK_DIR}`)} ${BLOCK(LOOK_LOG, 'LOOK_EXIT')} It reads the owner's read-only session from ${LOOK_SESSION}. Never read, print or copy that file, and never put what it holds in a command, a row, a PR or your answer.
+2. LOOK_EXIT=3 means the laptop holds no usable session. Return looked=false, the log's "look:" line as skipped, and this text as ask: "${LOOK_ASK}" LOOK_EXIT=4 means the box did not answer: return looked=false, the "look:" line as skipped and an empty ask. On any other value but 0, and when the line never comes, return looked=false, the last lines of the log as skipped and an empty ask. In each case findings and rows are empty.
+3. On LOOK_EXIT=0, put the log's "box:" line in box. Read every TXT and PNG file in ${LOOK_DIR} with the Read tool, and read responses.txt and errors.txt there. Check the copy word by word in the TXT files, never only in a picture.
+4. The session only reads, so the box answers 403 "this session is read-only" to some requests, and responses.txt lists each one. A surface that failed only on such a 403 is not a finding. Any other wrong state is one: a stale check, a missing chip, wrong or misspelt copy, an error or an empty screen where the page expects content, a layout broken at 390 px. When the box line says newer True, the box runs an older build than its channel offers: say so in each finding.
+5. Run git -C ${REPO} fetch origin and read tracker.md with git -C ${REPO} show origin/main:tracker.md. Drop each finding that an open row there already names, and say which row in its line.
+6. If findings remain, add one ⬜ todo row for each to tracker.md §3 in one docs PR. Run git -C ${REPO} worktree add -b look-${TODAY} ${WT_ROOT}/look-${TODAY} origin/main and work only there. Take the next free Y-numbers. A row says what to do and what done means, and stops (CLAUDE.md §B5). It opens with "**Box look, ${TODAY}:**" and what the page shows, which makes it priority 0. The repository is public: a row names no private repository, branch, thread title, address or person, and you commit or push no picture and no text file from the look. Commit "Y-NNN: add the rows from the box look" with the first new number, push the branch and open the PR with gh pr create --base main. Then run exactly one command, bare: bash ${MERGE_GUARD} <pr number> --merge "Y-NNN: add the rows from the box look (#<pr number>)". Never call \`gh pr merge\` yourself. After the merge, remove the worktree and the local branch. Return the row numbers and the PR. If the merge guard fails, return the PR and say so in skipped; the findings stay in your answer.
+No AI attribution anywhere.`
+}
+
 function triagePrompt(exclude) {
   return `Run git -C ${REPO} fetch origin, then read tracker.md from origin/main with git -C ${REPO} show origin/main:tracker.md. Do not read the file in the checkout: it can be stale or on another branch.
 Rank the open rows in its §3 that an agent can finish alone today.
@@ -172,7 +204,7 @@ Not eligible: anything CLAUDE.md §B7 excludes. That covers rows that need the o
 Also skip: ${exclude.length ? exclude.join(', ') : 'nothing else'}.
 Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, unless its reason no longer holds on origin/main.${RETRY.length ? `\nThe owner asked to retry these parked rows, so they are eligible if nothing else rules them out: ${RETRY.join(', ')}. An open PR does not rule a retried row out: it continues on that PR's branch.` : ''}
 
-Priority, from CLAUDE.md §B7: 0 = a defect the owner or the box walk found on the real box (the row quotes the owner or the walk), 1 = a row that milestone M18 (the daily driver) lists, 2 = closes or unblocks another open milestone, 3 = another defect or a red suite, 4 = a feature whose dependencies are done, 5 = debt. Ties go to the lower Y-number.
+Priority, from CLAUDE.md §B7: 0 = a defect the owner or the box look found on the real box (the row quotes the owner, the walk or the box look), 1 = a row that milestone M18 (the daily driver) lists, 2 = closes or unblocks another open milestone, 3 = another defect or a red suite, 4 = a feature whose dependencies are done, 5 = debt. Ties go to the lower Y-number.
 Put each priority 0 or 1 row that is blocked only on the owner in owner_asks, with the exact step the owner takes and why. If owner_asks is not empty, return no row of priority 3 or higher in rows: move them to skipped with the reason "waits behind an owner ask".
 For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs), its risk (security, hard or normal, as the schema says) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
 }
@@ -422,6 +454,13 @@ const results = []
 const skipped = new Map()
 const only = A.rows || null
 
+phase('Look')
+const NO_LOOK = (skipped) => ({ looked: false, skipped, ask: '', box: '', findings: [], rows: [], pr: '' })
+const look = DRY
+  ? NO_LOOK('a dry run does not look at the box')
+  : (await agent(lookPrompt(), { label: 'look', phase: 'Look', schema: LOOK_SCHEMA, model: 'sonnet', effort: 'medium' })) || NO_LOOK('the look agent died')
+log(look.looked ? `Look: ${look.box}; ${look.findings.length} findings, ${look.rows.length} new rows` : `Look skipped: ${look.skipped}`)
+
 // One triage serves the run: the 2026-11-02 run re-triaged before every batch and got the same ranking four times.
 phase('Triage')
 const t = await agent(triagePrompt([]), { label: 'triage', phase: 'Triage', schema: TRIAGE_SCHEMA, model: 'opus', effort: 'medium' })
@@ -459,7 +498,9 @@ if (pool.some((r) => !attempted.has(r.id))) log(`Stopped at maxRows=${MAX_ROWS};
 phase('Report')
 await agent(
   `Write ${REPORT} (create the folder if needed). If it exists, an earlier run today wrote it: keep its text and append this run under a \`## Another run\` heading. It is the owner's morning report for the build loop on ${TODAY}. Plain prose, CLAUDE.md §A6.
-Open with what the owner must do, if anything: one short paragraph per ask, the exact step and why, no row ids. Asks: ${JSON.stringify(asks)}\nThen one line: how many rows merged, stayed open and parked.
+Open with what the owner must do, if anything: one short paragraph per ask, the exact step and why, no row ids. The look's ask comes first when it has one. Asks: ${JSON.stringify(asks)}
+Then one paragraph on the look at the real box: the box's version and channel, what the look saw and the rows it added, or that the run skipped the look and why. Look: ${JSON.stringify(look)}
+Then one line: how many rows merged, stayed open and parked.
 Then a table: row, title, outcome, PR, the machine that ran its gate (gateMachine), and for parked rows the reason and the branch that holds the work.
 Then the rows triage skipped, one line each.
 Results: ${JSON.stringify(results)}
@@ -467,4 +508,4 @@ Skipped: ${JSON.stringify([...skipped].map(([id, reason]) => ({ id, reason })))}
   { label: 'report', phase: 'Report', model: 'sonnet', effort: 'low' },
 )
 
-return { report: REPORT, asks, results, skipped: [...skipped].map(([id, reason]) => ({ id, reason })) }
+return { report: REPORT, look, asks, results, skipped: [...skipped].map(([id, reason]) => ({ id, reason })) }

@@ -44,7 +44,7 @@ use yantra_core::room_file::{self, Definition};
 use yantra_core::workspace;
 
 use crate::room::Rooms;
-use crate::write::{Authoriser, Peer, Refused, Who, allowed, identify};
+use crate::write::{Authoriser, Peer, Refused, Who, allowed, identify, reading};
 
 const THREAD: &str = "x-yantra-thread";
 const SESSION: &str = "mcp-session-id";
@@ -134,6 +134,9 @@ async fn mcp<I: Inventory + Clone + Send + Sync + 'static>(
     body: Bytes,
 ) -> Result<Response, Refused> {
     let who = identify(&state.authoriser, &from, &headers).await?;
+    if matches!(who, Who::Reader(_)) {
+        return Err(Refused::ReadOnly);
+    }
     if let Who::Agent { workspace, .. } = &who
         && thread_workspace(&headers).is_some_and(|named| named != workspace)
     {
@@ -234,6 +237,7 @@ async fn tool<I>(state: &Served<I>, who: &Who, reader: &Reader, label: &str, cal
     let rooms = match who {
         Who::Agent { workspace, .. } => &state.rooms.scoped(workspace),
         Who::Owner(..) => &state.rooms,
+        Who::Reader(_) => return outcome(Err("this session is read-only".to_owned())),
     };
     let said = match call {
         Call::Send { room, text } => rooms
@@ -328,8 +332,10 @@ fn thread_workspace(headers: &HeaderMap) -> Option<&str> {
 /// An agent token reaches a room only when the room is its workspace's
 /// (ADR-0044 decision 12).
 fn may_reach(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
-    let Who::Agent { workspace, .. } = who else {
-        return Ok(());
+    let workspace = match who {
+        Who::Owner(..) => return Ok(()),
+        Who::Reader(_) => return Err(Refused::ReadOnly),
+        Who::Agent { workspace, .. } => workspace,
     };
     let home = rooms.view(name).map_err(missing)?.0.workspace;
     if home.as_deref() == Some(workspace.as_str()) {
@@ -346,7 +352,8 @@ fn may_reach(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
 fn may_call(who: &Who, rooms: &Rooms, name: &str) -> Result<(), Refused> {
     match who {
         Who::Agent { workspace, .. } if !rooms.admits(name, workspace) => Err(Refused::AgentScope),
-        _ => Ok(()),
+        Who::Reader(_) => Err(Refused::ReadOnly),
+        Who::Owner(..) | Who::Agent { .. } => Ok(()),
     }
 }
 
@@ -733,7 +740,7 @@ async fn list<I: Inventory + Clone + Send + Sync + 'static>(
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<RoomSummary>>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     Ok(Json(
         state
             .rooms
@@ -750,7 +757,7 @@ async fn view<I: Inventory + Clone + Send + Sync + 'static>(
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Result<Json<RoomView>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     let (summary, messages) = state.rooms.view(&name).map_err(missing)?;
     let presence = state.rooms.presence(&name).map_err(missing)?;
     Ok(Json(RoomView {
@@ -769,7 +776,7 @@ async fn events<I: Inventory + Clone + Send + Sync + 'static>(
     Path(name): Path<String>,
     RawQuery(query): RawQuery,
 ) -> Result<Json<RoomEvents>, Refused> {
-    allowed(&state.authoriser, &from, &headers).await?;
+    reading(&state.authoriser, &from, &headers).await?;
     let (after, wait) = poll(query.as_deref()).map_err(|said| Refused::Verb {
         status: StatusCode::BAD_REQUEST,
         said: said.to_owned(),
@@ -813,6 +820,7 @@ async fn post_message<I: Inventory + Clone + Send + Sync + 'static>(
             let label = format!("owner on {}", machine.name);
             state.rooms.post(&name, &label, &post.text)
         }
+        Who::Reader(_) => return Err(Refused::ReadOnly),
         Who::Agent { caller, workspace } => {
             let label = format!("{} · {workspace}", machine.name);
             let reader = Reader {

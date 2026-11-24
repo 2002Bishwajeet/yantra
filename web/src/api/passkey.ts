@@ -18,7 +18,13 @@ export type DeviceSession = {
   made: number
   ends: number
   this_device: boolean
+  /** It reads and changes nothing (ADR-0044's note of 2026-11-24). */
+  read_only: boolean
 }
+
+/** `POST /api/sessions/read/{name}`. The daemon keeps only a hash of `token`,
+ *  so this answer is the one place it shows. */
+export type ReadOnlySession = { token: string; session: DeviceSession }
 
 /** `GET /api/passkey`. `relying_party` is null until the hub knows its name. */
 export type Devices = {
@@ -147,6 +153,13 @@ export const useSignOutOthers = () =>
 export const useRemovePasskey = () =>
   useDevicesWrite((name: string) =>
     fetchJson<void>(`/api/passkey/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  )
+
+/** The session the build loop looks at this hub with. The token stays in the
+ *  mutation's result and nowhere else. */
+export const useReadOnlySession = () =>
+  useDevicesWrite((_: void) =>
+    fetchJson<ReadOnlySession>('/api/sessions/read/walk', { method: 'POST' }, fields('token', 'session')),
   )
 
 /** A code is a write, and each press makes a new one. */

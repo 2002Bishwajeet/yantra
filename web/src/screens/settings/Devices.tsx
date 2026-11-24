@@ -1,7 +1,8 @@
-import { KeyRound, Laptop, LogOut, Plus } from 'lucide-react'
+import { Eye, KeyRound, Laptop, LogOut, Plus } from 'lucide-react'
 import {
   useDevices,
   useEnrolCode,
+  useReadOnlySession,
   useRemovePasskey,
   useSignOut,
   useSignOutOthers,
@@ -14,7 +15,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Num } from '@/m3/text/Text'
+import { Mono, Num } from '@/m3/text/Text'
 import type { ApiError } from '@/api/errors'
 import { day } from '@/lib/time'
 import { Group } from './Group'
@@ -51,13 +52,21 @@ function Session(props: { session: DeviceSession }) {
       <ListItem
         headline={session.device}
         leading={
-          <Lead tone={session.this_device ? 'primary' : undefined}>
-            <Laptop />
-          </Lead>
+          session.read_only ? (
+            <Lead tone="tertiary">
+              <Eye />
+            </Lead>
+          ) : (
+            <Lead tone={session.this_device ? 'primary' : undefined}>
+              <Laptop />
+            </Lead>
+          )
         }
         supporting={
           <>
-            {session.this_device ? 'this device · ' : ''}with {session.passkey} · ends <Num>{when(session.ends)}</Num>
+            {session.read_only ? 'reads only' : `${session.this_device ? 'this device · ' : ''}with ${session.passkey}`}
+            {' · ends '}
+            <Num>{when(session.ends)}</Num>
           </>
         }
         trailing={
@@ -122,6 +131,43 @@ function NewDevice(props: { first: boolean }) {
       />
       {code.error ? <Failed error={code.error} title="No code was made" /> : null}
       {code.data ? <Copyable text={code.data.code} what="the code" /> : null}
+    </Group>
+  )
+}
+
+/** ADR-0044's note of 2026-11-24: a session that reads and changes nothing,
+ *  for the build loop's look at this hub. Its token shows once, here. */
+function ReadOnly() {
+  const made = useReadOnlySession()
+  return (
+    <Group
+      label="Read-only session"
+      note={
+        made.data ? (
+          <>
+            This token shows once. Save it on the laptop as <Mono>~/.config/yantra/walk-session</Mono> with mode 600.
+          </>
+        ) : (
+          'It reads this dashboard from your own devices for 30 days and changes nothing. The build loop looks at this hub with it.'
+        )
+      }
+    >
+      <ListItem
+        headline="A session that only reads"
+        leading={
+          <Lead tone="tertiary">
+            <Eye />
+          </Lead>
+        }
+        supporting="or run yantra session read walk on the hub"
+        trailing={
+          <Button variant="tonal" onClick={() => made.mutate()} disabled={made.isPending}>
+            {made.data ? 'Make another' : 'Make a token'}
+          </Button>
+        }
+      />
+      {made.error ? <Failed error={made.error} title="No read-only session was made" /> : null}
+      {made.data ? <Copyable text={made.data.token} what="the token" /> : null}
     </Group>
   )
 }
@@ -193,6 +239,7 @@ export function Devices() {
         ))}
       </Group>
       <NewDevice first={false} />
+      <ReadOnly />
     </>
   )
 }

@@ -545,6 +545,79 @@ fn a_write_needs_the_owners_passkey() -> Result<()> {
     std::thread::sleep(Duration::from_secs(2));
     let late = hub.enrol(&mut SoftPasskey::new(true), &code, "Late")?;
     assert_eq!(late.status, 401, "an expired code: {}", late.body);
+
+    // (g) The 2026-11-24 note: the yantra uid makes a read-only session. Its
+    //     token reads from the phone, and a write, an MCP call and a socket
+    //     upgrade each get 403. The file keeps no token, and a revoke ends it.
+    let made = hub.curl("yantra", "POST", "/api/sessions/read/walk", &[], None)?;
+    assert_eq!(made.status, 200, "{}", made.body);
+    assert!(
+        !made.head.to_ascii_lowercase().contains("set-cookie"),
+        "{}",
+        made.head
+    );
+    let made = made.json()?;
+    let reader = made["token"].as_str().context("a token")?.to_owned();
+    let id = made["session"]["id"].as_str().context("an id")?.to_owned();
+    assert_eq!(
+        hub.phone("GET", "/api/sessions", Some(&reader), None)?
+            .status,
+        200
+    );
+    let ping = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" });
+    let mut upgrade = vec![
+        format!("X-Forwarded-For: {PHONE}"),
+        format!("Cookie: {COOKIE}={reader}"),
+    ];
+    upgrade.extend(
+        [
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            "Sec-WebSocket-Version: 13",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        ]
+        .map(str::to_owned),
+    );
+    for (what, refused) in [
+        (
+            "a write",
+            hub.write(
+                Some(&reader),
+                Some(hub.origin.as_str().trim_end_matches('/')),
+            )?,
+        ),
+        (
+            "an MCP call",
+            hub.phone("POST", "/api/mcp", Some(&reader), Some(&ping))?,
+        ),
+        (
+            "a socket upgrade",
+            hub.curl("root", "GET", "/api/machines/box/chat", &upgrade, None)?,
+        ),
+    ] {
+        assert_eq!(refused.status, 403, "{what}: {}", refused.body);
+        assert!(
+            refused.body.starts_with("this session is read-only"),
+            "{what}: {}",
+            refused.body
+        );
+    }
+    let saved = hub.sh(&format!("cat {FILE}"))?;
+    assert!(saved.contains("read_only = true"), "{saved}");
+    assert!(!saved.contains(&reader), "the file holds a token");
+    let revoked = hub.curl(
+        "yantra",
+        "DELETE",
+        &format!("/api/sessions/{id}"),
+        &[],
+        None,
+    )?;
+    assert!(revoked.status < 300, "{}", revoked.body);
+    assert_eq!(
+        hub.phone("GET", "/api/sessions", Some(&reader), None)?
+            .status,
+        401
+    );
     Ok(())
 }
 

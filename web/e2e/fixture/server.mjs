@@ -129,8 +129,8 @@ function defaults() {
       relying_party: 'cachyos-g14.tail3a1b.ts.net',
       passkeys: [{ name: 'iPhone', made: 1788609600 }],
       sessions: [
-        { id: 'a1b2c3d4e5f60718', passkey: 'iPhone', device: 'iPhone', made: 1788609600, ends: 1791201600, this_device: true },
-        { id: '0f1e2d3c4b5a6978', passkey: 'iPhone', device: 'Mac', made: 1788609600, ends: 1791201600, this_device: false },
+        { id: 'a1b2c3d4e5f60718', passkey: 'iPhone', device: 'iPhone', made: 1788609600, ends: 1791201600, this_device: true, read_only: false },
+        { id: '0f1e2d3c4b5a6978', passkey: 'iPhone', device: 'Mac', made: 1788609600, ends: 1791201600, this_device: false, read_only: false },
       ],
     },
     status: Object.fromEntries(
@@ -336,6 +336,8 @@ const OPEN = new Set([
 ])
 const SIGN_IN = 'sign in from the dashboard, or run this on the hub'
 const CODE = 'ABCD2345'
+// As long as a real token, so a capture shows how one wraps. It opens nothing.
+const READ_TOKEN = 'Zm9yLXRoZS1maXh0dXJlLW9ubHktbm90LWEtdG9rZW4'
 const b64 = (bytes) => Buffer.from(bytes).toString('base64url')
 
 /** What webauthn-rs sends inside `publicKey`, bound to the page's own host. */
@@ -359,7 +361,7 @@ const hostOf = (request) => new URL(`http://${request.headers['x-forwarded-host'
 
 function finished(state, device) {
   state.signedOut = false
-  const session = { id: randomBytes(8).toString('hex'), passkey: device, device, made: FIXTURE_NOW, ends: FIXTURE_NOW + 2592000, this_device: true }
+  const session = { id: randomBytes(8).toString('hex'), passkey: device, device, made: FIXTURE_NOW, ends: FIXTURE_NOW + 2592000, this_device: true, read_only: false }
   state.devices.sessions = [...state.devices.sessions.map((one) => ({ ...one, this_device: false })), session]
   return [200, { session }]
 }
@@ -412,6 +414,24 @@ const routes = [
       s.devices.sessions = s.devices.sessions.filter((session) => session.id !== id)
       if (one.this_device) s.signedOut = true
       return [204]
+    },
+  ],
+  [
+    'POST',
+    /^\/api\/sessions\/read\/([^/]+)$/,
+    (s, [device]) => {
+      const mine = s.devices.sessions.find((one) => one.this_device)
+      const session = {
+        id: randomBytes(8).toString('hex'),
+        passkey: mine?.passkey ?? '',
+        device,
+        made: FIXTURE_NOW,
+        ends: FIXTURE_NOW + 2592000,
+        this_device: false,
+        read_only: true,
+      }
+      s.devices.sessions = [...s.devices.sessions, session]
+      return [200, { token: READ_TOKEN, session }]
     },
   ],
   [
