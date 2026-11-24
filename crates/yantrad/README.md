@@ -145,7 +145,8 @@ background like every other read, and `GET /api/machines/{name}/readiness` is on
 sweep asks the machines a workspace names and each online Linux or macOS machine you own on the
 tailnet. The daemon keeps
 the latest check of each machine in memory, with its own `age_seconds`, so a later sweep that skips
-the machine or fails does not lose it. A machine no check has reached is a `404` here even though
+the machine or fails does not lose it. A restart empties that memory, so the daemon checks the hub
+at each start, before the first sweep (Y-830). The first sweep waits for the first machines reading. A machine no check has reached is a `404` here even though
 `yantra doctor <machine>` would go and ask it. Each check that ran a step carries `took_ms`,
 and a check with no step leaves the key out.
 
