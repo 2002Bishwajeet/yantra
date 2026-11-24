@@ -32,6 +32,8 @@ signin=$((port + 1))
 mac=${WALK_MAC:-biswa@bishwajeets-macbook-pro}
 marker='<!-- yantra-walk -->'
 
+walk_tmux() { echo "PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH tmux -L yantra -N"; }
+
 kinds() {
   grep -qE '^web/(src/|index\.html$)' <<<"$1" && echo web
   grep -qE '^crates/yantra-core/src/(keep|claude|chat|tmux|remote|probe)|^crates/yantrad/src/chat\.rs$' <<<"$1" && echo machine
@@ -83,12 +85,24 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
   # A file that does not load is such a row and reaches no machine. The host's directory shows through unchanged.
   ws=${XDG_CONFIG_HOME:-$HOME/.config}/yantra/workspaces
   rm -rf "$dir/workspaces"
-  if git -C "$wt" diff --name-only origin/main...HEAD | grep -q '^web/src/screens/dashboard/'; then
+  changed=$(git -C "$wt" diff --name-only origin/main...HEAD)
+  if grep -q '^web/src/screens/dashboard/' <<<"$changed"; then
     if [ -d "$ws" ]; then
       cp -rL "$ws" "$dir/workspaces"
       printf 'machine = ""\nrepo = "/walk"\n' >"$dir/workspaces/walk-shows-a-long-needs-you-title.toml"
     else
       echo "walk: $ws does not exist, so the walk adds no Needs-you row" >&2
+    fi
+  fi
+  # Y-755: a row on Fleet needs a running workspace and an unclaimed session to show Stop, Open, Attach and Kill.
+  # Two tmux sessions on the Mac and one workspace file for the first; `down` kills the sessions.
+  if grep -qE '^web/src/screens/(fleet|dashboard)/' <<<"$changed"; then
+    if ssh -o BatchMode=yes -o ConnectTimeout=10 "$mac" "$(walk_tmux) new-session -d -s walk-running -c /tmp && $(walk_tmux) new-session -d -s walk-unclaimed -c /tmp" 2>/dev/null; then
+      [ -d "$dir/workspaces" ] || { [ ! -d "$ws" ] || cp -rL "$ws" "$dir/workspaces"; }
+      mkdir -p "$dir/workspaces"
+      printf 'machine = "%s"\nrepo = "/tmp"\n' "${mac#*@}" >"$dir/workspaces/walk-running.toml"
+    else
+      echo "walk: the Mac is unreachable, so Fleet shows no running workspace and no unclaimed session" >&2
     fi
   fi
   # shellcheck disable=SC2016
@@ -119,6 +133,13 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
       grep -q '"checks":\[{' <<<"$(curl -sf "http://127.0.0.1:$port/api/readiness")" && break
       sleep 1
     done
+    # Y-755: the sidebar and Fleet read "Sessions have not been read yet" until the first session sweep returns.
+    if [ -f "$dir/workspaces/walk-running.toml" ]; then
+      for _ in $(seq 120); do
+        grep -q 'walk-running' <<<"$(curl -sf "http://127.0.0.1:$port/api/sessions")" && break
+        sleep 1
+      done
+    fi
     echo "http://127.0.0.1:$port"
     exit 0
   done
@@ -161,6 +182,9 @@ down)
   dir="$(realpath "$1")/.walk"
   [ -f "$dir/daemon.pid" ] || exit 0
   kill -TERM -- "-$(cat "$dir/daemon.pid")" 2>/dev/null || true
+  for s in walk-running walk-unclaimed; do
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "$mac" "$(walk_tmux) kill-session -t $s" 2>/dev/null || true
+  done
   rm -f "$dir/daemon.pid"
   ;;
 
