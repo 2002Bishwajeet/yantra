@@ -22,6 +22,10 @@ describe('the capitals guard (Y-763)', () => {
     expect(lowerLines(page(supporting(line)))).toEqual([line])
   })
 
+  it('reads the supporting line of an M3 row', () => {
+    expect(lowerLines(page('<span class="m3-row__supporting">online · macOS</span>'))).toEqual(['online · macOS'])
+  })
+
   it('reads each place a supporting line is drawn', () => {
     const drawn = page(`
       <span class="m3-list-item__supporting"><span class="m3-state">in progress · 0 of 2 machines ready</span></span>
@@ -44,6 +48,14 @@ describe('the capitals guard (Y-763)', () => {
   it('lets a line start with a name that is spelled in lower case', () => {
     const names = ['macOS · no sessions', 'gh not signed in', 'tmux needs your password', 'pi-5.tail3a1b.ts.net', 'github.com/o/r']
     expect(lowerLines(page(names.map(supporting).join('')))).toEqual([])
+  })
+
+  it('lets a line start inside a marked name, and only there', () => {
+    const marked = '<span class="m3-row__supporting"><span data-name>cachyos-g14</span> · 2 windows</span>'
+    expect(lowerLines(page(marked))).toEqual([])
+    expect(lowerLines(page('<span class="m3-row__supporting">idle · <span data-name>cachyos-g14</span></span>'))).toEqual([
+      'idle · cachyos-g14',
+    ])
   })
 
   it('lets a line start with a machine only where the page names that machine', () => {

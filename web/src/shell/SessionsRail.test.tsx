@@ -52,9 +52,9 @@ describe('the sessions rail groups each state', () => {
 
     await waitFor(() => expect(within(live).getAllByRole('link').map((one) => one.textContent)).toHaveLength(2))
     expect(within(live).getByRole('link', { name: /^api/ })).toBeTruthy()
-    expect(within(live).getByRole('link', { name: /^ghost.*unclear/ })).toBeTruthy()
-    expect(within(history).getByRole('link', { name: /^halted.*stopped/ })).toBeTruthy()
-    expect(within(history).getByRole('link', { name: /^gone.*stopped/ })).toBeTruthy()
+    expect(within(live).getByRole('link', { name: /^ghost.*Unclear/ })).toBeTruthy()
+    expect(within(history).getByRole('link', { name: /^halted.*Stopped/ })).toBeTruthy()
+    expect(within(history).getByRole('link', { name: /^gone.*Stopped/ })).toBeTruthy()
     expect(within(rail).queryByText(/no session/)).toBeNull()
   })
 })
@@ -70,7 +70,7 @@ describe('the sessions rail lists home chats', () => {
     const links = homeRows(rail).getAllByRole('link')
     const hubs = contract.machines.data.filter((one) => runsSessions(one)).length
     expect(links).toHaveLength(hubs)
-    expect(links[0].textContent).toMatch(/^Say hello.*idle · /)
+    expect(links[0].textContent).toMatch(/^Say hello.*Idle · /)
     expect(homeRows(rail).queryByText('Keep a thread store')).toBeNull()
     expect(links[0].getAttribute('href')).toMatch(/^\/m\/[^/]+\/home\?thread=6a1b2c3d4e5f6a7b$/)
   })

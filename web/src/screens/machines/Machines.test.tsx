@@ -381,7 +381,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
   /** A changed host key reads as `unreachable`, never `refused` — the join
    *  command places a key and cannot fix that (`reachableFailure`, Y-402
    *  review). Only a refused key offers Copy join command. */
-  it('reads ssh failing on a neutral-tone chip, and offers only the raw text', async () => {
+  it("reads Can't reach on a neutral-tone chip, and offers only the raw text", async () => {
     const state = scenario('busy')
     const data = state.readiness!.data as { machine: string; checks: { check: string; state: string; detail: string }[] }[]
     const cachy = data.find((one) => one.machine === 'cachyos-g14')!
@@ -392,7 +392,7 @@ describe('/machines when ssh fails for a reason the join command cannot fix', ()
     await screen.findByText(/^looked /)
 
     const failing = card('cachyos-g14')
-    expect(failing.getByText('ssh failing')).toBeTruthy()
+    expect(failing.getByText("Can't reach")).toBeTruthy()
     expect(failing.queryByRole('button', { name: 'Copy join command' })).toBeNull()
     expect(failing.getAllByRole('button').map((one) => one.textContent)).toEqual(['Show'])
   })

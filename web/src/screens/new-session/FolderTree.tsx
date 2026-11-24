@@ -13,7 +13,7 @@ import { slug } from './form'
 import { arrange } from './picker'
 
 const badge = (entry: Entry): string =>
-  entry.origin ? `git · ${slug(entry.origin)}` : entry.repo ? 'git · no origin' : 'not a repository'
+  entry.origin ? `git · ${slug(entry.origin)}` : entry.repo ? 'git · no origin' : 'Not a repository'
 
 const note = (text: string) => (
   <Text render={<p />} className="ns__note" scale="body-medium" tone="variant">
@@ -78,7 +78,7 @@ function Node(props: Walk & { entry: Entry }) {
           <Lead tone="error">
             <FolderLock />
           </Lead>
-          <RowText headline={entry.name} supporting="no access" />
+          <RowText headline={entry.name} supporting="No access" />
         </Row>
       </div>
     )

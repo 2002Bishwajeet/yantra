@@ -151,7 +151,7 @@ function Rows(props: { form: SessionForm; values: Values; repos: Repo[]; query: 
                 </IconTile>
                 <RowText
                   headline={repo.full_name}
-                  supporting={`${repo.private ? 'private' : 'public'}${repo.language ? ` · ${repo.language}` : ''} · ${pushed(repo, now)}`}
+                  supporting={`${repo.private ? 'Private' : 'Public'}${repo.language ? ` · ${repo.language}` : ''} · ${pushed(repo, now)}`}
                 />
                 <Text className="ns__state" scale="label-medium" tone="variant">
                   {stateLabel(where)}

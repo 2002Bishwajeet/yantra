@@ -220,7 +220,7 @@ describe('step 2, the local picker browses like a file browser (Y-516)', () => {
   }
   const crumbsNow = () => within(screen.getByRole('navigation', { name: 'Where you are' }))
   const rowNames = () =>
-    folders.getAllByRole('button', { name: /^(?!Show folders)/ }).map((one) => one.textContent?.replace(/(git|not a repository).*$/, ''))
+    folders.getAllByRole('button', { name: /^(?!Show folders)/ }).map((one) => one.textContent?.replace(/(git|Not a repository).*$/, ''))
 
   it('types a path in the path bar and walks there', async () => {
     await toLocal()

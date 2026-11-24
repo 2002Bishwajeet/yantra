@@ -277,7 +277,7 @@ describe('the Dashboard in Compact', () => {
     expect(screen.queryByRole('button', { name: /^Show/ })).toBeNull()
     // Two of the five events in the buffer name no workspace, so three remain.
     expect(reads('Recent')).toContain('last 3 session events')
-    expect(reads('Recent')).toContain('asked for trust · cachyos-g14')
+    expect(reads('Recent')).toContain('Asked for trust · cachyos-g14')
     expect(region('Recent').queryByText(/relay test/)).toBeNull()
     expect(idle.queryByRole('link', { name: 'New session' })).toBeNull()
   })

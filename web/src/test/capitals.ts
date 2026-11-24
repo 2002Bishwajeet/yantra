@@ -3,6 +3,7 @@ import { afterEach, expect } from 'vitest'
 /** The second line of a list row, the lines Setup and a Machines card draw under a name, and their chips. */
 const LINES = [
   '.m3-list-item__supporting',
+  '.m3-row__supporting',
   '.setup__sub > .m3-text',
   '.m3-text.setup__said',
   '.setup__said > .m3-text',
@@ -13,16 +14,27 @@ const LINES = [
   '.m3-list-item__trailing .m3-chip',
 ].join(', ')
 
-/** A product or a tool that is spelled in lower case, and a host or an address. */
-const NAME = /^(?:macOS|iOS|gh|git|claude|ssh|tmux)\b|^[\w-]+\.\S/
+/** A product or a tool that is spelled in lower case, a host or an address, a hyphenated host, and a
+ *  name before a colon (a workspace's `api: …` or a commit's `feat: …`). */
+const NAME = /^(?:macOS|iOS|gh|git|claude|ssh|tmux)\b|^[\w-]+\.\S|^[a-z\d]+(?:-[a-z\d]+)+\b|^[\w-]+: /
 
 /** Where a page shows a machine's name: a line may start with that name. */
 const MACHINES = '.setup__machine, .machines__card h2'
+
+/** A line that starts inside `[data-name]` starts with a name or with a person's own words. */
+function startsInName(line: Element) {
+  const walk = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    if (node.textContent?.trim()) return node.parentElement?.closest('[data-name]') != null
+  }
+  return false
+}
 
 /** The supporting lines under `root` that start in lower case. */
 export function lowerLines(root: ParentNode): string[] {
   const machines = new Set([...root.querySelectorAll(MACHINES)].map((one) => one.textContent ?? ''))
   return [...root.querySelectorAll(LINES)]
+    .filter((one) => !startsInName(one))
     .map((one) => (one.textContent ?? '').trim())
     .filter((line) => /^\p{Ll}/u.test(line) && !NAME.test(line) && !machines.has(line.split(' ')[0]!))
 }

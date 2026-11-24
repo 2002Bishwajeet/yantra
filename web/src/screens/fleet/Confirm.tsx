@@ -80,7 +80,7 @@ function Plain(props: { name: string; where: string }) {
   return (
     <Row>
       <Tile name={name} />
-      <RowText headline={name} supporting={where} />
+      <RowText headline={name} supporting={<span data-name>{where}</span>} />
     </Row>
   )
 }

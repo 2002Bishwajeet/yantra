@@ -191,7 +191,7 @@ export function chipOf(verdict: Verdict, lastSeen: string | null): { state: Mark
     case 'changed':
       return { state: 'failed', word: 'Host key changed', error: true }
     case 'unreachable':
-      return { state: 'failed', word: 'ssh failing', error: true }
+      return { state: 'failed', word: "Can't reach", error: true }
     case 'installing':
       return { state: 'running', word: 'Installing', error: false }
     case 'sudo':

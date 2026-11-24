@@ -6,6 +6,7 @@ import { useDown, useResume } from '@/api/mutations'
 import type { Reading } from '@/api/hooks'
 import { answerFailure, joinFixes, reachWords } from '@/lib/checks'
 import { ago } from '@/lib/time'
+import { capital } from '@/lib/words'
 import { useIdle } from '@/lib/useIdle'
 import { Button } from '@/m3/button/Button'
 import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
@@ -48,7 +49,7 @@ export function Delete(props: {
             headline={workspace.name}
             supporting={
               <State size="small" state={mark}>
-                {words} · {workspace.machine}
+                {capital(words)} · {workspace.machine}
               </State>
             }
           />

@@ -114,7 +114,7 @@ describe('join and install rows (Y-399)', () => {
     const [entry] = merge([joinedNormal], null)
     expect(entry).toMatchObject({
       headline: 'pi joined',
-      supporting: 'as biswa',
+      supporting: 'Logs in as biswa',
       mark: 'done',
       open: 'pi',
     })

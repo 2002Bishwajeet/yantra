@@ -475,7 +475,7 @@ describe('step 2, the local browser', () => {
     const { folders, sent } = await toLocal()
     const closed = await folders.findByText('private')
     expect(folders.queryByText('todo.txt')).toBeNull()
-    expect(folders.getByText('no access')).toBeTruthy()
+    expect(folders.getByText('No access')).toBeTruthy()
     expect(closed.closest('button')).toBeNull()
     expect(folders.queryByRole('button', { name: /^private/ })).toBeNull()
 

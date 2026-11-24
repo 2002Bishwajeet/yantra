@@ -52,6 +52,8 @@ type Rule = {
   kind: 'url' | 'dialog' | 'expanded' | 'pressed' | 'disabled' | 'text' | 'value'
   value: string
   gone?: string
+  /** A class on the pressed button's own card: `value` and `gone` are read inside it. */
+  within?: string
 }
 type Expect = Rule | Partial<Record<Size, Rule>>
 
@@ -60,7 +62,7 @@ const dialog: Rule = { kind: 'dialog', value: '' }
 const expanded: Rule = { kind: 'expanded', value: 'true' }
 const pressed: Rule = { kind: 'pressed', value: 'true' }
 const disabled: Rule = { kind: 'disabled', value: '' }
-const text = (value: string, gone?: string): Rule => ({ kind: 'text', value, gone })
+const text = (value: string, gone?: string, within?: string): Rule => ({ kind: 'text', value, gone, within })
 
 /** A key names every button whose name starts with it; the longest key wins. */
 const SHELL: Record<string, Expect> = {
@@ -108,7 +110,8 @@ const PRESSES: Record<string, Record<string, Expect>> = {
   fleet: { 'New session': url('/new'), 'Sign in': url('/settings/providers') },
   machines: {
     Open: url('/m/yantra-box'),
-    Check: text('Ready'),
+    // Scoped to the card, so another card's 'Ready' chip cannot answer for a refused re-check (#514).
+    Check: text('Ready', 'Not checked', 'machines__card'),
     'Add a device': url('/machines/add'),
   },
   ...Object.fromEntries(MACHINES.map((name) => [`machine-${name}`, MACHINE_PAGE])),
@@ -215,8 +218,11 @@ async function press(page: Page, el: Locator, rule: Rule) {
     case 'value':
       return expect(page.getByRole('textbox', { name: rule.value, exact: true })).not.toHaveValue('')
     case 'text':
-      await expect(page.getByText(rule.value, { exact: true }).first()).toBeVisible()
-      if (rule.gone) await expect(page.getByText(rule.gone, { exact: true })).toHaveCount(0)
+      const scope = rule.within
+        ? el.locator(`xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ${rule.within} ')][1]`)
+        : page
+      await expect(scope.getByText(rule.value, { exact: true }).first()).toBeVisible()
+      if (rule.gone) await expect(scope.getByText(rule.gone, { exact: true })).toHaveCount(0)
   }
 }
 
