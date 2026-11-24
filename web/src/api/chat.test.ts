@@ -253,10 +253,25 @@ describe('the chat socket', () => {
     await settled(() => expect(errors).toHaveLength(1))
     await new Promise((done) => setTimeout(done, 100))
     expect(errors.map((error) => error.kind)).toEqual(['notLoggedIn'])
-    expect(errors[0]?.login).toEqual({ harness: 'opencode', machine: 'cachyos-g14', command: 'opencode auth login' })
+    expect(errors[0]?.login).toEqual({
+      harness: 'opencode',
+      machine: 'cachyos-g14',
+      account: 'work',
+      command: 'sudo -iu work opencode auth login',
+    })
     expect(errors[0]?.said).toBe('the agent refused: Authentication required (-32000)')
-    expect(errors[0]?.describe()).toBe('Run this on cachyos-g14, then retry.')
+    expect(errors[0]?.describe()).toBe('Run this on cachyos-g14 from your own account, then retry.')
     expect(errors[0]?.retryable).toBe(false)
+  })
+
+  it('says only the machine for a missing login that names no account', async () => {
+    const { errors, opened } = connect(chatAddress({ kind: 'workspace', workspace: 'yantra-web' }, '1a2b3c4d'))
+    await settled(() => expect(opened).toHaveBeenCalled())
+    const { account: _, ...unnamed } = chatNotLoggedIn
+    server.say(JSON.stringify({ ...unnamed, command: 'opencode auth login' }))
+    await settled(() => expect(errors).toHaveLength(1))
+    expect(errors[0]?.login).toEqual({ harness: 'opencode', machine: 'cachyos-g14', command: 'opencode auth login' })
+    expect(errors[0]?.describe()).toBe('Run this on cachyos-g14, then retry.')
   })
 
   it('sends the harness on a turn only when it is given, the mode, and only a plan interaction', async () => {
@@ -451,7 +466,11 @@ describe('a daemon frame', () => {
 
   it('is a missing login only with a known harness, a machine and a command', () => {
     expect(frameOf(JSON.stringify(chatNotLoggedIn))).toEqual(chatNotLoggedIn)
+    const { account: _, ...unnamed } = chatNotLoggedIn
+    expect(frameOf(JSON.stringify(unnamed))).toEqual(unnamed)
     for (const broken of [
+      { account: 7 },
+      { account: '' },
       { harness: 'aider' },
       { harness: undefined },
       { machine: 7 },

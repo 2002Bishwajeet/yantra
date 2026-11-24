@@ -936,7 +936,8 @@ a keeper on its machine ([`keep.rs`](../yantra-core/src/keep.rs)): the tmux sess
   Claude opens itself when a background task ends is the next turn, with its checkpoint and diff.
   The keeper closes stdin after 30 minutes with no turn and no background task. A task pins it,
   and every line Claude writes restarts the pin; 4 silent hours close it. Past half the journal
-  cap it is replaced between turns, unless a task runs. The thread keeps Claude's `session_id`
+  cap it is replaced between turns, unless a task runs, and so is a keeper whose turn failed
+  "Not logged in", because a running `claude` may not see a later `/login` (Y-815). The thread keeps Claude's `session_id`
   under `branch.<branch>.yantraClaudeSession`, and a new keeper resumes that id. A debug build
   reads `YANTRA_CHAT_IDLE`, in seconds, in place of the 30 minutes, for `tests/chat_keeper.rs`.
 - **An ACP keeper stays for the next turn** and stops after 15 minutes with no turn and no tab, or
@@ -955,7 +956,9 @@ The rules from before the keeper still hold:
   `stopTask`, `stopAll`, `revert`, `diff` and `ping`; the daemon answers a `ping` with `{"type":"pong"}`, sends protocol pings itself and
   ends a chat socket after two misses (Y-668). The daemon sends `ThreadEvent`s, `queue` and one `{"type":"error","kind","said"}`, whose kinds are
   `unknownThread`, `busy`, `badFrame`, `unreachable`, `notLoggedIn`, `checkpoint`, `diff` and `stopTask`. `notLoggedIn`
-  adds `harness`, `machine` and the `command` to run there. All are in `contract.gen.ts`, with
+  adds `harness`, `machine`, the `command` to run there and, when `ssh -G` names it, the `account`
+  the agent runs as. An account that is not the daemon's own makes the command start with
+  `sudo -iu <account>`, which the person runs from their own account (Y-815). All are in `contract.gen.ts`, with
   `chatQuery`.
 - **Each turn ends in a checkpoint** (Y-448, [`checkpoint`](../yantra-core/src/checkpoint.rs)).
   Before a turn starts, the route keeps checkpoint 0 if the thread has none, and a turn without it
@@ -1013,7 +1016,9 @@ The rules from before the keeper still hold:
   [`tests/chat_keeper.rs`](tests/chat_keeper.rs) is ADR-0035's done test: a real `yantrad` against
   the podman fixture, through a cut pipe, a closed socket and a killed daemon. Its ADR-0041 cases
   prove that a background task outlives its turn and wakes the thread, and that an idle keeper
-  closes.
+  closes. Its Y-815 case runs the real `claude` with no login on an account that is not the
+  daemon's own: the refusal names that account, the keeper goes, and after the login the next turn
+  completes.
 
 ## The route that holds rooms
 

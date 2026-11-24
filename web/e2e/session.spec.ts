@@ -137,7 +137,7 @@ test.describe('the session screen, chat first', () => {
     await page.getByLabel(label, { exact: true }).fill('hello')
     await page.getByRole('button', { name: 'Send' }).click()
     const alert = page.getByRole('alert')
-    await expect(alert.getByRole('heading')).toHaveText('Gemini is not logged in on cachyos-g14')
+    await expect(alert.getByRole('heading')).toHaveText('Gemini is not logged in as work on cachyos-g14')
     await expect(alert.getByText('run gemini and sign in')).toBeVisible()
     await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible()
   })

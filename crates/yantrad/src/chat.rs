@@ -114,6 +114,7 @@ use yantra_core::chat::{
 };
 use yantra_core::checkpoint::{self, BranchDiff, Diff};
 use yantra_core::claude::{self, Events, Said, Session};
+use yantra_core::identity;
 use yantra_core::image::{self, Images};
 use yantra_core::inventory::Inventory;
 use yantra_core::keep::{self, Cursor, File, Keeper, Limits};
@@ -384,8 +385,9 @@ struct Failure {
     tag: &'static str,
     kind: Kind,
     said: String,
+    // Boxed, so a `Result<_, Failure>` stays small (clippy::result_large_err).
     #[serde(flatten)]
-    login: Option<Login>,
+    login: Option<Box<Login>>,
 }
 
 /// The one reply to each image, in the order the images came.
@@ -528,11 +530,14 @@ fn joined(mut next: Vec<Next>) -> Option<Next> {
     })
 }
 
-/// What a `notLoggedIn` failure names: whose login, where, and how to make it.
+/// What a `notLoggedIn` failure names: whose login, where, as which account,
+/// and how to make it.
 #[derive(Debug, Clone, Serialize)]
 struct Login {
     harness: &'static str,
     machine: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account: Option<String>,
     command: String,
 }
 
@@ -575,13 +580,25 @@ fn busy() -> Failure {
 
 // The command is always ours: an agent's auth-method description is prose,
 // and pasted into a shell its backticks run.
-fn not_logged_in(harness: Option<Harness>, machine: &str, said: String) -> Failure {
+fn not_logged_in(
+    harness: Option<Harness>,
+    machine: &str,
+    account: Option<String>,
+    said: String,
+) -> Failure {
+    let own = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .ok();
+    let other = account
+        .as_deref()
+        .filter(|account| own.as_deref() != Some(*account));
     Failure {
-        login: Some(Login {
+        login: Some(Box::new(Login {
             harness: name_of(harness),
             machine: machine.to_owned(),
-            command: acp::login_command(harness).to_owned(),
-        }),
+            command: acp::login_command(harness, other),
+            account,
+        })),
         ..failure(Kind::NotLoggedIn, said)
     }
 }
@@ -664,6 +681,8 @@ struct Journals {
 trait Machine: Send + Sync + 'static {
     /// The machine's name, as a login failure names it.
     fn machine(&self) -> &str;
+    /// The account the agent runs as there, as a login failure names it.
+    fn account(&self) -> impl Future<Output = Option<String>> + Send;
     fn registry(&self) -> &Registry;
     /// Whether the thread is a git worktree that each turn checkpoints. A home
     /// thread is not, so it skips every checkpoint (ADR-0046 decision 1.3).
@@ -907,6 +926,14 @@ fn mode_named(name: &str) -> PermissionMode {
 impl Machine for Fleet {
     fn machine(&self) -> &str {
         &self.workspace.machine
+    }
+
+    async fn account(&self) -> Option<String> {
+        let machine = self.workspace.machine.clone();
+        tokio::task::spawn_blocking(move || identity::logs_in_as(&machine))
+            .await
+            .ok()
+            .flatten()
     }
 
     fn registry(&self) -> &Registry {
@@ -1324,6 +1351,10 @@ impl Home {
 impl Machine for Home {
     fn machine(&self) -> &str {
         self.fleet.machine()
+    }
+
+    async fn account(&self) -> Option<String> {
+        self.fleet.account().await
     }
 
     fn registry(&self) -> &Registry {
@@ -2905,13 +2936,23 @@ async fn branch_diff<M: Machine>(machine: &M, name: &str, place: &Place) -> Stri
 
 /// What an agent's refusal tells the browser: the login to make, or the
 /// agent's own words.
-fn refused(machine: &str, harness: Harness, login: Option<String>, error: &acp::Error) -> Failure {
+async fn refused<M: Machine>(
+    machine: &M,
+    harness: Harness,
+    login: Option<String>,
+    error: &acp::Error,
+) -> Failure {
     if error.is_auth() {
         let said = match login {
             Some(hint) => format!("{error}. {hint}"),
             None => error.to_string(),
         };
-        not_logged_in(Some(harness), machine, said)
+        not_logged_in(
+            Some(harness),
+            machine.machine(),
+            machine.account().await,
+            said,
+        )
     } else {
         failure(Kind::Unreachable, chain(error))
     }
@@ -3801,25 +3842,24 @@ async fn open_session<M: Machine>(
     agent: &Agent,
     session: Option<String>,
 ) -> Result<(String, Option<String>), Failure> {
-    let capabilities = agent
-        .initialize()
-        .await
-        .map_err(|error| refused(machine.machine(), harness, None, &error))?;
+    let capabilities = match agent.initialize().await {
+        Ok(capabilities) => capabilities,
+        Err(error) => return Err(refused(machine, harness, None, &error).await),
+    };
     let login = capabilities.login;
     // An agent that cannot load starts a new conversation in the same worktree.
     let session = match session.filter(|_| capabilities.load_session) {
         Some(session) => {
-            agent
-                .load_session(&session, &place.worktree)
-                .await
-                .map_err(|error| refused(machine.machine(), harness, login.clone(), &error))?;
+            if let Err(error) = agent.load_session(&session, &place.worktree).await {
+                return Err(refused(machine, harness, login.clone(), &error).await);
+            }
             session
         }
         None => {
-            let session = agent
-                .new_session(&place.worktree)
-                .await
-                .map_err(|error| refused(machine.machine(), harness, login.clone(), &error))?;
+            let session = match agent.new_session(&place.worktree).await {
+                Ok(session) => session,
+                Err(error) => return Err(refused(machine, harness, login.clone(), &error).await),
+            };
             let stored = store_session(machine, place, harness.name(), &session).await;
             if let Err(said) = machine.remember(place, harness, &session).await {
                 if !stored {
@@ -3958,27 +3998,38 @@ async fn keep_claude<M: Machine>(
                 if let Event::TurnCompleted(done) = &event.event {
                     tracing::info!("chat {name}: the turn ended {:?}", done.state);
                     let failed = done.state == TurnState::Failed;
-                    if let Some(said) = done
+                    let logged_out = done
                         .message
                         .as_ref()
-                        .filter(|said| failed && said.starts_with(CLAUDE_NOT_LOGGED_IN))
-                    {
-                        live.publish(&not_logged_in(None, machine.machine(), said.clone()), None);
+                        .filter(|said| failed && said.starts_with(CLAUDE_NOT_LOGGED_IN));
+                    if let Some(said) = logged_out {
+                        let account = machine.account().await;
+                        let refusal = not_logged_in(None, machine.machine(), account, said.clone());
+                        live.publish(&refusal, None);
                     }
+                    let logged_out = logged_out.is_some();
                     // A closing keeper keeps the deadline its close armed.
                     if !live.lock().closing {
                         kill_at = None;
                     }
                     claude_turn_ended(machine.as_ref(), &name, &place, &live, failed).await;
                     // A keeper with background work waits for it (ADR-0041 decision 9).
+                    // A running claude may not see a later /login, so the
+                    // turn after one starts a new claude (Y-815).
                     if claude.session.background().is_empty()
-                        && let Ok(size) = machine.out_size(&place).await
-                        && size > Limits::default().cap / 2
+                        && (logged_out
+                            || machine
+                                .out_size(&place)
+                                .await
+                                .is_ok_and(|size| size > Limits::default().cap / 2))
                         && live.close_unless_busy()
                     {
-                        tracing::info!(
-                            "chat {name}: the keeper's out is past half its cap, so it is replaced"
-                        );
+                        let why = if logged_out {
+                            "claude is not logged in"
+                        } else {
+                            "the keeper's out is past half its cap"
+                        };
+                        tracing::info!("chat {name}: {why}, so the keeper is replaced");
                         close_claude(&claude, &mut kill_at);
                     }
                     claude_next(machine.as_ref(), &name, &place, &live, &mut claude).await;
@@ -4498,10 +4549,9 @@ async fn keep_acp<M: Machine>(
                     Ok(reason) => tracing::info!("chat {name}: the turn ended {reason:?}"),
                     Err(error) => {
                         tracing::info!("chat {name}: the turn failed");
-                        live.publish(
-                            &refused(machine.machine(), acp.harness, acp.login.clone(), &error),
-                            None,
-                        );
+                        let refusal =
+                            refused(machine.as_ref(), acp.harness, acp.login.clone(), &error).await;
+                        live.publish(&refusal, None);
                     }
                 }
                 turn_ended(machine.as_ref(), &name, &place, &live, failed, &mut kill_at).await;
@@ -5201,6 +5251,7 @@ pub(crate) fn answers() -> Vec<(&'static str, &'static str, serde_json::Value)> 
             serde_json::to_value(not_logged_in(
                 Some(Harness::Opencode),
                 "cachyos-g14",
+                Some("work".to_owned()),
                 "the agent refused: Authentication required (-32000)".to_owned(),
             ))
             .expect("a failure serialises"),
@@ -5638,6 +5689,8 @@ mod tests {
         orphans: Mutex<Vec<String>>,
         /// An orphan's agent still runs, so it is not killed.
         orphan_runs: bool,
+        /// The account the agent runs as on the machine.
+        account: Option<String>,
         /// Shared by every tab connected to this script.
         registry: Registry,
     }
@@ -5716,6 +5769,10 @@ mod tests {
     impl Machine for Script {
         fn machine(&self) -> &str {
             "m"
+        }
+
+        async fn account(&self) -> Option<String> {
+            self.account.clone()
         }
 
         fn registry(&self) -> &Registry {
@@ -7012,6 +7069,110 @@ mod tests {
                    "harness": "claude", "machine": "m",
                    "command": "run claude and type /login"})
         );
+    }
+
+    /// Y-815: an agent that runs as another account is logged in as that account.
+    #[tokio::test]
+    async fn a_login_on_another_account_names_it_and_runs_as_it() {
+        let script = Arc::new(Script {
+            account: Some("work".to_owned()),
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi", "harness": "opencode"}));
+        let mut agent = script.agent().await;
+        agent.initialized().await;
+        let new = agent.heard().await;
+        agent
+            .say(refusal(&new["id"], -32000, "Authentication required"))
+            .await;
+        assert_eq!(
+            tab.next().await,
+            json!({"type": "error", "kind": "notLoggedIn",
+                   "said": "the agent refused: Authentication required (-32000)",
+                   "harness": "opencode", "machine": "m", "account": "work",
+                   "command": "sudo -iu work opencode auth login"})
+        );
+
+        let script = Arc::new(Script {
+            account: Some("work".to_owned()),
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        claude
+            .say(
+                json!({"type": "result", "subtype": "success", "is_error": true,
+                        "result": "Not logged in · Please run /login"}),
+            )
+            .await;
+        assert_eq!(tab.next().await["payload"]["state"], "failed");
+        let said = tab.next().await;
+        assert_eq!(said["account"], "work", "{said}");
+        assert_eq!(said["command"], "run sudo -iu work claude and type /login");
+    }
+
+    /// Y-815: a running claude may not see a later /login, so a turn that
+    /// failed "Not logged in" closes the keeper and the next turn starts a new one.
+    #[tokio::test]
+    async fn a_claude_that_is_not_logged_in_is_replaced_for_the_next_turn() {
+        let script = Arc::new(Script {
+            account: Some("work".to_owned()),
+            ..Script::default()
+        });
+        let (mut tab, _served) = connect(Arc::clone(&script), None);
+        tab.send(json!({"type": "turn", "text": "hi"}));
+        tab.next().await;
+        tab.next().await;
+        let mut claude = script.claude().await;
+        claude.heard().await;
+        claude
+            .say(
+                json!({"type": "result", "subtype": "success", "is_error": true,
+                        "result": "Not logged in · Please run /login"}),
+            )
+            .await;
+        assert_eq!(tab.next().await["payload"]["state"], "failed");
+        assert_eq!(tab.next().await["kind"], "notLoggedIn");
+        assert_eq!(claude.heard().await, None, "its stdin closed");
+        until_closed(&script, claude).await;
+
+        tab.send(json!({"type": "turn", "text": "again"}));
+        let mut fresh = script.claude().await;
+        assert_eq!(prompt_of(&fresh.heard().await.expect("a line")), "again");
+    }
+
+    /// Y-815: once the person logs in, Retry sends the turn again on the same socket.
+    #[tokio::test]
+    async fn a_turn_after_the_login_runs() {
+        let script = Arc::new(Script {
+            account: Some("work".to_owned()),
+            ..Script::default()
+        });
+        let (mut tab, mut agent, prompt) = an_opencode_thread(&script).await;
+        agent
+            .say(refusal(&prompt["id"], -32000, "Authentication required"))
+            .await;
+        assert_eq!(tab.next().await["payload"]["state"], "failed");
+        assert_eq!(tab.next().await["kind"], "notLoggedIn");
+
+        tab.send(json!({"type": "turn", "text": "list the files"}));
+        while tab.next().await["payload"]["itemId"] != "user:1:2" {}
+        let again = agent.heard().await;
+        assert_eq!(again["method"], "session/prompt");
+        agent.reply(&again, json!({"stopReason": "end_turn"})).await;
+        loop {
+            let event = tab.next().await;
+            if event["type"] == "turn.completed" {
+                assert_eq!(event["payload"]["state"], "completed", "{event}");
+                break;
+            }
+            assert_ne!(event["type"], "error", "{event}");
+        }
     }
 
     #[tokio::test]

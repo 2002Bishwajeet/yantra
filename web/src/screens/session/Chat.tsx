@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ImagePlus } from 'lucide-react'
 import type { Mentions, SlashCommand, Workspace } from '@/api'
-import { IMAGE_TYPES, type ChatError, type ChatTarget } from '@/api/chat'
+import { IMAGE_TYPES, loginPlace, type ChatError, type ChatTarget } from '@/api/chat'
 import { asApiError } from '@/api/errors'
 import { useCommands, useMentions } from '@/api/queries'
 import {
@@ -128,8 +128,8 @@ function LoggedOut(props: { error: ChatError; login: NonNullable<ChatError['logi
         </>
       }
       error={error}
-      eyebrow={`on ${login.machine}`}
-      title={`${LABEL[login.harness]} is not logged in on ${login.machine}`}
+      eyebrow={loginPlace(login)}
+      title={`${LABEL[login.harness]} is not logged in ${loginPlace(login)}`}
     />
   )
 }
