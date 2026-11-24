@@ -28,7 +28,7 @@ test.describe('install and join rows on notifications', () => {
     await expect(main.getByText('thinkpad joined, as another account')).toBeVisible()
 
     await expect(main.getByText('macbook joined')).toBeVisible()
-    await expect(main.getByText('as biswa', { exact: true })).toBeVisible()
+    await expect(main.getByText('Logs in as biswa', { exact: true })).toBeVisible()
 
     await expect(main.getByText('hetzner-1 is ready')).toBeVisible()
 
