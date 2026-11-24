@@ -172,6 +172,21 @@ describe('the phone shell', () => {
     await waitFor(() => expect(location.pathname).toBe('/'))
   })
 
+  it('draws the app bar slot for a pushed screen, and not at the top level or on the desktop (Y-757)', async () => {
+    mount('phone', '/settings')
+    await waitFor(() => expect(document.querySelector('.m3-top-app-bar .shell__bar-slot')).toBeTruthy())
+    unmount()
+    cleanup()
+    mount('phone', '/machines')
+    await screen.findAllByRole('heading', { level: 1, name: 'Machines' })
+    expect(document.querySelector('.shell__bar-slot')).toBeNull()
+    unmount()
+    cleanup()
+    mount('desktop', '/settings')
+    await waitFor(() => expect(screen.getAllByRole('heading', { level: 1, name: 'Settings' }).length).toBeGreaterThan(0))
+    expect(document.querySelector('.shell__bar-slot')).toBeNull()
+  })
+
   it('opens notifications as a pushed screen', async () => {
     mount('phone', '/notifications')
     await waitFor(() => expect(screen.getByRole('banner').querySelector('h1')?.textContent).toBe('Notifications'))

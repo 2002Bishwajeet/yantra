@@ -17,3 +17,14 @@ guardCapitals()
 // for a query, so a text query that would otherwise find the same words twice
 // skips it.
 configure({ asyncUtilTimeout: 10_000, defaultIgnore: 'script, style, [data-live]' })
+
+// jsdom has no `matchMedia`. A test that does not stub one gets the desktop, the width the shell reads first.
+if (typeof globalThis.matchMedia === 'undefined') {
+  globalThis.matchMedia = (query: string) =>
+    ({
+      matches: query === '(min-width: 1240px)',
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }) as unknown as MediaQueryList
+}

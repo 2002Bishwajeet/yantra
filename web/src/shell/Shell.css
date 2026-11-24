@@ -244,6 +244,13 @@
 
 /* Phone: the app bar is the h1, so the screen's own is not drawn. */
 
+/* Y-757: a pushed screen portals its verbs here (appBarSlot.ts). */
+.shell__bar-slot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* Shell.tsx keeps one contents box at every width so the tree survives a
    form-factor change (Y-361). The phone's draws no box of its own. */
 .shell__contents {
