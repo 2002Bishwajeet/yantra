@@ -154,7 +154,7 @@ function ReadOnly() {
             <Eye />
           </Lead>
         }
-        supporting="or run yantra session read walk on the hub"
+        supporting="Or run yantra session read walk on the hub"
         trailing={
           <Button variant="tonal" onClick={() => made.mutate()} disabled={made.isPending}>
             {made.data ? 'Make another' : 'Make a token'}
