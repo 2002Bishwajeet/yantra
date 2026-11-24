@@ -1861,23 +1861,28 @@ fn from_update(error: &update::Error) -> StatusCode {
 }
 
 /// The dashboard saying it is on screen (D3 §13), so the notifier stops pushing
-/// what the page is already showing.
+/// what the page is already showing. A subscribed browser names its push
+/// endpoint, and Web Push then skips that device alone (ADR-0047 decision 6).
+/// A beacon with no body quiets the relay only.
 ///
 /// **It is a write and it is authorised like one**: silencing someone's phone
 /// is an act, and `whois` costs one subprocess per beacon — the page beacons
 /// once every `BEACON_MS` and only while the tab is visible, which is the same
 /// order as the sweep this daemon already runs.
 ///
-/// **The state is one timestamp in memory** and a restart forgets it, which is
-/// what Y-044 means here. It is not the exception ADR-0021 carved: nothing
-/// about a viewer needs to survive anything.
+/// **The state is a few timestamps in memory** and a restart forgets them,
+/// which is what Y-044 means here. It is not the exception ADR-0021 carved:
+/// nothing about a viewer needs to survive anything. The endpoint is a
+/// capability, so it is never logged.
 async fn viewing<I: Inventory + Clone + Send + Sync + 'static>(
     State(state): State<Remembered<I>>,
     ConnectInfo(from): ConnectInfo<Peer>,
     headers: HeaderMap,
+    named: Option<Json<crate::push::Named>>,
 ) -> Result<StatusCode, Refused> {
     allowed(&state.authoriser, &from, &headers).await?;
-    *state.fleet.viewers.write().await = Some(std::time::Instant::now());
+    let endpoint = named.map(|Json(named)| named.endpoint);
+    state.fleet.viewers.write().await.beacon(endpoint);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -6035,13 +6040,32 @@ mod tests {
         );
     }
 
-    /// D3 §13's beacon reaching the one timestamp the notifier reads, and
-    /// nothing else: the daemon knows a viewer is there and knows nothing about
-    /// who or where.
+    fn beacon(from: u8, endpoint: Option<&str>) -> axum::http::Request<axum::body::Body> {
+        use axum::body::Body;
+        use axum::http::{Request, header};
+
+        let post = Request::post("/viewing");
+        let mut beacon = match endpoint {
+            Some(endpoint) => {
+                post.header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "endpoint": endpoint }).to_string(),
+                    ))
+            }
+            None => post.body(Body::empty()),
+        }
+        .expect("a POST");
+        beacon
+            .extensions_mut()
+            .insert(ConnectInfo(tcp(address(from))));
+        beacon
+    }
+
+    /// D3 §13's beacon reaching what the notifier reads, and nothing else: the
+    /// daemon knows a viewer is there, and which device when the page says so.
+    /// A page with no subscription, or a cached older page, sends no body.
     #[tokio::test]
     async fn a_beacon_from_this_owner_is_what_the_notifier_reads() {
-        use axum::body::Body;
-        use axum::http::Request;
         use tower::ServiceExt as _;
 
         let fleet = Fleet::default();
@@ -6049,23 +6073,32 @@ mod tests {
             direct(tailnet(vec![(address(2), caller(ME, &[]))])),
             fleet.clone(),
         );
-        let mut beacon = Request::post("/viewing")
-            .body(Body::empty())
-            .expect("a POST");
-        beacon.extensions_mut().insert(ConnectInfo(tcp(address(2))));
+        let say = |endpoint| app.clone().oneshot(beacon(2, endpoint));
 
-        let answered = app.oneshot(beacon).await.expect("the router is infallible");
-
+        let answered = say(None).await.expect("the router is infallible");
         assert_eq!(answered.status(), StatusCode::NO_CONTENT);
-        assert!(crate::notify::watched(&fleet.viewers).await);
+        let watched = crate::notify::watched(&fleet.viewers).await;
+        assert!(watched.anyone && watched.devices.is_empty(), "{watched:?}");
+
+        let laptop = "https://push.example/laptop";
+        let answered = say(Some(laptop)).await.expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::NO_CONTENT);
+        let long = "a".repeat(2049);
+        let answered = say(Some(&long)).await.expect("the router is infallible");
+        assert_eq!(answered.status(), StatusCode::NO_CONTENT);
+        let watched = crate::notify::watched(&fleet.viewers).await;
+        assert!(watched.anyone);
+        assert_eq!(
+            watched.devices,
+            std::collections::HashSet::from([laptop.to_owned()]),
+            "an endpoint that is too long is not kept"
+        );
     }
 
     /// ADR-0016 covers it like every other write, and the reason is what it
     /// does: a beacon stops this daemon pushing to somebody's phone.
     #[tokio::test]
     async fn a_beacon_from_a_node_that_is_not_this_owners_silences_nothing() {
-        use axum::body::Body;
-        use axum::http::Request;
         use tower::ServiceExt as _;
 
         let fleet = Fleet::default();
@@ -6073,15 +6106,17 @@ mod tests {
             direct(tailnet(vec![(address(3), caller(ME + 1, &[]))])),
             fleet.clone(),
         );
-        let mut beacon = Request::post("/viewing")
-            .body(Body::empty())
-            .expect("a POST");
-        beacon.extensions_mut().insert(ConnectInfo(tcp(address(3))));
 
-        let answered = app.oneshot(beacon).await.expect("the router is infallible");
+        let answered = app
+            .oneshot(beacon(3, Some("https://push.example/phone")))
+            .await
+            .expect("the router is infallible");
 
         assert_eq!(answered.status(), StatusCode::FORBIDDEN);
-        assert!(!crate::notify::watched(&fleet.viewers).await);
+        assert_eq!(
+            crate::notify::watched(&fleet.viewers).await,
+            crate::notify::Watched::default()
+        );
     }
 
     /// The route that writes a secret to disk is behind the same gate as the

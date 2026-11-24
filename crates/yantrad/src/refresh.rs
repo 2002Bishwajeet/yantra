@@ -634,7 +634,7 @@ async fn look_at_agents(
     model.write().await.agents = Some(reading.clone());
     if let Ok(fleet) = reading.value() {
         notifier
-            .tell(fleet, crate::notify::watched(viewers).await, events)
+            .tell(fleet, &crate::notify::watched(viewers).await, events)
             .await;
     }
 }
