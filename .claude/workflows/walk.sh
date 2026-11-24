@@ -11,6 +11,9 @@
 #                                       a branch that changes Fleet or the dashboard gets a workspace on the Mac that the
 #                                       walk starts with an agent, and a tmux session that no workspace claims, so the
 #                                       pages draw Stop and Kill (Y-755); `down` ends both
+#                                       the daemon sees a copy of the owner's workspaces; when a branch changes the session
+#                                       screen and the owner has none, the copy gets the workspace `walk`: the clone that
+#                                       gate.sh keeps on the gate host (Y-757)
 #                                       This daemon runs as you with your ssh config, and no agent reports to it. It cannot show
 #                                       a check that only the hub's own account or an agent's report can fail (Y-740)
 #   walk.sh shoot <worktree> <route>... screenshots and the visible text of each route, WebKit at 390 px, Chromium at
@@ -21,6 +24,8 @@
 #                                       `/` also opens the first Needs-you row and shoots the page it leads to (Y-754)
 #                                       a walk that started the agent's workspace also shoots its page, light and dark,
 #                                       for the Stop in the session header (Y-755)
+#                                       and the first workspace's screen, its More menu open, and on the phone the
+#                                       measured top of the conversation (Y-757)
 #                                       /machines also shoots the page of each machine whose card lists a failing check (Y-740)
 #                                       or what ssh said, and the page of each phone, tablet and Windows PC of the owner's,
 #                                       which the list hides (Y-775)
@@ -46,6 +51,11 @@ kinds() {
   grep -qE '^web/(src/|index\.html$)' <<<"$1" && echo web
   grep -qE '^crates/yantra-core/src/(keep|claude|chat|tmux|remote|probe)|^crates/yantrad/src/chat\.rs$' <<<"$1" && echo machine
   true
+}
+
+# Y-770, Y-757: a branch that changes the session screen is walked on a live session and on a workspace.
+session_changed() {
+  git -C "$1" diff --name-only origin/main...HEAD | grep -qE '^web/src/screens/session(-terminal)?/'
 }
 
 case $cmd in
@@ -89,14 +99,27 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
   rm -rf "$dir/etc-yantra" && mkdir -p "$dir/etc-yantra"
   echo stable >"$dir/etc-yantra/channel"
   rm -rf "$dir/run" && mkdir -p "$dir/run"
+  # Y-757: the session screen needs a workspace, and the owner's fleet may hold none. The namespace gets a copy
+  # of the owner's workspaces, so the one the walk adds is the walk's own and never reaches the host.
+  ws=${XDG_CONFIG_HOME:-$HOME/.config}/yantra/workspaces
+  rm -rf "$dir/workspaces" && mkdir -p "$dir/workspaces"
+  cp "$ws"/*.toml "$dir/workspaces/" 2>/dev/null || true
+  if session_changed "$wt" && [ -d "$ws" ] && [ -z "$(ls "$dir/workspaces")" ]; then
+    # gate.sh keeps a clone of this repository on the gate host, so the workspace names a real machine and a real repository.
+    gate=${GATE_HOSTS:-yantra-box}
+    gate=${gate%% *}
+    if repo=$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$gate" 'git -C ~/yantra-gate/yantra rev-parse --show-toplevel' 2>/dev/null); then
+      printf 'machine = "%s"\nrepo = "%s"\n' "$gate" "$repo" >"$dir/workspaces/walk.toml"
+    else
+      echo "walk: $gate has no clone at ~/yantra-gate/yantra, so the walk has no workspace of its own" >&2
+    fi
+  fi
   # Y-754: the laptop holds no workspace, so `/` drew the checklist and no walk showed a Needs-you row.
   # A file that does not load is such a row and reaches no machine. The host's directory shows through unchanged.
-  ws=${XDG_CONFIG_HOME:-$HOME/.config}/yantra/workspaces
-  rm -rf "$dir/workspaces"
   changed=$(git -C "$wt" diff --name-only origin/main...HEAD)
   if grep -q '^web/src/screens/dashboard/' <<<"$changed"; then
     if [ -d "$ws" ]; then
-      cp -rL "$ws" "$dir/workspaces"
+      cp -rL "$ws"/. "$dir/workspaces"/
       printf 'machine = ""\nrepo = "/walk"\n' >"$dir/workspaces/walk-shows-a-long-needs-you-title.toml"
     else
       echo "walk: $ws does not exist, so the walk adds no Needs-you row" >&2
@@ -107,7 +130,6 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
   if grep -qE '^web/src/screens/(fleet|dashboard)/' <<<"$changed"; then
     # A session that an interrupted walk left makes Start attach, and then no agent runs in it.
     if ssh -o BatchMode=yes -o ConnectTimeout=10 "$mac" "$(walk_tmux) kill-session -t walk-running 2>/dev/null; mkdir -p $walk_repo" 2>/dev/null; then
-      [ -d "$dir/workspaces" ] || { [ ! -d "$ws" ] || cp -rL "$ws" "$dir/workspaces"; }
       mkdir -p "$dir/workspaces"
       printf 'machine = "%s"\nrepo = "%s"\n' "${mac#*@}" "$walk_repo" >"$dir/workspaces/walk-running.toml"
     else
@@ -127,7 +149,7 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
       mount --bind "$f" "$1/etc-yantra/${f##*/}"
     done
     mount --rbind "$1/etc-yantra" /etc/yantra
-    [ ! -d "$1/workspaces" ] || mount --bind "$1/workspaces" "$8"
+    [ ! -d "$8" ] || mount --bind "$1/workspaces" "$8"
     exec unshare --user --map-user="$2" --map-group="$3" bash -c "
       python3 $7/walk-proxy.py 7718 $1/run/yantrad.sock &
       [ -z \"$6\" ] || python3 $7/walk-proxy.py 7719 $4:7717 $6 &
@@ -176,7 +198,7 @@ shoot)
   shift
   [ $# -gt 0 ] || { echo "walk: name at least one route" >&2; exit 1; }
   # Y-770: the walker knows no session name, so a branch that changes the terminal was walked without one.
-  if git -C "$wt" diff --name-only origin/main...HEAD | grep -qE '^web/src/screens/session(-terminal)?/'; then
+  if session_changed "$wt"; then
     live=$(curl -sf "http://127.0.0.1:$port/api/sessions" | python3 -c '
 import json, sys
 from urllib.parse import quote
@@ -188,6 +210,17 @@ if live: print("/m/%s/s/%s" % tuple(quote(part, safe="") for part in live[0]))' 
       done
     else
       echo "walk: the fleet has no live session, so no terminal is shot" >&2
+    fi
+    # Y-757: the header, the thread picker and the git action are on the workspace's own screen.
+    work=$(curl -sf "http://127.0.0.1:$port/api/workspaces" | python3 -c '
+import json, sys
+from urllib.parse import quote
+names = [w["name"] for w in json.load(sys.stdin).get("data") or [] if w.get("loaded") == "yes"]
+if names: print("/w/" + quote(names[0], safe=""))' 2>/dev/null) || work=
+    if [ -n "$work" ]; then
+      case " $* " in *" $work "*) ;; *) set -- "$@" "$work" ;; esac
+    else
+      echo "walk: the fleet has no workspace, so no session screen is shot" >&2
     fi
   fi
   # Y-755: the session header holds the third Stop, so its page is shot beside Fleet and the dashboard.

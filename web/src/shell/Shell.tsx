@@ -34,6 +34,7 @@ import { Reconnecting } from './Reconnecting'
 import { UpdateSnackbar, useUpdateBadge } from './UpdateNotice'
 import { useReached } from './reached'
 import { SessionsRail } from './SessionsRail'
+import { setAppBarSlot } from './appBarSlot'
 import { useScreenTitleOverride } from './title'
 import { paintThemeColor, syncThemeColor } from './themeColor'
 import './Shell.css'
@@ -348,7 +349,9 @@ function PhoneBar({ top }: { top: boolean }) {
             </Guarded>
             <AccountButton />
           </>
-        ) : undefined
+        ) : (
+          <div className="shell__bar-slot" ref={setAppBarSlot} />
+        )
       }
       leading={
         top ? undefined : (
