@@ -351,7 +351,7 @@ describe('the Dashboard keeps one style per kind of action', () => {
     expect(within(list).getByText('scratch').closest('.m3-row')).toBeTruthy()
   })
 
-  it('acts tonally in Needs you, goes to a thing as text, and destroys with an outlined error Kill', async () => {
+  it('acts tonally in Needs you, goes to a thing as text, and destroys with a Kill in the error container', async () => {
     mount('desktop', '/')
     await drawn()
     await waitFor(() => expect(region('Worth a look').getAllByRole('button', { name: 'Kill' })[0]!.hasAttribute('disabled')).toBe(false))
@@ -369,8 +369,10 @@ describe('the Dashboard keeps one style per kind of action', () => {
     for (const one of goes) expect(one.getAttribute('data-variant')).toBe('text')
     for (const one of screen.getAllByRole('button', { name: 'Kill' })) {
       expect(one.getAttribute('data-tone')).toBe('error')
-      expect(one.getAttribute('data-variant')).toBe('outlined')
+      expect(one.getAttribute('data-variant')).toBe('tonal')
     }
+    // Y-755: Fleet and the session header draw the only two Stops, so none here can differ from them.
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
   })
 
   it('keeps every age, elapsed time and since value on one line', async () => {

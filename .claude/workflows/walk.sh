@@ -8,6 +8,9 @@
 #                                       it returns when the daemon has checked the machines, so a card shows its checks (Y-740).
 #                                       a branch that changes the dashboard gets one workspace file that does not load,
 #                                       in the daemon's own copy of the workspaces, so `/` draws a Needs-you row (Y-754)
+#                                       a branch that changes Fleet or the dashboard gets a workspace on the Mac that the
+#                                       walk starts with an agent, and a tmux session that no workspace claims, so the
+#                                       pages draw Stop and Kill (Y-755); `down` ends both
 #                                       This daemon runs as you with your ssh config, and no agent reports to it. It cannot show
 #                                       a check that only the hub's own account or an agent's report can fail (Y-740)
 #   walk.sh shoot <worktree> <route>... screenshots and the visible text of each route, WebKit at 390 px, Chromium at
@@ -16,6 +19,8 @@
 #                                       a branch that changes the session screen also gets the first live session,
 #                                       light and dark (Y-770); the picture shows what that pane holds
 #                                       `/` also opens the first Needs-you row and shoots the page it leads to (Y-754)
+#                                       a walk that started the agent's workspace also shoots its page, light and dark,
+#                                       for the Stop in the session header (Y-755)
 #                                       /machines also shoots the page of each machine whose card lists a failing check (Y-740)
 #                                       or what ssh said, and the page of each phone, tablet and Windows PC of the owner's,
 #                                       which the list hides (Y-775)
@@ -31,6 +36,9 @@ port=${WALK_PORT:-17717}
 signin=$((port + 1))
 mac=${WALK_MAC:-biswa@bishwajeets-macbook-pro}
 marker='<!-- yantra-walk -->'
+# I-49: an agent in a directory that Claude Code does not trust holds at a dialog and never reads as running.
+# The Mac trusts /private/tmp/yantra-q12, which `just test-mac` uses, and each directory under it (measured 2026-11-24).
+walk_repo=/private/tmp/yantra-q12/walk
 
 walk_tmux() { echo "PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH tmux -L yantra -N"; }
 
@@ -94,13 +102,14 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
       echo "walk: $ws does not exist, so the walk adds no Needs-you row" >&2
     fi
   fi
-  # Y-755: a row on Fleet needs a running workspace and an unclaimed session to show Stop, Open, Attach and Kill.
-  # Two tmux sessions on the Mac and one workspace file for the first; `down` kills the sessions.
+  # Y-755: Fleet draws Stop only beside a running agent, and the dashboard draws Kill only on a session that no
+  # workspace claims. This is the workspace file; the walk starts its agent below, when the daemon answers.
   if grep -qE '^web/src/screens/(fleet|dashboard)/' <<<"$changed"; then
-    if ssh -o BatchMode=yes -o ConnectTimeout=10 "$mac" "$(walk_tmux) new-session -d -s walk-running -c /tmp && $(walk_tmux) new-session -d -s walk-unclaimed -c /tmp" 2>/dev/null; then
+    # A session that an interrupted walk left makes Start attach, and then no agent runs in it.
+    if ssh -o BatchMode=yes -o ConnectTimeout=10 "$mac" "$(walk_tmux) kill-session -t walk-running 2>/dev/null; mkdir -p $walk_repo" 2>/dev/null; then
       [ -d "$dir/workspaces" ] || { [ ! -d "$ws" ] || cp -rL "$ws" "$dir/workspaces"; }
       mkdir -p "$dir/workspaces"
-      printf 'machine = "%s"\nrepo = "/tmp"\n' "${mac#*@}" >"$dir/workspaces/walk-running.toml"
+      printf 'machine = "%s"\nrepo = "%s"\n' "${mac#*@}" "$walk_repo" >"$dir/workspaces/walk-running.toml"
     else
       echo "walk: the Mac is unreachable, so Fleet shows no running workspace and no unclaimed session" >&2
     fi
@@ -127,18 +136,31 @@ print(next((p["TailscaleIPs"][0] for p in (s.get("Peer") or {}).values()
   echo $! >"$dir/daemon.pid"
   for _ in $(seq 60); do
     curl -sf "http://127.0.0.1:$port/healthz" >/dev/null || { sleep 1; continue; }
+    # Y-755: the walk presses Start as the dashboard does, so the running agent is one that Yantra launched.
+    # Start also has launchd start the Mac's tmux server when none runs, so the unclaimed session comes after it.
+    if [ -f "$dir/workspaces/walk-running.toml" ]; then
+      said=$(curl -s --max-time 120 -X POST -H 'content-type: application/json' -d '{"agent":"claude"}' \
+        "http://127.0.0.1:$port/api/workspaces/walk-running/up") || said="no answer: curl exit $?"
+      grep -q '"launched":true' <<<"$said" || echo "walk: Start launched no agent in walk-running, so no page shows Stop: $said" >&2
+      ssh -o BatchMode=yes -o ConnectTimeout=10 "$mac" "$(walk_tmux) has-session -t walk-unclaimed 2>/dev/null || $(walk_tmux) new-session -d -s walk-unclaimed -c /tmp" 2>/dev/null ||
+        echo "walk: the Mac opened no unclaimed session, so the dashboard shows no Kill" >&2
+    fi
     # Y-740: the first readiness sweep runs before the tailnet is read and asks no machine, so a walk shot then
     # drew every card as "not checked". The next sweep landed 96 s after the start on 2026-11-12.
     for _ in $(seq 180); do
       grep -q '"checks":\[{' <<<"$(curl -sf "http://127.0.0.1:$port/api/readiness")" && break
       sleep 1
     done
-    # Y-755: the sidebar and Fleet read "Sessions have not been read yet" until the first session sweep returns.
+    # Y-755: the agent reads as running one look after Claude Code lists it, and a look comes each 30 s.
+    # The sidebar and Fleet read "Sessions have not been read yet" until a session sweep returns.
     if [ -f "$dir/workspaces/walk-running.toml" ]; then
       for _ in $(seq 120); do
-        grep -q 'walk-running' <<<"$(curl -sf "http://127.0.0.1:$port/api/sessions")" && break
+        grep -q '"state":"running"' <<<"$(curl -sf "http://127.0.0.1:$port/api/workspaces/walk-running/status")" &&
+          grep -q 'walk-unclaimed' <<<"$(curl -sf "http://127.0.0.1:$port/api/sessions")" && break
         sleep 1
       done
+      grep -q '"state":"running"' <<<"$(curl -sf "http://127.0.0.1:$port/api/workspaces/walk-running/status")" ||
+        echo "walk: walk-running does not read as running, so no page shows Stop; see /api/workspaces/walk-running/status" >&2
     fi
     echo "http://127.0.0.1:$port"
     exit 0
@@ -167,6 +189,12 @@ if live: print("/m/%s/s/%s" % tuple(quote(part, safe="") for part in live[0]))' 
     else
       echo "walk: the fleet has no live session, so no terminal is shot" >&2
     fi
+  fi
+  # Y-755: the session header holds the third Stop, so its page is shot beside Fleet and the dashboard.
+  if [ -f "$dir/workspaces/walk-running.toml" ]; then
+    for route in /w/walk-running /w/walk-running@dark; do
+      case " $* " in *" $route "*) ;; *) set -- "$@" "$route" ;; esac
+    done
   fi
   rm -rf "$dir/shots" && mkdir -p "$dir/shots"
   image=$(grep -m1 -oE 'mcr.microsoft.com/playwright:v[0-9.]+-noble' "$wt/.github/workflows/web.yml")

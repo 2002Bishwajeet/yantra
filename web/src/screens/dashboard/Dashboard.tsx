@@ -73,7 +73,7 @@ const KillSession = lazy(() =>
 const Setup = lazy(() => import('@/screens/setup/Setup').then((it) => ({ default: it.Setup })))
 
 const kill = (ready: boolean) => (
-  <Button className="dash__kill" disabled={!ready} tone="error" variant="outlined">
+  <Button className="dash__kill" disabled={!ready} tone="error" variant="tonal">
     Kill
   </Button>
 )
