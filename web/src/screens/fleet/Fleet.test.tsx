@@ -64,6 +64,28 @@ describe('/fleet on the busy fleet', () => {
     await waitFor(() => expect(asked).toContain('POST /api/workspaces/homelab-k8s/down'))
   })
 
+  it('uses one tonal style for every row action and draws no filled button', async () => {
+    mount('desktop', '/fleet')
+    await screen.findByText(/^looked /, {}, { timeout: 2000 })
+    fireEvent.click(region('Idle').getByRole('button', { name: 'Show 1 more' }))
+    for (const name of ['Needs you', 'Running', 'Idle', 'On GitHub']) {
+      const buttons = [...screen.getByRole('region', { name }).querySelectorAll('.m3-button')]
+      expect(buttons.length).toBeGreaterThan(0)
+      expect(buttons.filter((one) => one.getAttribute('data-variant') === 'filled')).toEqual([])
+    }
+    const row = (name: string, scope: string) =>
+      region(scope).getAllByRole(name === 'Open' ? 'link' : 'button', { name })
+    for (const one of [...row('Open', 'Running'), ...row('Stop', 'Running'), ...row('Start', 'Idle')]) {
+      expect(one.getAttribute('data-variant')).toBe('tonal')
+    }
+    expect(region('Needs you').getByRole('link', { name: 'Answer' }).getAttribute('data-variant')).toBe('tonal')
+    expect(region('Needs you').getByRole('link', { name: 'Fix' }).getAttribute('data-variant')).toBe('tonal')
+    expect(region('Needs you').getByRole('button', { name: 'Resume' }).getAttribute('data-variant')).toBe('tonal')
+    for (const one of region('On GitHub').getAllByRole('link', { name: /^(Review|Open)$/ })) {
+      expect(one.getAttribute('data-variant')).toBe('tonal')
+    }
+  })
+
   it('draws no Reorder button before any row moves', async () => {
     mount('desktop', '/fleet')
     await screen.findByText(/^looked /, {}, { timeout: 2000 })
@@ -231,6 +253,15 @@ describe('a machine row whose answer was a tmux error', () => {
     for (const words of [/unreachable/, /can’t reach/, /appliance’s key/, /Permission denied/]) {
       expect(screen.queryByText(words)).toBeNull()
     }
+  })
+})
+
+describe('a row that will not load', () => {
+  it('offers Repair as a tonal action', async () => {
+    await renderInApp(
+      <WorkRowView row={{ id: 'u:x', band: 'needs', kind: 'unusable', name: 'broken', error: 'bad toml' }} sessions={new Map()} />,
+    )
+    expect((await screen.findByRole('link', { name: 'Repair' })).getAttribute('data-variant')).toBe('tonal')
   })
 })
 

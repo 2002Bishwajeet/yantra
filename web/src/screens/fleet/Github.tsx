@@ -135,7 +135,7 @@ function Group(props: { items: Item[]; title: string; verb: string; why: string 
                   <span className="github__title">{item.title}</span>
                 </div>
                 <div className="github__actions">
-                  <Button render={<a href={item.url} rel="noreferrer" target="_blank" />} role="link" variant="outlined">
+                  <Button render={<a href={item.url} rel="noreferrer" target="_blank" />} role="link" variant="tonal">
                     {verb}
                   </Button>
                   {verb === 'Open' ? <StartSession item={item} /> : null}
