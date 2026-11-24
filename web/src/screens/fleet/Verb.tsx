@@ -48,7 +48,7 @@ export function Start(props: Pressed) {
       mutation={up}
       refused="Start was refused"
       send={workspace}
-      variant={variant ?? 'filled'}
+      variant={variant ?? 'tonal'}
     />
   )
 }
@@ -64,7 +64,7 @@ export function Stop(props: Pressed) {
       mutation={down}
       refused="Stop was refused"
       send={workspace.name}
-      variant={variant ?? 'text'}
+      variant={variant ?? 'tonal'}
     />
   )
 }
@@ -80,7 +80,7 @@ export function Resume(props: Pressed) {
       mutation={resume}
       refused="Resume was refused"
       send={workspace.name}
-      variant={variant ?? 'filled'}
+      variant={variant ?? 'tonal'}
     />
   )
 }
@@ -92,19 +92,19 @@ export function Verb(props: { workspace: Workspace; status: WorkspaceStatus | nu
   switch (one.does) {
     case 'wait':
       return (
-        <Button disabled variant="outlined">
+        <Button disabled variant="tonal">
           reading…
         </Button>
       )
     case 'fix':
       return (
-        <Button render={<Link params={{ machine: workspace.machine }} to="/m/$machine" />} role="link" variant="outlined">
+        <Button render={<Link params={{ machine: workspace.machine }} to="/m/$machine" />} role="link" variant="tonal">
           Fix
         </Button>
       )
     case 'answer':
       return (
-        <Button render={<Link params={{ name: workspace.name }} search={{ view: 'chat' }} to="/w/$name" />} role="link">
+        <Button render={<Link params={{ name: workspace.name }} search={{ view: 'chat' }} to="/w/$name" />} role="link" variant="tonal">
           Answer
         </Button>
       )

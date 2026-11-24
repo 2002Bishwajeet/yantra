@@ -63,6 +63,17 @@ async function open() {
   return screen.findByRole('dialog')
 }
 
+describe('the GitHub list', () => {
+  it('draws every action tonal', async () => {
+    daemon()
+    await renderInApp(<Github attention={attention} grant={held} />)
+    await screen.findAllByRole('button', { name: /^Start session on / })
+    const actions = [...document.querySelectorAll('.github__actions .m3-button')]
+    expect(actions.length).toBeGreaterThan(2)
+    for (const one of actions) expect(one.getAttribute('data-variant')).toBe('tonal')
+  })
+})
+
 describe('Start session', () => {
   it('is on every issue and on no review', async () => {
     daemon()

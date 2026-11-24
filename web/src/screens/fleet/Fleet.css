@@ -354,6 +354,14 @@
   padding: 6px 6px 6px 8px;
 }
 
+/* At 200 % zoom the phone is 320 px wide and a tonal verb leaves the name too little room. */
+@media (max-width: 340px) {
+  [data-shell="phone"] .fleet__row {
+    grid-template-columns: var(--m3-tile-size) minmax(0, 1fr);
+    grid-template-areas: "tile state" "tile meta" "actions actions" "said said";
+  }
+}
+
 [data-shell="tablet"] .fleet__meta,
 [data-shell="phone"] .fleet__meta {
   display: flex;

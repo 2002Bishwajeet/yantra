@@ -313,7 +313,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
         </span>
         <span className="fleet__detail m3-wrap">{reachWords(failure, row.machine).cause}</span>
         <span className="fleet__actions">
-          <Button render={<Link params={{ machine: row.machine }} to="/m/$machine" />} role="link" variant="outlined">
+          <Button render={<Link params={{ machine: row.machine }} to="/m/$machine" />} role="link" variant="tonal">
             Fix
           </Button>
         </span>
@@ -332,7 +332,7 @@ export function WorkRowView(props: { row: WorkRow; sessions: Sessions }) {
         </span>
         <Mono className="fleet__detail m3-wrap">{row.error}</Mono>
         <span className="fleet__actions">
-          <Button render={<Link params={{ name: row.name }} to="/w/$name/repair" />} role="link" variant="outlined">
+          <Button render={<Link params={{ name: row.name }} to="/w/$name/repair" />} role="link" variant="tonal">
             Repair
           </Button>
         </span>

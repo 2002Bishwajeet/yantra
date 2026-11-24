@@ -351,20 +351,28 @@ describe('the Dashboard keeps one style per kind of action', () => {
     expect(within(list).getByText('scratch').closest('.m3-row')).toBeTruthy()
   })
 
-  it('answers tonally, goes to a thing as text, and destroys in the error tone', async () => {
+  it('acts tonally in Needs you, goes to a thing as text, and destroys with a Kill in the error container', async () => {
     mount('desktop', '/')
     await drawn()
     await waitFor(() => expect(region('Worth a look').getAllByRole('button', { name: 'Kill' })[0]!.hasAttribute('disabled')).toBe(false))
     const hero = region('Needs you')
     expect(hero.getByRole('link', { name: 'Answer' }).getAttribute('data-variant')).toBe('tonal')
     for (const one of hero.getAllByRole('link', { name: 'Review' })) expect(one.getAttribute('data-variant')).toBe('tonal')
+    const needs = [...hero.getAllByRole('link', { name: /^(Open|Repair|Answer|Review)$/ })].filter((one) => one.classList.contains('m3-button'))
+    expect(needs.length).toBeGreaterThan(1)
+    for (const one of needs) expect(one.getAttribute('data-variant')).toBe('tonal')
     const goes = [
-      ...screen.getAllByRole('link', { name: 'Open' }),
+      ...region('Running').getAllByRole('link', { name: 'Open' }),
       ...screen.getAllByRole('link', { name: 'Attach' }),
     ].filter((one) => one.classList.contains('m3-button'))
-    expect(goes.length).toBeGreaterThan(4)
+    expect(goes.length).toBeGreaterThan(2)
     for (const one of goes) expect(one.getAttribute('data-variant')).toBe('text')
-    for (const one of screen.getAllByRole('button', { name: 'Kill' })) expect(one.getAttribute('data-tone')).toBe('error')
+    for (const one of screen.getAllByRole('button', { name: 'Kill' })) {
+      expect(one.getAttribute('data-tone')).toBe('error')
+      expect(one.getAttribute('data-variant')).toBe('tonal')
+    }
+    // Y-755: Fleet and the session header draw the only two Stops, so none here can differ from them.
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
   })
 
   it('keeps every age, elapsed time and since value on one line', async () => {

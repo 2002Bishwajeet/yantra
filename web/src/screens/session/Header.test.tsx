@@ -86,6 +86,11 @@ describe('the session header actions (Y-717)', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy()
   })
 
+  it('draws Stop tonal, as a Fleet row does (Y-755)', async () => {
+    await show('running')
+    expect((await screen.findByRole('button', { name: 'Stop' })).getAttribute('data-variant')).toBe('tonal')
+  })
+
   it('mounts the menu closed once idle, so the first tap only opens it (Y-765)', async () => {
     await show('running')
     const more = await screen.findByRole('button', { name: 'More actions' })
