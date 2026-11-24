@@ -5,6 +5,7 @@
 #                                  With no route it shoots the pages the owner uses; look.mjs holds the list.
 # LOOK_ORIGIN is the box's dashboard. LOOK_SESSION is the file that holds the token, mode 600.
 # Exit 3: the laptop holds no usable session, so the owner makes one. Exit 4: the box does not answer.
+# It takes the laptop's lock for heavy commands by itself. The lock does not nest, so never run look.sh under heavy.
 # The token is read from the file alone. It never goes in argv, an environment, a log or a file under <out dir>.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
@@ -47,12 +48,19 @@ print("box: version %s, channel %s, newer %s" % (about.get("version"), about.get
 
 repo=$(git -C "$here" rev-parse --show-toplevel)
 image=$(grep -m1 -oE 'mcr.microsoft.com/playwright:v[0-9.]+-noble' "$repo/.github/workflows/web.yml")
-[ -d "$repo/web/node_modules" ] || { echo "look: $repo/web has no node_modules; run npm ci there" >&2; exit 1; }
+# The lock is taken here, after the session is known to work, so a run with no session never waits for it.
+heavy=()
+[ -x ~/.claude/bin/heavy ] && heavy=(~/.claude/bin/heavy)
+# The checkout that the build loop runs from builds nothing, so its node_modules can hold only Vite's cache.
+if [ ! -d "$repo/web/node_modules/@playwright/test" ] || [ "$repo/web/package-lock.json" -nt "$repo/web/node_modules/.package-lock.json" ]; then
+  (cd "$repo/web" && "${heavy[@]}" npm ci --prefer-offline) ||
+    { echo "look: npm ci failed in $repo/web, so the look has no browser to run" >&2; exit 1; }
+fi
 nm=$(readlink -f "$repo/web/node_modules")
 mkdir -p "$out"
 out=$(realpath "$out")
 rm -f "$out"/*.png "$out"/*.txt
-podman run --rm --network=host --memory "${LOOK_MEMORY:-4g}" --memory-swap "${LOOK_MEMORY:-4g}" \
+"${heavy[@]}" podman run --rm --network=host --memory "${LOOK_MEMORY:-4g}" --memory-swap "${LOOK_MEMORY:-4g}" \
   -v "$repo/web:/work/web:ro" -v "$nm:$nm:ro" -v "$here/look.mjs:/look.mjs:ro" \
   -v "$(realpath "$session"):/look-session:ro" -v "$out:/out" \
   -w /work/web "$image" node /look.mjs "$origin" /out /look-session "$@"
