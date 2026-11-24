@@ -6,7 +6,8 @@ export const meta = {
     { title: 'Triage', detail: 'rank the rows an agent can finish alone' },
     { title: 'Build', detail: 'plan, build, CI gate, fix' },
     { title: 'Review', detail: 'independent review, fix, re-check' },
-    { title: 'Ship', detail: 'one row at a time: rebase, tracker, checks, merge' },
+    { title: 'Ship', detail: 'checks, merge' },
+    { title: 'Record', detail: 'one PR for the tracker, the session log and the summaries' },
     { title: 'Report' },
   ],
 }
@@ -48,7 +49,7 @@ const GATE = (row) => `Push the branch and open its PR first: ${PUSH_PR(row)} Th
 const RULES = (wt) => `
 Rules for this run (CLAUDE.md §B7, the build loop):
 - Work only inside the worktree ${wt}. Never touch ${REPO} itself.
-- Do not edit tracker.md or docs/session-log.md. The ship stage does that.
+- Do not edit tracker.md, docs/session-log.md, or any llms.txt or README.md. Every row edits them, so each one made the next merge conflict. The record stage updates them for the whole wave in one PR (Y-836).
 - Run every local cargo, npm, npx, just or podman command through \`~/.claude/bin/heavy\` (for example \`~/.claude/bin/heavy cargo nextest run -p yantrad foo\`). It is a machine-wide lock that other projects' agents on this laptop share, so two heavy commands never run at once and the laptop does not run out of memory. It waits for the lock by itself; do not kill a waiting command.
 - Do not create or change anything under docs/adr/, and do not add or change an invariant in a crate tracker. If the row needs either, stop and say so.
 - Commit messages are "Y-NNN: <what changed>" and carry no AI attribution of any kind.
@@ -81,9 +82,10 @@ const TRIAGE_SCHEMA = {
           paths: { type: 'array', items: { type: 'string' }, description: 'the files the change will edit, e.g. web/src/m3/Card.tsx; a folder only for new files in it' },
           priority: { type: 'integer', minimum: 0, maximum: 5 },
           reason: { type: 'string' },
+          size: { type: 'string', enum: ['small', 'large'], description: 'small: copy, a doc, or a change of one or two files with a plain done condition. Else large.' },
           risk: { type: 'string', enum: ['normal', 'hard', 'security'], description: 'security: touches auth, sessions, passkeys, write routes, agent permissions, the updater, install or join, secrets, or builds a shell, ssh or tmux command from input. hard: a design or a bug a plain build is likely to get wrong. Else normal.' },
         },
-        required: ['id', 'title', 'kind', 'paths', 'priority', 'reason', 'risk'],
+        required: ['id', 'title', 'kind', 'paths', 'priority', 'reason', 'size', 'risk'],
       },
     },
     skipped: {
@@ -174,7 +176,7 @@ Also skip a row that an earlier report in ${REPO}/.claude/build-loop/ parked, un
 
 Priority, from CLAUDE.md §B7: 0 = a defect the owner or the box walk found on the real box (the row quotes the owner or the walk), 1 = a row that milestone M18 (the daily driver) lists, 2 = closes or unblocks another open milestone, 3 = another defect or a red suite, 4 = a feature whose dependencies are done, 5 = debt. Ties go to the lower Y-number.
 Put each priority 0 or 1 row that is blocked only on the owner in owner_asks, with the exact step the owner takes and why. If owner_asks is not empty, return no row of priority 3 or higher in rows: move them to skipped with the reason "waits behind an owner ask".
-For each eligible row give its kind (rust-transport for ssh, tmux or socket code; rust; web; docs), its risk (security, hard or normal, as the schema says) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
+For each eligible row give its size, its kind (rust-transport for ssh, tmux or socket code; rust; web; docs), its risk (security, hard or normal, as the schema says) and the files it will edit: read the code to find them, because a folder such as web/src blocks every other row in it. Put every row you rejected in skipped with one line of reason.`
 }
 
 const rank = (rows) => [...rows].sort((a, b) => a.priority - b.priority || Number(a.id.slice(2)) - Number(b.id.slice(2)))
@@ -335,7 +337,13 @@ async function runRow(row, built = () => {}) {
   // A retried row was parked on review findings, and only the report remembers them.
   const retried = RETRY.includes(row.id) ? `\nThe owner asked to retry this parked row. Read why it was parked in the reports in ${REPO}/.claude/build-loop/, and fix those findings first.` : ''
 
-  const plan = await agent(
+  // Y-836: a small row skips the planner; the builder sets up and plans for itself.
+  const small = row.size === 'small' && !risky(row)
+  const SETUP = `First set up the worktree. In ${REPO}: git fetch origin. Keep any work already on branch ${branch}, and never reset or delete its commits: they are work a parked run kept.
+- If ${wt} exists, use it as it is.
+- Else if branch ${branch} exists, run git worktree add ${wt} ${branch}.
+- Else run git worktree add -b ${branch} ${wt} origin/main.`
+  const plan = small ? { plan: `${SETUP}\nThen read the row in tracker.md and the code it touches, and make the smallest change that meets its done condition.${retried}`, park: false } : await agent(
     `First set up the worktree. In ${REPO}: git fetch origin. Keep any work already on branch ${branch}, and never reset or delete its commits: they are work a parked run kept.
 - If ${wt} exists, use it as it is.
 - Else if branch ${branch} exists, run git worktree add ${wt} ${branch}.
@@ -376,6 +384,8 @@ ${REVIEW_RULE}`,
     if (!(await verifyUntilGreen(row, wt, plan, 2))) return park('the gate went red after review fixes')
     w = await walkUntilGreen(row, wt, plan)
     if (typeof w === 'string') return park(w)
+    // Y-836: a small row trusts CI after one fix instead of a second review.
+    if (small) { r = { ...r, blocking: [], doneMet: true }; break }
     r = await agent(
       `Re-check the change for ${row.id} in ${wt}. You did not write it. An earlier review blocked it on:\n${issues}\n
 Read the fix (git diff ${base}..HEAD) and the code each point names. For each point, decide if the fix resolves it. Also report any new defect the fix brings in. Do not review the rest of the change again.${shown(w)}
@@ -391,15 +401,12 @@ ${REVIEW_RULE}`,
     serialShip(() =>
       agent(
         `Ship ${row.id} from ${wt}, branch ${branch}. CI passed on the branch.
-0. git fetch origin and rebase on origin/main. Resolve conflicts in tracker.md and docs/session-log.md by keeping both sides and deduplicating by Y-number. Do not change any other file except to resolve a conflict. If a conflict in any other file cannot be resolved, abort the rebase and return failed.
-1. In tracker.md set the ${row.id} row to 🔵 review and add "**Merged ${TODAY}** by the build loop." with one line on what shipped. A row does not close in its own PR: a later release PR marks it ✅ done. Update the row; never add a second one. Then check: grep -oE '^\\| Y-[0-9]+ \\|' tracker.md | sort | uniq -d prints nothing. Skip this step if the row already says it.
-2. Append one entry to docs/session-log.md for ${TODAY}, in the style of the entries above it. Plain prose, CLAUDE.md §A6. Skip this step if the entry exists.
-3. Commit "${row.id}: record the change in the tracker" if steps 1–2 changed anything.${DRY ? `
-4. Dry run: do not push. Return status open.` : `
-4. Push the branch: ${PUSH_PR(row)}
-5. ${w.needs.length ? `Run \`bash ${WALK} publish ${wt} <pr number>\`. It posts the walk's screenshots on the PR. If it fails, return failed with its output. ` : ''}Run exactly one command: bash ${WALK} guard <pr number> && bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> --merge "${title} (#<pr number>)". The merge guard merges only when every check is green; never call \`gh pr merge\` yourself. The walk guard exits non-zero when the PR changes a screen or a machine path and has no walk comment. The merge guard waits for every check on the rebased commit and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the walk guard fails, return failed with its output. If the merge guard fails, return checks-failed with the failing check's log tail.
-6. If GitHub says the branch is behind, return status behind; do not rebase here, because a rebase runs before the tracker step.
-7. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
+0. git fetch origin. Run \`gh pr view ${branch} --json mergeStateStatus -q .mergeStateStatus\`. Only if it says DIRTY, rebase on origin/main and resolve the conflicts; if one cannot be resolved, abort the rebase and return failed. Do not edit tracker.md, docs/session-log.md or any summary file: the record stage does that.${DRY ? `
+1. Dry run: do not push. Return status open.` : `
+1. Push the branch: ${PUSH_PR(row)}
+2. ${w.needs.length ? `Run \`bash ${WALK} publish ${wt} <pr number>\`. It posts the walk's screenshots on the PR. If it fails, return failed with its output. ` : ''}Run exactly one command: bash ${WALK} guard <pr number> && bash ${REPO}/.claude/workflows/merge-guard.sh <pr number> --merge "${title} (#<pr number>)". The merge guard merges only when every check is green; never call \`gh pr merge\` yourself. The walk guard exits non-zero when the PR changes a screen or a machine path and has no walk comment. The merge guard waits for every check on the rebased commit and exits non-zero unless all are green. Run it bare: do not pipe it, redirect it or wrap it, because a pipe hides the guard's exit code and the merge then runs on a red check (Y-646). Never merge outside this command, and never call a red check unrelated. If the walk guard fails, return failed with its output. If the merge guard fails, return checks-failed with the failing check's log tail.
+3. If GitHub says the branch conflicts, return status behind.
+4. After a merge, run git worktree remove ${wt} from ${REPO} and delete the local branch.`}`,
         { label: `ship:${row.id}`, phase: 'Ship', schema: SHIP_SCHEMA, model: 'sonnet', effort: 'medium' },
       ),
     )
@@ -455,6 +462,20 @@ for (;;) {
   await Promise.race([...running.entries()].flatMap(([id, x]) => (building.has(id) ? [x.done, x.freed] : [x.done])))
 }
 if (pool.some((r) => !attempted.has(r.id))) log(`Stopped at maxRows=${MAX_ROWS}; ${pool.filter((r) => !attempted.has(r.id)).map((r) => r.id).join(', ')} not started.`)
+
+// Y-836: one docs-only PR records the wave, so no row conflicts on the shared files and its CI takes seconds.
+const merged = results.filter((r) => r.status === 'merged')
+if (merged.length && !DRY) {
+  phase('Record')
+  await agent(
+    `Record the build loop's wave of ${TODAY}. In ${REPO}: git fetch origin, then git worktree add -b build-loop-record-${TODAY} ${WT_ROOT}/build-loop-record-${TODAY} origin/main, and work only there. These PRs merged: ${JSON.stringify(merged.map((r) => ({ id: r.id, title: r.title, pr: r.pr })))}.
+1. In tracker.md set each row to 🔵 review and add "**Merged ${TODAY}** by the build loop (#<pr>)." with one line on what shipped. Update the row; never add a second one. Then check: grep -oE '^\\| Y-[0-9]+ \\|' tracker.md | sort | uniq -d prints nothing.
+2. Append one entry per row to docs/session-log.md for ${TODAY}, in the style of the entries above it.
+3. Read each PR's diff (gh pr diff <pr>). Where it changed what a crate's llms.txt or README.md, the root llms.txt or README.md says, update that sentence (CLAUDE.md §B5). Change nothing else.
+4. Commit "build loop: record the wave of ${TODAY}", no AI attribution. Push, open a PR with that title, and run bash ${REPO}/.claude/workflows/merge-when-green.sh <pr> "build loop: record the wave of ${TODAY} (#<pr>)". Then run git worktree remove from ${REPO}.${RULES(`${WT_ROOT}/build-loop-record-${TODAY}`).replace(/- Do not edit tracker.md[^\n]*\n/, '')}`,
+    { label: 'record', phase: 'Record', model: 'sonnet', effort: 'medium' },
+  )
+}
 
 phase('Report')
 await agent(
