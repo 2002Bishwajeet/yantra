@@ -15,7 +15,7 @@ import { ErrorSurface } from '@/m3/error-surface/ErrorSurface'
 import { Lead } from '@/m3/lead/Lead'
 import { ListItem } from '@/m3/list/List'
 import { Skeleton } from '@/m3/skeleton/Skeleton'
-import { Mono, Num } from '@/m3/text/Text'
+import { Num } from '@/m3/text/Text'
 import type { ApiError } from '@/api/errors'
 import { day } from '@/lib/time'
 import { Group } from './Group'
@@ -47,6 +47,7 @@ function Empty(props: { title: string; children: string }) {
 function Session(props: { session: DeviceSession }) {
   const { session } = props
   const out = useSignOut()
+  const how = session.read_only ? 'reads only' : `${session.this_device ? 'this device · ' : ''}with ${session.passkey}`
   return (
     <>
       <ListItem
@@ -64,9 +65,7 @@ function Session(props: { session: DeviceSession }) {
         }
         supporting={
           <>
-            {session.read_only ? 'reads only' : `${session.this_device ? 'this device · ' : ''}with ${session.passkey}`}
-            {' · ends '}
-            <Num>{when(session.ends)}</Num>
+            {how} · ends <Num>{when(session.ends)}</Num>
           </>
         }
         trailing={
@@ -143,13 +142,9 @@ function ReadOnly() {
     <Group
       label="Read-only session"
       note={
-        made.data ? (
-          <>
-            This token shows once. Save it on the laptop as <Mono>~/.config/yantra/walk-session</Mono> with mode 600.
-          </>
-        ) : (
-          'It reads this dashboard from your own devices for 30 days and changes nothing. The build loop looks at this hub with it.'
-        )
+        made.data
+          ? 'This token shows once. Save it on the laptop as ~/.config/yantra/walk-session with mode 600.'
+          : 'It reads this dashboard from your own devices for 30 days and changes nothing. The build loop looks at this hub with it.'
       }
     >
       <ListItem
